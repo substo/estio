@@ -3,7 +3,7 @@ import TandemCore
 import TandemMedia
 @testable import TandemRender
 
-/// What plays once an angle and a mic are synced to the camera (`tandem
+/// What plays once an angle and a mic are synced to the camera (`substo
 /// sync <file>`) and the angle shown over a stretch: the picture switches
 /// there and only there, and the mic is the only sound all along, in the
 /// viewer, review clips and exports alike (they share this plan).

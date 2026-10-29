@@ -3,8 +3,8 @@ import TandemAssets
 import TandemCore
 import TandemMedia
 
-// Segments for agents: `tandem segments list | save | insert` and the
-// `segments_*` MCP tools. Like the asset library they work on Mike's
+// Segments for agents: `substo segments list | save | insert` and the
+// `segments_*` MCP tools. Like the asset library they work on the creator's
 // per-user shared library; `save` reads the project and `insert` edits
 // it, through the app when it has the project open.
 
@@ -238,16 +238,16 @@ extension SegmentListResult: ReadableResult {
     public var readableText: String {
         var lines: [String] = []
         if !exists {
-            lines.append("There's no shared library at \((folder as NSString).deletingLastPathComponent) yet. Tandem makes it when it opens; `tandem segments save` makes it too.")
+            lines.append("There's no shared library at \((folder as NSString).deletingLastPathComponent) yet. Substo Video makes it when it opens; `substo segments save` makes it too.")
         } else if segments.isEmpty {
-            lines.append("No segments in \(ByteText.home(folder)) yet. Save one from the timeline (Timeline > Save selection as segment) or with tandem segments save \"Intro\" --clips clip_a,clip_b.")
+            lines.append("No segments in \(ByteText.home(folder)) yet. Save one from the timeline (Timeline > Save selection as segment) or with substo segments save \"Intro\" --clips clip_a,clip_b.")
         } else {
             lines.append("Segments in \(ByteText.home(folder)) (\(segments.count)):")
             let width = min(segments.map(\.name.count).max() ?? 0, 32)
             for segment in segments {
                 lines.append("  \(segment.name.padding(toLength: max(width, segment.name.count), withPad: " ", startingAt: 0))  \(segment.line)")
             }
-            lines.append("Put one on the timeline with tandem segments insert \"<name>\" --at <time> (--value key=text fills a field).")
+            lines.append("Put one on the timeline with substo segments insert \"<name>\" --at <time> (--value key=text fills a field).")
         }
         for problem in problems { lines.append("Warning: \(problem)") }
         return lines.joined(separator: "\n")
@@ -263,7 +263,7 @@ extension SegmentSaveResult: ReadableResult {
             lines.append("Copied beside it, so it stands on its own: \(copied.joined(separator: ", ")).")
         }
         for note in notes { lines.append("Note: \(note)") }
-        lines.append("Insert it with tandem segments insert \"\(segment.name)\" --at <time>.")
+        lines.append("Insert it with substo segments insert \"\(segment.name)\" --at <time>.")
         return lines.joined(separator: "\n")
     }
 }

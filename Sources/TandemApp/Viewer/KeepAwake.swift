@@ -13,7 +13,7 @@ final class KeepAwake {
     /// Holds the display awake, or lets it go.
     func hold(_ awake: Bool) {
         if awake, assertion == nil {
-            assertion = PowerAssertion(.display, reason: "Tandem is playing the timeline")
+            assertion = PowerAssertion(.display, reason: "Substo Video is playing the timeline")
         } else if !awake, let assertion {
             assertion.release()
             self.assertion = nil

@@ -1,7 +1,7 @@
 import AppKit
 import TandemCore
 
-/// Every cursor Tandem shows, named for what a press there would do. Views
+/// Every cursor Substo Video shows, named for what a press there would do. Views
 /// work out the kind with the functions here, which are tested, and only
 /// set its `nsCursor`.
 ///
@@ -55,7 +55,7 @@ enum CursorKind: Equatable {
         + ViewerCorner.allCases.map { .scaleCorner($0) }
 
     /// The kind `cursor` shows, or "other" (a text field's I-beam, say),
-    /// for the `tandem://debug` dump.
+    /// for the `substo://debug` dump.
     static func describe(_ cursor: NSCursor) -> String {
         if let kind = all.first(where: { $0.nsCursor === cursor }) { return "\(kind)" }
         // The arrow and the I-beam have no image to compare (macOS draws

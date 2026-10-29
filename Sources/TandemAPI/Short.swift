@@ -3,11 +3,11 @@ import TandemCore
 import TandemMedia
 import TandemRender
 
-// A 9:16 short from the landscape edit, the way Mike made his: the screen
+// A 9:16 short from the landscape edit, the way the creator made his: the screen
 // (and B-roll and graphics) in the top half, the camera in the bottom half
 // with its background, and full-frame camera moments filling the frame.
 // It's an alternate output format of the same project, so edits carry over
-// and `tandem export --preset short` renders it.
+// and `substo export --preset short` renders it.
 
 public struct ShortRequest: ServiceCall {
     public static let operation = ServiceOperation.short
@@ -18,7 +18,7 @@ public struct ShortRequest: ServiceCall {
     /// portrait. This project isn't edited.
     public var copy: Bool?
     /// Where the copy goes, relative to the project's folder. Defaults to
-    /// "<Name> Short.tandem".
+    /// "<Name> Short.substo".
     public var copyPath: String?
     public var label: String?
     public var author: String?
@@ -65,11 +65,11 @@ extension TandemService {
         let (project, revision) = coordinator.snapshot()
         try checkExpected(request.expectedRevision, at: revision)
         let existing = project.settings.alternateFormats.first { $0.id == OutputFormat.portrait.id }
-        // A project made 9:16 (`tandem new --portrait`) is its own short.
+        // A project made 9:16 (`substo new --portrait`) is its own short.
         // Laying a portrait format over it would stack the screen and the
         // camera again, and the short preset would render that instead.
         if existing == nil, OutputFrames.isNineBySixteen(width: project.settings.width, height: project.settings.height) {
-            throw ServiceError(.invalid, "This project's canvas is already 9:16 (\(project.settings.width)x\(project.settings.height)), so it is the short and there's nothing to lay out. Export it with `tandem export --preset short`.")
+            throw ServiceError(.invalid, "This project's canvas is already 9:16 (\(project.settings.width)x\(project.settings.height)), so it is the short and there's nothing to lay out. Export it with `substo export --preset short`.")
         }
         let format = existing ?? .portrait
         let copying = request.copy == true || request.copyPath != nil
@@ -129,11 +129,11 @@ extension TandemService {
     func shortCopy(_ request: ShortRequest, project: Project, revision: Int, format: OutputFormat, result: ShortResult) throws -> ShortResult {
         var result = result
         let folder = session.fileURL.deletingLastPathComponent()
-        let name = request.copyPath ?? session.fileURL.deletingPathExtension().lastPathComponent + " Short.tandem"
+        let name = request.copyPath ?? session.fileURL.deletingPathExtension().lastPathComponent + " Short.\(ProjectFile.fileExtension)"
         var target = URL(fileURLWithPath: name, relativeTo: folder).standardizedFileURL
         if target.pathExtension != ProjectFile.fileExtension { target.appendPathExtension(ProjectFile.fileExtension) }
         if FileManager.default.fileExists(atPath: target.path) {
-            throw ServiceError(.invalid, "\(target.lastPathComponent) is already there, and the short never replaces a file. Open that one, or give the copy another name (`tandem short --copy -o \"<Name> Short v2.tandem\"`).")
+            throw ServiceError(.invalid, "\(target.lastPathComponent) is already there, and the short never replaces a file. Open that one, or give the copy another name (`substo short --copy -o \"<Name> Short v2.substo\"`).")
         }
         let copy = ProjectCoordinator(project: project)
         result.commands.append(.adoptFormat(format: format.id))
@@ -183,11 +183,11 @@ extension ShortResult: ReadableResult {
         }
         for warning in warnings { lines.append("Warning: \(warning)") }
         if let copy {
-            lines.append("Made the short its own 1080x1920 project: \(copy). This project is unchanged. Open the short with `tandem app \"\(copy)\"` and cut it down there; `tandem export --preset short` renders it.")
+            lines.append("Made the short its own 1080x1920 project: \(copy). This project is unchanged. Open the short with `substo app \"\(copy)\"` and cut it down there; `substo export --preset short` renders it.")
         } else if applied == nil, !counts.isEmpty, commands.contains(where: { if case .adoptFormat = $0 { return true } else { return false } }) {
             lines.append("Nothing written yet. Run again with --apply to make the copy.")
         } else if let applied {
-            lines.append("Applied as revision \(applied.revision). Render it with `tandem export --preset short` or look with `tandem frame <time> --format portrait`.")
+            lines.append("Applied as revision \(applied.revision). Render it with `substo export --preset short` or look with `substo frame <time> --format portrait`.")
         } else if !counts.isEmpty {
             lines.append("Nothing changed yet. Run again with --apply (or apply: true) to lay it out.")
         }

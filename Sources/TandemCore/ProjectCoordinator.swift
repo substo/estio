@@ -44,7 +44,7 @@ public final class ProjectCoordinator: @unchecked Sendable {
         var after: Project
     }
 
-    private let queue = DispatchQueue(label: "com.mikerosoft.tandem.coordinator")
+    private let queue = DispatchQueue(label: "com.substo.video.coordinator")
     private var _project: Project
     private var _revision: Int
     private var undoStack: [UndoEntry] = []

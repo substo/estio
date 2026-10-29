@@ -9,18 +9,18 @@ import TandemCore
 ///     GET  /v1/<operation>   the same with no parameters (status, history...)
 ///     GET  /v1/watch         server-sent events: change, jobs and export events
 ///     GET  /v1/schema        the EditBatch JSON schema
-///     GET  /v1/health        no token needed; says a Tandem API is here
-///     POST /v1/release       asks `tandem serve` to save and let go of the project
+///     GET  /v1/health        no token needed; says a Substo Video API is here
+///     POST /v1/release       asks `substo serve` to save and let go of the project
 ///
 /// Errors come back as `{"error": {"code", "message"}}` with a matching
-/// status code. Edits are credited to the `X-Tandem-Author` header when a
+/// status code. Edits are credited to the `X-Substo Video-Author` header when a
 /// request doesn't name its own author.
 public final class TandemHTTPServer: @unchecked Sendable {
     public let service: TandemService
     public let token: String
     public private(set) var port: Int = 0
 
-    private let queue = DispatchQueue(label: "com.mikerosoft.tandem.http")
+    private let queue = DispatchQueue(label: "com.substo.video.http")
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: HTTPConnection] = [:]
     private let lock = NSLock()
@@ -28,7 +28,7 @@ public final class TandemHTTPServer: @unchecked Sendable {
     /// clients from timing out.
     var keepAliveInterval: TimeInterval = 15
     /// Called for `POST /v1/release`, when another process (the app) wants
-    /// the project. `tandem serve` sets it to save and quit; the app leaves
+    /// the project. `substo serve` sets it to save and quit; the app leaves
     /// it nil, so the request is refused.
     public var onRelease: (@Sendable () -> Void)?
 
@@ -140,11 +140,11 @@ public final class TandemHTTPServer: @unchecked Sendable {
     fileprivate func respond(to request: HTTPRequest, on connection: HTTPConnection) async {
         let path = request.path
         if path == "/v1/health" {
-            connection.send(json: .object(["ok": .bool(true), "service": .string("tandem"), "apiVersion": .string(TandemAPI.version)]))
+            connection.send(json: .object(["ok": .bool(true), "service": .string("substo"), "apiVersion": .string(TandemAPI.version)]))
             return
         }
         guard authorised(request) else {
-            connection.send(error: ServiceError(.unauthorized, "Missing or wrong API token. The token is in the project's .tandem/<name>.lock file."))
+            connection.send(error: ServiceError(.unauthorized, "Missing or wrong API token. The token is in the project's .substo/<name>.lock file."))
             return
         }
         guard path.hasPrefix("/v1/") else {
@@ -158,14 +158,14 @@ public final class TandemHTTPServer: @unchecked Sendable {
         }
         if name == "release" && request.method == "POST" {
             guard let onRelease else {
-                connection.send(error: ServiceError(.unavailable, "This Tandem keeps the project open; close it there instead."))
+                connection.send(error: ServiceError(.unavailable, "This Substo Video keeps the project open; close it there instead."))
                 return
             }
             connection.send(json: .object(["ok": .bool(true)]))
             onRelease()
             return
         }
-        let author = request.headers["x-tandem-author"].flatMap { $0.isEmpty ? nil : $0 } ?? "agent"
+        let author = request.headers["x-substo-author"].flatMap { $0.isEmpty ? nil : $0 } ?? "agent"
         if name == "watch" && request.method == "GET" {
             service.noteCall("watch", author: author)
             let after = request.headers["last-event-id"].flatMap(Int.init) ?? request.query["after"].flatMap(Int.init)

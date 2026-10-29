@@ -9,7 +9,7 @@ import XCTest
 
 /// Renders the Text section of the Video tab offscreen, to look at:
 ///
-///     TANDEM_TEXT_UI_OUT=~/dev/me/tandem-research/text-ui \
+///     SUBSTO_TEXT_UI_OUT=~/dev/me/tandem-research/text-ui \
 ///     swift test --package-path . --filter TextInspectorSnapshots
 ///
 /// Without the variable it still renders each state once, so a view that
@@ -20,9 +20,9 @@ final class TextInspectorSnapshots: XCTestCase {
     private var model: EditorModel!
 
     override func setUp() async throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-text-ui-\(UUID().uuidString)", isDirectory: true)
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-text-ui-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let session = try ProjectSession.create(at: folder.appendingPathComponent("Text.tandem"), name: "Text", owner: .app)
+        let session = try ProjectSession.create(at: folder.appendingPathComponent("Text.substo"), name: "Text", owner: .app)
         model = EditorModel(session: session)
     }
 
@@ -50,7 +50,7 @@ final class TextInspectorSnapshots: XCTestCase {
         renderer.scale = 2
         let image = try XCTUnwrap(renderer.cgImage, "\(name) didn't render")
         XCTAssertGreaterThan(image.height, 200, name)
-        guard let out = ProcessInfo.processInfo.environment["TANDEM_TEXT_UI_OUT"], !out.isEmpty else { return }
+        guard let out = ProcessInfo.processInfo.environment["SUBSTO_TEXT_UI_OUT"], !out.isEmpty else { return }
         let dir = URL(fileURLWithPath: NSString(string: out).expandingTildeInPath, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(dir.appendingPathComponent(name + ".png") as CFURL, UTType.png.identifier as CFString, 1, nil))

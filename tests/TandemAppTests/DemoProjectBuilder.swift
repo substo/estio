@@ -5,18 +5,18 @@ import XCTest
 
 /// Builds a realistic project from real footage for looking at the app:
 ///
-///     TANDEM_DEMO_OUT="/private/tmp/claude-501/tandem-app/Decision Models.tandem" \
-///     TANDEM_DEMO_MEDIA=~/dev/convex/convex-videos/decision-models \
+///     SUBSTO_DEMO_OUT="/private/tmp/claude-501/tandem-app/Decision Models.substo" \
+///     SUBSTO_DEMO_MEDIA=~/dev/convex/convex-videos/decision-models \
 ///     swift test --package-path . --filter DemoProjectBuilder
 ///
-/// Skipped unless `TANDEM_DEMO_OUT` is set. The media is only read.
+/// Skipped unless `SUBSTO_DEMO_OUT` is set. The media is only read.
 final class DemoProjectBuilder: XCTestCase {
     func testBuildDemoProject() async throws {
         let environment = ProcessInfo.processInfo.environment
-        guard let out = environment["TANDEM_DEMO_OUT"], !out.isEmpty else {
-            throw XCTSkip("Set TANDEM_DEMO_OUT to build the demo project")
+        guard let out = environment["SUBSTO_DEMO_OUT"], !out.isEmpty else {
+            throw XCTSkip("Set SUBSTO_DEMO_OUT to build the demo project")
         }
-        let root = URL(fileURLWithPath: NSString(string: environment["TANDEM_DEMO_MEDIA"] ?? "~/dev/convex/convex-videos/decision-models").expandingTildeInPath)
+        let root = URL(fileURLWithPath: NSString(string: environment["SUBSTO_DEMO_MEDIA"] ?? "~/dev/convex/convex-videos/decision-models").expandingTildeInPath)
         let url = URL(fileURLWithPath: out)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
 

@@ -478,7 +478,7 @@ final class HTTPTests: XCTestCase {
     }
 
     func testKeychainLookupOfAMissingServiceIsNil() {
-        XCTAssertNil(KeychainSecretStore().secret(service: "tandem-test-no-such-service-\(UUID().uuidString)"))
+        XCTAssertNil(KeychainSecretStore().secret(service: "substo-test-no-such-service-\(UUID().uuidString)"))
     }
 }
 

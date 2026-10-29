@@ -1,6 +1,6 @@
 import Foundation
 
-/// Epidemic Sound music and SFX: a stub until Mike subscribes.
+/// Epidemic Sound music and SFX: a stub until the creator subscribes.
 ///
 /// When he does: Epidemic's personal-key MCP endpoint serves search,
 /// similar tracks, stems and downloads. The plan tier decides what's
@@ -23,15 +23,15 @@ public final class EpidemicSoundProvider: AssetProvider, @unchecked Sendable {
     public init() {}
 
     public func status() async -> ProviderStatus {
-        ProviderStatus(.stub, "Not set up: Mike hasn't subscribed. Pro (freelance) or Business (Convex employee) is needed for company videos.")
+        ProviderStatus(.stub, "Not set up: the creator hasn't subscribed. Pro (freelance) or Business (Convex employee) is needed for company videos.")
     }
 
     public func search(_ query: ProviderQuery) async throws -> [Asset] {
-        throw AssetError.providerUnavailable(provider: displayName, reason: "not set up until Mike subscribes")
+        throw AssetError.providerUnavailable(provider: displayName, reason: "not set up until the creator subscribes")
     }
 
     public func fetchOriginal(_ asset: Asset, into folder: URL) async throws -> FetchedOriginal {
-        throw AssetError.providerUnavailable(provider: displayName, reason: "not set up until Mike subscribes")
+        throw AssetError.providerUnavailable(provider: displayName, reason: "not set up until the creator subscribes")
     }
 
     public func licence(for asset: Asset) async throws -> AssetLicence {
@@ -39,7 +39,7 @@ public final class EpidemicSoundProvider: AssetProvider, @unchecked Sendable {
     }
 }
 
-/// Lordicon animated icons: a stub until Mike subscribes.
+/// Lordicon animated icons: a stub until the creator subscribes.
 ///
 /// When he does: the PRO plan ($8 a month) gives a bearer-token API with
 /// Lottie JSON downloads and no credit requirement (the free plan needs a
@@ -58,15 +58,15 @@ public final class LordiconProvider: AssetProvider, @unchecked Sendable {
     public init() {}
 
     public func status() async -> ProviderStatus {
-        ProviderStatus(.stub, "Not set up: Mike hasn't subscribed to Lordicon PRO.")
+        ProviderStatus(.stub, "Not set up: the creator hasn't subscribed to Lordicon PRO.")
     }
 
     public func search(_ query: ProviderQuery) async throws -> [Asset] {
-        throw AssetError.providerUnavailable(provider: displayName, reason: "not set up until Mike subscribes")
+        throw AssetError.providerUnavailable(provider: displayName, reason: "not set up until the creator subscribes")
     }
 
     public func fetchOriginal(_ asset: Asset, into folder: URL) async throws -> FetchedOriginal {
-        throw AssetError.providerUnavailable(provider: displayName, reason: "not set up until Mike subscribes")
+        throw AssetError.providerUnavailable(provider: displayName, reason: "not set up until the creator subscribes")
     }
 
     public func licence(for asset: Asset) async throws -> AssetLicence {

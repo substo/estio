@@ -11,7 +11,7 @@ import TandemMedia
 
 /// Renders the shared library's views offscreen, to look at:
 ///
-///     TANDEM_SEGMENT_UI_OUT=/private/tmp/segment-ui \
+///     SUBSTO_SEGMENT_UI_OUT=/private/tmp/segment-ui \
 ///     swift test --package-path . --filter SegmentUISnapshots
 ///
 /// Without the variable it still renders each once, so a view that can't
@@ -21,7 +21,7 @@ final class SegmentUISnapshots: XCTestCase {
     private var folder: URL!
 
     override func setUp() async throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-segment-ui-\(UUID().uuidString)", isDirectory: true)
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-segment-ui-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     }
 
@@ -35,7 +35,7 @@ final class SegmentUISnapshots: XCTestCase {
         renderer.scale = 2
         let image = try XCTUnwrap(renderer.cgImage, "\(name) didn't render", file: file, line: line)
         XCTAssertGreaterThan(image.height, 40, name, file: file, line: line)
-        if let out = ProcessInfo.processInfo.environment["TANDEM_SEGMENT_UI_OUT"], !out.isEmpty {
+        if let out = ProcessInfo.processInfo.environment["SUBSTO_SEGMENT_UI_OUT"], !out.isEmpty {
             let dir = URL(fileURLWithPath: NSString(string: out).expandingTildeInPath, isDirectory: true)
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let url = dir.appendingPathComponent(name + ".png")
@@ -48,7 +48,7 @@ final class SegmentUISnapshots: XCTestCase {
 
     /// Three saved segments in a temp library.
     private func segments() throws -> [StoredSegment] {
-        let library = SharedLibrary(root: folder.appendingPathComponent("Tandem Library", isDirectory: true))
+        let library = SharedLibrary(root: folder.appendingPathComponent("Substo Library", isDirectory: true))
         let video = folder.appendingPathComponent("video", isDirectory: true)
         try FileManager.default.createDirectory(at: video.appendingPathComponent("sfx"), withIntermediateDirectories: true)
         try Data(repeating: 7, count: 4000).write(to: video.appendingPathComponent("sfx/whoosh.wav"))
@@ -88,7 +88,7 @@ final class SegmentUISnapshots: XCTestCase {
         .background(Theme.panel.color)
         try render(tiles, "1-segment-tiles")
 
-        let session = try ProjectSession.create(at: folder.appendingPathComponent("Sheet.tandem"), name: "Sheet", owner: .app)
+        let session = try ProjectSession.create(at: folder.appendingPathComponent("Sheet.substo"), name: "Sheet", owner: .app)
         defer { _ = session.close() }
         let model = EditorModel(session: session)
         defer { model.tearDown() }
@@ -97,7 +97,7 @@ final class SegmentUISnapshots: XCTestCase {
             .insertClip(trackID: text, clip: Clip(id: "clip_a", name: "Title", content: .text(TextContent(text: "Welcome back", preset: "callout")), start: t(0), duration: t(3))),
             .insertClip(trackID: text, clip: Clip(id: "clip_b", content: .text(TextContent(text: "Tip 1", preset: "label")), start: t(3), duration: t(2)))
         ]))
-        let sheetModel = SaveSegmentModel(project: model.project, folder: model.folder, clipIDs: ["clip_a", "clip_b"], library: SharedLibrary(root: folder.appendingPathComponent("Tandem Library", isDirectory: true)))
+        let sheetModel = SaveSegmentModel(project: model.project, folder: model.folder, clipIDs: ["clip_a", "clip_b"], library: SharedLibrary(root: folder.appendingPathComponent("Substo Library", isDirectory: true)))
         sheetModel.setup.titles[0].asked = true
         try render(SaveSegmentView(model: sheetModel), "2-save-sheet")
 

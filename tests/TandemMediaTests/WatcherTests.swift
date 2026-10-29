@@ -43,7 +43,7 @@ final class FolderWatcherTests: TempFolderTestCase {
         var next = collector.expectBatch(self, "added")
         touch("source/take-camera.mov", contents: "one")
         touch("notes.txt")
-        touch(".tandem/cache/proxy/abc/proxy.mov")
+        touch(".substo/cache/proxy/abc/proxy.mov")
         touch("exports/final.mp4")
         wait(for: [next], timeout: 5)
         XCTAssertEqual(collector.merged.added, ["source/take-camera.mov"])
@@ -86,8 +86,8 @@ final class FolderWatcherTests: TempFolderTestCase {
         try watcher.start()
         defer { watcher.stop() }
         for i in 0..<3 {
-            try FileManager.default.createDirectory(at: file(".tandem/cache/proxy/.tmp-\(i)"), withIntermediateDirectories: true)
-            try FileManager.default.moveItem(at: file(".tandem/cache/proxy/.tmp-\(i)"), to: file(".tandem/cache/proxy/key\(i)"))
+            try FileManager.default.createDirectory(at: file(".substo/cache/proxy/.tmp-\(i)"), withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: file(".substo/cache/proxy/.tmp-\(i)"), to: file(".substo/cache/proxy/key\(i)"))
             try FileManager.default.createDirectory(at: file("exports/render\(i)"), withIntermediateDirectories: true)
         }
         try FileManager.default.createDirectory(at: file("exports"), withIntermediateDirectories: true)

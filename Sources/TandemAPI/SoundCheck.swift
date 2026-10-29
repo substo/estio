@@ -2,7 +2,7 @@ import Foundation
 import TandemCore
 import TandemRender
 
-// Checking sound without ffmpeg: `tandem loudness --from --to` measures the
+// Checking sound without ffmpeg: `substo loudness --from --to` measures the
 // rendered mix over time (or only some tracks), and `--gains` checks each
 // track's render against its gain lane. Both read the mix the way export
 // does (`MixMeter`).

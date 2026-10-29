@@ -18,7 +18,7 @@ extension StatusResult: ReadableResult {
             lines.append("  open in: nothing else, read from the file for this command")
         } else if let openIn {
             let serving = openIn.port.map { ", serving the API on port \($0)" } ?? ""
-            lines.append("  open in: \(openIn.owner == "app" ? "the Tandem app" : "tandem \(openIn.owner)") (pid \(openIn.pid))\(serving)")
+            lines.append("  open in: \(openIn.owner == "app" ? "the Substo Video app" : "substo \(openIn.owner)") (pid \(openIn.pid))\(serving)")
         }
         if let undo { lines.append("  undo: \(undo)") }
         if let redo { lines.append("  redo: \(redo)") }
@@ -51,7 +51,7 @@ extension StatusResult: ReadableResult {
 extension MediaResult: ReadableResult {
     public var readableText: String {
         guard !items.isEmpty else {
-            return "No media in the project yet. Put files in the project folder and run `tandem media --refresh`."
+            return "No media in the project yet. Put files in the project folder and run `substo media --refresh`."
         }
         var lines: [String] = []
         if !added.isEmpty { lines.append("Added \(added.count) new file\(added.count == 1 ? "" : "s").") }
@@ -115,7 +115,7 @@ extension TranscriptResult: ReadableResult {
             lines += Self.lines(words)
         }
         if !missing.isEmpty {
-            lines.append("No transcript yet for: \(missing.joined(separator: ", ")). `tandem media` shows progress.")
+            lines.append("No transcript yet for: \(missing.joined(separator: ", ")). `substo media` shows progress.")
         }
         return lines.joined(separator: "\n")
     }
@@ -238,7 +238,7 @@ extension TightenResult: ReadableResult {
         }
         for warning in warnings { lines.append("Warning: \(warning)") }
         if let applied {
-            lines.append("Applied as revision \(applied.revision) (\"\(applied.label)\"). Undo with `tandem undo`.")
+            lines.append("Applied as revision \(applied.revision) (\"\(applied.label)\"). Undo with `substo undo`.")
         } else if !cuts.isEmpty || !widened.isEmpty {
             lines.append("Nothing changed yet. Run again with --apply (or apply: true) to make the cut.")
         }
@@ -294,7 +294,7 @@ extension HistoryResult: ReadableResult {
         }
         if let redo { lines.append("Redo: \(redo)") }
         if let edits, !edits.isEmpty {
-            lines.append("Edits, newest first (kept across restarts; tandem diff --since <revision> shows what each did to the clips):")
+            lines.append("Edits, newest first (kept across restarts; substo diff --since <revision> shows what each did to the clips):")
             lines += Self.editLines(edits)
         } else if !events.isEmpty {
             lines.append("Recent changes:")
@@ -312,7 +312,7 @@ extension HistoryResult: ReadableResult {
         return "  " + EditPlace(start: start, end: end, tracks: tracks ?? []).description
     }
 
-    /// One line per edit, with a run of Tandem finding new media (which
+    /// One line per edit, with a run of Substo Video finding new media (which
     /// can be dozens) on one line.
     static func editLines(_ edits: [HistoryEdit]) -> [String] {
         let time = DateFormatter()

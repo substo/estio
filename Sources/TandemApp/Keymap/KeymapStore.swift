@@ -1,16 +1,16 @@
 import Foundation
 
 /// Finds the keymap: the Premiere defaults shipped in the app's resource
-/// bundle, with the user's `~/Library/Application Support/Tandem/keymap.json`
+/// bundle, with the user's `~/Library/Application Support/Substo/keymap.json`
 /// merged on top.
 enum KeymapStore {
-    static let bundleName = "Tandem_TandemApp.bundle"
+    static let bundleName = "Substo_TandemApp.bundle"
     static let defaultFile = "Keymaps/premiere.json"
 
     static var userKeymapURL: URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        return support.appendingPathComponent("Tandem/keymap.json")
+        return support.appendingPathComponent("Substo/keymap.json")
     }
 
     /// Where the shipped keymap can be: inside the app bundle's resources,
@@ -67,7 +67,7 @@ enum KeymapStore {
         let template = """
         {
           "name": "Mine",
-          "about": "Bindings here replace Tandem's Premiere defaults. Use null to remove one. Commands: \(names)",
+          "about": "Bindings here replace Substo Video's Premiere defaults. Use null to remove one. Commands: \(names)",
           "bindings": {
           }
         }

@@ -1,7 +1,7 @@
 import Foundation
 
 /// One-key layouts for a clip (keys 1 to 4 in the app, `applyLayout` for
-/// agents). The values come from Mike's Filmora projects: in 2026 every PiP
+/// agents). The values come from the creator's Filmora projects: in 2026 every PiP
 /// was 50% scale around (0.87, 0.77) with the portrait cutout, and most had
 /// Filmora's default drop shadow.
 public enum LayoutPreset: String, Codable, CaseIterable, Sendable {
@@ -31,7 +31,7 @@ public enum LayoutPreset: String, Codable, CaseIterable, Sendable {
     public static let pipRightPosition = Point(x: 0.87, y: 0.77)
     public static let pipLeftPosition = Point(x: 0.13, y: 0.77)
 
-    /// Filmora's default drop shadow, which Mike never changed.
+    /// Filmora's default drop shadow, which the creator never changed.
     public static func pipShadow(id: String) -> Effect {
         Effect(id: id, type: "dropShadow", params: [
             "distance": .number(4), "blur": .number(5), "opacity": .number(60)
@@ -174,7 +174,7 @@ extension Transform {
     }
 }
 
-/// Where a clip goes in a 9:16 short made from the landscape edit: Mike's
+/// Where a clip goes in a 9:16 short made from the landscape edit: the creator's
 /// shorts put the screen in the top half and the camera in the bottom half,
 /// with captions between, and full-frame camera moments fill the frame.
 public enum PortraitSlot: String, Codable, CaseIterable, Sendable {

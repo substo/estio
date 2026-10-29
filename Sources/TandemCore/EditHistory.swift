@@ -1,9 +1,9 @@
 import Foundation
 
 // What changed on the timeline, clip by clip, and the edit history that
-// remembers it. `tandem history` says where each edit was, `tandem diff`
+// remembers it. `substo history` says where each edit was, `substo diff`
 // says what changed since a revision, a backup or an export, and
-// `tandem restore` puts clips back as they were. All three work on clips
+// `substo restore` puts clips back as they were. All three work on clips
 // only: media, markers, transitions and settings aren't compared.
 
 /// A clip and the track it's on.
@@ -476,7 +476,7 @@ public struct EditPlace: Codable, Equatable, Sendable, CustomStringConvertible {
 
 // MARK: - The edit history
 
-/// One change to the project, as `.tandem/<name>.history.jsonl` keeps it:
+/// One change to the project, as `.substo/<name>.history.jsonl` keeps it:
 /// who made it, where it was, and enough to take its clips back to how they
 /// were before it.
 public struct HistoryRecord: Codable, Equatable, Sendable {
@@ -619,8 +619,8 @@ public enum HistoryChain {
     }
 }
 
-/// `.tandem/<name>.history.jsonl`: one line per change to the project,
-/// appended as it commits, whoever has the project open (the app, `tandem
+/// `.substo/<name>.history.jsonl`: one line per change to the project,
+/// appended as it commits, whoever has the project open (the app, `substo
 /// serve`, each CLI command). It outlives restarts, unlike the undo stack.
 public final class EditHistoryLog: @unchecked Sendable {
     /// When the file grows past this, the older half goes.
@@ -721,7 +721,7 @@ public final class EditHistoryLog: @unchecked Sendable {
 /// queue. Every session has one, so the history carries on from the app
 /// to the CLI and back, and across restarts.
 public final class HistoryRecorder: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.mikerosoft.tandem.history")
+    private let queue = DispatchQueue(label: "com.substo.video.history")
     private let coordinator: ProjectCoordinator
     public let log: EditHistoryLog?
     private var token: UUID?

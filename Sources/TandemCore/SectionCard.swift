@@ -1,6 +1,6 @@
 import Foundation
 
-/// Mike's section card: a full-screen card of about three seconds between
+/// the creator's section card: a full-screen card of about three seconds between
 /// the cold open, the intro and each section, so viewers get a breather.
 /// Convex's yellow, red and purple bands sweep across to wipe it in, the
 /// dark card holds a number chip, the title (Anton), a letter-spaced
@@ -266,7 +266,7 @@ extension SectionCard {
     /// subtitle either: it arrives with a wipe and the viewer's eyes have
     /// to find it, so 0.8 s goes to taking it in. The words are then read
     /// at 15 characters a second, spaces included, a little slower than
-    /// Netflix's 17 for adult subtitles: Mike found cards at 17 went by a
+    /// Netflix's 17 for adult subtitles: the creator found cards at 17 went by a
     /// bit fast. METHODOLOGY / LET'S KEEP IT FAIR (30 characters) gets
     /// 4.2 s, and THE ONE I WOULD TURN ON / REQUIRE ACCESS CONTROL 5.3 s.
     public enum Reading {

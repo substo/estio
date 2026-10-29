@@ -3,7 +3,7 @@ import XCTest
 @testable import TandemCore
 import TandemMedia
 
-/// Mike's comments as agents see them: `tandem comments` (and the MCP
+/// Mike's comments as agents see them: `substo comments` (and the MCP
 /// tool), and clearing the ones they've done.
 final class CommentsTests: XCTestCase {
     private func projectWithComments() -> Project {
@@ -54,7 +54,7 @@ final class CommentsTests: XCTestCase {
     }
 }
 
-/// `tandem comments` and `tandem comments resolve`, run as agents run them.
+/// `substo comments` and `substo comments resolve`, run as agents run them.
 final class CommentsCLITests: XCTestCase {
     private let cli = CLITests()
 
@@ -67,24 +67,24 @@ final class CommentsCLITests: XCTestCase {
         ]
         let url = try APIFixture.write(to: folder.url, project: project)
 
-        let listed = try cli.tandem("comments", in: folder.url)
+        let listed = try cli.substo("comments", in: folder.url)
         XCTAssertEqual(listed.status, 0, listed.stderr)
         XCTAssertTrue(listed.stdout.contains("mk_one  00:12.000  \"Cut the umm\""), listed.stdout)
 
-        let resolved = try cli.tandem("comments", "resolve", "mk_one", "--author", "claude", in: folder.url)
+        let resolved = try cli.substo("comments", "resolve", "mk_one", "--author", "claude", in: folder.url)
         XCTAssertEqual(resolved.status, 0, resolved.stderr)
         XCTAssertTrue(resolved.stdout.contains("Applied \"Resolve comment\" by claude"), resolved.stdout)
         XCTAssertEqual(try ProjectFile.load(from: url).project.comments.map(\.id), ["mk_two"])
 
-        let notAComment = try cli.tandem("comments", "resolve", "mk_s2", in: folder.url)
+        let notAComment = try cli.substo("comments", "resolve", "mk_s2", in: folder.url)
         XCTAssertEqual(notAComment.status, 2)
         XCTAssertTrue(notAComment.stderr.contains("mk_s2 isn't a project comment"), notAComment.stderr)
 
-        let nothing = try cli.tandem("comments", "resolve", in: folder.url)
+        let nothing = try cli.substo("comments", "resolve", in: folder.url)
         XCTAssertEqual(nothing.status, 2)
         XCTAssertTrue(nothing.stderr.contains("needs the IDs"), nothing.stderr)
 
-        let all = try cli.tandem("comments", "resolve", "--all", in: folder.url)
+        let all = try cli.substo("comments", "resolve", "--all", in: folder.url)
         XCTAssertEqual(all.status, 0, all.stderr)
         let after = try ProjectFile.load(from: url).project
         XCTAssertTrue(after.comments.isEmpty)

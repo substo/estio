@@ -34,7 +34,7 @@ enum CubeLUT {
             case "LUT_3D_SIZE": size = Int(numbers.first ?? 0)
             case "DOMAIN_MIN" where numbers.count == 3: domainMin = numbers
             case "DOMAIN_MAX" where numbers.count == 3: domainMax = numbers
-            case "LUT_1D_SIZE": throw AssetError.unsupported("\(url.lastPathComponent) is a 1D LUT; Tandem uses 3D LUTs")
+            case "LUT_1D_SIZE": throw AssetError.unsupported("\(url.lastPathComponent) is a 1D LUT; Substo Video uses 3D LUTs")
             default: break
             }
         }

@@ -209,7 +209,7 @@ final class StillArea {
 /// recording: how much a still wall and still screen text change from frame
 /// to frame against the original, the tick at each keyframe, size, encode
 /// speed, and how long the viewer takes to show an exact frame. Opt in with
-/// TANDEM_REAL_MEDIA=1 (release, -enable-testing); skipped when the footage
+/// SUBSTO_REAL_MEDIA=1 (release, -enable-testing); skipped when the footage
 /// isn't on this Mac. Reads the decision-models folder, never writing
 /// there; proxies go to /private/tmp/claude-501/tandem-render/proxy.
 final class ProxyRealMediaTests: XCTestCase {
@@ -337,7 +337,7 @@ final class ProxyRealMediaTests: XCTestCase {
     }
 
     func testTodaysProxiesAgainstAllIntra() async throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["TANDEM_REAL_MEDIA"] == "1", "set TANDEM_REAL_MEDIA=1 to run")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBSTO_REAL_MEDIA"] == "1", "set SUBSTO_REAL_MEDIA=1 to run")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: camera.source.path) && FileManager.default.fileExists(atPath: screen.source.path), "decision-models footage isn't on this Mac")
         let today = AnalysisSettings.standard
         let allIntra = AnalysisSettings(proxyQuality: 0.6, proxyKeyFrameInterval: 1)

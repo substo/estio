@@ -6,7 +6,7 @@ import TandemCore
 import UniformTypeIdentifiers
 
 /// Lays rendered frames out on one PNG, each with its time under it, for
-/// `tandem frames`. Agents used to loop `tandem frame` and stitch the PNGs
+/// `substo frames`. Agents used to loop `substo frame` and stitch the PNGs
 /// with ffmpeg, which broke on drawtext escaping and on file names with
 /// colons, so this draws with Core Graphics and nothing else.
 enum ContactSheet {

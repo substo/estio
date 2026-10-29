@@ -325,7 +325,7 @@ final class PlaybackMatchTests: XCTestCase {
         let playing = try await playerFrame(try await CompositionBuilder.build(context), at: at)
         // Paused: FrameRenderer's still.
         let still = try await FrameRenderer(context: context).image(at: Time(seconds: at))
-        // `tandem frame`: the same renderer's PNG, read back.
+        // `substo frame`: the same renderer's PNG, read back.
         let png = try await FrameRenderer(context: context).pngData(at: Time(seconds: at))
         let source0 = try XCTUnwrap(CGImageSourceCreateWithData(png as CFData, nil))
         let frameImage = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source0, 0, nil))
@@ -343,7 +343,7 @@ final class PlaybackMatchTests: XCTestCase {
         let original = patchValues(Levels(try await decodedFrame(source, at: at, format: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange), width: columns, height: 8))
 
         // The same values: nothing lost to range, matrix or rounding.
-        for (name, values) in [("player", player), ("export", export), ("tandem frame", grabbed), ("source", original)] {
+        for (name, values) in [("player", player), ("export", export), ("substo frame", grabbed), ("source", original)] {
             let off = worst(values, paused)
             XCTAssertLessThanOrEqual(off.difference, 3, "\(name) values are \(off.difference) levels off the still at patch \(off.patch):\n\(describe(values))\n\(describe(paused))")
         }
@@ -357,7 +357,7 @@ final class PlaybackMatchTests: XCTestCase {
         let stillSpace = try XCTUnwrap(still.colorSpace)
         let onScreenPaused = shown(paused, in: stillSpace)
         let frameSpace = try XCTUnwrap(frameImage.colorSpace, "the PNG carries its colour space")
-        for (name, values, space) in [("player", player, playerSpace), ("export", export, exportSpace), ("tandem frame", grabbed, frameSpace)] {
+        for (name, values, space) in [("player", player, playerSpace), ("export", export, exportSpace), ("substo frame", grabbed, frameSpace)] {
             let onScreen = shown(values, in: space)
             let off = worst(onScreen, onScreenPaused)
             XCTAssertLessThanOrEqual(off.difference, 2.5, "\(name) shows \(off.difference) levels off the paused still at patch \(off.patch) (Display P3):\n\(describe(onScreen))\n\(describe(onScreenPaused))")
@@ -402,7 +402,7 @@ extension PlaybackMatchTests {
         return (Double(differing) / Double(total) * 100, sum / Double(total * 3))
     }
 
-    /// Paused, playing, `tandem frame` and export agree on a clip with its
+    /// Paused, playing, `substo frame` and export agree on a clip with its
     /// cutout on, placed as a picture in picture over the patches: the same
     /// matte, placement and colour, although playback reads a half-size
     /// proxy and the matte is half size too.
@@ -451,12 +451,12 @@ extension PlaybackMatchTests {
             let i = (Int(y * Double(levels.height)) * levels.width + Int(x * Double(levels.width))) * 3
             return Array(levels.rgb[i..<(i + 3)])
         }
-        for (name, levels) in [("paused", paused), ("playing", player), ("tandem frame", grabbed), ("export", export)] {
+        for (name, levels) in [("paused", paused), ("playing", player), ("substo frame", grabbed), ("export", export)] {
             let corner = pixel(levels, 0.49, 0.40), person = pixel(levels, 0.7, 0.55)
             XCTAssertFalse(corner[1] > corner[0] + 60 && corner[1] > corner[2] + 60, "\(name) shows the camera's green around the person: no matte (\(corner))")
             XCTAssertGreaterThan(person[0], 150, "\(name) has no person where the cutout puts them (\(person))")
         }
-        for (name, levels) in [("playing", player), ("tandem frame", grabbed), ("export", export)] {
+        for (name, levels) in [("playing", player), ("substo frame", grabbed), ("export", export)] {
             let difference = blocks(levels, paused)
             XCTAssertLessThan(difference.share, 3, String(format: "%@ differs from the paused still in %.1f%% of blocks (mean %.2f)", name, difference.share, difference.mean))
             XCTAssertLessThan(difference.mean, 3, String(format: "%@ is %.2f levels off the paused still on average", name, difference.mean))

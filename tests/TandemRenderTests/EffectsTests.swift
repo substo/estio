@@ -130,7 +130,7 @@ final class EffectsTests: XCTestCase {
     }
 
     func testLUTFromCubeFile() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-lut-\(UUID().uuidString)")
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("substo-lut-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         // A 2-point inverting cube, red changing fastest.

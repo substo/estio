@@ -91,7 +91,7 @@ final class EditHistoryTests: XCTestCase {
     private var folder: URL!
 
     override func setUpWithError() throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-history-\(UUID().uuidString)")
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-history-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     }
 

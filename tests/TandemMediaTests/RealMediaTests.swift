@@ -6,10 +6,10 @@ import XCTest
 
 /// Checks and timings on Mike's real footage (read only). Opt-in:
 ///
-///     TANDEM_REAL_MEDIA=1 swift test -c release -Xswiftc -enable-testing \
+///     SUBSTO_REAL_MEDIA=1 swift test -c release -Xswiftc -enable-testing \
 ///       --package-path . --filter RealMediaTests
 ///
-/// Add TANDEM_REAL_MEDIA_FULL=1 for the whole-take transcript. Results and
+/// Add SUBSTO_REAL_MEDIA_FULL=1 for the whole-take transcript. Results and
 /// timings go to /private/tmp/claude-501/tandem-media/real/.
 final class RealMediaTests: XCTestCase {
     static let project = URL(fileURLWithPath: NSString(string: "~/dev/convex/convex-videos/decision-models").expandingTildeInPath)
@@ -20,7 +20,7 @@ final class RealMediaTests: XCTestCase {
     static let minute = CMTimeRange(start: CMTime(seconds: 1010, preferredTimescale: 600), duration: CMTime(seconds: 60, preferredTimescale: 600))
 
     override func setUpWithError() throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["TANDEM_REAL_MEDIA"] == "1", "set TANDEM_REAL_MEDIA=1 to run the real footage tests")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBSTO_REAL_MEDIA"] == "1", "set SUBSTO_REAL_MEDIA=1 to run the real footage tests")
         try XCTSkipUnless(FileManager.default.fileExists(atPath: Self.camera.path), "decision-models footage isn't on this Mac")
         try FileManager.default.createDirectory(at: Self.scratch, withIntermediateDirectories: true)
     }
@@ -279,7 +279,7 @@ final class RealMediaTests: XCTestCase {
     /// frames (each request sees every third frame), fresh requests every
     /// frame, and one worker in order.
     func testMatteTemporalStateExperiment() async throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["TANDEM_MATTE_EXPERIMENT"] == "1", "set TANDEM_MATTE_EXPERIMENT=1")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBSTO_MATTE_EXPERIMENT"] == "1", "set SUBSTO_MATTE_EXPERIMENT=1")
         let range = CMTimeRange(start: CMTime(seconds: 1010, preferredTimescale: 600), duration: CMTime(seconds: 20, preferredTimescale: 600))
         var results: [String: [[UInt8]]] = [:]
         for (name, tuning) in [("shared-a", MatteJob.Tuning(workers: 3, stateless: false)), ("shared-b", MatteJob.Tuning(workers: 3, stateless: false)),
@@ -401,7 +401,7 @@ final class RealMediaTests: XCTestCase {
 
     func testTranscriptOfTheWholeCamera() async throws {
         guard #available(macOS 26, *) else { throw XCTSkip("needs macOS 26") }
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["TANDEM_REAL_MEDIA_FULL"] == "1", "set TANDEM_REAL_MEDIA_FULL=1 for the whole take")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBSTO_REAL_MEDIA_FULL"] == "1", "set SUBSTO_REAL_MEDIA_FULL=1 for the whole take")
         let before = peakMemory()
         let folder = try output("transcript-full")
         let (_, seconds) = try await time {

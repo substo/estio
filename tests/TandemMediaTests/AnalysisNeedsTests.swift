@@ -89,7 +89,7 @@ final class AnalysisNeedsTests: XCTestCase {
 }
 
 extension AnalysisNeedsTests {
-    /// `tandem transcribe` marks a file so its transcript is made whatever
+    /// `substo transcribe` marks a file so its transcript is made whatever
     /// its role or track: a generated clip checked for made-up speech.
     func testATranscriptAskedForIsMadeWhateverTheRole() throws {
         var p = project()

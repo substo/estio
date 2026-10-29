@@ -6,7 +6,7 @@ final class ProjectSessionTests: XCTestCase {
     var folder: URL!
 
     override func setUpWithError() throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-session-\(UUID().uuidString)")
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-session-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     }
 
@@ -15,7 +15,7 @@ final class ProjectSessionTests: XCTestCase {
     }
 
     func testCreateSaveAndReopen() throws {
-        let url = folder.appendingPathComponent("Video.tandem")
+        let url = folder.appendingPathComponent("Video.substo")
         let session = try ProjectSession.create(at: url, owner: .cli)
         XCTAssertEqual(session.coordinator.project.videoTracks.map(\.name), ["Screen", "Camera", "B-roll", "Graphics", "Text"])
         try session.coordinator.apply(EditBatch(label: "Marker", commands: [.addMarker(marker: Marker(id: "mk_a", time: Time(seconds: 3), name: "Hook"))]))
@@ -28,7 +28,7 @@ final class ProjectSessionTests: XCTestCase {
     }
 
     func testJournalRecoversUnsavedEdits() throws {
-        let url = folder.appendingPathComponent("Crash.tandem")
+        let url = folder.appendingPathComponent("Crash.substo")
         let session = try ProjectSession.create(at: url, owner: .cli)
         session.autosaveDelay = 3600
         try session.coordinator.apply(EditBatch(label: "Marker", commands: [.addMarker(marker: Marker(id: "mk_b", time: Time(seconds: 1), name: "B"))]))
@@ -42,15 +42,15 @@ final class ProjectSessionTests: XCTestCase {
     }
 
     func testAnUnreadableProjectPointsToItsBackups() throws {
-        let url = folder.appendingPathComponent("Video.tandem")
+        let url = folder.appendingPathComponent("Video.substo")
         try ProjectFile.save(Project.standard(name: "Video"), revision: 1, to: url)
         try ProjectFile.save(Project.standard(name: "Video"), revision: 2, to: url)
         // Cut short by a crash, or broken by a hand edit.
         try Data(#"{"project": {"name": "Vid"#.utf8).write(to: url)
         XCTAssertThrowsError(try ProjectSession.open(url, owner: .app)) { error in
             let message = "\(error)"
-            XCTAssertTrue(message.contains("Video.tandem"), message)
-            XCTAssertTrue(message.contains(".tandem/backups"), message)
+            XCTAssertTrue(message.contains("Video.substo"), message)
+            XCTAssertTrue(message.contains(".substo/backups"), message)
             let newest = ProjectFile.backups(of: url).last?.lastPathComponent
             XCTAssertNotNil(newest)
             XCTAssertTrue(message.contains(newest ?? "?"), message)
@@ -61,7 +61,7 @@ final class ProjectSessionTests: XCTestCase {
     func testANewProjectDoesntInheritWhatAnOldOneLeftBehind() throws {
         // A project of this name crashed with unsaved edits and was then
         // deleted, and the CLI had kept undo history for it.
-        let url = folder.appendingPathComponent("Video.tandem")
+        let url = folder.appendingPathComponent("Video.substo")
         var old = Project.standard(name: "Old")
         old.markers = [Marker(id: "mk_old", time: t(1), name: "Old")]
         ProjectJournal.forProject(at: url).appendSnapshot(project: old, revision: 3, reason: "undo")
@@ -82,26 +82,26 @@ final class ProjectSessionTests: XCTestCase {
         let before = folder.appendingPathComponent("working title", isDirectory: true)
         let after = folder.appendingPathComponent("decision-models", isDirectory: true)
         try FileManager.default.createDirectory(at: before, withIntermediateDirectories: true)
-        let session = try ProjectSession.create(at: before.appendingPathComponent("Video.tandem"), owner: .app)
+        let session = try ProjectSession.create(at: before.appendingPathComponent("Video.substo"), owner: .app)
         session.autosaveDelay = 3600
         try session.coordinator.apply(EditBatch(label: "Before", commands: [.addMarker(marker: Marker(id: "mk_1", time: t(1), name: "1"))]))
         try FileManager.default.moveItem(at: before, to: after)
         // Something recreates the old path (the analysis cache writing into
-        // .tandem/cache, say); the project still belongs in the renamed folder.
-        try FileManager.default.createDirectory(at: before.appendingPathComponent(".tandem/cache"), withIntermediateDirectories: true)
+        // .substo/cache, say); the project still belongs in the renamed folder.
+        try FileManager.default.createDirectory(at: before.appendingPathComponent(".substo/cache"), withIntermediateDirectories: true)
         try session.coordinator.apply(EditBatch(label: "After", commands: [.addMarker(marker: Marker(id: "mk_2", time: t(2), name: "2"))]))
         session.close()
 
-        let moved = after.appendingPathComponent("Video.tandem")
+        let moved = after.appendingPathComponent("Video.substo")
         XCTAssertEqual(try ProjectFile.load(from: moved).project.markers.map(\.id), ["mk_1", "mk_2"])
-        XCTAssertFalse(FileManager.default.fileExists(atPath: before.appendingPathComponent("Video.tandem").path))
-        XCTAssertEqual(session.fileURL.lastPathComponent, "Video.tandem")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: before.appendingPathComponent("Video.substo").path))
+        XCTAssertEqual(session.fileURL.lastPathComponent, "Video.substo")
         XCTAssertEqual(session.fileURL.deletingLastPathComponent().lastPathComponent, "decision-models")
         XCTAssertFalse(FileManager.default.fileExists(atPath: ProjectSession.lockURL(for: moved).path), "the lock goes with it")
     }
 
     func testAnEditThatLandsDuringASaveIsStillJournaled() throws {
-        let url = folder.appendingPathComponent("Race.tandem")
+        let url = folder.appendingPathComponent("Race.substo")
         let session = try ProjectSession.create(at: url, owner: .app)
         session.autosaveDelay = 3600
         try session.coordinator.apply(EditBatch(label: "First", commands: [.addMarker(marker: Marker(id: "mk_1", time: t(1), name: "1"))]))
@@ -145,7 +145,7 @@ final class ProjectSessionTests: XCTestCase {
     }
 
     func testAutosaveWritesAfterAnEdit() throws {
-        let url = folder.appendingPathComponent("Auto.tandem")
+        let url = folder.appendingPathComponent("Auto.substo")
         let session = try ProjectSession.create(at: url, owner: .cli)
         session.autosaveDelay = 0.05
         try session.coordinator.apply(EditBatch(label: "Marker", commands: [.addMarker(marker: Marker(time: Time(seconds: 2), name: "C"))]))
@@ -177,7 +177,7 @@ final class MediaRefreshTests: XCTestCase {
         try Self.wav(samples: 4_800).write(to: folder.file("sfx/click.wav"))
         var project = Project.standard(name: "Imported")
         project.media = [MediaItem(id: "med_click", path: folder.file("sfx/click.wav").path, kind: .audio, role: .sfx, duration: t(0.1), hasAudio: true)]
-        let url = folder.file("Imported.tandem")
+        let url = folder.file("Imported.substo")
         try ProjectFile.save(project, revision: 0, to: url)
         try Self.wav(samples: 9_600).write(to: folder.file("sfx/new.wav"))
 
@@ -196,9 +196,9 @@ extension MediaRefreshTests {
     func testRefreshesAtTheSameTimeAddAFileOnce() async throws {
         // Opening a project in the app starts two scans at once (the
         // window's and the folder watcher's first look), and a take
-        // recorded while Tandem was closed is new to both.
+        // recorded while Substo Video was closed is new to both.
         let folder = TempFolder()
-        let session = try ProjectSession.create(at: folder.file("Video.tandem"), owner: .cli)
+        let session = try ProjectSession.create(at: folder.file("Video.substo"), owner: .cli)
         defer { session.close() }
         try FileManager.default.createDirectory(at: folder.file("sfx"), withIntermediateDirectories: true)
         for name in ["a", "b", "c"] { try Self.wav(samples: 4_800).write(to: folder.file("sfx/\(name).wav")) }
@@ -211,10 +211,10 @@ extension MediaRefreshTests {
 
 final class SessionWatchingTests: XCTestCase {
     func testNewFilesJoinAWatchedProject() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-watch-\(UUID().uuidString)")
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-watch-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let session = try ProjectSession.create(at: folder.appendingPathComponent("Watch.tandem"), owner: .cli)
+        let session = try ProjectSession.create(at: folder.appendingPathComponent("Watch.substo"), owner: .cli)
         defer { session.close() }
         session.startWatching()
         XCTAssertTrue(session.isWatching)

@@ -1,7 +1,7 @@
 import AppKit
 import TandemCore
 
-/// Renders a window to PNG from inside the app, so Tandem can screenshot
+/// Renders a window to PNG from inside the app, so Substo Video can screenshot
 /// itself without screen recording permission. SwiftUI draws most of the
 /// window into layers that `cacheDisplay` doesn't see, so the capture
 /// renders the window's layer tree and uses `cacheDisplay` for views that
@@ -57,7 +57,7 @@ enum WindowSnapshot {
 
     /// The view and layer tree as text, for debugging layout from agents.
     static func describe(_ window: NSWindow) -> String {
-        // Whether Tandem is the active app, to check that background
+        // Whether Substo Video is the active app, to check that background
         // commands (`open -g`) leave focus alone.
         var lines: [String] = [
             "app active: \(NSApp.isActive ? "yes" : "no"), window key: \(window.isKeyWindow ? "yes" : "no")",
@@ -65,7 +65,7 @@ enum WindowSnapshot {
             // What the last hover set, so a simulated hover can be checked.
             "cursor: \(CursorKind.describe(NSCursor.current))"
         ]
-        // Where each view is in the coordinates `tandem://simulate` takes:
+        // Where each view is in the coordinates `substo://simulate` takes:
         // window points from the top left.
         let windowHeight = (window.contentView?.superview ?? window.contentView)?.bounds.height ?? 0
         func visit(_ view: NSView, depth: Int) {
@@ -111,9 +111,9 @@ enum WindowSnapshot {
 /// being captured.
 protocol CaptureAware: AnyObject {}
 
-/// Commands the app takes through `tandem://` URLs, for smoke tests and
-/// agents: `tandem url "screenshot?out=/tmp/shot.png"`. A link only acts
-/// with this Mac's key (see `AppURLKey`), which `tandem url` adds.
+/// Commands the app takes through `substo://` URLs, for smoke tests and
+/// agents: `substo url "screenshot?out=/tmp/shot.png"`. A link only acts
+/// with this Mac's key (see `AppURLKey`), which `substo url` adds.
 enum AppURLCommand: Equatable {
     /// Writes the front project window (or the welcome window) to a PNG.
     case screenshot(out: String)
@@ -141,16 +141,16 @@ enum AppURLCommand: Equatable {
     /// Sizes the front window (or the project list), for checking layouts.
     case windowSize(width: Double, height: Double)
     /// Brings the front window in front of other apps' windows, or sends
-    /// it behind them, without activating Tandem.
+    /// it behind them, without activating Substo Video.
     case windowOrder(toFront: Bool)
 
-    /// `tandem`, plus any scheme the app's bundle registers, so a copy of the
+    /// `substo`, plus any scheme the app's bundle registers, so a copy of the
     /// app built under another bundle ID (for measuring beside the installed
     /// one) answers its own links.
     static var schemes: Set<String> {
         let types = Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] ?? []
         let registered = types.flatMap { $0["CFBundleURLSchemes"] as? [String] ?? [] }.map { $0.lowercased() }
-        return Set(registered).union(["tandem"])
+        return Set(registered).union(["substo"])
     }
 
     /// The project a link names with `project=` (its window title, file
@@ -228,7 +228,7 @@ enum AppURLCommand: Equatable {
     }
 
     /// An absolute path, after `~` expansion, with the extension the command
-    /// writes. Any app or web page can open a tandem:// link, so a
+    /// writes. Any app or web page can open a substo:// link, so a
     /// screenshot mustn't be able to overwrite, say, a shell profile.
     private static func path(_ raw: String?, extension required: String? = nil) -> String? {
         guard let raw, !raw.isEmpty else { return nil }

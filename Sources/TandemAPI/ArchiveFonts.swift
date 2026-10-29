@@ -25,7 +25,7 @@ public protocol FontLocating: Sendable {
 /// registers (the CLI doesn't).
 public struct InstalledFonts: FontLocating {
     public var libraryRoot: URL?
-    /// The shared library (`~/Movies/Tandem Library`), whose `Fonts/`
+    /// The shared library (`~/Movies/Substo Library`), whose `Fonts/`
     /// folder is looked in.
     public var sharedLibrary: URL?
 
@@ -34,7 +34,7 @@ public struct InstalledFonts: FontLocating {
         self.sharedLibrary = sharedLibrary
     }
 
-    /// `$TANDEM_ASSETS_ROOT`, or the per-user library.
+    /// `$SUBSTO_ASSETS_ROOT`, or the per-user library.
     public static func defaultLibraryRoot(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
         AssetLibrary.root(environment: environment)
     }

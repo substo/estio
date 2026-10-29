@@ -1,10 +1,10 @@
 import Foundation
 
 // Page changes on the screen recording with no transition, for
-// `tandem check`.
+// `substo check`.
 //
 // Page changes in an explainer or slides push. An agent working from its
-// cue list missed 10 of them on Build Your Own Convex, and Mike pushed them
+// cue list missed 10 of them on Build Your Own Convex, and the creator pushed them
 // by hand. So the check finds them in the screen recording itself, scanned
 // on its own (`screenOnly`), as the camera picture-in-picture sits over it
 // in the composite: a large share of the picture changing at once, then
@@ -17,7 +17,7 @@ extension QualityCheck {
     /// pane that scrolls beside a sidebar that doesn't still reads as a
     /// scroll.
     public static let scanlineBands = 4
-    /// A tile changes when its luma moves by more than this (of 255). Mike's
+    /// A tile changes when its luma moves by more than this (of 255). the creator's
     /// explainers are dim text on a dark page, so a new page moves its tiles
     /// by less than a bright one would.
     static let pageLevel = 6
@@ -192,7 +192,7 @@ extension QualityCheck {
 
     /// Whether the screen recording shows at `time`: nothing over it covers
     /// half the frame (a full-frame B-roll shot, the camera full frame, a
-    /// card). A cut-out camera leaves the screen showing around Mike.
+    /// card). A cut-out camera leaves the screen showing around the creator.
     static func screenShows(at time: Time, in project: Project, media: [String: MediaItem]) -> Bool {
         guard let screen = screenClip(at: time, in: project, media: media) else { return false }
         for track in project.videoTracks[(screen.track + 1)...] where !track.hidden {

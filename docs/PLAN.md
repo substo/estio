@@ -1,10 +1,10 @@
-# Tandem V1 plan
+# Substo Video V1 plan
 
 What V1 has to do: open a video folder, show the takes and media in it, let
-Mike cut a 6 to 15 minute Convex video the way he did in Filmora (camera take,
+the creator cut a 6 to 15 minute Convex video the way he did in Filmora (camera take,
 screen with a cutout PiP, B-roll, titles, music, SFX), and export a
 loudness-matched 4K file. Agents can do everything he can through the CLI and
-MCP. This list merges Mike's brief, the Filmora audit (51 projects), the
+MCP. This list merges the creator's brief, the Filmora audit (51 projects), the
 spikes, Astra's review and Fable's review.
 
 Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
@@ -58,10 +58,10 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] Service: status, media, transcript, search, timeline, apply (with dry run), undo, redo, history, frame, clip, export, loudness, validate, watch, effects, screenshot [api]
 - [x] Readable timeline dump for agents (text, --summary, --words, JSON) [api]
 - [x] Local HTTP server with token, event stream for watch [api]
-- [x] `tandem` CLI, headless when the app is closed (undo kept on disk), talks to the app when open [api]
-- [x] `tandem mcp` stdio server (both MCP protocol eras) [api]
+- [x] `substo` CLI, headless when the app is closed (undo kept on disk), talks to the app when open [api]
+- [x] `substo mcp` stdio server (both MCP protocol eras) [api]
 - [x] Transcript tools: find phrase, list pauses, tighten pauses [api]
-- [x] A section card at every section marker: `addSectionCards`, `tandem cards`, MCP `cards`, Timeline > Add section cards at section markers, each as long as its words need (Fit to text in the inspector) with soft whooshes set against the project's speech [api, app]
+- [x] A section card at every section marker: `addSectionCards`, `substo cards`, MCP `cards`, Timeline > Add section cards at section markers, each as long as its words need (Fit to text in the inspector) with soft whooshes set against the project's speech [api, app]
 - [x] docs/AGENTS.md with an example of every command, checked by tests [api]
 
 ## Milestone 5: the app
@@ -82,26 +82,26 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 
 ## Milestone 6: real projects
 
-- [x] Import the decision-models EDL into a .tandem project [importer] (676.6 s vs v14 667.3 s: Mike's hand trims after the pipeline)
+- [x] Import the decision-models EDL into a .substo project [importer] (676.6 s vs v14 667.3 s: the creator's hand trims after the pipeline)
 - [x] Import Filmora .wfp projects [importer] (v14 487/487 clips and 34/34 transitions exact; 119-project corpus imports without failures)
 - [x] Render the imported v14 and compare frames against Filmora's export [render] (placement exact; grade within about 4/255)
-- [x] `tandem import filmora|edl|compare` in the CLI [integration]
+- [x] `substo import filmora|edl|compare` in the CLI [integration]
 
 ## Wave 2
 
 - [x] Asset library: catalogue (SQLite FTS5), providers (import folders, ElevenLabs, Noto, Iconify, SVGL, Fontsource, Pexels, Pixabay, Freesound), normalising (alpha stickers to HEVC, Lottie, SVG, audio loudness), project use and credits [assets]
-- [x] Asset commands in the CLI and MCP (`tandem assets ...`, five MCP tools) [api]
+- [x] Asset commands in the CLI and MCP (`substo assets ...`, five MCP tools) [api]
 - [x] Asset browser in the app: search, sources, favourites, hover previews, drag or double-click to place, credits [app]
 - [x] ElevenLabs Generate, the big Space preview, looks and fonts dropped onto clips [app]
 - [x] Sources as providers; paid libraries through watched import folders. ElevenLabs sound effects need the key's `sound_generation` permission (music works)
 - [~] Title and template pack (core insertTemplate done): plain label, pop callout, two-line section header, version number, section card (done: one clip with its whooshes, edited in the inspector), Like and Subscribe, Comment Below
-- [x] Shared library: one watched folder on this Mac (`~/Movies/Tandem Library`, moved in Settings) for stickers, graphics, sounds, music, looks, fonts and segments; its files are used where they are (its fonts registered by every render), archiving copies them in (Live Photo movies too), relink looks there [assets, api, app]
-- [x] Saved segments: Save selection as segment (menu bar and clip menu), the Text tab's Segments, `tandem segments list/save/insert` and `segments_*` MCP tools; a segment carries copies of its files [core, api, app]
+- [x] Shared library: one watched folder on this Mac (`~/Movies/Substo Library`, moved in Settings) for stickers, graphics, sounds, music, looks, fonts and segments; its files are used where they are (its fonts registered by every render), archiving copies them in (Live Photo movies too), relink looks there [assets, api, app]
+- [x] Saved segments: Save selection as segment (menu bar and clip menu), the Text tab's Segments, `substo segments list/save/insert` and `segments_*` MCP tools; a segment carries copies of its files [core, api, app]
 - [ ] The app asks for a segment's words when it goes in (agents pass them already); relink finds LUTs too, not just media, and a Live Photo movie that went missing while its still didn't
 - [ ] Stickers: Lottie and HEVC with alpha
-- [x] Word-by-word captions from the transcripts (`tandem captions`, MCP `captions`) [integration]
+- [x] Word-by-word captions from the transcripts (`substo captions`, MCP `captions`) [integration]
 - [x] Colour tab like other editors': whole take or this clip, then Light, Colour, colour wheels (the new `colorWheels` effect), a Lightroom-style colour mixer, vignette, sharpen and LUT; sliders with gradient tracks, reset, scrubbing and typing [app, render]
-- [x] Portrait short from the same edit: `setFormatLayout`, `tandem short`, portrait frames and the short export preset [integration]
+- [x] Portrait short from the same edit: `setFormatLayout`, `substo short`, portrait frames and the short export preset [integration]
 - [x] Transitions drawn as boxes as long as they play, like Filmora's, whose edges drag their length (both sides together); a transition can carry a sound, a clip on SFX tied to it that moves and goes with it, with the light swoosh on push, slide, cut slide and wipe by default and each type's sound picked in Settings [core, api, app]
 - [x] Export presets set quality, not shape: a resolution class on the frame's short side, the default preset follows the canvas, `--preset short` renders a 9:16 canvas, and the Export dialog shows each preset's size (`ExportPreset.plan(for:)`) [render, api, app]
 - [ ] Segment render cache for fast re-exports
@@ -112,6 +112,6 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 
 Curves, HDR, chroma key, blend modes, stabilisation, tracking, video
 denoise, reverse, EQ, auto reframe, auto ducking, in-app music generation.
-Mike used none of these in 51 projects, or used them once. (Colour wheels
+the creator used none of these in 51 projects, or used them once. (Colour wheels
 were on this list too; they're in the Colour tab because they're what any
 other editor's grade starts from.)

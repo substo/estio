@@ -21,8 +21,8 @@ public struct URLSessionTransport: HTTPTransport {
             configuration.timeoutIntervalForRequest = 60
             // Long enough for a 4K stock clip on a slow connection.
             configuration.timeoutIntervalForResource = 60 * 60
-            configuration.httpAdditionalHeaders = ["User-Agent": "Tandem/\(TandemAssets.version) (macOS video editor)"]
-            // Tandem keeps its own caches with each provider's rules.
+            configuration.httpAdditionalHeaders = ["User-Agent": "Substo/\(TandemAssets.version) (macOS video editor)"]
+            // Substo Video keeps its own caches with each provider's rules.
             configuration.urlCache = nil
             self.session = URLSession(configuration: configuration)
         }

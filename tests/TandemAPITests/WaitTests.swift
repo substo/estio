@@ -3,7 +3,7 @@ import XCTest
 @testable import TandemCore
 import TandemMedia
 
-/// `tandem transcribe` and `tandem wait`: transcripts on request, and
+/// `substo transcribe` and `substo wait`: transcripts on request, and
 /// waiting for background work without a sleep loop.
 final class TranscribeTests: XCTestCase {
     static let said = Transcript(language: "en", engine: "fake", words: [
@@ -21,7 +21,7 @@ final class TranscribeTests: XCTestCase {
         XCTAssertEqual(h.analysis.requests.map(\.kind), [.transcript])
         XCTAssertEqual(h.analysis.requests.first?.priority, .interactive)
         XCTAssertEqual(result.files.map(\.state), ["waiting"])
-        XCTAssertTrue(result.readableText.contains("tandem wait transcript --media med_music"), result.readableText)
+        XCTAssertTrue(result.readableText.contains("substo wait transcript --media med_music"), result.readableText)
 
         // Asking again changes nothing more.
         let again = try await h.service.transcribe(TranscribeRequest(media: ["med_music"]), context: h.context)
@@ -99,8 +99,8 @@ final class TranscribeTests: XCTestCase {
             _ = try h.service.transcript(id: "med_music", from: nil, to: nil)
             XCTFail("no transcript yet")
         } catch let error as ServiceError {
-            XCTAssertTrue(error.message.contains("tandem transcribe med_music"), error.message)
-            XCTAssertFalse(error.message.contains("tandem serve"), error.message)
+            XCTAssertTrue(error.message.contains("substo transcribe med_music"), error.message)
+            XCTAssertFalse(error.message.contains("substo serve"), error.message)
         }
     }
 
@@ -116,8 +116,8 @@ final class TranscribeTests: XCTestCase {
                 return (error as? ServiceError)?.message ?? "\(error)"
             }
         }
-        XCTAssertTrue(message("med_camera").contains("tandem wait transcript --media med_camera"), message("med_camera"))
-        XCTAssertTrue(message("med_music").contains("tandem transcribe med_music"), message("med_music"))
+        XCTAssertTrue(message("med_camera").contains("substo wait transcript --media med_camera"), message("med_camera"))
+        XCTAssertTrue(message("med_music").contains("substo transcribe med_music"), message("med_music"))
     }
 }
 
@@ -183,7 +183,7 @@ final class WaitTests: XCTestCase {
             XCTFail("nothing makes the music's transcript")
         } catch let error as ServiceError {
             XCTAssertEqual(error.code, ServiceError.Code.invalid.rawValue)
-            XCTAssertTrue(error.message.contains("tandem transcribe med_music"), error.message)
+            XCTAssertTrue(error.message.contains("substo transcribe med_music"), error.message)
         }
         do {
             _ = try await h.service.wait(WaitRequest(what: .matte, media: ["med_screen"], timeout: 5))
@@ -243,7 +243,7 @@ final class WaitTests: XCTestCase {
 }
 
 /// With nothing holding the project, a wait runs the analysis itself and
-/// serves the API meanwhile, the way `tandem serve` does.
+/// serves the API meanwhile, the way `substo serve` does.
 final class HeadlessWaitTests: XCTestCase {
     func testAHeadlessWaitServesTheProjectWhileItMakesTheTranscript() async throws {
         let folder = TempFolder()
@@ -288,7 +288,7 @@ final class HeadlessWaitTests: XCTestCase {
     }
 }
 
-/// `tandem transcribe` and `tandem wait` as agents run them, with the real
+/// `substo transcribe` and `substo wait` as agents run them, with the real
 /// analysis (the fixture's files don't exist, so nothing is transcribed).
 final class WaitCLITests: XCTestCase {
     private let cli = CLITests()
@@ -304,30 +304,30 @@ final class WaitCLITests: XCTestCase {
         try FileManager.default.createDirectory(at: folder.file("music"), withIntermediateDirectories: true)
         try Data(repeating: 1, count: 4096).write(to: folder.file("music/bed.m4a"))
 
-        let queued = try cli.tandem("transcribe", "music/bed.m4a", "--no-wait", "--author", "claude", in: folder.url)
+        let queued = try cli.substo("transcribe", "music/bed.m4a", "--no-wait", "--author", "claude", in: folder.url)
         XCTAssertEqual(queued.status, 0, queued.stderr)
         XCTAssertTrue(queued.stdout.contains("Applied \"Transcribe bed.m4a\" by claude"), queued.stdout)
-        XCTAssertTrue(queued.stdout.contains("when the app or `tandem serve` opens it"), queued.stdout)
+        XCTAssertTrue(queued.stdout.contains("when the app or `substo serve` opens it"), queued.stdout)
         XCTAssertEqual(try ProjectFile.load(from: url).project.media("med_music")?.transcribe, true)
 
         // Headless, it waits by default: the file is missing, so that's the answer.
-        let made = try cli.tandem("transcribe", "med_broll", in: folder.url)
+        let made = try cli.substo("transcribe", "med_broll", in: folder.url)
         XCTAssertEqual(made.status, 1, made.stdout)
         XCTAssertTrue(made.stdout.contains("broll/servers.mp4: failed"), made.stdout)
 
-        let nothing = try cli.tandem("wait", "export", in: folder.url)
+        let nothing = try cli.substo("wait", "export", in: folder.url)
         XCTAssertEqual(nothing.status, 0, nothing.stderr)
         XCTAssertTrue(nothing.stdout.contains("No exports running"), nothing.stdout)
 
-        let notMade = try cli.tandem("wait", "transcript", "--media", "med_screen", "--timeout", "5", in: folder.url)
+        let notMade = try cli.substo("wait", "transcript", "--media", "med_screen", "--timeout", "5", in: folder.url)
         XCTAssertEqual(notMade.status, 1)
-        XCTAssertTrue(notMade.stderr.contains("tandem transcribe med_screen"), notMade.stderr)
+        XCTAssertTrue(notMade.stderr.contains("substo transcribe med_screen"), notMade.stderr)
 
-        let bad = try cli.tandem("wait", "soon", in: folder.url)
+        let bad = try cli.substo("wait", "soon", in: folder.url)
         XCTAssertEqual(bad.status, 2)
         XCTAssertTrue(bad.stderr.contains("transcript, matte, proxy, jobs or export"), bad.stderr)
 
-        let missing = try cli.tandem("transcript", "med_screen", in: folder.url)
-        XCTAssertTrue(missing.stderr.contains("tandem transcribe med_screen"), missing.stderr)
+        let missing = try cli.substo("transcript", "med_screen", in: folder.url)
+        XCTAssertTrue(missing.stderr.contains("substo transcribe med_screen"), missing.stderr)
     }
 }

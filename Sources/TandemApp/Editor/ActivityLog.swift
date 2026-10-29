@@ -31,7 +31,7 @@ struct ActivityLog: Equatable {
     /// Who a batch came from, as the feed shows it.
     static func displayName(_ author: String) -> String {
         if isPerson(author) { return "You" }
-        if author == systemAuthor { return "Tandem" }
+        if author == systemAuthor { return "Substo Video" }
         // The command line tools are acronyms.
         if ["cli", "mcp", "api"].contains(author.lowercased()) { return author.uppercased() }
         return author.prefix(1).uppercased() + author.dropFirst()

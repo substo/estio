@@ -10,7 +10,7 @@ final class ArchiveSheetTests: XCTestCase {
     /// The sheet opens on a dry run, and making the folder standalone
     /// points the open project at the copies.
     func testTheSheetPlansThenMakesTheProjectStandalone() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-sheet-\(UUID().uuidString)", isDirectory: true)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("substo-sheet-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let bed = root.appendingPathComponent("outside/music/bed.m4a")
         try FileManager.default.createDirectory(at: bed.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -20,7 +20,7 @@ final class ArchiveSheetTests: XCTestCase {
         var project = Project.standard(name: "Sheet")
         project.media = [MediaItem(id: "med_bed", path: bed.path, kind: .audio, role: .music, duration: Time(seconds: 30), hasAudio: true)]
         project.audioTracks[1].clips = [Clip(id: "clip_bed", content: .media(mediaID: "med_bed"), start: .zero, duration: Time(seconds: 10))]
-        let url = video.appendingPathComponent("Sheet.tandem")
+        let url = video.appendingPathComponent("Sheet.substo")
         try ProjectFile.save(project, revision: 1, to: url)
         let session = try ProjectSession.open(url, owner: .app)
         session.autosaveDelay = 3600

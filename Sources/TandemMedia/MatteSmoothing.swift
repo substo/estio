@@ -115,7 +115,7 @@ struct MotionPicture {
 /// after it wherever the arm arrived next. Mattes come out `delay` frames
 /// after they go in.
 ///
-/// Measured on 20 s ranges of two of Mike's takes (docs/MEDIA.md), the
+/// Measured on 20 s ranges of two of the creator's takes (docs/MEDIA.md), the
 /// three steps cut the matte's frame-to-frame change where the picture is
 /// still to between a quarter and a third of what the subject blend alone
 /// leaves.

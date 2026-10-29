@@ -6,22 +6,22 @@ import XCTest
 /// Makes a scratch asset library for looking at the browser, so testing
 /// never touches Mike's own library:
 ///
-///     TANDEM_ASSET_DEMO_ROOT=/private/tmp/claude-501/tandem-app/assets-lib \
-///     TANDEM_ASSET_DEMO_FOLDERS=/private/tmp/.../mike-music:/private/tmp/.../mike-sfx \
+///     SUBSTO_ASSET_DEMO_ROOT=/private/tmp/claude-501/tandem-app/assets-lib \
+///     SUBSTO_ASSET_DEMO_FOLDERS=/private/tmp/.../mike-music:/private/tmp/.../mike-sfx \
 ///     swift test --package-path . --filter AssetLibraryDemo
 ///
-/// Then launch the app with `TANDEM_ASSETS_ROOT` set to the same folder.
-/// Skipped unless `TANDEM_ASSET_DEMO_ROOT` is set.
+/// Then launch the app with `SUBSTO_ASSETS_ROOT` set to the same folder.
+/// Skipped unless `SUBSTO_ASSET_DEMO_ROOT` is set.
 final class AssetLibraryDemo: XCTestCase {
     func testBuildScratchLibrary() async throws {
         let environment = ProcessInfo.processInfo.environment
-        guard let root = environment["TANDEM_ASSET_DEMO_ROOT"], !root.isEmpty else {
-            throw XCTSkip("Set TANDEM_ASSET_DEMO_ROOT to build a scratch asset library")
+        guard let root = environment["SUBSTO_ASSET_DEMO_ROOT"], !root.isEmpty else {
+            throw XCTSkip("Set SUBSTO_ASSET_DEMO_ROOT to build a scratch asset library")
         }
         let url = URL(fileURLWithPath: root, isDirectory: true)
         let library = try AssetLibrary(root: url, previewFolder: url.appendingPathComponent("previews", isDirectory: true))
         try library.installStarterContent()
-        for folder in (environment["TANDEM_ASSET_DEMO_FOLDERS"] ?? "").split(separator: ":") where !folder.isEmpty {
+        for folder in (environment["SUBSTO_ASSET_DEMO_FOLDERS"] ?? "").split(separator: ":") where !folder.isEmpty {
             let report = try await library.addImportFolder(URL(fileURLWithPath: String(folder), isDirectory: true))
             XCTAssertGreaterThan(report.added + report.unchanged, 0, String(folder))
         }

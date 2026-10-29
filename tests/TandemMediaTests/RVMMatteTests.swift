@@ -10,7 +10,7 @@ final class RVMMatteTests: XCTestCase {
     var temp: URL!
 
     override func setUpWithError() throws {
-        temp = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-rvm-\(UUID().uuidString)", isDirectory: true)
+        temp = FileManager.default.temporaryDirectory.appendingPathComponent("substo-rvm-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
     }
 
@@ -93,7 +93,7 @@ final class RVMMatteTests: XCTestCase {
 
     func testTheStandardStoreIsTheOfficialReleaseOutsideTheApp() {
         let store = RVMModelStore.standard
-        XCTAssertTrue(store.folder.path.hasSuffix("Library/Application Support/Tandem/Models/rvm"), store.folder.path)
+        XCTAssertTrue(store.folder.path.hasSuffix("Library/Application Support/Substo/Models/rvm"), store.folder.path)
         XCTAssertEqual(store.remote.absoluteString,
                        "https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3_1280x720_s0.375_fp16.mlmodel")
         XCTAssertEqual(store.sha256.count, 64)

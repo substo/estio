@@ -6,7 +6,7 @@ final class PersistenceTests: XCTestCase {
     var folder: URL!
 
     override func setUpWithError() throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-persistence-\(UUID().uuidString)")
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-persistence-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     }
 
@@ -14,7 +14,7 @@ final class PersistenceTests: XCTestCase {
         try? FileManager.default.removeItem(at: folder)
     }
 
-    var backups: URL { folder.appendingPathComponent(".tandem/backups") }
+    var backups: URL { folder.appendingPathComponent(".substo/backups") }
 
     func backupNames() throws -> [String] {
         try FileManager.default.contentsOfDirectory(atPath: backups.path).sorted()
@@ -25,11 +25,11 @@ final class PersistenceTests: XCTestCase {
         // backups start with "Video " too, but they aren't Video's.
         let project = Project.standard(name: "Video")
         try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
-        let versionBackups = ["Video v2 2026-09-25 10.00.01.tandem", "Video v2 2026-09-25 10.00.02.tandem", "Video v2 2026-09-25 10.00.03.tandem"]
-        for name in versionBackups + ["Video 2026-09-24 09.00.00.tandem"] {
+        let versionBackups = ["Video v2 2026-09-25 10.00.01.substo", "Video v2 2026-09-25 10.00.02.substo", "Video v2 2026-09-25 10.00.03.substo"]
+        for name in versionBackups + ["Video 2026-09-24 09.00.00.substo"] {
             try ProjectFile.encoder().encode(ProjectFile.Envelope(revision: 1, project: project)).write(to: backups.appendingPathComponent(name))
         }
-        let url = folder.appendingPathComponent("Video.tandem")
+        let url = folder.appendingPathComponent("Video.substo")
         try ProjectFile.save(project, revision: 1, to: url, keepBackups: 2)
         try ProjectFile.save(project, revision: 2, to: url, keepBackups: 2)
 
@@ -37,13 +37,13 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(names.filter { $0.hasPrefix("Video v2 ") }, versionBackups, "saving Video must not prune Video v2's backups")
         let own = names.filter { !$0.hasPrefix("Video v2 ") }
         XCTAssertEqual(own.count, 2, "Video keeps its own newest two: \(own)")
-        XCTAssertTrue(own.contains("Video 2026-09-24 09.00.00.tandem"), "\(own)")
+        XCTAssertTrue(own.contains("Video 2026-09-24 09.00.00.substo"), "\(own)")
     }
 
     // MARK: - Journal
 
     func journal() -> ProjectJournal {
-        ProjectJournal.forProject(at: folder.appendingPathComponent("Video.tandem"))
+        ProjectJournal.forProject(at: folder.appendingPathComponent("Video.substo"))
     }
 
     func marker(_ id: String, at seconds: Double) -> EditBatch {
@@ -70,7 +70,7 @@ final class PersistenceTests: XCTestCase {
     }
 
     func testForgettingHistoryClearsTheJournalAndUndoHistory() throws {
-        let url = folder.appendingPathComponent("Video.tandem")
+        let url = folder.appendingPathComponent("Video.substo")
         journal().append(batch: marker("mk_1", at: 1), revision: 1, seed: 1)
         try Data("{}".utf8).write(to: ProjectFile.undoHistoryURL(for: url))
         ProjectFile.forgetHistory(of: url)
@@ -107,8 +107,8 @@ final class PersistenceTests: XCTestCase {
     }
 
     func testTheJournalFollowsARenamedFolder() throws {
-        let before = folder.appendingPathComponent("working title/Video.tandem")
-        let after = folder.appendingPathComponent("decision-models/Video.tandem")
+        let before = folder.appendingPathComponent("working title/Video.substo")
+        let after = folder.appendingPathComponent("decision-models/Video.substo")
         let journal = ProjectJournal.forProject(at: before)
         journal.append(batch: marker("mk_1", at: 1), revision: 1, seed: 1)
         try FileManager.default.moveItem(at: before.deletingLastPathComponent(), to: after.deletingLastPathComponent())
@@ -152,10 +152,10 @@ final class BackupPolicyTests: XCTestCase {
     }
 
     func testAutosaveDoesNotBackUpEverySave() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-backup-\(UUID().uuidString)")
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-backup-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let url = folder.appendingPathComponent("Video.tandem")
+        let url = folder.appendingPathComponent("Video.substo")
         let project = Project.standard(name: "Video")
         for revision in 0..<5 {
             try ProjectFile.save(project, revision: revision, to: url)

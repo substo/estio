@@ -3,7 +3,7 @@ import Foundation
 
 /// Analysis results on disk, one folder per result:
 ///
-///     .tandem/cache/<kind>/<key>/
+///     .substo/cache/<kind>/<key>/
 ///       entry.json      what the result is (CacheManifest)
 ///       ...             the result files (a proxy, a transcript, thumbnails)
 ///

@@ -4,7 +4,7 @@ import TandemCore
 
 /// Assets that change a clip rather than going on the timeline: a look (a
 /// LUT) grades a picture and a font sets a title's typeface. Media assets
-/// are always placed, since swapping a clip's media isn't an edit Tandem
+/// are always placed, since swapping a clip's media isn't an edit Substo Video
 /// has.
 enum AssetApplying {
     /// True for kinds that are dropped on a clip instead of placed.

@@ -6,10 +6,10 @@ import TandemMedia
 import ImageIO
 @testable import TandemCore
 
-/// Runs the built `tandem` binary, the way Mike and agents do.
+/// Runs the built `substo` binary, the way Mike and agents do.
 final class CLITests: XCTestCase {
     static var binary: URL {
-        Bundle(for: CLITests.self).bundleURL.deletingLastPathComponent().appendingPathComponent("tandem")
+        Bundle(for: CLITests.self).bundleURL.deletingLastPathComponent().appendingPathComponent("substo")
     }
 
     struct Output {
@@ -19,27 +19,27 @@ final class CLITests: XCTestCase {
     }
 
     /// A shared library nothing makes, so commands run here never look in
-    /// the real ~/Movies/Tandem Library.
-    static let noSharedLibrary = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-tests-no-shared-library-\(UUID().uuidString)").path
+    /// the real ~/Movies/Substo Library.
+    static let noSharedLibrary = FileManager.default.temporaryDirectory.appendingPathComponent("substo-tests-no-shared-library-\(UUID().uuidString)").path
     /// Settings nothing writes, so commands run here never use Mike's.
-    static let noSettings = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-tests-no-settings-\(UUID().uuidString).json").path
+    static let noSettings = FileManager.default.temporaryDirectory.appendingPathComponent("substo-tests-no-settings-\(UUID().uuidString).json").path
 
     static func environment(_ extra: [String: String] = [:]) -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
-        environment.removeValue(forKey: "TANDEM_PROJECT")
-        environment.removeValue(forKey: "TANDEM_AUTHOR")
-        environment["TANDEM_LIBRARY"] = noSharedLibrary
-        environment["TANDEM_SETTINGS"] = noSettings
+        environment.removeValue(forKey: "SUBSTO_PROJECT")
+        environment.removeValue(forKey: "SUBSTO_AUTHOR")
+        environment["SUBSTO_LIBRARY"] = noSharedLibrary
+        environment["SUBSTO_SETTINGS"] = noSettings
         environment.merge(extra) { $1 }
         return environment
     }
 
     @discardableResult
-    func tandem(_ arguments: String..., in folder: URL, stdin: String? = nil, env: [String: String] = [:]) throws -> Output {
-        try tandem(arguments, in: folder, stdin: stdin, env: env)
+    func substo(_ arguments: String..., in folder: URL, stdin: String? = nil, env: [String: String] = [:]) throws -> Output {
+        try substo(arguments, in: folder, stdin: stdin, env: env)
     }
 
-    func tandem(_ arguments: [String], in folder: URL, stdin: String? = nil, env: [String: String] = [:]) throws -> Output {
+    func substo(_ arguments: [String], in folder: URL, stdin: String? = nil, env: [String: String] = [:]) throws -> Output {
         let process = Process()
         process.executableURL = Self.binary
         process.arguments = arguments
@@ -63,112 +63,112 @@ final class CLITests: XCTestCase {
     }
 
     override func setUpWithError() throws {
-        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: Self.binary.path), "tandem isn't built at \(Self.binary.path)")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: Self.binary.path), "substo isn't built at \(Self.binary.path)")
     }
 
     func testHelpVersionAndUsageErrors() throws {
         let folder = TempFolder()
-        let version = try tandem("--version", in: folder.url)
+        let version = try substo("--version", in: folder.url)
         XCTAssertEqual(version.status, 0)
-        XCTAssertEqual(version.stdout, "tandem \(TandemAPI.version)\n")
+        XCTAssertEqual(version.stdout, "substo \(TandemAPI.version)\n")
 
-        let bare = try tandem(in: folder.url)
+        let bare = try substo(in: folder.url)
         XCTAssertEqual(bare.status, 2)
         XCTAssertTrue(bare.stdout.contains("Commands:"), bare.stdout)
 
-        let help = try tandem("help", "tighten", in: folder.url)
+        let help = try substo("help", "tighten", in: folder.url)
         XCTAssertEqual(help.status, 0)
-        XCTAssertTrue(help.stdout.hasPrefix("Usage: tandem tighten"), help.stdout)
+        XCTAssertTrue(help.stdout.hasPrefix("Usage: substo tighten"), help.stdout)
 
-        let typo = try tandem("statsu", in: folder.url)
+        let typo = try substo("statsu", in: folder.url)
         XCTAssertEqual(typo.status, 2)
-        XCTAssertTrue(typo.stderr.contains("Did you mean `tandem status`?"), typo.stderr)
+        XCTAssertTrue(typo.stderr.contains("Did you mean `substo status`?"), typo.stderr)
 
-        let option = try tandem("pauses", "--mni", "1", in: folder.url)
+        let option = try substo("pauses", "--mni", "1", in: folder.url)
         XCTAssertEqual(option.status, 2)
         XCTAssertTrue(option.stderr.contains("Unknown option --mni. Did you mean --min?"), option.stderr)
 
-        let wrong = try tandem("timeline", "--min", "3", in: folder.url)
+        let wrong = try substo("timeline", "--min", "3", in: folder.url)
         XCTAssertEqual(wrong.status, 2)
-        XCTAssertTrue(wrong.stderr.contains("`tandem timeline` doesn't take --min"), wrong.stderr)
+        XCTAssertTrue(wrong.stderr.contains("`substo timeline` doesn't take --min"), wrong.stderr)
 
-        let noProject = try tandem("status", in: folder.url)
+        let noProject = try substo("status", in: folder.url)
         XCTAssertEqual(noProject.status, 1)
-        XCTAssertTrue(noProject.stderr.contains("No .tandem project"), noProject.stderr)
+        XCTAssertTrue(noProject.stderr.contains("No .substo project"), noProject.stderr)
 
         // What an export leaves beside its video is a record, not a project.
-        try Data("{}".utf8).write(to: folder.file("review 1:00-1:20.mp4.tandem"))
-        XCTAssertTrue(ProjectLocator.isRenderSnapshot(folder.file("review 1:00-1:20.mp4.tandem")))
-        XCTAssertFalse(ProjectLocator.isRenderSnapshot(folder.file("Daytona.tandem")))
-        let snapshotOnly = try tandem("status", in: folder.url)
-        XCTAssertTrue(snapshotOnly.stderr.contains("No .tandem project"), snapshotOnly.stderr)
+        try Data("{}".utf8).write(to: folder.file("review 1:00-1:20.mp4.substo"))
+        XCTAssertTrue(ProjectLocator.isRenderSnapshot(folder.file("review 1:00-1:20.mp4.substo")))
+        XCTAssertFalse(ProjectLocator.isRenderSnapshot(folder.file("Daytona.substo")))
+        let snapshotOnly = try substo("status", in: folder.url)
+        XCTAssertTrue(snapshotOnly.stderr.contains("No .substo project"), snapshotOnly.stderr)
 
-        let badTime = try tandem("frame", "soon", in: folder.url)
+        let badTime = try substo("frame", "soon", in: folder.url)
         XCTAssertEqual(badTime.status, 2)
         XCTAssertTrue(badTime.stderr.contains("isn't a time"), badTime.stderr)
     }
 
     func testHelpExplainsEditCommandsFromTheSchema() throws {
         let folder = TempFolder()
-        let help = try tandem("help", "addTransition", in: folder.url)
+        let help = try substo("help", "addTransition", in: folder.url)
         XCTAssertEqual(help.status, 0, help.stderr)
-        XCTAssertTrue(help.stdout.hasPrefix("addTransition (an edit command for tandem apply): Adds a transition"), help.stdout)
+        XCTAssertTrue(help.stdout.hasPrefix("addTransition (an edit command for substo apply): Adds a transition"), help.stdout)
         XCTAssertTrue(help.stdout.contains("trackID"), help.stdout)
         XCTAssertTrue(help.stdout.contains("required"), help.stdout)
         XCTAssertTrue(help.stdout.contains(#"{"addTransition": {"trackID": "trk_camera""#), help.stdout)
 
-        let anyCase = try tandem("help", "addtransition", in: folder.url)
+        let anyCase = try substo("help", "addtransition", in: folder.url)
         XCTAssertEqual(anyCase.stdout, help.stdout)
 
         // join is a CLI command and an edit command: both are explained.
-        let join = try tandem("help", "join", in: folder.url)
-        XCTAssertTrue(join.stdout.hasPrefix("Usage: tandem join"), join.stdout)
+        let join = try substo("help", "join", in: folder.url)
+        XCTAssertTrue(join.stdout.hasPrefix("Usage: substo join"), join.stdout)
         XCTAssertTrue(join.stdout.contains(#"{"join": {"clipID""#), join.stdout)
 
-        let typo = try tandem("help", "addTransiton", in: folder.url)
+        let typo = try substo("help", "addTransiton", in: folder.url)
         XCTAssertEqual(typo.status, 2)
-        XCTAssertTrue(typo.stderr.contains("Did you mean `tandem help addTransition`?"), typo.stderr)
+        XCTAssertTrue(typo.stderr.contains("Did you mean `substo help addTransition`?"), typo.stderr)
 
-        let overview = try tandem("help", in: folder.url)
-        XCTAssertTrue(overview.stdout.contains("tandem help <edit command>"), overview.stdout)
+        let overview = try substo("help", in: folder.url)
+        XCTAssertTrue(overview.stdout.contains("substo help <edit command>"), overview.stdout)
     }
 
     func testFramesWritesOneContactSheet() throws {
         let folder = TempFolder()
-        XCTAssertEqual(try tandem("new", "Sheet.tandem", in: folder.url).status, 0)
-        let screen = try XCTUnwrap(try ProjectFile.load(from: folder.file("Sheet.tandem")).project.track(named: "Screen")).id
-        let solid = try tandem("apply", #"{"insertClip": {"trackID": "\#(screen)", "clip": {"content": {"solid": {"color": {"r": 0.2, "g": 0.4, "b": 0.8}}}, "start": 0, "duration": 4}}}"#, in: folder.url)
+        XCTAssertEqual(try substo("new", "Sheet.substo", in: folder.url).status, 0)
+        let screen = try XCTUnwrap(try ProjectFile.load(from: folder.file("Sheet.substo")).project.track(named: "Screen")).id
+        let solid = try substo("apply", #"{"insertClip": {"trackID": "\#(screen)", "clip": {"content": {"solid": {"color": {"r": 0.2, "g": 0.4, "b": 0.8}}}, "start": 0, "duration": 4}}}"#, in: folder.url)
         XCTAssertEqual(solid.status, 0, solid.stderr)
-        let named = try tandem("frames", "0", "0:01.5", "1", in: folder.url)
+        let named = try substo("frames", "0", "0:01.5", "1", in: folder.url)
         XCTAssertEqual(named.status, 0, named.stderr)
         XCTAssertTrue(named.stdout.contains("3 frames"), named.stdout)
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.file("frames-00.00.000-00.01.500.png").path), named.stdout)
 
-        let stepped = try tandem("frames", "--every", "1", "--to", "3", "--width", "160", "-o", "sheets/step.png", in: folder.url)
+        let stepped = try substo("frames", "--every", "1", "--to", "3", "--width", "160", "-o", "sheets/step.png", in: folder.url)
         XCTAssertEqual(stepped.status, 0, stepped.stderr)
         XCTAssertTrue(stepped.stdout.contains("4 frames"), stepped.stdout)
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.file("sheets/step.png").path))
 
-        let nothing = try tandem("frames", in: folder.url)
+        let nothing = try substo("frames", in: folder.url)
         XCTAssertEqual(nothing.status, 2)
         XCTAssertTrue(nothing.stderr.contains("--every"), nothing.stderr)
     }
 
     func testApplyTakesTheBatchQuotedAsItsArgument() throws {
-        // As `tandem media` suggests fixes: tandem apply '{"updateMedia": ...}'.
+        // As `substo media` suggests fixes: substo apply '{"updateMedia": ...}'.
         let folder = TempFolder()
-        XCTAssertEqual(try tandem("new", "Inline.tandem", in: folder.url).status, 0)
-        let inline = try tandem("apply", #"  {"addMarker": {"marker": {"id": "mk_inline", "time": 2, "name": "Inline"}}}"#, in: folder.url)
+        XCTAssertEqual(try substo("new", "Inline.substo", in: folder.url).status, 0)
+        let inline = try substo("apply", #"  {"addMarker": {"marker": {"id": "mk_inline", "time": 2, "name": "Inline"}}}"#, in: folder.url)
         XCTAssertEqual(inline.status, 0, inline.stderr)
-        XCTAssertNotNil(try ProjectFile.load(from: folder.file("Inline.tandem")).project.markers.first { $0.id == "mk_inline" })
-        let missing = try tandem("apply", "nope.json", in: folder.url)
+        XCTAssertNotNil(try ProjectFile.load(from: folder.file("Inline.substo")).project.markers.first { $0.id == "mk_inline" })
+        let missing = try substo("apply", "nope.json", in: folder.url)
         XCTAssertEqual(missing.status, 2)
         XCTAssertTrue(missing.stderr.contains("Couldn't read"), missing.stderr)
     }
 
     func testHeadlessEditLoop() throws {
         let folder = TempFolder()
-        let created = try tandem("new", "Loop.tandem", in: folder.url)
+        let created = try substo("new", "Loop.substo", in: folder.url)
         XCTAssertEqual(created.status, 0, created.stderr)
         XCTAssertTrue(created.stdout.contains("with 8 tracks"), created.stdout)
 
@@ -180,105 +180,105 @@ final class CLITests: XCTestCase {
         ]}
         """#
         try batch.write(to: folder.file("batch.json"), atomically: true, encoding: .utf8)
-        let applied = try tandem("apply", "batch.json", in: folder.url)
+        let applied = try substo("apply", "batch.json", in: folder.url)
         XCTAssertEqual(applied.status, 0, applied.stderr)
         XCTAssertTrue(applied.stdout.hasPrefix("Applied \"Place the take\" by cli as revision 1."), applied.stdout)
 
-        let timeline = try tandem("timeline", in: folder.url)
+        let timeline = try substo("timeline", in: folder.url)
         XCTAssertEqual(timeline.status, 0)
         XCTAssertTrue(timeline.stdout.contains("t1-camera.mov [00:00.000-01:00.000]  linked #1  level -20 LUFS"), timeline.stdout)
 
-        let cut = try tandem("apply", "-", "--author", "claude", in: folder.url, stdin: #"{"blade": {"at": "0:10"}}"#)
+        let cut = try substo("apply", "-", "--author", "claude", in: folder.url, stdin: #"{"blade": {"at": "0:10"}}"#)
         XCTAssertEqual(cut.status, 0, cut.stderr)
         XCTAssertTrue(cut.stdout.hasPrefix("Applied \"Cut at 00:10.000\" by claude as revision 2."), cut.stdout)
 
-        let dry = try tandem("apply", "-", "--dry-run", in: folder.url, stdin: #"[{"rippleDeleteRange": {"range": {"start": 20, "end": 22}}}]"#)
+        let dry = try substo("apply", "-", "--dry-run", in: folder.url, stdin: #"[{"rippleDeleteRange": {"range": {"start": 20, "end": 22}}}]"#)
         XCTAssertEqual(dry.status, 0, dry.stderr)
         XCTAssertTrue(dry.stdout.contains("it would work"), dry.stdout)
 
-        let history = try tandem("history", in: folder.url)
+        let history = try substo("history", in: folder.url)
         XCTAssertTrue(history.stdout.contains("Cut at 00:10.000  (claude)  at 00:10.000 on V2 Camera, V1 Screen, A1 Voice\n  Place the take  (cli)"), history.stdout)
 
-        let undo = try tandem("undo", "--expect", "2", in: folder.url)
+        let undo = try substo("undo", "--expect", "2", in: folder.url)
         XCTAssertEqual(undo.status, 0, undo.stderr)
         XCTAssertEqual(undo.stdout, "Undid \"Cut at 00:10.000\" (by claude). Now at revision 3.\n")
 
-        let status = try tandem("status", "--json", in: folder.url)
+        let status = try substo("status", "--json", in: folder.url)
         let decoded = try ServiceJSON.decoder().decode(StatusResult.self, from: Data(status.stdout.utf8))
         XCTAssertEqual(decoded.revision, 3)
         XCTAssertEqual(decoded.redo, "Cut at 00:10.000")
         XCTAssertTrue(decoded.headless)
 
-        let invalid = try tandem("validate", in: folder.url)
+        let invalid = try substo("validate", in: folder.url)
         XCTAssertEqual(invalid.status, 1, "the media files don't exist")
         XCTAssertTrue(invalid.stdout.contains("source/t1-camera.mov is missing"), invalid.stdout)
 
         // The take covers the timeline, so the checks that need no
         // rendering find nothing.
-        let check = try tandem("check", "--quick", in: folder.url)
+        let check = try substo("check", "--quick", in: folder.url)
         XCTAssertEqual(check.status, 0, check.stdout + check.stderr)
         XCTAssertTrue(check.stdout.hasPrefix("Checked 00:00.000-"), check.stdout)
         XCTAssertTrue(check.stdout.contains("(quick: no frames rendered)") && check.stdout.contains("no problems."), check.stdout)
-        let cuts = try tandem("check", "--cuts", in: folder.url)
+        let cuts = try substo("check", "--cuts", in: folder.url)
         XCTAssertEqual(cuts.status, 0, cuts.stdout + cuts.stderr)
         XCTAssertTrue(cuts.stdout.contains("cut edge") && cuts.stdout.contains("so its cuts weren't checked."), "the file isn't there to listen to: \(cuts.stdout)")
-        let backwards = try tandem("check", "--from", "20", "--to", "10", in: folder.url)
+        let backwards = try substo("check", "--from", "20", "--to", "10", in: folder.url)
         XCTAssertEqual(backwards.status, 1)
         XCTAssertTrue(backwards.stderr.contains("Nothing to check between"), backwards.stderr)
 
-        let bad = try tandem("apply", "-", "--json", in: folder.url, stdin: #"{"trim": {"clipID": "x", "edge": "end", "to": 5, "rippel": true}}"#)
+        let bad = try substo("apply", "-", "--json", in: folder.url, stdin: #"{"trim": {"clipID": "x", "edge": "end", "to": 5, "rippel": true}}"#)
         XCTAssertEqual(bad.status, 1)
         let envelope = try ServiceJSON.decoder().decode(ErrorEnvelope.self, from: Data(bad.stdout.utf8))
         XCTAssertEqual(envelope.error.code, "badRequest")
         XCTAssertTrue(envelope.error.message.contains("did you mean \"ripple\""), envelope.error.message)
 
         // Without transcripts the tools say so instead of inventing pauses.
-        let pauses = try tandem("pauses", in: folder.url)
+        let pauses = try substo("pauses", in: folder.url)
         XCTAssertEqual(pauses.status, 0)
         XCTAssertTrue(pauses.stdout.contains("No transcript yet for med_cam"), pauses.stdout)
-        let tighten = try tandem("tighten", "--mike", "--mid", "0.1", "--widen", "--protect", "0:10,20.5", "--json", in: folder.url)
+        let tighten = try substo("tighten", "--mike", "--mid", "0.1", "--widen", "--protect", "0:10,20.5", "--json", in: folder.url)
         XCTAssertEqual(tighten.status, 0, tighten.stderr)
         let plan = try ServiceJSON.decoder().decode(TightenResult.self, from: Data(tighten.stdout.utf8))
         XCTAssertEqual(plan.sentence, Time(seconds: 0.4))
         XCTAssertEqual(plan.mid, Time(seconds: 0.1))
         XCTAssertTrue(plan.cuts.isEmpty && plan.widened.isEmpty)
-        let both = try tandem("tighten", "--keep", "0.2", "--sentence", "0.4", in: folder.url)
+        let both = try substo("tighten", "--keep", "0.2", "--sentence", "0.4", in: folder.url)
         XCTAssertEqual(both.status, 1)
         XCTAssertTrue(both.stderr.contains("give each kind its own"), both.stderr)
 
-        let project = try ProjectFile.load(from: folder.file("Loop.tandem"))
+        let project = try ProjectFile.load(from: folder.file("Loop.substo"))
         XCTAssertEqual(project.revision, 3)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: ProjectSession.lockURL(for: folder.file("Loop.tandem")).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ProjectSession.lockURL(for: folder.file("Loop.substo")).path))
     }
 
     func testRevisionUndoCountAndJSONErrors() throws {
         let folder = TempFolder()
-        XCTAssertEqual(try tandem("new", "Revs.tandem", in: folder.url).status, 0)
+        XCTAssertEqual(try substo("new", "Revs.substo", in: folder.url).status, 0)
         let marker = { (id: String) in #"{"addMarker": {"marker": {"id": "\#(id)", "time": 2, "name": "M"}}}"# }
-        XCTAssertEqual(try tandem("apply", marker("mk_a"), "--label", "First", in: folder.url).status, 0)
-        XCTAssertEqual(try tandem("apply", marker("mk_b"), "--label", "Second", in: folder.url).status, 0)
+        XCTAssertEqual(try substo("apply", marker("mk_a"), "--label", "First", in: folder.url).status, 0)
+        XCTAssertEqual(try substo("apply", marker("mk_b"), "--label", "Second", in: folder.url).status, 0)
 
-        let revision = try tandem("status", "--revision", in: folder.url)
+        let revision = try substo("status", "--revision", in: folder.url)
         XCTAssertEqual(revision.status, 0, revision.stderr)
         XCTAssertEqual(revision.stdout, "2\n")
 
-        let badCount = try tandem("undo", "--count", "zero", in: folder.url)
+        let badCount = try substo("undo", "--count", "zero", in: folder.url)
         XCTAssertEqual(badCount.status, 2)
 
-        let undo = try tandem("undo", "--count", "2", "--expect", "2", in: folder.url)
+        let undo = try substo("undo", "--count", "2", "--expect", "2", in: folder.url)
         XCTAssertEqual(undo.status, 0, undo.stderr)
         XCTAssertEqual(undo.stdout, "Undid 2 edits: \"Second\" (by cli), \"First\" (by cli). Now at revision 4.\n")
-        XCTAssertEqual(try tandem("status", "--revision", in: folder.url).stdout, "4\n")
+        XCTAssertEqual(try substo("status", "--revision", in: folder.url).stdout, "4\n")
 
-        let undoJSON = try tandem("redo", "--count", "2", "--json", in: folder.url)
+        let undoJSON = try substo("redo", "--count", "2", "--json", in: folder.url)
         XCTAssertEqual(undoJSON.status, 0, undoJSON.stderr)
         let redone = try ServiceJSON.decoder().decode(UndoResult.self, from: Data(undoJSON.stdout.utf8))
         XCTAssertEqual(redone.labels, ["First", "Second"])
 
         // An error in --json mode is a JSON object on stdout and a non-zero exit.
-        XCTAssertEqual(try tandem("new", "Other.tandem", in: folder.url).status, 0)
+        XCTAssertEqual(try substo("new", "Other.substo", in: folder.url).status, 0)
         for arguments in [["status", "--json"], ["status", "--revision"]] {
-            let ambiguous = try tandem(arguments, in: folder.url)
+            let ambiguous = try substo(arguments, in: folder.url)
             XCTAssertEqual(ambiguous.status, 1, arguments.joined(separator: " "))
             if arguments.contains("--json") {
                 let envelope = try ServiceJSON.decoder().decode(ErrorEnvelope.self, from: Data(ambiguous.stdout.utf8))
@@ -309,12 +309,12 @@ final class CLITests: XCTestCase {
         let lock = try XCTUnwrap(ProjectSession.liveLock(for: url), "serve should advertise its port")
         XCTAssertEqual(lock.pid, serve.processIdentifier)
 
-        let status = try tandem("status", "--json", in: folder.url)
+        let status = try substo("status", "--json", in: folder.url)
         let decoded = try ServiceJSON.decoder().decode(StatusResult.self, from: Data(status.stdout.utf8))
         XCTAssertFalse(decoded.headless, "went through serve's API")
         XCTAssertEqual(decoded.openIn?.pid, serve.processIdentifier)
 
-        let applied = try tandem("apply", "-", "--author", "codex", in: folder.url, stdin: #"{"addMarker": {"marker": {"id": "mk_hook", "time": 3, "name": "Hook"}}}"#)
+        let applied = try substo("apply", "-", "--author", "codex", in: folder.url, stdin: #"{"addMarker": {"marker": {"id": "mk_hook", "time": 3, "name": "Hook"}}}"#)
         XCTAssertEqual(applied.status, 0, applied.stderr)
         XCTAssertTrue(applied.stdout.contains("by codex as revision 2"), applied.stdout)
 
@@ -397,68 +397,68 @@ final class CLITests: XCTestCase {
     func testDiffRestoreHistoryAndClips() throws {
         let folder = TempFolder()
         _ = try APIFixture.write(to: folder.url)
-        let lift = try tandem("apply", #"{"removeClips": {"clipIDs": ["clip_brl1"]}}"#, "--label", "Lift the B-roll", in: folder.url)
+        let lift = try substo("apply", #"{"removeClips": {"clipIDs": ["clip_brl1"]}}"#, "--label", "Lift the B-roll", in: folder.url)
         XCTAssertEqual(lift.status, 0, lift.stderr)
 
-        let history = try tandem("history", in: folder.url)
+        let history = try substo("history", in: folder.url)
         XCTAssertTrue(history.stdout.contains("Lift the B-roll  (cli)  00:20.000-00:25.000 on V3 B-roll"), history.stdout)
 
-        let diff = try tandem("diff", "--since", "1", in: folder.url)
+        let diff = try substo("diff", "--since", "1", in: folder.url)
         XCTAssertEqual(diff.status, 0, diff.stderr)
         XCTAssertTrue(diff.stdout.contains("r2  Lift the B-roll  by cli"), diff.stdout)
         XCTAssertTrue(diff.stdout.contains("removed  clip_brl1  V3 B-roll  00:20.000-00:25.000  servers.mp4"), diff.stdout)
-        let json = try tandem("diff", "--since", "1", "--json", in: folder.url)
+        let json = try substo("diff", "--since", "1", "--json", in: folder.url)
         let decoded = try ServiceJSON.decoder().decode(DiffResult.self, from: Data(json.stdout.utf8))
         XCTAssertEqual(decoded.changes.first?.before?.id, "clip_brl1")
 
-        let dry = try tandem("restore", "--from", "1", "--clips", "clip_brl1", in: folder.url)
+        let dry = try substo("restore", "--from", "1", "--clips", "clip_brl1", in: folder.url)
         XCTAssertEqual(dry.status, 0, dry.stderr)
         XCTAssertTrue(dry.stdout.contains("put back  clip_brl1"), dry.stdout)
-        let applied = try tandem("restore", "--from", "1", "--clips", "clip_brl1", "--apply", in: folder.url)
+        let applied = try substo("restore", "--from", "1", "--clips", "clip_brl1", "--apply", in: folder.url)
         XCTAssertTrue(applied.stdout.contains("Applied as revision 3"), applied.stdout)
 
-        let ids = try tandem("clips", "--track", "B-roll", "--ids", in: folder.url)
+        let ids = try substo("clips", "--track", "B-roll", "--ids", in: folder.url)
         XCTAssertEqual(ids.stdout, "clip_brl1\n")
-        let listed = try tandem("clips", "--media", "bed.m4a", in: folder.url)
+        let listed = try substo("clips", "--media", "bed.m4a", in: folder.url)
         XCTAssertTrue(listed.stdout.contains("clip_mus1"), listed.stdout)
 
-        XCTAssertEqual(try tandem("diff", in: folder.url).status, 2)
-        XCTAssertEqual(try tandem("restore", "--clips", "clip_brl1", in: folder.url).status, 2)
+        XCTAssertEqual(try substo("diff", in: folder.url).status, 2)
+        XCTAssertEqual(try substo("restore", "--clips", "clip_brl1", in: folder.url).status, 2)
     }
 }
 
-/// `tandem import`, wired in at integration.
+/// `substo import`, wired in at integration.
 final class ImportCLITests: XCTestCase {
     let cli = CLITests()
 
     override func setUpWithError() throws {
-        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "substo isn't built")
     }
 
     func testImportUsageErrors() throws {
         let folder = TempFolder()
-        let bare = try cli.tandem("import", in: folder.url)
+        let bare = try cli.substo("import", in: folder.url)
         XCTAssertEqual(bare.status, 2)
         XCTAssertTrue(bare.stderr.contains("needs filmora, edl or compare"), bare.stderr)
-        let typo = try cli.tandem("import", "filmroa", "x.wfp", in: folder.url)
+        let typo = try cli.substo("import", "filmroa", "x.wfp", in: folder.url)
         XCTAssertEqual(typo.status, 2)
-        XCTAssertTrue(typo.stderr.contains("Did you mean `tandem import filmora`?"), typo.stderr)
-        let noRecipe = try cli.tandem("import", "edl", in: folder.url)
+        XCTAssertTrue(typo.stderr.contains("Did you mean `substo import filmora`?"), typo.stderr)
+        let noRecipe = try cli.substo("import", "edl", in: folder.url)
         XCTAssertEqual(noRecipe.status, 2)
         XCTAssertTrue(noRecipe.stderr.contains("needs --recipe"), noRecipe.stderr)
-        let missing = try cli.tandem("import", "filmora", "nope.wfp", in: folder.url)
+        let missing = try cli.substo("import", "filmora", "nope.wfp", in: folder.url)
         XCTAssertEqual(missing.status, 1)
     }
 
     func testCompareTwoCuts() throws {
         let folder = TempFolder()
         let coordinator = ProjectCoordinator(project: APIFixture.project())
-        let a = folder.url.appendingPathComponent("a.tandem")
-        let b = folder.url.appendingPathComponent("b.tandem")
+        let a = folder.url.appendingPathComponent("a.substo")
+        let b = folder.url.appendingPathComponent("b.substo")
         try ProjectFile.save(coordinator.project, revision: 1, to: a)
         try coordinator.apply(EditBatch(label: "Tighten", commands: [.rippleDeleteRange(range: TimeRange(start: Time(seconds: 10), end: Time(seconds: 11)))]))
         try ProjectFile.save(coordinator.project, revision: 2, to: b)
-        let result = try cli.tandem("import", "compare", "a.tandem", "b.tandem", "--json", in: folder.url)
+        let result = try cli.substo("import", "compare", "a.substo", "b.substo", "--json", in: folder.url)
         XCTAssertEqual(result.status, 0, result.stderr)
         let json = try JSONDecoder().decode(JSONValue.self, from: Data(result.stdout.utf8))
         guard case .object(let fields) = json else { return XCTFail("not an object: \(result.stdout)") }
@@ -501,17 +501,17 @@ final class ExitSignal: @unchecked Sendable {
     }
 }
 
-/// `tandem assets`, against a library in a temp folder with the network
+/// `substo assets`, against a library in a temp folder with the network
 /// and the Keychain switched off.
 final class AssetsCLITests: XCTestCase {
     let cli = CLITests()
 
     override func setUpWithError() throws {
-        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "substo isn't built")
     }
 
     func testAssetsEndToEnd() async throws {
-        let folder = TempFolder("tandem-assets-cli")
+        let folder = TempFolder("substo-assets-cli")
         let root = folder.url.appendingPathComponent("library", isDirectory: true)
         do {
             // An import folder whose licence asks for a credit.
@@ -520,65 +520,65 @@ final class AssetsCLITests: XCTestCase {
             try AssetFixtures.wav(at: imports.appendingPathComponent("sfx/Swoosh_Air.wav"))
             try await library.addImportFolder(imports, licence: FolderLicence(source: "Test Sounds", licence: "CC BY 4.0", licenceClass: .creditNeeded, credit: "Swoosh Air by Test Sounds (CC BY 4.0)"))
         }
-        let env = ["TANDEM_ASSETS_ROOT": root.path, "TANDEM_ASSETS_OFFLINE": "1"]
+        let env = ["SUBSTO_ASSETS_ROOT": root.path, "SUBSTO_ASSETS_OFFLINE": "1"]
         let video = folder.url.appendingPathComponent("video", isDirectory: true)
         try FileManager.default.createDirectory(at: video, withIntermediateDirectories: true)
         let projectURL = try APIFixture.write(to: video)
 
-        let providers = try cli.tandem("assets", "providers", in: video, env: env)
+        let providers = try cli.substo("assets", "providers", in: video, env: env)
         XCTAssertEqual(providers.status, 0, providers.stderr)
         XCTAssertTrue(providers.stdout.contains("elevenlabs  ElevenLabs"), providers.stdout)
         XCTAssertTrue(providers.stdout.contains("needs a key"), providers.stdout)
 
-        let search = try cli.tandem("assets", "search", "swoosh", "--kind", "sfx", "--json", in: video, env: env)
+        let search = try cli.substo("assets", "search", "swoosh", "--kind", "sfx", "--json", in: video, env: env)
         XCTAssertEqual(search.status, 0, search.stderr)
         let found = try ServiceJSON.decoder().decode(AssetSearchResult.self, from: Data(search.stdout.utf8))
         let id = try XCTUnwrap(found.local.first?.id)
 
-        let use = try cli.tandem("assets", "use", id, "--at", "0:02", "--author", "claude", in: video, env: env)
+        let use = try cli.substo("assets", "use", id, "--at", "0:02", "--author", "claude", in: video, env: env)
         XCTAssertEqual(use.status, 0, use.stderr)
         XCTAssertTrue(use.stdout.hasPrefix("Placed Swoosh Air (sfx) at 00:02.000 on SFX at -15 dB as revision 2."), use.stdout)
         XCTAssertTrue(use.stdout.contains("needs a credit"), use.stdout)
         let project = try ProjectFile.load(from: projectURL).project
         XCTAssertEqual(project.track(named: "SFX")?.clips.first?.start, t(2))
-        let history = try cli.tandem("history", in: video)
+        let history = try cli.substo("history", in: video)
         XCTAssertTrue(history.stdout.contains("Add Swoosh Air at 00:02.000  (claude)"), history.stdout)
 
-        let credits = try cli.tandem("assets", "credits", in: video, env: env)
+        let credits = try cli.substo("assets", "credits", in: video, env: env)
         XCTAssertEqual(credits.status, 0, credits.stderr)
         XCTAssertTrue(credits.stdout.contains("Credits\nSwoosh Air by Test Sounds (CC BY 4.0)"), credits.stdout)
 
-        let online = try cli.tandem("assets", "search", "rocket", "--online", "--provider", "noto", in: video, env: env)
+        let online = try cli.substo("assets", "search", "rocket", "--online", "--provider", "noto", in: video, env: env)
         XCTAssertEqual(online.status, 0, online.stderr)
         XCTAssertTrue(online.stdout.contains("noto: couldn't search."), online.stdout)
 
-        let generate = try cli.tandem("assets", "generate", "sfx", "soft whoosh", in: video, env: env)
+        let generate = try cli.substo("assets", "generate", "sfx", "soft whoosh", in: video, env: env)
         XCTAssertEqual(generate.status, 1)
         XCTAssertTrue(generate.stderr.contains("ElevenLabs is unavailable"), generate.stderr)
 
-        let starter = try cli.tandem("assets", "install-starter", in: video, env: env)
+        let starter = try cli.substo("assets", "install-starter", in: video, env: env)
         XCTAssertTrue(starter.stdout.hasPrefix("The starter set is in the library:"), starter.stdout)
 
-        let noID = try cli.tandem("assets", "use", in: video, env: env)
+        let noID = try cli.substo("assets", "use", in: video, env: env)
         XCTAssertEqual(noID.status, 2)
         XCTAssertTrue(noID.stderr.contains("needs an asset ID"), noID.stderr)
-        let wrongOption = try cli.tandem("assets", "search", "x", "--at", "3", in: video, env: env)
+        let wrongOption = try cli.substo("assets", "search", "x", "--at", "3", in: video, env: env)
         XCTAssertEqual(wrongOption.status, 2)
-        XCTAssertTrue(wrongOption.stderr.contains("`tandem assets search` doesn't take --at"), wrongOption.stderr)
-        let wrongAnchor = try cli.tandem("assets", "use", "stock:whoosh-deep", "--at", "1", "--anchor", "bottomright", in: video, env: env)
+        XCTAssertTrue(wrongOption.stderr.contains("`substo assets search` doesn't take --at"), wrongOption.stderr)
+        let wrongAnchor = try cli.substo("assets", "use", "stock:whoosh-deep", "--at", "1", "--anchor", "bottomright", in: video, env: env)
         XCTAssertEqual(wrongAnchor.status, 2)
         XCTAssertTrue(wrongAnchor.stderr.contains("--anchor is one of bottom, bottomLeft"), wrongAnchor.stderr)
         XCTAssertTrue(wrongAnchor.stderr.contains("Did you mean bottomRight?"), wrongAnchor.stderr)
     }
 }
 
-/// `tandem screenshot` needs the app, so headless it explains that.
+/// `substo screenshot` needs the app, so headless it explains that.
 final class ScreenshotCLITests: XCTestCase {
     func testScreenshotWithoutTheAppExplainsWhy() throws {
-        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "substo isn't built")
         let folder = TempFolder()
         _ = try APIFixture.write(to: folder.url)
-        let result = try CLITests().tandem("screenshot", "-o", "shot.png", in: folder.url)
+        let result = try CLITests().substo("screenshot", "-o", "shot.png", in: folder.url)
         XCTAssertEqual(result.status, 1)
         XCTAssertFalse(result.stderr.isEmpty)
         XCTAssertFalse(FileManager.default.fileExists(atPath: folder.file("shot.png").path))
@@ -587,15 +587,15 @@ final class ScreenshotCLITests: XCTestCase {
 
 final class NewProjectCLITests: XCTestCase {
     func testPortraitProject() throws {
-        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "substo isn't built")
         let folder = TempFolder()
-        let result = try CLITests().tandem("new", "Short.tandem", "--portrait", in: folder.url)
+        let result = try CLITests().substo("new", "Short.substo", "--portrait", in: folder.url)
         XCTAssertEqual(result.status, 0, result.stderr)
         XCTAssertTrue(result.stdout.contains("1080x1920"), result.stdout)
-        let project = try ProjectFile.load(from: folder.file("Short.tandem")).project
+        let project = try ProjectFile.load(from: folder.file("Short.substo")).project
         XCTAssertEqual(project.settings.width, 1080)
         XCTAssertEqual(project.settings.height, 1920)
-        let bad = try CLITests().tandem("new", "Odd.tandem", "--size", "big", in: folder.url)
+        let bad = try CLITests().substo("new", "Odd.substo", "--size", "big", in: folder.url)
         XCTAssertEqual(bad.status, 2)
     }
 
@@ -603,7 +603,7 @@ final class NewProjectCLITests: XCTestCase {
     /// default both render its 1080x1920 canvas at the 1080p rate, and say
     /// what they used. (It used to fail with "No output format".)
     func testPortraitProjectExports() async throws {
-        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "substo isn't built")
         guard let ffmpeg = FFmpeg.locate() else { throw XCTSkip("ffmpeg isn't installed") }
         let cli = CLITests()
         let folder = TempFolder()
@@ -611,18 +611,18 @@ final class NewProjectCLITests: XCTestCase {
         try ffmpeg.run(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x2040c0:s=1080x1920:d=2:r=30",
                         "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-c:v", "libx264", "-pix_fmt", "yuv420p",
                         "-c:a", "aac", "-shortest", folder.file("source/take1-camera.mp4").path])
-        let created = try cli.tandem("new", "Short.tandem", "--portrait", in: folder.url)
+        let created = try cli.substo("new", "Short.substo", "--portrait", in: folder.url)
         XCTAssertEqual(created.status, 0, created.stderr)
-        let project = try ProjectFile.load(from: folder.file("Short.tandem")).project
+        let project = try ProjectFile.load(from: folder.file("Short.substo")).project
         let media = try XCTUnwrap(project.media.first { $0.path == "source/take1-camera.mp4" })
-        let placed = try cli.tandem("apply", "-", in: folder.url, stdin: #"{"placeMedia": {"mediaIDs": ["\#(media.id)"], "at": 0}}"#)
+        let placed = try cli.substo("apply", "-", in: folder.url, stdin: #"{"placeMedia": {"mediaIDs": ["\#(media.id)"], "at": 0}}"#)
         XCTAssertEqual(placed.status, 0, placed.stderr)
 
-        // Into exports/, as the snapshot beside each export is a .tandem too.
-        let short = try cli.tandem("export", "--preset", "short", "-o", "exports/short.mp4", in: folder.url)
+        // Into exports/, as the snapshot beside each export is a .substo too.
+        let short = try cli.substo("export", "--preset", "short", "-o", "exports/short.mp4", in: folder.url)
         XCTAssertEqual(short.status, 0, short.stderr)
         XCTAssertTrue(short.stdout.contains("(Short 9:16: 1080x1920 H.264 at 20 Mbps, 00:02.000 long)"), short.stdout)
-        let standard = try cli.tandem("export", "-o", "exports/default.mp4", "--json", in: folder.url)
+        let standard = try cli.substo("export", "-o", "exports/default.mp4", "--json", in: folder.url)
         XCTAssertEqual(standard.status, 0, standard.stderr)
         let outcome = try ServiceJSON.decoder().decode(ExportOutcome.self, from: Data(standard.stdout.utf8))
         XCTAssertEqual(outcome.preset, "YouTube 1080p")
@@ -634,13 +634,13 @@ final class NewProjectCLITests: XCTestCase {
             XCTAssertEqual(size, CGSize(width: 1080, height: 1920), name)
         }
         // Laying a short over a project that's already one is refused.
-        let layout = try cli.tandem("short", in: folder.url)
+        let layout = try cli.substo("short", in: folder.url)
         XCTAssertEqual(layout.status, 1)
         XCTAssertTrue(layout.stderr.contains("already 9:16"), layout.stderr)
 
-        let help = try cli.tandem("help", "export", in: folder.url)
+        let help = try cli.substo("help", "export", in: folder.url)
         XCTAssertTrue(help.stdout.contains("1080x1920 for a 9:16 one"), help.stdout)
-        XCTAssertTrue(help.stdout.contains("`tandem new --portrait`"), help.stdout)
+        XCTAssertTrue(help.stdout.contains("`substo new --portrait`"), help.stdout)
     }
 
     /// A photo like an iPhone's, for a Live Photo.
@@ -655,7 +655,7 @@ final class NewProjectCLITests: XCTestCase {
     }
 
     func testSaysWhichFileIsTheCameraAndKeepsLivePhotosTogether() throws {
-        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "substo isn't built")
         guard let ffmpeg = FFmpeg.locate() else { throw XCTSkip("ffmpeg isn't installed") }
         func movie(_ path: String, seconds: Int, in folder: TempFolder) throws {
             try FileManager.default.createDirectory(at: folder.file(path).deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -669,9 +669,9 @@ final class NewProjectCLITests: XCTestCase {
         try movie("photos/IMG_0130.mov", seconds: 2, in: folder)
         try Self.writeJPEG(to: folder.file("photos/IMG_0130.jpg"))
 
-        let result = try CLITests().tandem("new", "Bench.tandem", in: folder.url)
+        let result = try CLITests().substo("new", "Bench.substo", in: folder.url)
         XCTAssertEqual(result.status, 0, result.stderr)
-        let project = try ProjectFile.load(from: folder.file("Bench.tandem")).project
+        let project = try ProjectFile.load(from: folder.file("Bench.substo")).project
         XCTAssertEqual(project.media.map(\.path).sorted(), ["photos/IMG_0130.jpg", "source/t1-camera.mov"])
         XCTAssertEqual(project.media.first { $0.path == "photos/IMG_0130.jpg" }?.livePhotoVideo, "photos/IMG_0130.mov")
         let camera = try XCTUnwrap(project.media.first { $0.path == "source/t1-camera.mov" })
@@ -679,20 +679,20 @@ final class NewProjectCLITests: XCTestCase {
         XCTAssertTrue(result.stdout.contains("Added 2 media files from the folder.\n"), result.stdout)
         XCTAssertTrue(result.stdout.contains("1 is a Live Photo: "), result.stdout)
         XCTAssertTrue(result.stdout.contains("Camera take: source/t1-camera.mov (\(camera.id)), named like a record-it camera file.\n"), result.stdout)
-        XCTAssertTrue(result.stdout.contains(#"tandem apply '{"updateMedia": {"mediaID": "\#(camera.id)", "patch": {"role": "other"}}}'"#), result.stdout)
-        let media = try CLITests().tandem("media", in: folder.url)
+        XCTAssertTrue(result.stdout.contains(#"substo apply '{"updateMedia": {"mediaID": "\#(camera.id)", "patch": {"role": "other"}}}'"#), result.stdout)
+        let media = try CLITests().substo("media", in: folder.url)
         XCTAssertTrue(media.stdout.contains("photos/IMG_0130.jpg  image  64x48  Live Photo, motion clip IMG_0130.mov  0 clips"), media.stdout)
 
         // With no camera take it names the likeliest video to make one.
         let bare = TempFolder()
         try movie("source/talk.mov", seconds: 3, in: bare)
         try movie("source/short.mov", seconds: 1, in: bare)
-        let none = try CLITests().tandem("new", "Bare.tandem", in: bare.url)
+        let none = try CLITests().substo("new", "Bare.substo", in: bare.url)
         XCTAssertEqual(none.status, 0, none.stderr)
-        let talk = try XCTUnwrap(ProjectFile.load(from: bare.file("Bare.tandem")).project.media.first { $0.path == "source/talk.mov" })
+        let talk = try XCTUnwrap(ProjectFile.load(from: bare.file("Bare.substo")).project.media.first { $0.path == "source/talk.mov" })
         XCTAssertEqual(talk.role, .other)
         XCTAssertTrue(none.stdout.contains("No camera take: "), none.stdout)
-        XCTAssertTrue(none.stdout.contains(#"tandem apply '{"updateMedia": {"mediaID": "\#(talk.id)", "patch": {"role": "camera"}}}'"#), none.stdout)
+        XCTAssertTrue(none.stdout.contains(#"substo apply '{"updateMedia": {"mediaID": "\#(talk.id)", "patch": {"role": "camera"}}}'"#), none.stdout)
 
         // Mike's usual 30 fps take leaves the project at 30, and says nothing.
         XCTAssertEqual(project.settings.frameRate, FrameRate(30))
@@ -700,7 +700,7 @@ final class NewProjectCLITests: XCTestCase {
     }
 
     func testANewProjectTakesItsCameraTakesFrameRate() throws {
-        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "substo isn't built")
         guard let ffmpeg = FFmpeg.locate() else { throw XCTSkip("ffmpeg isn't installed") }
         func movie(_ path: String, rate: String, in folder: TempFolder) throws {
             try FileManager.default.createDirectory(at: folder.file(path).deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -711,17 +711,17 @@ final class NewProjectCLITests: XCTestCase {
         let film = TempFolder()
         try movie("source/ian-camera.mov", rate: "24000/1001", in: film)
         try movie("source/ian-screen.mov", rate: "30", in: film)
-        let made = try CLITests().tandem("new", "Ian.tandem", in: film.url)
+        let made = try CLITests().substo("new", "Ian.substo", in: film.url)
         XCTAssertEqual(made.status, 0, made.stderr)
-        XCTAssertEqual(try ProjectFile.load(from: film.file("Ian.tandem")).project.settings.frameRate, FrameRate(24_000, 1001))
+        XCTAssertEqual(try ProjectFile.load(from: film.file("Ian.substo")).project.settings.frameRate, FrameRate(24_000, 1001))
         XCTAssertTrue(made.stdout.contains("Frame rate: 23.976 fps, the camera take's."), made.stdout)
 
         // A 60 fps webcam keeps Mike's usual 30.
         let fast = TempFolder()
         try movie("source/t1-camera.mov", rate: "60", in: fast)
-        let sixty = try CLITests().tandem("new", "Fast.tandem", in: fast.url)
+        let sixty = try CLITests().substo("new", "Fast.substo", in: fast.url)
         XCTAssertEqual(sixty.status, 0, sixty.stderr)
-        XCTAssertEqual(try ProjectFile.load(from: fast.file("Fast.tandem")).project.settings.frameRate, FrameRate(30))
+        XCTAssertEqual(try ProjectFile.load(from: fast.file("Fast.substo")).project.settings.frameRate, FrameRate(30))
         XCTAssertFalse(sixty.stdout.contains("Frame rate:"), sixty.stdout)
     }
 }
@@ -731,7 +731,7 @@ final class NewProjectCLITests: XCTestCase {
 /// fail with "Cannot Decode"; now the render converts them first.
 final class UndecodableStickerCLITests: XCTestCase {
     func testQuickTimeAnimationAndPNGStickersRender() throws {
-        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "substo isn't built")
         guard let ffmpeg = FFmpeg.locate() else { throw XCTSkip("ffmpeg isn't installed") }
         let cli = CLITests()
         let folder = TempFolder()
@@ -744,9 +744,9 @@ final class UndecodableStickerCLITests: XCTestCase {
         try ffmpeg.run(["-y", "-v", "error", "-f", "lavfi", "-i", "color=c=0x2040c0:s=1280x720:d=4:r=30", "-c:v", "libx264", "-pix_fmt", "yuv420p",
                         folder.file("source/take1-screen.mp4").path])
 
-        let created = try cli.tandem("new", "Alpha.tandem", "--size", "1280x720", in: folder.url)
+        let created = try cli.substo("new", "Alpha.substo", "--size", "1280x720", in: folder.url)
         XCTAssertEqual(created.status, 0, created.stderr)
-        let listed = try cli.tandem("media", "--refresh", "--json", in: folder.url)
+        let listed = try cli.substo("media", "--refresh", "--json", in: folder.url)
         XCTAssertEqual(listed.status, 0, listed.stderr)
         let media = try ServiceJSON.decoder().decode(MediaResult.self, from: Data(listed.stdout.utf8))
         func id(_ path: String) throws -> String { try XCTUnwrap(media.items.first { $0.path == path }?.id, path) }
@@ -754,7 +754,7 @@ final class UndecodableStickerCLITests: XCTestCase {
         XCTAssertEqual(media.items.first { $0.path == "stickers/disc-png.mov" }?.undecodableCodec, "png ")
         XCTAssertNil(media.items.first { $0.path == "source/take1-screen.mp4" }?.undecodableCodec)
 
-        let project = try ProjectFile.load(from: folder.file("Alpha.tandem")).project
+        let project = try ProjectFile.load(from: folder.file("Alpha.substo")).project
         let graphics = try XCTUnwrap(project.track(named: "Graphics")).id
         let batch = """
         {"commands": [
@@ -763,11 +763,11 @@ final class UndecodableStickerCLITests: XCTestCase {
           {"placeMedia": {"mediaIDs": ["\(try id("stickers/disc-png.mov"))"], "at": 2, "videoTrackID": "\(graphics)", "anchor": "centre"}}
         ]}
         """
-        let applied = try cli.tandem("apply", "-", in: folder.url, stdin: batch)
+        let applied = try cli.substo("apply", "-", in: folder.url, stdin: batch)
         XCTAssertEqual(applied.status, 0, applied.stderr)
 
         for (time, name) in [("1", "qtrle"), ("3", "png")] {
-            let frame = try cli.tandem("frame", time, "-o", "frame-\(name).png", in: folder.url)
+            let frame = try cli.substo("frame", time, "-o", "frame-\(name).png", in: folder.url)
             XCTAssertEqual(frame.status, 0, "\(name): \(frame.stderr)")
             XCTAssertFalse(frame.stdout.contains("decode"), frame.stdout)
             let image = try XCTUnwrap(CGImageSourceCreateWithURL(folder.file("frame-\(name).png") as CFURL, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) })
@@ -777,11 +777,11 @@ final class UndecodableStickerCLITests: XCTestCase {
             XCTAssertLessThan(centre[2], 40, "\(name): \(centre)")
             XCTAssertGreaterThan(corner[2], 150, "\(name): the take shows around it, \(corner)")
         }
-        let clip = try cli.tandem("clip", "0", "4", "-o", "exports/review.mp4", in: folder.url)
+        let clip = try cli.substo("clip", "0", "4", "-o", "exports/review.mp4", in: folder.url)
         XCTAssertEqual(clip.status, 0, clip.stderr)
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.file("exports/review.mp4").path))
 
-        let after = try cli.tandem("media", in: folder.url)
+        let after = try cli.substo("media", in: folder.url)
         XCTAssertEqual(after.status, 0, after.stderr)
         XCTAssertTrue(after.stdout.contains("stickers/disc-qtrle.mov  sticker"), after.stdout)
         XCTAssertTrue(after.stdout.contains("QuickTime Animation"), after.stdout)

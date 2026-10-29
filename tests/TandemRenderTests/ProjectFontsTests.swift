@@ -34,7 +34,7 @@ final class ProjectFontsTests: XCTestCase {
     func testTheSharedLibrarysFontsComeWithEveryProjects() throws {
         let media = try TestMedia()
         let family = FontFixtures.uniqueFamily()
-        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-library-fonts-\(UUID().uuidString)", isDirectory: true)
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("substo-library-fonts-\(UUID().uuidString)", isDirectory: true)
         // The library's Fonts folder, reached through a link as a library
         // kept on another disk would be.
         let fonts = temp.appendingPathComponent("disk/Fonts", isDirectory: true)
@@ -72,7 +72,7 @@ final class ProjectFontsTests: XCTestCase {
         XCTAssertNil(missing[0].presetID)
         XCTAssertEqual(
             missing[0].warning,
-            "Nope Sans Test isn't installed, so 3 text clips are drawn in SF Pro instead. Install it with: tandem assets use fontsource:nope-sans-test"
+            "Nope Sans Test isn't installed, so 3 text clips are drawn in SF Pro instead. Install it with: substo assets use fontsource:nope-sans-test"
         )
         XCTAssertEqual(ProjectFonts.missing(in: project, drawnOnly: true)[0].clipIDs, ["clip_a", "clip_c"], "a clip that's off isn't drawn")
     }
@@ -85,7 +85,7 @@ final class ProjectFontsTests: XCTestCase {
         XCTAssertEqual(missing.assetID, "fontsource:tilt-warp")
         XCTAssertEqual(
             missing.warning,
-            "Tilt Warp, the caption preset's font, isn't installed, so 1 text clip is drawn in SF Pro instead. Install it with: tandem assets use fontsource:tilt-warp"
+            "Tilt Warp, the caption preset's font, isn't installed, so 1 text clip is drawn in SF Pro instead. Install it with: substo assets use fontsource:tilt-warp"
         )
     }
 
@@ -121,7 +121,7 @@ final class ProjectFontsTests: XCTestCase {
         let before = try await FrameRenderer(context: context).warnings()
         XCTAssertEqual(before, [ProjectFonts.missing(in: project)[0].warning])
 
-        // As `tandem assets use` would, while the app has the project open.
+        // As `substo assets use` would, while the app has the project open.
         try FontFixtures.renamed(try fontFile(), family: family, to: ProjectFonts.folder(of: media.projectFolder).appendingPathComponent("face.ttf"))
         let after = try await FrameRenderer(context: context).warnings()
         XCTAssertEqual(after, [], "the build registered the new file first")

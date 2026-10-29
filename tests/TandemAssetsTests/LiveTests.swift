@@ -4,16 +4,16 @@ import TandemCore
 import TandemMedia
 @testable import TandemAssets
 
-/// Real APIs, real Keychain. Opt in with `TANDEM_LIVE_ASSETS=1`:
+/// Real APIs, real Keychain. Opt in with `SUBSTO_LIVE_ASSETS=1`:
 ///
-///     TANDEM_LIVE_ASSETS=1 swift test --package-path . --filter LiveProviderTests
+///     SUBSTO_LIVE_ASSETS=1 swift test --package-path . --filter LiveProviderTests
 ///
 /// Providers without a key in the Keychain skip. Nothing here costs money;
 /// the paid ElevenLabs generations are in `PaidLiveTests`.
 final class LiveProviderTests: XCTestCase {
     override func setUpWithError() throws {
-        guard ProcessInfo.processInfo.environment["TANDEM_LIVE_ASSETS"] == "1" else {
-            throw XCTSkip("set TANDEM_LIVE_ASSETS=1 to test against the real APIs")
+        guard ProcessInfo.processInfo.environment["SUBSTO_LIVE_ASSETS"] == "1" else {
+            throw XCTSkip("set SUBSTO_LIVE_ASSETS=1 to test against the real APIs")
         }
     }
 
@@ -112,11 +112,11 @@ final class LiveProviderTests: XCTestCase {
 }
 
 /// ElevenLabs generations cost credits. Opt in separately with
-/// `TANDEM_LIVE_ELEVENLABS=1`; each test makes exactly one request.
+/// `SUBSTO_LIVE_ELEVENLABS=1`; each test makes exactly one request.
 final class PaidLiveTests: XCTestCase {
     override func setUpWithError() throws {
-        guard ProcessInfo.processInfo.environment["TANDEM_LIVE_ELEVENLABS"] == "1" else {
-            throw XCTSkip("set TANDEM_LIVE_ELEVENLABS=1 to make paid ElevenLabs generations")
+        guard ProcessInfo.processInfo.environment["SUBSTO_LIVE_ELEVENLABS"] == "1" else {
+            throw XCTSkip("set SUBSTO_LIVE_ELEVENLABS=1 to make paid ElevenLabs generations")
         }
     }
 

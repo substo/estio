@@ -1,6 +1,6 @@
 // A thin TypeScript client for Tandem's local HTTP API.
 //
-//   const t = await Tandem.open("Video.tandem");
+//   const t = await Tandem.open("Video.substo");
 //   const p = await t.project();                       // the timeline, with helpers
 //   const pushes = p.transitions((tr) => tr.type === "push" && !tr.soundClipID);
 //   await t.edit("Swooshes on the pushes", pushes.map((tr) =>
@@ -47,18 +47,18 @@ export class TandemError extends Error {
 
 type Lock = { port: number; token: string; pid: number; owner: string };
 
-/** The project file for a path: a .tandem file, or the folder holding exactly one. */
+/** The project file for a path: a .substo file, or the folder holding exactly one. */
 export function findProject(path: string): string {
   const p = resolve(path);
-  if (p.endsWith(".tandem")) return p;
-  // The .tandem/ folder beside a project ends in .tandem too, so only count files.
-  const found = readdirSync(p).filter((f) => f.endsWith(".tandem") && statSync(join(p, f)).isFile());
-  if (found.length !== 1) throw new Error(`${p} has ${found.length} .tandem projects; pass the file itself.`);
+  if (p.endsWith(".substo")) return p;
+  // The .substo/ folder beside a project ends in .substo too, so only count files.
+  const found = readdirSync(p).filter((f) => f.endsWith(".substo") && statSync(join(p, f)).isFile());
+  if (found.length !== 1) throw new Error(`${p} has ${found.length} .substo projects; pass the file itself.`);
   return join(p, found[0]);
 }
 
 export function lockPath(project: string): string {
-  return join(dirname(project), ".tandem", `${basename(project, ".tandem")}.lock`);
+  return join(dirname(project), ".substo", `${basename(project, ".substo")}.lock`);
 }
 
 function readLock(project: string): Lock | undefined {
@@ -74,7 +74,7 @@ function readLock(project: string): Lock | undefined {
 }
 
 export type OpenOptions = {
-  /** Credited in the app's undo menu and activity feed. Default $TANDEM_AUTHOR or "claude". */
+  /** Credited in the app's undo menu and activity feed. Default $SUBSTO_AUTHOR or "claude". */
   author?: string;
   /** Start `tandem serve` when nothing serves the project (default true). close() stops it. */
   serve?: boolean;
@@ -101,7 +101,7 @@ export class Tandem {
 
   static async open(path: string, options: OpenOptions = {}): Promise<Tandem> {
     const project = findProject(path);
-    const author = options.author ?? process.env.TANDEM_AUTHOR ?? "claude";
+    const author = options.author ?? process.env.SUBSTO_AUTHOR ?? "claude";
     let lock = readLock(project);
     let served: ReturnType<typeof Bun.spawn> | undefined;
     if (!lock) {
@@ -109,7 +109,7 @@ export class Tandem {
       served = Bun.spawn(["tandem", "serve", "--project", project], {
         stdout: "ignore",
         stderr: "pipe",
-        env: { ...process.env, TANDEM_AUTHOR: author },
+        env: { ...process.env, SUBSTO_AUTHOR: author },
       });
       const deadline = Date.now() + 30_000;
       while (!(lock = readLock(project)) || lock.pid !== served.pid) {

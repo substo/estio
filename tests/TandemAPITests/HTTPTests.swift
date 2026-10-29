@@ -35,7 +35,7 @@ final class HTTPTests: XCTestCase {
         XCTAssertEqual(status.revision, 1)
 
         let applied = try await served.client().call(ApplyRequest(commands: [.blade(at: t(10))]))
-        XCTAssertEqual(applied.author, "claude", "credited to the X-Tandem-Author header")
+        XCTAssertEqual(applied.author, "claude", "credited to the X-Substo Video-Author header")
         XCTAssertEqual(served.harness.service.coordinator.revision, 2)
 
         do {
@@ -214,12 +214,12 @@ final class HTTPTests: XCTestCase {
     }
 
     func testRequestParsing() {
-        let raw = Data("POST /v1/apply?x=1 HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\nX-Tandem-Author: me\r\n\r\n{}".utf8)
+        let raw = Data("POST /v1/apply?x=1 HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\nX-Substo Video-Author: me\r\n\r\n{}".utf8)
         guard case .complete(let request) = HTTPRequest.parse(raw) else { return XCTFail("should parse") }
         XCTAssertEqual(request.method, "POST")
         XCTAssertEqual(request.path, "/v1/apply")
         XCTAssertEqual(request.query["x"], "1")
-        XCTAssertEqual(request.headers["x-tandem-author"], "me")
+        XCTAssertEqual(request.headers["x-substo-author"], "me")
         XCTAssertEqual(request.body, Data("{}".utf8))
         guard case .incomplete = HTTPRequest.parse(raw.dropLast()) else { return XCTFail("body not complete yet") }
         guard case .invalid(let status, _) = HTTPRequest.parse(Data("POST /v1/x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n".utf8)) else { return XCTFail("chunked") }
@@ -382,7 +382,7 @@ final class ProjectClientTests: XCTestCase {
     }
 
     func testStoppingLetsACallAlreadyRunningAnswer() async throws {
-        // Tandem quits (a new build going in) just as an agent's edit
+        // Substo Video quits (a new build going in) just as an agent's edit
         // arrives: the edit still gets its reply.
         let served = try await HTTPTests.Served()
         defer { served.harness.close() }
@@ -504,12 +504,12 @@ final class ProjectClientTests: XCTestCase {
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
         XCTAssertEqual(try ProjectLocator.find(nil, in: nested, environment: [:]), url.standardizedFileURL)
         XCTAssertEqual(try ProjectLocator.find(folder.url.path, in: URL(fileURLWithPath: "/"), environment: [:]), url.standardizedFileURL)
-        XCTAssertEqual(try ProjectLocator.find(nil, in: URL(fileURLWithPath: "/"), environment: ["TANDEM_PROJECT": url.path]), url.standardizedFileURL)
+        XCTAssertEqual(try ProjectLocator.find(nil, in: URL(fileURLWithPath: "/"), environment: ["SUBSTO_PROJECT": url.path]), url.standardizedFileURL)
         _ = try APIFixture.write(to: folder.url, name: "Decision Models v2")
         XCTAssertThrowsError(try ProjectLocator.find(nil, in: nested, environment: [:])) { error in
             XCTAssertTrue("\(error)".contains("has 2 projects"), "\(error)")
         }
-        XCTAssertThrowsError(try ProjectLocator.find("missing.tandem", in: folder.url, environment: [:]))
+        XCTAssertThrowsError(try ProjectLocator.find("missing.substo", in: folder.url, environment: [:]))
     }
 }
 

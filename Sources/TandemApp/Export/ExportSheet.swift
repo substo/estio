@@ -10,7 +10,7 @@ import TandemRender
 /// the one that fits the timeline.
 struct ExportSheetOverlay: View {
     let model: EditorModel
-    /// Nil until Mike picks one: the preset that fits the timeline.
+    /// Nil until the creator picks one: the preset that fits the timeline.
     @State private var presetIndex: Int?
     @State private var useRange = false
     @State private var output: URL?
@@ -342,7 +342,7 @@ struct ExportSheetOverlay: View {
     static func problem(_ error: ExportPlanError) -> String {
         switch error {
         case .noPortrait:
-            return "This project has no 9:16 layout for the short yet. An agent can lay one out with `tandem short --apply`, with the screen on top and the camera below."
+            return "This project has no 9:16 layout for the short yet. An agent can lay one out with `substo short --apply`, with the screen on top and the camera below."
         case .noFormat:
             return error.description
         }

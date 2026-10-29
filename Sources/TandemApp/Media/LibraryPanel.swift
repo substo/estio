@@ -32,6 +32,7 @@ struct LibraryPanel: View {
             case .audio:
                 AssetBrowser(model: model, sections: AssetSection.audio, section: Binding(get: { AssetLibraryHost.shared.audioSection }, set: { AssetLibraryHost.shared.audioSection = $0 }))
             case .text: TitleLibrary(model: model)
+            case .styles: StylesLibrary(model: model)
             case .transitions, .effects:
                 EffectsLibrary(model: model, showTransitions: Binding(
                     get: { model.libraryTab == .transitions },

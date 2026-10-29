@@ -7,7 +7,7 @@ import TandemMedia
 import TandemRender
 import UniformTypeIdentifiers
 
-/// Where a project's icon lives: `.tandem/<name>.icon.png`, beside its
+/// Where a project's icon lives: `.substo/<name>.icon.png`, beside its
 /// journal, so each project file in a folder has its own.
 enum ProjectIconFile {
     static func url(for projectURL: URL) -> URL {
@@ -198,7 +198,7 @@ final class ProjectIcons {
     }
 
     /// A recent project that isn't open and has no icon gets one, in the
-    /// background and one at a time. Skipped when another Tandem has it
+    /// background and one at a time. Skipped when another Substo Video has it
     /// open: that one makes it.
     private func makeLater(_ key: String) {
         guard !tried.contains(key), rendering[key] == nil else { return }

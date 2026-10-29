@@ -3,13 +3,13 @@ import TandemCore
 import TandemMedia
 import TandemRender
 
-/// `tandem check`: looks for what Mike would otherwise catch in review
+/// `substo check`: looks for what the creator would otherwise catch in review
 /// (`QualityCheck`), so an agent can fix it before handing an edit back.
 public struct CheckRequest: ServiceCall {
     public static let operation = ServiceOperation.check
     public var from: Time?
     public var to: Time?
-    /// Only the stretches agents changed that wait for Mike's review.
+    /// Only the stretches agents changed that wait for the creator's review.
     public var changed: Bool?
     /// Only the checks that need no rendering: gaps, soft pictures and slivers.
     public var quick: Bool?
@@ -161,7 +161,7 @@ extension CheckResult: ReadableResult {
             let batch = (try? encoder.encode(commands)).map { String(decoding: $0, as: UTF8.self) } ?? "[]"
             let expect = revision.map { " --expect \($0)" } ?? ""
             let label = cuts == nil ? QualityCheck.holdLabel : CutCheck.label
-            lines.append("Fix: tandem apply\(expect) --label \"\(label)\" '\(batch)'")
+            lines.append("Fix: substo apply\(expect) --label \"\(label)\" '\(batch)'")
         }
         return lines.joined(separator: "\n")
     }
@@ -301,7 +301,7 @@ extension TandemService {
         }
     }
 
-    /// What the check hears said, for dead air: the words `tandem pauses`
+    /// What the check hears said, for dead air: the words `substo pauses`
     /// reads (edges on the voice), and the voice clips they come from. A
     /// sound effect on a voice track isn't a voice, so it counts as sound
     /// for as long as it plays, as does a voice whose transcript isn't

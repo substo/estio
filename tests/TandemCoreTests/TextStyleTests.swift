@@ -84,7 +84,7 @@ final class TextStyleTests: XCTestCase {
     """#
 
     func folder() throws -> URL {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-styles-\(UUID().uuidString)")
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-styles-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
         return folder
@@ -96,7 +96,7 @@ final class TextStyleTests: XCTestCase {
     }
 
     func testAnOldProjectFileKeepsItsLook() throws {
-        let url = try folder().appendingPathComponent("Old.tandem")
+        let url = try folder().appendingPathComponent("Old.substo")
         try Data(Self.oldFile.utf8).write(to: url)
         let (project, revision) = try ProjectFile.load(from: url)
         XCTAssertEqual(revision, 3)
@@ -116,7 +116,7 @@ final class TextStyleTests: XCTestCase {
     }
 
     func testAnUpgradedProjectIsntUpgradedAgain() throws {
-        let url = try folder().appendingPathComponent("Old.tandem")
+        let url = try folder().appendingPathComponent("Old.substo")
         try Data(Self.oldFile.utf8).write(to: url)
         var (project, _) = try ProjectFile.load(from: url)
         // A new edit that switches the callout's shadow off and keeps it
@@ -135,7 +135,7 @@ final class TextStyleTests: XCTestCase {
 
     func testAJournalEntryFromBeforeTheUpgradeIsReadTheOldWay() throws {
         let folder = try folder()
-        let journal = ProjectJournal.forProject(at: folder.appendingPathComponent("Video.tandem"))
+        let journal = ProjectJournal.forProject(at: folder.appendingPathComponent("Video.substo"))
         let project = Project.standard(name: "Video")
         let textTrack = try XCTUnwrap(project.track(named: "Text")).id
         // What the old app journaled for a callout dropped from the library.
@@ -148,7 +148,7 @@ final class TextStyleTests: XCTestCase {
         var line = try encoder.encode(ProjectJournal.Entry(revision: 1, date: Date(), batch: old, seed: 1, snapshot: nil, reason: nil, schemaVersion: nil))
         line.append(0x0A)
         try line.write(to: journal.url)
-        // Then this Tandem's own edit, which means what it says.
+        // Then this Substo Video's own edit, which means what it says.
         journal.append(batch: EditBatch(label: "Lower case", commands: [
             .insertClip(trackID: textTrack, clip: Clip(id: "clip_new", content: .text(TextContent(text: "url", preset: "label", style: TextStyle(uppercase: false))), start: t(3), duration: t(2)))
         ]), revision: 2, seed: 2)

@@ -1,12 +1,12 @@
 import Darwin
 import Foundation
 
-/// Mike's shared library: one visible folder on this Mac for the stickers,
+/// the creator's shared library: one visible folder on this Mac for the stickers,
 /// graphics, sound effects, music, looks, fonts and saved segments every
-/// project can use. It's `~/Movies/Tandem Library` unless Settings moves
+/// project can use. It's `~/Movies/Substo Library` unless Settings moves
 /// it; Backblaze backs it up with the rest of the Mac.
 ///
-///     Tandem Library/
+///     Substo Library/
 ///       Stickers/          animated stickers
 ///       Graphics/          logos, lower thirds, overlays, stills
 ///       Sound effects/
@@ -29,22 +29,22 @@ public struct SharedLibrary: Sendable, Equatable {
     }
 
     /// The folder's name by default.
-    public static let defaultName = "Tandem Library"
+    public static let defaultName = "Substo Library"
     /// Moves the library for one process (tests, agents).
-    public static let environmentKey = "TANDEM_LIBRARY"
-    /// Where each folder's note to Mike goes.
+    public static let environmentKey = "SUBSTO_LIBRARY"
+    /// Where each folder's note to the creator goes.
     public static let readmeName = "README.txt"
 
-    /// `~/Movies/Tandem Library`.
+    /// `~/Movies/Substo Library`.
     public static var standardRoot: URL {
         FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(defaultName, isDirectory: true)
     }
 
     /// Where the library is for an asset library at `assetsRoot`: the
-    /// folder its settings name, otherwise `~/Movies/Tandem Library` for
-    /// Mike's own asset library, and `Tandem Library` inside any other (a
-    /// test's, or `$TANDEM_ASSETS_ROOT`), so those never touch the real one.
+    /// folder its settings name, otherwise `~/Movies/Substo Library` for
+    /// the creator's own asset library, and `Substo Library` inside any other (a
+    /// test's, or `$SUBSTO_ASSETS_ROOT`), so those never touch the real one.
     public static func root(for settings: AssetSettings, assetsRoot: URL) -> URL {
         if let chosen = settings.sharedLibrary {
             return URL(fileURLWithPath: NSString(string: chosen).expandingTildeInPath, isDirectory: true).standardizedFileURL
@@ -53,7 +53,7 @@ public struct SharedLibrary: Sendable, Equatable {
         return assetsRoot.appendingPathComponent(defaultName, isDirectory: true)
     }
 
-    /// The library this process uses: `$TANDEM_LIBRARY`, otherwise what the
+    /// The library this process uses: `$SUBSTO_LIBRARY`, otherwise what the
     /// settings of the asset library the environment names say.
     public static func locate(environment: [String: String] = ProcessInfo.processInfo.environment) -> SharedLibrary {
         if let path = environment[environmentKey], !path.isEmpty {
@@ -65,7 +65,7 @@ public struct SharedLibrary: Sendable, Equatable {
 
     // MARK: - Folders
 
-    /// The folders Tandem makes, each with a README.
+    /// The folders Substo Video makes, each with a README.
     public enum Folder: String, CaseIterable, Sendable {
         case stickers = "Stickers"
         case graphics = "Graphics"
@@ -160,7 +160,7 @@ public struct SharedLibrary: Sendable, Equatable {
     }
 
     static let rootReadme = """
-    Tandem Library
+    Substo Library
 
     Everything in here is shared by every Tandem project on this Mac. Drop files into these folders and they show up in Tandem's library tabs straight away, searchable, with the Shared library chip:
 
@@ -184,7 +184,7 @@ public struct SharedLibrary: Sendable, Equatable {
     """
 
     /// Makes the library's folder, its subfolders and their READMEs,
-    /// leaving anything already there alone (a README Mike edited stays as
+    /// leaving anything already there alone (a README the creator edited stays as
     /// he left it). Returns what it made.
     @discardableResult
     public func create() throws -> [URL] {
@@ -240,7 +240,7 @@ public struct SharedLibrary: Sendable, Equatable {
         return String(cString: resolved)
     }
 
-    /// True for the notes Tandem writes into each folder.
+    /// True for the notes Substo Video writes into each folder.
     static func isReadme(_ name: String) -> Bool {
         name.caseInsensitiveCompare(readmeName) == .orderedSame
     }
@@ -261,10 +261,10 @@ extension AssetLibrary {
         return decoded.asset.providerID
     }
 
-    /// The asset library a process uses: `$TANDEM_ASSETS_ROOT`, or the
+    /// The asset library a process uses: `$SUBSTO_ASSETS_ROOT`, or the
     /// per-user one.
     public static func root(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
-        if let root = environment["TANDEM_ASSETS_ROOT"], !root.isEmpty {
+        if let root = environment["SUBSTO_ASSETS_ROOT"], !root.isEmpty {
             return URL(fileURLWithPath: NSString(string: root).expandingTildeInPath, isDirectory: true)
         }
         return defaultRoot

@@ -8,7 +8,7 @@ import TandemMedia
 /// B-roll and music follow.
 enum PauseTightening {
     /// Timeline ranges to remove: pauses between words longer than
-    /// `minimum` (found the way `tandem pauses` finds them, from words
+    /// `minimum` (found the way `substo pauses` finds them, from words
     /// trimmed to the voice and placed through the cuts), less `keep` of
     /// breathing room on each side, only inside `within` if given. Sorted
     /// and merged. Locked tracks aren't tightened, so their words don't

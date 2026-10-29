@@ -3,7 +3,7 @@ import TandemAPI
 import TandemAssets
 import TandemCore
 
-/// `tandem assets`: the asset library. Searching, fetching and generating
+/// `substo assets`: the asset library. Searching, fetching and generating
 /// work anywhere; `use` and `credits` work on the project, through the app
 /// when it has the project open.
 struct AssetsCommand {
@@ -26,11 +26,11 @@ struct AssetsCommand {
 
     func run(_ args: Arguments, author: String, project: () throws -> URL) async throws -> Int32 {
         guard let name = args.positionals.first else {
-            throw UsageError(message: "`tandem assets` needs one of \(Self.subcommands.joined(separator: ", ")), like tandem assets search \"whoosh\" --kind sfx.")
+            throw UsageError(message: "`substo assets` needs one of \(Self.subcommands.joined(separator: ", ")), like substo assets search \"whoosh\" --kind sfx.")
         }
         guard let allowed = Self.options[name] else {
-            let hint = Arguments.closest(name, in: Self.subcommands).map { " Did you mean `tandem assets \($0)`?" } ?? ""
-            throw UsageError(message: "`tandem assets` can do \(Self.subcommands.joined(separator: ", ")), not \(name).\(hint)")
+            let hint = Arguments.closest(name, in: Self.subcommands).map { " Did you mean `substo assets \($0)`?" } ?? ""
+            throw UsageError(message: "`substo assets` can do \(Self.subcommands.joined(separator: ", ")), not \(name).\(hint)")
         }
         try args.check(allowed: allowed, command: "assets \(name)")
         let json = args.has("json")
@@ -50,15 +50,15 @@ struct AssetsCommand {
             return show(try await assets.search(request), json: json)
         case "fetch":
             try args.expectPositionals(atMost: 2, command: "assets fetch")
-            let id = try args.positional(1, "an asset ID from a search, like tandem assets fetch noto:1f680", command: "assets fetch")
+            let id = try args.positional(1, "an asset ID from a search, like substo assets fetch noto:1f680", command: "assets fetch")
             return show(try await assets.fetch(AssetFetchRequest(id: id)), json: json)
         case "show":
             try args.expectPositionals(atMost: 2, command: "assets show")
-            let id = try args.positional(1, "an asset ID, like tandem assets show elevenlabs:music_2p839smz", command: "assets show")
+            let id = try args.positional(1, "an asset ID, like substo assets show elevenlabs:music_2p839smz", command: "assets show")
             return show(try await assets.show(AssetShowRequest(id: id)), json: json)
         case "use":
             try args.expectPositionals(atMost: 2, command: "assets use")
-            let id = try args.positional(1, "an asset ID from a search, like tandem assets use noto:1f680 --at 1:23", command: "assets use")
+            let id = try args.positional(1, "an asset ID from a search, like substo assets use noto:1f680 --at 1:23", command: "assets use")
             var anchor: StickerAnchor?
             if let name = args.options["anchor"] {
                 guard let parsed = StickerAnchor(rawValue: name) else {
@@ -80,11 +80,11 @@ struct AssetsCommand {
             return show(try await assets.credits(AssetCreditsRequest(includeOptional: args.has("optional")), project: client), json: json)
         case "generate":
             try args.expectPositionals(atMost: 3, command: "assets generate")
-            let kindName = try args.positional(1, "sfx or music and a prompt, like tandem assets generate sfx \"soft whoosh\"", command: "assets generate")
+            let kindName = try args.positional(1, "sfx or music and a prompt, like substo assets generate sfx \"soft whoosh\"", command: "assets generate")
             guard let kind = try AssetNames.parse(kinds: kindName).first, kind == .sfx || kind == .music else {
-                throw UsageError(message: "`tandem assets generate` makes sfx or music, not \(kindName).")
+                throw UsageError(message: "`substo assets generate` makes sfx or music, not \(kindName).")
             }
-            let prompt = try args.positional(2, "a prompt in quotes, like tandem assets generate sfx \"soft whoosh\"", command: "assets generate")
+            let prompt = try args.positional(2, "a prompt in quotes, like substo assets generate sfx \"soft whoosh\"", command: "assets generate")
             let request = AssetGenerateRequest(kind: kind, prompt: prompt, duration: try time(args, "duration")?.seconds, variations: try args.integer("variations"))
             return show(try await assets.generate(request), json: json)
         default:

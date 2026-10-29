@@ -31,7 +31,7 @@ public struct MissingFont: Equatable, Sendable {
     public func warning(count: Int) -> String {
         let whose = presetID.map { ", the \($0) preset's font," } ?? ""
         let what = count == 1 ? "1 text clip is" : "\(count) text clips are"
-        return "\(name)\(whose) isn't installed, so \(what) drawn in SF Pro instead. Install it with: tandem assets use \(assetID)"
+        return "\(name)\(whose) isn't installed, so \(what) drawn in SF Pro instead. Install it with: substo assets use \(assetID)"
     }
 }
 
@@ -39,8 +39,8 @@ public struct MissingFont: Equatable, Sendable {
 /// process.
 ///
 /// Core Text fonts are registered per process. A project carries fonts in
-/// `assets/font/` (where `tandem assets use` and archiving put them), and
-/// whichever process renders it (the app, `tandem serve`, a CLI command)
+/// `assets/font/` (where `substo assets use` and archiving put them), and
+/// whichever process renders it (the app, `substo serve`, a CLI command)
 /// registers the files there it hasn't seen before it draws. So a font
 /// added while the app has the project open reaches the app's renders
 /// without a restart, and cached titles drawn in the fallback are dropped.

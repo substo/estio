@@ -92,7 +92,7 @@ final class StockProvider: AssetProvider, @unchecked Sendable {
 /// A library in a temp folder: every built-in provider on a stub transport,
 /// plus the stock provider and an import folder holding one whoosh.
 final class AssetHarness {
-    let folder = TempFolder("tandem-assets")
+    let folder = TempFolder("substo-assets")
     let transport = StubTransport()
     let service: AssetService
 
@@ -311,9 +311,9 @@ final class AssetServiceTests: XCTestCase {
     }
 
     func testOfflineLibraryUsesTheOverriddenRoot() async throws {
-        let folder = TempFolder("tandem-assets-root")
+        let folder = TempFolder("substo-assets-root")
         let root = folder.url.appendingPathComponent("lib")
-        let service = try AssetService.standard(environment: ["TANDEM_ASSETS_ROOT": root.path, "TANDEM_ASSETS_OFFLINE": "1"])
+        let service = try AssetService.standard(environment: ["SUBSTO_ASSETS_ROOT": root.path, "SUBSTO_ASSETS_OFFLINE": "1"])
         XCTAssertEqual(service.library.root.resolvingSymlinksInPath().path, root.resolvingSymlinksInPath().path)
         let providers = await service.providers()
         XCTAssertEqual(providers.providers.first { $0.id == "elevenlabs" }?.status.state, .needsKey, "offline reads no keys")

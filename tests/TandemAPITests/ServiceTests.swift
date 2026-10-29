@@ -338,7 +338,7 @@ final class ServiceTests: XCTestCase {
         try Data("camera take".utf8).write(to: take)
         let projectBytes = try Data(contentsOf: h.url)
 
-        for output in ["source/take1-camera.mov", h.folder.file("source/take1-camera.mov").path, "Decision Models.tandem", "Other version.tandem"] {
+        for output in ["source/take1-camera.mov", h.folder.file("source/take1-camera.mov").path, "Decision Models.substo", "Other version.substo"] {
             do {
                 _ = try await FrameRequest(time: t(12), output: output).run(on: h.service, context: h.context)
                 XCTFail("a frame shouldn't be written to \(output)")
@@ -357,7 +357,7 @@ final class ServiceTests: XCTestCase {
         assertServiceError(.invalid) { _ = try h.service.prepareClip(ClipRequest(start: t(0), end: t(1), output: take.path)) }
         XCTAssertEqual(try Data(contentsOf: take), Data("camera take".utf8))
         XCTAssertEqual(try Data(contentsOf: h.url), projectBytes)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: h.folder.file("Other version.tandem").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: h.folder.file("Other version.substo").path))
         // Anywhere else is fine, including over an earlier frame.
         _ = try await FrameRequest(time: t(12), output: "frames/f.png").run(on: h.service, context: h.context)
         _ = try await FrameRequest(time: t(13), output: "frames/f.png").run(on: h.service, context: h.context)
@@ -468,7 +468,7 @@ final class ServiceTests: XCTestCase {
         XCTAssertThrowsError(try h.service.prepareExport(ExportRequest(preset: "short"))) { error in
             let failure = error as? ServiceError
             XCTAssertEqual(failure?.code, ServiceError.Code.notFound.rawValue)
-            XCTAssertTrue(failure?.message.contains("`tandem short --apply`") ?? false, "\(error)")
+            XCTAssertTrue(failure?.message.contains("`substo short --apply`") ?? false, "\(error)")
             XCTAssertTrue(failure?.message.hasSuffix("use --preset youtube4k.") ?? false, "\(error)")
         }
         // The landscape project's default is still 4K.
@@ -501,7 +501,7 @@ final class ServiceTests: XCTestCase {
         XCTAssertNil(dry.copy, "a dry run makes nothing")
         let result = try h.service.short(ShortRequest(apply: true, copy: true), context: h.context)
         let copy = URL(fileURLWithPath: try XCTUnwrap(result.copy))
-        XCTAssertEqual(copy.lastPathComponent, h.url.deletingPathExtension().lastPathComponent + " Short.tandem")
+        XCTAssertEqual(copy.lastPathComponent, h.url.deletingPathExtension().lastPathComponent + " Short.substo")
         XCTAssertEqual(copy.deletingLastPathComponent().standardizedFileURL, h.url.deletingLastPathComponent().standardizedFileURL, "beside the long one")
         let (short, _) = try ProjectFile.load(from: copy)
         XCTAssertEqual(short.settings.width, 1080)
@@ -509,7 +509,7 @@ final class ServiceTests: XCTestCase {
         XCTAssertTrue(short.settings.alternateFormats.isEmpty)
         XCTAssertNotEqual(short.id, before.project.id)
         XCTAssertTrue(short.allTracks.flatMap(\.clips).allSatisfy { $0.video?.formatOverrides.isEmpty ?? true })
-        XCTAssertTrue(result.readableText.contains("Short.tandem"), result.readableText)
+        XCTAssertTrue(result.readableText.contains("Short.substo"), result.readableText)
 
         let (project, revision) = h.service.coordinator.snapshot()
         XCTAssertEqual(revision, before.revision, "the long video isn't edited")
@@ -519,8 +519,8 @@ final class ServiceTests: XCTestCase {
         XCTAssertThrowsError(try h.service.short(ShortRequest(apply: true, copy: true), context: h.context), "never replaces a file") { error in
             XCTAssertTrue("\(error)".contains("already"), "\(error)")
         }
-        let named = try h.service.short(ShortRequest(apply: true, copy: true, copyPath: "Short v2.tandem"), context: h.context)
-        XCTAssertEqual(named.copy.map { URL(fileURLWithPath: $0).lastPathComponent }, "Short v2.tandem")
+        let named = try h.service.short(ShortRequest(apply: true, copy: true, copyPath: "Short v2.substo"), context: h.context)
+        XCTAssertEqual(named.copy.map { URL(fileURLWithPath: $0).lastPathComponent }, "Short v2.substo")
     }
 
     func testShortRefusesACanvasThatsAlreadyNineBySixteen() throws {
@@ -531,7 +531,7 @@ final class ServiceTests: XCTestCase {
         defer { h.close() }
         XCTAssertThrowsError(try h.service.short(ShortRequest(apply: true), context: h.context)) { error in
             XCTAssertEqual((error as? ServiceError)?.code, ServiceError.Code.invalid.rawValue)
-            XCTAssertTrue("\(error)".contains("`tandem export --preset short`"), "\(error)")
+            XCTAssertTrue("\(error)".contains("`substo export --preset short`"), "\(error)")
         }
         XCTAssertEqual(h.service.coordinator.project.settings.alternateFormats, [], "nothing changed")
     }

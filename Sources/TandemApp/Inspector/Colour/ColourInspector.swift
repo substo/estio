@@ -3,7 +3,7 @@ import SwiftUI
 import TandemCore
 
 /// What the Colour tab grades: every clip from the file (its look, how
-/// Mike grades a camera take) or just this clip, on top of that.
+/// the creator grades a camera take) or just this clip, on top of that.
 enum ColourTarget: String, CaseIterable, Hashable, Sendable {
     case take, clip
 }
@@ -55,7 +55,7 @@ struct ColourInspector: View {
 
     /// The tab opens where the grade is: the whole take when only the file
     /// has one, this clip when only the clip has one. Otherwise camera
-    /// takes open on the whole take, since that's how Mike grades, and
+    /// takes open on the whole take, since that's how the creator grades, and
     /// anything else on the clip.
     private func target(for item: MediaItem?) -> ColourTarget {
         guard let item else { return .clip }

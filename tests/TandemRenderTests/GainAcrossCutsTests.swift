@@ -386,7 +386,7 @@ final class GainAcrossCutsTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(built.audioMix.inputParameters.count, 3)
         XCTAssertGreaterThanOrEqual(built.composition.tracks(withMediaType: .video).count, 3)
 
-        // Read from part way through the clip, as `tandem clip` does and as
+        // Read from part way through the clip, as `substo clip` does and as
         // the viewer does after a seek there.
         let from = 5.0
         let plan = RenderPlanner.plan(project, format: nil, assets: assets)

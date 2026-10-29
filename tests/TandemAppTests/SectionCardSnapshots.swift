@@ -11,7 +11,7 @@ import TandemRender
 /// Renders a section card's Video tab and the Section card tile's art
 /// offscreen, to look at:
 ///
-///     TANDEM_CARD_UI_OUT=~/dev/me/tandem-research/title-cards/tandem/ui \
+///     SUBSTO_CARD_UI_OUT=~/dev/me/tandem-research/title-cards/tandem/ui \
 ///     swift test --package-path . --filter SectionCardSnapshots
 ///
 /// Without the variable it still renders them once, so a view that can't
@@ -22,9 +22,9 @@ final class SectionCardSnapshots: XCTestCase {
     private var model: EditorModel!
 
     override func setUp() async throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-card-ui-\(UUID().uuidString)", isDirectory: true)
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-card-ui-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let session = try ProjectSession.create(at: folder.appendingPathComponent("Cards.tandem"), name: "Cards", owner: .app)
+        let session = try ProjectSession.create(at: folder.appendingPathComponent("Cards.substo"), name: "Cards", owner: .app)
         model = EditorModel(session: session)
     }
 
@@ -36,7 +36,7 @@ final class SectionCardSnapshots: XCTestCase {
     }
 
     private func write(_ image: CGImage, _ name: String) throws {
-        guard let out = ProcessInfo.processInfo.environment["TANDEM_CARD_UI_OUT"], !out.isEmpty else { return }
+        guard let out = ProcessInfo.processInfo.environment["SUBSTO_CARD_UI_OUT"], !out.isEmpty else { return }
         let dir = URL(fileURLWithPath: NSString(string: out).expandingTildeInPath, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(name + ".png")

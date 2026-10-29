@@ -12,7 +12,7 @@ extension EditorModel {
     func importFiles(_ urls: [URL], at time: Time?, trackID: String?, newTrack: TrackKind? = nil) {
         let files = FileImport.mediaFiles(in: urls)
         guard !files.isEmpty else {
-            show(.info, "Nothing there Tandem can use. It takes video, audio and pictures.")
+            show(.info, "Nothing there Substo Video can use. It takes video, audio and pictures.")
             return
         }
         let folder = self.folder

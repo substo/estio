@@ -93,7 +93,7 @@ final class ProjectBuilder {
 
     private func note(_ warnings: [String]) {
         for warning in warnings {
-            report.add(.note, "tandem", warning)
+            report.add(.note, "substo", warning)
         }
     }
 }

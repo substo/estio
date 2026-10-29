@@ -116,7 +116,7 @@ struct ColourSliderSpec: Equatable {
             ]
         case .vignette:
             return [
-                ColourSliderSpec(key: "amount", label: "Amount", undo: "Vignette amount", help: "Darkens the edges (below 0) or lightens them (above 0). Mike's camera grade uses −22 to −37.", gradient: ColourTracks.vignette),
+                ColourSliderSpec(key: "amount", label: "Amount", undo: "Vignette amount", help: "Darkens the edges (below 0) or lightens them (above 0). The sample camera grade uses −22 to −37.", gradient: ColourTracks.vignette),
                 ColourSliderSpec(key: "size", label: "Size", undo: "Vignette size", help: "How much of the middle stays clear.", unit: "%", signed: false),
                 ColourSliderSpec(key: "feather", label: "Feather", undo: "Vignette feather", help: "How gradually the edges fall off.", unit: "%", signed: false)
             ]
@@ -143,7 +143,7 @@ struct ColourSliderSpec: Equatable {
         let name = colour.capitalized
         return [
             ColourSliderSpec(key: colour + "Hue", label: "Hue", undo: "\(name) hue", help: "Shifts the \(plural) towards \(before) (left) or \(after) (right), by up to 30°.", unit: "°", scale: 0.3, decimals: 1, gradient: ColourTracks.hueAround(hue)),
-            ColourSliderSpec(key: colour + "Saturation", label: "Saturation", undo: "\(name) saturation", help: "Makes the \(plural) greyer (left) or richer (right). Mike's camera grade takes reds down 7 or 8 to calm skin.", unit: "%", gradient: ColourTracks.saturation(of: hue)),
+            ColourSliderSpec(key: colour + "Saturation", label: "Saturation", undo: "\(name) saturation", help: "Makes the \(plural) greyer (left) or richer (right). The sample camera grade takes reds down 7 or 8 to calm skin.", unit: "%", gradient: ColourTracks.saturation(of: hue)),
             ColourSliderSpec(key: colour + "Luminance", label: "Luminance", undo: "\(name) luminance", help: "Makes the \(plural) darker (left) or lighter (right).", gradient: ColourTracks.luminance(of: hue))
         ]
     }

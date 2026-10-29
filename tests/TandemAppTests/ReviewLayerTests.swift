@@ -131,9 +131,9 @@ final class ReviewModelTests: XCTestCase {
     private var model: EditorModel!
 
     override func setUp() async throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-review-model-\(UUID().uuidString)", isDirectory: true)
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-review-model-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let session = try ProjectSession.create(at: folder.appendingPathComponent("Review.tandem"), name: "Review", owner: .app)
+        let session = try ProjectSession.create(at: folder.appendingPathComponent("Review.substo"), name: "Review", owner: .app)
         model = EditorModel(session: session)
         let fixture = try AppFixture()
         model.apply(EditBatch(label: "Media", commands: fixture.project.media.map { .addMedia(item: $0) }))

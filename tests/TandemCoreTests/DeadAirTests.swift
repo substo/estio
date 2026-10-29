@@ -1,7 +1,7 @@
 import XCTest
 @testable import TandemCore
 
-/// Dead air for `tandem check`: a still picture with nothing to hear, on
+/// Dead air for `substo check`: a still picture with nothing to hear, on
 /// made-up frame measurements and projects.
 final class DeadAirTests: XCTestCase {
     // MARK: - Helpers

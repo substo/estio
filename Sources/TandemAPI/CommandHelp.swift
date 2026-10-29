@@ -3,13 +3,13 @@ import TandemCore
 
 extension CommandSchema {
     /// An edit command explained from its schema entry, for
-    /// `tandem help <editCommand>`: its summary, each argument with its type
+    /// `substo help <editCommand>`: its summary, each argument with its type
     /// and description, and the example. A shared model or patch argument is
     /// opened up one level, so `addTransition` shows the transition's fields
     /// too instead of agents learning them by failing.
     public static func help(_ command: CommandCase) -> String {
         guard let entry = entry(command) else { return command.rawValue }
-        var lines = ["\(command.rawValue) (an edit command for tandem apply): \(entry.summary)", ""]
+        var lines = ["\(command.rawValue) (an edit command for substo apply): \(entry.summary)", ""]
         let arguments = properties(of: entry.arguments)
         if arguments.isEmpty {
             lines.append("No arguments.")
@@ -17,7 +17,7 @@ extension CommandSchema {
             lines.append("Arguments:")
             lines += argumentLines(arguments, indent: 2, expand: true)
         }
-        lines += ["", "Example:", "  \(entry.example)", "", "`tandem schema` prints the whole JSON schema."]
+        lines += ["", "Example:", "  \(entry.example)", "", "`substo schema` prints the whole JSON schema."]
         return lines.joined(separator: "\n")
     }
 
@@ -71,7 +71,7 @@ extension CommandSchema {
 
     private static func typeText(_ schema: JSONValue) -> String {
         if let name = modelName(schema) { return name }
-        if let model = string(field(schema, "x-tandem-patch")) { return "patch of \(model)" }
+        if let model = string(field(schema, "x-substo-patch")) { return "patch of \(model)" }
         if case .array(let values)? = field(schema, "enum") {
             return "one of " + values.compactMap(string).joined(separator: " | ")
         }
@@ -93,7 +93,7 @@ extension CommandSchema {
     /// array's items.
     private static func openedModel(_ schema: JSONValue) -> JSONValue? {
         if let name = modelName(schema) { return definitions[name] }
-        if let model = string(field(schema, "x-tandem-patch")) { return definitions[model] ?? patchModels[model] }
+        if let model = string(field(schema, "x-substo-patch")) { return definitions[model] ?? patchModels[model] }
         if case .string("array")? = field(schema, "type"), let items = field(schema, "items") { return openedModel(items) }
         if field(schema, "properties") != nil { return schema }
         return nil

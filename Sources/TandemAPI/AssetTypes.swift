@@ -3,9 +3,9 @@ import TandemAssets
 import TandemCore
 import TandemMedia
 
-// Requests and results for the asset library, shared by `tandem assets` and
+// Requests and results for the asset library, shared by `substo assets` and
 // the `assets_*` MCP tools. Like the project operations they're Codable and
-// read well as text; unlike them they work on Mike's per-user library, so
+// read well as text; unlike them they work on the creator's per-user library, so
 // only `use` and `credits` need a project.
 
 /// The asset operations agents have.
@@ -18,7 +18,7 @@ public enum AssetOperation: String, CaseIterable, Codable, Sendable {
     case credits
     case generate
     case installStarter = "install-starter"
-    /// Saved segments in the shared library (`tandem segments ...`).
+    /// Saved segments in the shared library (`substo segments ...`).
     case segments
     case saveSegment = "save-segment"
     case insertSegment = "insert-segment"
@@ -282,7 +282,7 @@ public struct AssetUseResult: Codable, Sendable {
     /// file instead of a copy, and archiving copies it in.
     public var referencedInPlace: Bool?
     public var role: MediaRole
-    /// The track it lands on in Mike's layout.
+    /// The track it lands on in the creator's layout.
     public var trackName: String?
     public var gainDB: Double?
     /// Where it was placed, when it was.
@@ -293,7 +293,7 @@ public struct AssetUseResult: Codable, Sendable {
     public var fonts: [String]
     public var licence: AssetLicence?
     /// For fonts, when the project is open elsewhere: who registered the
-    /// font too (`app` or `cli` for `tandem serve`).
+    /// font too (`app` or `cli` for `substo serve`).
     public var fontsReached: String?
     /// For fonts: titles whose font is still missing afterwards.
     public var fontWarnings: [String]?

@@ -14,7 +14,7 @@ enum LaneStyle: Equatable {
     case sfx
     case audio
 
-    /// Guesses a track's style from its kind and name. Mike's standard
+    /// Guesses a track's style from its kind and name. the creator's standard
     /// project names its tracks Screen, Camera, B-roll, Graphics, Text,
     /// Voice, Music and SFX.
     static func of(_ track: Track) -> LaneStyle {

@@ -2,7 +2,7 @@ import Foundation
 import TandemCore
 import TandemMedia
 
-// Word-by-word captions from the transcripts, the way Mike's shorts have
+// Word-by-word captions from the transcripts, the way the creator's shorts have
 // them: a few words at a time, the spoken word highlighted (the render
 // module's `caption` title preset).
 
@@ -216,7 +216,7 @@ extension CaptionsResult: ReadableResult {
         }
         for warning in warnings { lines.append("Warning: \(warning)") }
         if let applied {
-            lines.append("Applied as revision \(applied.revision) (\"\(applied.label)\"). Undo with `tandem undo`.")
+            lines.append("Applied as revision \(applied.revision) (\"\(applied.label)\"). Undo with `substo undo`.")
         } else if !captions.isEmpty {
             lines.append("Nothing changed yet. Run again with --apply (or apply: true) to add them.")
         }

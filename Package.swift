@@ -4,13 +4,13 @@ import PackageDescription
 // Tandem is split so every client (the app, the CLI and the MCP server) goes
 // through the same core. Only TandemApp may import AppKit or SwiftUI.
 let package = Package(
-    name: "Tandem",
+    name: "Substo",
     platforms: [
         .macOS(.v15)
     ],
     products: [
-        .executable(name: "tandem-app", targets: ["TandemApp"]),
-        .executable(name: "tandem", targets: ["TandemCLI"]),
+        .executable(name: "substo-app", targets: ["TandemApp"]),
+        .executable(name: "substo", targets: ["TandemCLI"]),
         .library(name: "TandemCore", targets: ["TandemCore"]),
         .library(name: "TandemMedia", targets: ["TandemMedia"]),
         .library(name: "TandemRender", targets: ["TandemRender"]),

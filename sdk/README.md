@@ -11,7 +11,7 @@ Needs Bun (`~/.bun/bin/bun`). No runtime dependencies.
 ## Run a script
 
 ```bash
-bun sdk/run.ts "<video folder>/<name>.tandem" script.ts
+bun sdk/run.ts "<video folder>/<name>.substo" script.ts
 bun sdk/run.ts "<project>" -e 'const p = await t.project(); return p.transitions().length'
 bun sdk/run.ts "<project>" - < script.txt
 ```
@@ -22,9 +22,9 @@ bun sdk/run.ts "<project>" - < script.txt
 - What it returns prints as compact JSON. Errors print as
   `error: <code>: <message>` with exit code 1, nothing half applied.
 - It talks to whatever serves the project (the app, or `tandem serve`), found
-  from `<folder>/.tandem/<name>.lock`. If nothing does, it starts
+  from `<folder>/.substo/<name>.lock`. If nothing does, it starts
   `tandem serve` for the run and stops it after (saved on the way out).
-- Credited to `$TANDEM_AUTHOR`, or `claude`.
+- Credited to `$SUBSTO_AUTHOR`, or `claude`.
 
 ## The API
 
@@ -63,9 +63,9 @@ says what's wrong (`unknown field "transitionId" (did you mean
 `examples/` has three jobs, each one call:
 
 ```bash
-bun sdk/run.ts Video.tandem sdk/examples/fix-captions.ts    # misheard words in captions
-bun sdk/run.ts Video.tandem sdk/examples/swoosh-pushes.ts   # swoosh on every bare push
-MIN_PAUSE=1.6 bun sdk/run.ts Video.tandem sdk/examples/swell-music.ts  # music swells in pauses
+bun sdk/run.ts Video.substo sdk/examples/fix-captions.ts    # misheard words in captions
+bun sdk/run.ts Video.substo sdk/examples/swoosh-pushes.ts   # swoosh on every bare push
+MIN_PAUSE=1.6 bun sdk/run.ts Video.substo sdk/examples/swell-music.ts  # music swells in pauses
 ```
 
 ## Rules
@@ -82,7 +82,7 @@ before stopping it. In the app, Mike's undo menu has every edit as usual.
 
 ## Maintaining
 
-- `bun sdk/gen-types.ts <project.tandem>` regenerates `commands.gen.ts` from
+- `bun sdk/gen-types.ts <project.substo>` regenerates `commands.gen.ts` from
   the running server's `GET /v1/schema` after edit commands change.
 - `types.ts` holds the read results' shapes by hand.
 - `cd sdk && bun install && bun run typecheck` checks the SDK and examples.

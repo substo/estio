@@ -55,7 +55,7 @@ public enum EditCommand: Codable, Equatable, Sendable {
         pop: Bool? = nil,
         speed: Double? = nil
     )
-    /// Puts a file synced to a take (`tandem sync <file>` sets its
+    /// Puts a file synced to a take (`substo sync <file>` sets its
     /// `takeID` and `takeOffset` by sound) alongside the take's camera
     /// clips already on the timeline, linked to them, so ripple cuts,
     /// trims and moves keep it in step. The take is cut where the file
@@ -111,7 +111,7 @@ public enum EditCommand: Codable, Equatable, Sendable {
     /// `cuts` (insert only) moves where the take is cut for a marker's
     /// room, by marker ID, up to `SectionCard.maxCutShift` from it: into
     /// the pause before the section's first word, so the word isn't
-    /// clipped. `tandem cards --insert` works them out from the voice.
+    /// clipped. `substo cards --insert` works them out from the voice.
     case addSectionCards(
         markerIDs: [String]? = nil,
         trackID: String? = nil,
@@ -171,7 +171,7 @@ public enum EditCommand: Codable, Equatable, Sendable {
     case slide(clipID: String, delta: Time)
     /// Holds the frame `clipID` shows a frame before `range` over `range`
     /// (timeline times inside the clip), to cover a flash: a stale frame,
-    /// or the preview jumping for a frame as Mike clicked. Picture only:
+    /// or the preview jumping for a frame as the creator clicked. Picture only:
     /// just this clip is cut, the held piece is a freeze frame, and every
     /// piece stays linked to the take, whose sound plays on uncut.
     case holdFrame(clipID: String, range: TimeRange)
@@ -311,11 +311,11 @@ public struct EditBatch: Codable, Equatable, Sendable {
         self.idempotencyKey = idempotencyKey
     }
 
-    /// The label of the edit Tandem makes when it finds new files in the
+    /// The label of the edit Substo Video makes when it finds new files in the
     /// project folder.
     public static let mediaScanLabel = "Found new media"
 
-    /// Tandem adding files it found in the folder, which doesn't make an
+    /// Substo Video adding files it found in the folder, which doesn't make an
     /// agent's `expectedRevision` stale.
     public var isMediaScan: Bool {
         author == EditAuthor.system && label == Self.mediaScanLabel

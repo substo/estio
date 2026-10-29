@@ -12,10 +12,10 @@ public protocol FontInstalling: Sendable {
     func install(_ assetID: String, in folder: ProjectFolder, projectID: String, projectFile: URL) async throws -> [String]
 }
 
-/// The per-user asset library, the one `tandem assets` uses, opened the
-/// first time a font is needed. `$TANDEM_ASSETS_ROOT` and
-/// `$TANDEM_ASSETS_OFFLINE` move it and keep it offline, as they do for
-/// `tandem assets`.
+/// The per-user asset library, the one `substo assets` uses, opened the
+/// first time a font is needed. `$SUBSTO_ASSETS_ROOT` and
+/// `$SUBSTO_ASSETS_OFFLINE` move it and keep it offline, as they do for
+/// `substo assets`.
 public final class LibraryFontInstaller: FontInstalling, @unchecked Sendable {
     public static let shared = LibraryFontInstaller()
 

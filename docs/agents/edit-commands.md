@@ -1,10 +1,10 @@
 # Edit commands: what help doesn't say
 
-The batch format, a one-line index of every edit command, and the semantics and gotchas that `tandem help <command>` and the schema don't carry: levels, sticker placement, keyframe values, how gain keyframes combine with clip gain, transitions and their sounds, section cards, templates and joins.
+The batch format, a one-line index of every edit command, and the semantics and gotchas that `substo help <command>` and the schema don't carry: levels, sticker placement, keyframe values, how gain keyframes combine with clip gain, transitions and their sounds, section cards, templates and joins.
 
 For a command's arguments, their types, defaults and an example that
-works, run `tandem help <command>` (like `tandem help addTransition`).
-`tandem schema` prints the whole JSON schema, and `tandem effects` lists the
+works, run `substo help <command>` (like `substo help addTransition`).
+`substo schema` prints the whole JSON schema, and `substo effects` lists the
 effects with their parameters, the transitions with their default lengths,
 the layouts and the animatable parameters.
 
@@ -20,8 +20,8 @@ A batch looks like this; `commands` is required and the rest is optional:
  ]}
 ```
 
-`tandem apply` also takes a bare list of commands, or a single command, and
-the JSON can be quoted as the argument itself: `tandem apply '{"blade":
+`substo apply` also takes a bare list of commands, or a single command, and
+the JSON can be quoted as the argument itself: `substo apply '{"blade":
 {"at": 12.5}}'`. Patches (`updateClip`, `updateTrack`...) are JSON merge
 patches: send only the fields to change, nested objects merge, and `null`
 removes a field. A range is always an object under its own key (`"range":
@@ -37,7 +37,7 @@ removes a field. A range is always an object under its own key (`"range":
 | | `removeTrack` | a track and everything on it |
 | | `moveTrack` | a track's position among its kind |
 | | `updateTrack` | name, mute, solo, lock, hidden, targeted, ripple mode |
-| Media | `addMedia` | a file into the project, not the timeline (`tandem media --refresh` usually does it) |
+| Media | `addMedia` | a file into the project, not the timeline (`substo media --refresh` usually does it) |
 | | `updateMedia` | a file's role, colour look, picture delay... |
 | | `removeMedia` | a file nothing uses |
 | Placing | `placeMedia` | files on their role's tracks, the way a drag in does ([below](#placemedia)) |
@@ -91,7 +91,7 @@ moves every clip normalised to the old level to the new one; clips with a
 level of their own keep it. Every export preset masters to
 `loudnessTarget` with true peaks under `truePeakCeiling`.
 `alternateFormats` is where extra outputs like the 9:16 short (`portrait`)
-live; `tandem short` adds it.
+live; `substo short` adds it.
 
 ## placeMedia
 
@@ -114,7 +114,7 @@ timeline, so 9.6 s of B-roll at 1.5x fills a 6.4 s gap:
 {"placeMedia": {"mediaIDs": ["med_broll"], "at": 312.4, "duration": 6.4, "speed": 1.5}}
 ```
 
-Sound gets Mike's levels: speech (a camera's sound, files with no clearer
+Sound gets the creator's levels: speech (a camera's sound, files with no clearer
 role such as a rendered intro, and anything placed on a take track like
 Voice) is normalised to the project's speech level with no gain, music gets
 -31 dB with a 2 s fade out, and sound effects -15 dB.
@@ -136,7 +136,7 @@ last.
 `content` is one of `{"media": {"mediaID": ...}}`, `{"text": {...}}`,
 `{"graphic": {"template": ..., "props": {...}}}`, `{"solid": {"color":
 {...}}}` or `{"adjustment": {}}`. `{"graphic": {"template":
-"sectionCard"}}` is Mike's section card, drawn by Tandem
+"sectionCard"}}` is the creator's section card, drawn by Substo Video
 ([Add a section card](broll-and-titles.md#add-a-section-card) has its
 props); other graphic templates aren't rendered yet. Titles are in
 [Add a title](broll-and-titles.md#add-a-title).
@@ -146,7 +146,7 @@ props); other graphic templates aren't rendered yet. Titles are in
 Templates come from packs as JSON. Media a template uses is matched by path
 (`mediaPath`); a clip that carries its media item under `media` adds it when
 the project has nothing at that path yet, and reuses what's there
-otherwise. Saved segments carry theirs, which is how `tandem segments
+otherwise. Saved segments carry theirs, which is how `substo segments
 insert` works, and so does the Section card tile for its whooshes; without
 one, the file must already be in the project. `{{field}}` placeholders are
 filled in text clips and in a graphic's text props. `transitions` joins its
@@ -156,7 +156,7 @@ clips by their place in `clips` (`{"from": 0, "to": 1, "type":
 A clip that carries its file:
 
 ```json
-{"insertTemplate": {"template": {"id": "segment:Sting", "name": "Sting", "duration": 1.2, "clips": [{"track": "SFX", "trackKind": "audio", "clip": {"duration": 1.2, "audio": {"gainDB": -15}}, "mediaPath": "/Users/m5-mike/Movies/Tandem Library/Segments/Sting/sting.wav", "media": {"path": "sting.wav", "kind": "audio", "role": "sfx", "duration": 1.2, "hasAudio": true}}]}, "at": 42, "mode": "overwrite"}}
+{"insertTemplate": {"template": {"id": "segment:Sting", "name": "Sting", "duration": 1.2, "clips": [{"track": "SFX", "trackKind": "audio", "clip": {"duration": 1.2, "audio": {"gainDB": -15}}, "mediaPath": "/Users/m5-mike/Movies/Substo Library/Segments/Sting/sting.wav", "media": {"path": "sting.wav", "kind": "audio", "role": "sfx", "duration": 1.2, "hasAudio": true}}]}, "at": 42, "mode": "overwrite"}}
 ```
 
 ## addSectionCards
@@ -170,7 +170,7 @@ adding a section.
 
 With `mode: insert` the card is a pause and its wipes show the last shot of
 one section and the first of the next. `soundIn` and `soundOut` go on SFX
-(or SFX 2... where SFX is taken), linked to their card. `tandem cards`
+(or SFX 2... where SFX is taken), linked to their card. `substo cards`
 fills them in with the section card whooshes from the asset library,
 levelled for the project's speech.
 
@@ -180,7 +180,7 @@ for a card under 1.76 s), so the card still covers it. Put a cut in the
 pause before the section's first word, never on the word: room made right
 on a word's start leaves its first sound before the card and the rest after
 it. The card hides the frame from its cut on, and the marker moves with
-what it was on. `tandem cards --insert` works the cuts out from the voice.
+what it was on. `substo cards --insert` works the cuts out from the voice.
 
 ```json
 {"addSectionCards": {"markerIDs": ["mk_daytona"], "mode": "insert", "cuts": {"mk_daytona": "15:03.233"}}}
@@ -238,7 +238,7 @@ differ only by ID count as the same settings. Keyframes keep their timeline
 times. The clips linked across the same cut each have to meet the cut and
 join, or nothing does. One clip's animation only joins when it sits still,
 at the other clip's value, all through the other clip. A locked track
-fails it too. `tandem join` lists what it would join and why it leaves the
+fails it too. `substo join` lists what it would join and why it leaves the
 rest ([Join through-edits](cutting.md#join-through-edits)).
 
 ## updateClip
@@ -248,7 +248,7 @@ rotation), `video.crop`, `video.opacity`, `video.cutout`, `audio.gainDB`,
 `audio.fadeIn`, `audio.fadeOut`, `audio.normalizeTo`,
 `audio.voiceIsolation` (0 original to 1 fully isolated), a title's
 `content.text`, a graphic's `content.graphic.props`, `enabled`, `name`,
-`tags`... `tandem schema` has every field of `VideoProperties` and
+`tags`... `substo schema` has every field of `VideoProperties` and
 `AudioProperties`.
 
 `audio.normalizeTo` levels the clip from its file's measured loudness (the
@@ -259,7 +259,7 @@ about -18. `null` stops normalising. A gain of -96 dB or lower is silence.
 `video.crop` values are fractions (0 to 1) of the source hidden at each
 edge, so `{"left": 0.25}` hides the left quarter of the picture.
 `video.transform.position` is in canvas units, (0, 0) top left to (1, 1)
-bottom right, and `scale` 1 fits the canvas (Mike's PiP is 0.5).
+bottom right, and `scale` 1 fits the canvas (the creator's PiP is 0.5).
 
 `holdEdges` lets a clip run past the ends of its file: its first frame
 holds before the file starts (a negative `sourceStart`) and its last frame
@@ -275,12 +275,12 @@ the clip's own frame can't. Set it, then trim the edge out, in one batch:
 ]}
 ```
 
-`tandem timeline` shows how long it holds. To turn it off, trim the clip
+`substo timeline` shows how long it holds. To turn it off, trim the clip
 back inside its file first.
 
 ## applyLayout, zoomToRegion, addMotion
 
-- `pipRight` is Mike's usual PiP: 50% with the cutout and Filmora's drop
+- `pipRight` is the creator's usual PiP: 50% with the cutout and Filmora's drop
   shadow, bottom right. `split` puts the camera on the right half and
   everything else on the left.
 - `zoomToRegion`'s `rect` is a part of the source, 0 to 1 from its top
@@ -302,15 +302,15 @@ or from the first) that edge frame holds for the rest, as in Premiere and
 Filmora, and the edit's warnings say how long; trim the clip for real
 motion instead. On its own at an overlay's tail (`fromClipID` only), a push
 or slide moves the overlay off screen and the tracks below show where it
-was, as in Filmora (a B-roll pushed out upwards, leaving Mike playing
+was, as in Filmora (a B-roll pushed out upwards, leaving the creator playing
 below); at a head (`toClipID` only) it comes in. On audio tracks every
 transition is a crossfade, and sound past a file's ends is silence. Default
-lengths are Mike's usual ones from Filmora (`tandem effects` lists them:
+lengths are the creator's usual ones from Filmora (`substo effects` lists them:
 push and slide 0.7 s, cut slide 0.57 s, wipe 0.6 s, dissolve and zoom
 0.5 s, the fades 1.1 s).
 
 A transition can carry a sound effect: an ordinary clip on SFX (the first
-free SFX track), so Mike sees it and can nudge, trim or turn it down, tied
+free SFX track), so the creator sees it and can nudge, trim or turn it down, tied
 to the transition by its `soundClipID`. `addTransition` returns the
 transition's ID, then the sound clip's. The sound keeps its distance from
 the transition's middle (the cut, for one between two clips, where a push
@@ -320,7 +320,7 @@ whole, and a fade at a clip's head carries it as it grows. It goes when the
 transition goes, whether that's a `removeTransition`, a clip it joins
 deleted, the clips moved apart, or an undo. Deleting the sound clip leaves
 the transition silent. In the app, push, slide, cut slide and wipe come
-with a light swoosh unless Mike picks otherwise (Tandem > Settings);
+with a light swoosh unless the creator picks otherwise (Substo Video > Settings);
 [Put a swoosh on every push](sound.md#put-a-swoosh-on-every-push) has the
 gains and offsets.
 
@@ -383,15 +383,15 @@ the project's `truePeakCeiling` gets a compressor (3:1 from 6 dB over the
 speech level) and a limiter at the ceiling, at the end of its audio
 effects, and the warning names it. A clip with a limiter already, on or
 off, is left as it is, so removing or turning one off sticks until you
-add it back. Tandem fills in `measured` (each file's loudness and peak)
+add it back. Substo Video fills in `measured` (each file's loudness and peak)
 from its analysis, and the journal keeps it, so leave it out.
 
 ## Markers
 
 In the app each kind shows in a strip under the ruler: Markers (markers,
-sections, chapters), To-dos and Comments. A `todo` is a note for Mike, like
+sections, chapters), To-dos and Comments. A `todo` is a note for the creator, like
 a shot to record or find; put what's needed in its `note`, which he sees
-when he hovers over it. A `comment` is a note Mike left for the next round
-(`tandem comments`, and [Do Mike's comments](review-and-history.md#do-mikes-comments)).
+when he hovers over it. A `comment` is a note the creator left for the next round
+(`substo comments`, and [Do the creator's comments](review-and-history.md#do-mikes-comments)).
 A `duration` makes a marker a range. A section marker's name and note are
 its card's title and subtitle.

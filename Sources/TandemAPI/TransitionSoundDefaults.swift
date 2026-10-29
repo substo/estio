@@ -3,9 +3,9 @@ import TandemAssets
 import TandemCore
 import TandemMedia
 
-/// The sound each type of transition plays unless Mike picks another: push,
+/// The sound each type of transition plays unless the creator picks another: push,
 /// slide, cut slide and wipe get the light swoosh he likes on a push, and
-/// dissolves, fades and zooms stay silent. Mike's own picks (Tandem >
+/// dissolves, fades and zooms stay silent. the creator's own picks (Substo Video >
 /// Settings) are kept by the app and passed in as `choices`. Sounds come
 /// from the asset library, so their licences and every use are recorded,
 /// and are copied into the project's `assets/sfx/` when they're used.
@@ -13,7 +13,7 @@ public enum TransitionSoundDefaults {
     /// A library sound effect, set up to play with a transition.
     public struct Sound: Codable, Equatable, Sendable {
         public var assetID: String
-        /// Clip gain in dB for speech at Tandem's -20 LUFS, moved with a
+        /// Clip gain in dB for speech at Substo Video's -20 LUFS, moved with a
         /// project whose speech plays elsewhere (`Resolved.levelled(for:)`).
         public var gainDB: Double
         /// Seconds from the transition's middle to the sound's start, so
@@ -28,16 +28,16 @@ public enum TransitionSoundDefaults {
         }
     }
 
-    /// The level the gains are set against: Tandem's speech level.
+    /// The level the gains are set against: Substo Video's speech level.
     public static let speechLevel = AudioLevels.defaultSpeechLoudness
 
     /// Where a sound effect's loudest moment sits under the voice: 15 LU,
-    /// like the section card whooshes and Mike's own swipes in Decision
+    /// like the section card whooshes and the creator's own swipes in Decision
     /// Models (docs/ASSETS.md).
     public static let underSpeech = 15.0
 
     /// "A quick light swoosh sweeping from left to right…", made with
-    /// ElevenLabs on 2026-09-29: the one on a push in Mike's ESLint video,
+    /// ElevenLabs on 2026-09-29: the one on a push in the creator's ESLint video,
     /// which he asked for on every push. It swells from the left, passes
     /// at 0.39 s (its loudest moment, where it crosses to the right) and
     /// tails off by 0.65 s, so it starts 0.39 s before the middle and
@@ -49,7 +49,7 @@ public enum TransitionSoundDefaults {
     /// Sounds measured by hand, used as measured whatever picks them.
     public static let measured: [Sound] = [lightSwoosh]
 
-    /// Tandem's own choice for a type, before Mike's.
+    /// Substo Video's own choice for a type, before the creator's.
     public static func builtIn(_ type: TransitionType) -> Sound? {
         switch type {
         case .push, .slide, .cutSlide, .wipe: return lightSwoosh
@@ -57,8 +57,8 @@ public enum TransitionSoundDefaults {
         }
     }
 
-    /// What a type plays: Mike's pick when he's made one (an asset ID, or
-    /// "" for none), else Tandem's. A pick the library doesn't know plays
+    /// What a type plays: the creator's pick when he's made one (an asset ID, or
+    /// "" for none), else Substo Video's. A pick the library doesn't know plays
     /// nothing. `asset` looks an ID up, `waveform` its peaks.
     public static func sound(for type: TransitionType, choices: [String: String], asset: (String) -> Asset?, waveform: (Asset) -> Waveform?) -> Sound? {
         guard let choice = choices[type.rawValue] else { return builtIn(type) }

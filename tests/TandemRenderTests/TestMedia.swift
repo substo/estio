@@ -11,7 +11,7 @@ final class TestMedia {
     let folder: URL
 
     init() throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-render-\(UUID().uuidString)", isDirectory: true)
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-render-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     }
 

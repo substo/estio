@@ -6,7 +6,7 @@ import Foundation
 ///
 /// Off by default: Freesound's API terms need written permission from its
 /// operator (the Music Technology Group at UPF) for commercial use, and
-/// Mike's channel is commercial. Turn it on in the asset settings once that
+/// the creator's channel is commercial. Turn it on in the asset settings once that
 /// permission is in hand. Originals need OAuth2, so fetches keep the HQ
 /// preview, which is fine for most effects.
 public final class FreesoundProvider: AssetProvider, @unchecked Sendable {
@@ -22,7 +22,7 @@ public final class FreesoundProvider: AssetProvider, @unchecked Sendable {
             "Only CC0 and CC BY sounds; CC BY needs a credit line.",
             "Commercial use of the API needs written permission from UPF's Music Technology Group.",
             "60 requests a minute and 2,000 a day.",
-            "Originals need OAuth2; Tandem keeps the high-quality MP3 preview."
+            "Originals need OAuth2; Substo Video keeps the high-quality MP3 preview."
         ]
     )
     public var website: URL? { URL(string: "https://freesound.org") }

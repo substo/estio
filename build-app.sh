@@ -3,9 +3,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_CONFIGURATION="${TANDEM_BUILD_CONFIGURATION:-release}"
+BUILD_CONFIGURATION="${SUBSTO_BUILD_CONFIGURATION:-release}"
 APP_NAME="Substo Video"
-FINAL_DIR="${TANDEM_APP_DIR:-$HOME/Applications/$APP_NAME.app}"
+FINAL_DIR="${SUBSTO_APP_DIR:-$HOME/Applications/$APP_NAME.app}"
 # The bundle is built beside the installed one and swapped in at the end, so
 # a `tandem` command run meanwhile (an agent's, mid-install) never finds the
 # app missing, half copied or half signed.
@@ -17,10 +17,10 @@ cleanup() {
   rm -rf "$APP_DIR" "$OLD_DIR"
 }
 trap cleanup EXIT
-APP_BIN="$APP_DIR/Contents/MacOS/tandem-app"
-CLI_BIN="$APP_DIR/Contents/MacOS/tandem"
-ICON_SOURCE="$SCRIPT_DIR/icons/tandem.png"
-SIGNING_IDENTITY="${TANDEM_CODESIGN_IDENTITY:-}"
+APP_BIN="$APP_DIR/Contents/MacOS/substo-app"
+CLI_BIN="$APP_DIR/Contents/MacOS/substo"
+ICON_SOURCE="$SCRIPT_DIR/icons/substo.png"
+SIGNING_IDENTITY="${SUBSTO_CODESIGN_IDENTITY:-}"
 SIGNING_REQUIREMENTS=()
 
 if ! command -v swift >/dev/null 2>&1; then
@@ -32,7 +32,7 @@ echo "Building Substo Video ($BUILD_CONFIGURATION)..."
 swift build --package-path "$SCRIPT_DIR" -c "$BUILD_CONFIGURATION"
 BIN_DIR="$(swift build --package-path "$SCRIPT_DIR" -c "$BUILD_CONFIGURATION" --show-bin-path)"
 
-for binary in tandem-app tandem; do
+for binary in substo-app substo; do
   if [[ ! -x "$BIN_DIR/$binary" ]]; then
     echo "ERROR: built binary not found at $BIN_DIR/$binary"
     exit 1
@@ -43,8 +43,8 @@ echo "Staging $FINAL_DIR..."
 rm -rf "$APP_DIR"
 mkdir -p "$(dirname "$FINAL_DIR")"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
-cp "$BIN_DIR/tandem-app" "$APP_BIN"
-cp "$BIN_DIR/tandem" "$CLI_BIN"
+cp "$BIN_DIR/substo-app" "$APP_BIN"
+cp "$BIN_DIR/substo" "$CLI_BIN"
 cp "$SCRIPT_DIR/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
 # SwiftPM resource bundles (keymaps, packs) sit next to the binaries.
 for bundle in "$BIN_DIR"/*.bundle; do
@@ -56,14 +56,14 @@ done
 chmod +x "$APP_BIN" "$CLI_BIN"
 
 if [[ -f "$ICON_SOURCE" ]]; then
-  ICONSET="$(mktemp -d)/tandem.iconset"
+  ICONSET="$(mktemp -d)/substo.iconset"
   mkdir -p "$ICONSET"
   for size in 16 32 128 256 512; do
     sips -z "$size" "$size" "$ICON_SOURCE" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
     double=$((size * 2))
     sips -z "$double" "$double" "$ICON_SOURCE" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
   done
-  iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/tandem.icns"
+  iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/substo.icns"
   rm -rf "$(dirname "$ICONSET")"
 fi
 

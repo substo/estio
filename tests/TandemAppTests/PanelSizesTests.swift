@@ -3,7 +3,7 @@ import XCTest
 
 final class PanelSizesTests: XCTestCase {
     private func store() -> UserDefaults {
-        let name = "tandem-panels-\(UUID().uuidString)"
+        let name = "substo-panels-\(UUID().uuidString)"
         let store = UserDefaults(suiteName: name)!
         addTeardownBlock { store.removePersistentDomain(forName: name) }
         return store

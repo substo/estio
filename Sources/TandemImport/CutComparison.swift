@@ -4,7 +4,7 @@ import TandemCore
 /// Compares two cuts of the same footage, for example the decision-models
 /// EDL rebuild against the imported Filmora v14 it's meant to match.
 ///
-/// The voice is the backbone of Mike's cuts, so clips are matched on it:
+/// The voice is the backbone of the creator's cuts, so clips are matched on it:
 /// two voice clips match when they play the same stretch of the same
 /// camera file. Named anchors (section starts, given as a camera file and
 /// a time in it) show where each cut puts the same words.
@@ -97,7 +97,7 @@ public struct CutComparison: Codable, Equatable, Sendable {
         )
     }
 
-    /// Clips on audio tracks playing camera files: Mike's voice.
+    /// Clips on audio tracks playing camera files: the creator's voice.
     static func voice(in project: Project) -> [VoiceClip] {
         let cameras = Dictionary(uniqueKeysWithValues: project.media.filter { $0.role == .camera }.map { ($0.id, $0.path) })
         return project.audioTracks.flatMap(\.clips).compactMap { clip in

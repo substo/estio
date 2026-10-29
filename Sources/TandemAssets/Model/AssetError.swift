@@ -1,6 +1,6 @@
 import Foundation
 
-/// Errors from the asset library. Messages are written for Mike or an agent
+/// Errors from the asset library. Messages are written for the creator or an agent
 /// to act on, and never include keys.
 public enum AssetError: Error, Equatable, Sendable, LocalizedError {
     case notFound(String)

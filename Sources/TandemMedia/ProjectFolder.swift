@@ -2,14 +2,14 @@ import Foundation
 import TandemCore
 
 /// The folder a project lives in. Media paths in the project are relative to
-/// it, and Tandem keeps its own files in `.tandem/` inside it:
+/// it, and Substo Video keeps its own files in `.substo/` inside it:
 ///
 ///     <video folder>/
-///       <name>.tandem          the project
+///       <name>.substo          the project
 ///       source/                record-it takes (<base>-camera.mov, <base>-screen.mov)
 ///       broll/ music/ sfx/ graphics/ assets/ ...
 ///       exports/               renders, each with a project snapshot beside it
-///       .tandem/
+///       .substo/
 ///         backups/             previous saves
 ///         <name>.journal.jsonl edits since the last save
 ///         cache/               analysis results, keyed by content hash
@@ -21,12 +21,12 @@ public struct ProjectFolder: Sendable, Equatable {
         self.root = root.standardizedFileURL
     }
 
-    /// The folder holding a `.tandem` file.
+    /// The folder holding a `.substo` file.
     public init(projectFile: URL) {
         self.init(root: projectFile.deletingLastPathComponent())
     }
 
-    public var supportFolder: URL { root.appendingPathComponent(".tandem", isDirectory: true) }
+    public var supportFolder: URL { root.appendingPathComponent(".substo", isDirectory: true) }
     public var cacheFolder: URL { supportFolder.appendingPathComponent("cache", isDirectory: true) }
     public var exportsFolder: URL { root.appendingPathComponent("exports", isDirectory: true) }
     public var assetsFolder: URL { root.appendingPathComponent("assets", isDirectory: true) }

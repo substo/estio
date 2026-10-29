@@ -51,7 +51,7 @@ final class ReviewDiffTests: XCTestCase {
         }
     }
 
-    /// `tandem tighten` cuts several pauses in one batch, latest first:
+    /// `substo tighten` cuts several pauses in one batch, latest first:
     /// a mark at each join, where it is after all of them, and still
     /// nothing that only moved, not even the B-roll one of the pauses ran
     /// through.
@@ -487,7 +487,7 @@ final class ReviewLogTests: XCTestCase {
         // One shot deleted again stays listed, out of sight.
         try run(c, &log, by: "user", [.removeClips(clipIDs: [c.clips("B-roll").last!.id])])
         XCTAssertEqual(log.entries.first?.away.count, 1)
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("review-\(UUID().uuidString)/.tandem/Test.review.json")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("review-\(UUID().uuidString)/.substo/Test.review.json")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent().deletingLastPathComponent()) }
         try log.save(to: url)
         XCTAssertEqual(ReviewLog.load(from: url), log)
@@ -509,15 +509,15 @@ final class ReviewRecorderTests: XCTestCase {
     private var folder: URL!
 
     override func setUpWithError() throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-review-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder.appendingPathComponent(".tandem"), withIntermediateDirectories: true)
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-review-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent(".substo"), withIntermediateDirectories: true)
     }
 
     override func tearDownWithError() throws {
         try? FileManager.default.removeItem(at: folder)
     }
 
-    private var url: URL { ProjectFile.reviewURL(for: folder.appendingPathComponent("Test.tandem")) }
+    private var url: URL { ProjectFile.reviewURL(for: folder.appendingPathComponent("Test.substo")) }
 
     func testRecordsAgentEditsAndSavesThemForTheNextOpen() throws {
         let (_, c) = try Fixture.edited()
@@ -725,7 +725,7 @@ final class ReviewRecorderTests: XCTestCase {
     /// opens, once.
     func testCatchesUpOnEditsTheJournalReplayed() throws {
         let (f, c) = try Fixture.edited()
-        let journal = ProjectJournal(url: folder.appendingPathComponent(".tandem/Test.journal.jsonl"))
+        let journal = ProjectJournal(url: folder.appendingPathComponent(".substo/Test.journal.jsonl"))
         let batch = EditBatch(label: "Add push", author: "claude", commands: [.placeMedia(mediaIDs: ["med_broll"], at: t(40), duration: t(3))])
         journal.append(batch: batch, revision: c.revision + 1, seed: 7)
         var replayed: [(entry: ProjectJournal.Entry, before: Project, after: Project)] = []

@@ -90,13 +90,13 @@ struct Arguments {
         let global: Set<String> = ["project", "author", "json", "help"]
         for name in Set(options.keys).union(flags) where !allowed.contains(name) && !global.contains(name) {
             let takes = allowed.sorted().map { "--\($0)" }.joined(separator: ", ")
-            throw UsageError(message: "`tandem \(command)` doesn't take --\(name).\(takes.isEmpty ? "" : " It takes \(takes).")")
+            throw UsageError(message: "`substo \(command)` doesn't take --\(name).\(takes.isEmpty ? "" : " It takes \(takes).")")
         }
     }
 
     func positional(_ index: Int, _ name: String, command: String) throws -> String {
         guard index < positionals.count else {
-            throw UsageError(message: "`tandem \(command)` needs \(name).")
+            throw UsageError(message: "`substo \(command)` needs \(name).")
         }
         return positionals[index]
     }
@@ -104,7 +104,7 @@ struct Arguments {
     func expectPositionals(atMost count: Int, command: String) throws {
         if positionals.count > count {
             let extra = positionals[count...].joined(separator: " ")
-            throw UsageError(message: "`tandem \(command)` got unexpected arguments: \(extra)")
+            throw UsageError(message: "`substo \(command)` got unexpected arguments: \(extra)")
         }
     }
 

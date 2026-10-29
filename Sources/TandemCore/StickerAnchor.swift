@@ -4,9 +4,9 @@ import Foundation
 ///
 /// Stickers come in all sizes, and fitting one to the frame the way a shot
 /// is placed blew the ESLint video's "Comment below" (712 by 484) and "Like
-/// and subscribe" (1280 by 392) up over Mike's face. Placed at an anchor, a
+/// and subscribe" (1280 by 392) up over the creator's face. Placed at an anchor, a
 /// sticker fits a box at that edge of the frame instead. The box is the
-/// size of the ones Mike signed off there.
+/// size of the ones the creator signed off there.
 public enum StickerAnchor: String, Codable, CaseIterable, Sendable {
     case bottom, bottomLeft, bottomRight, top, topLeft, topRight, centre
     /// Bottom left, inside the title-safe area, like a name.

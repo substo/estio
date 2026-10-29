@@ -1,12 +1,12 @@
 import Foundation
 
-/// Reading and writing `.tandem` project files.
+/// Reading and writing `.substo` project files.
 ///
 /// The file is pretty-printed JSON with sorted keys so diffs stay readable
 /// and agents can inspect it. Writes are atomic (write to a temp file, then
-/// rename) and the previous version is kept in `.tandem/backups/`.
+/// rename) and the previous version is kept in `.substo/backups/`.
 public enum ProjectFile {
-    public static let fileExtension = "tandem"
+    public static let fileExtension = "substo"
 
     public struct Envelope: Codable, Sendable {
         /// Bumped on every committed edit. Lets the app notice that the CLI
@@ -42,29 +42,29 @@ public enum ProjectFile {
     }
 
     /// The hidden folder next to the project that holds backups, the journal
-    /// and the analysis cache: `<folder>/.tandem/`.
+    /// and the analysis cache: `<folder>/.substo/`.
     public static func supportFolder(for projectURL: URL) -> URL {
-        projectURL.deletingLastPathComponent().appendingPathComponent(".tandem", isDirectory: true)
+        projectURL.deletingLastPathComponent().appendingPathComponent(".substo", isDirectory: true)
     }
 
-    /// `.tandem/<name>.journal.jsonl`: edits since the last save.
+    /// `.substo/<name>.journal.jsonl`: edits since the last save.
     public static func journalURL(for projectURL: URL) -> URL {
         supportFolder(for: projectURL).appendingPathComponent("\(projectURL.deletingPathExtension().lastPathComponent).journal.jsonl")
     }
 
-    /// `.tandem/<name>.undo.json`: undo history for edits made while no app
+    /// `.substo/<name>.undo.json`: undo history for edits made while no app
     /// had the project open.
     public static func undoHistoryURL(for projectURL: URL) -> URL {
         supportFolder(for: projectURL).appendingPathComponent("\(projectURL.deletingPathExtension().lastPathComponent).undo.json")
     }
 
-    /// `.tandem/<name>.review.json`: agent edits Mike hasn't reviewed yet
+    /// `.substo/<name>.review.json`: agent edits the creator hasn't reviewed yet
     /// (see `ReviewLog`).
     public static func reviewURL(for projectURL: URL) -> URL {
         supportFolder(for: projectURL).appendingPathComponent("\(projectURL.deletingPathExtension().lastPathComponent).review.json")
     }
 
-    /// `.tandem/<name>.history.jsonl`: every change to the project, with
+    /// `.substo/<name>.history.jsonl`: every change to the project, with
     /// who made it and where (see `EditHistoryLog`).
     public static func historyURL(for projectURL: URL) -> URL {
         supportFolder(for: projectURL).appendingPathComponent("\(projectURL.deletingPathExtension().lastPathComponent).history.jsonl")
@@ -117,7 +117,7 @@ public enum ProjectFile {
         return ISO8601DateFormatter.backupStamp.date(from: stamp)
     }
 
-    /// The backups of the project at `url` in `.tandem/backups/`, oldest
+    /// The backups of the project at `url` in `.substo/backups/`, oldest
     /// first.
     public static func backups(of url: URL) -> [URL] {
         let folder = supportFolder(for: url).appendingPathComponent("backups", isDirectory: true)
@@ -126,9 +126,9 @@ public enum ProjectFile {
         return files.filter { isBackup($0.lastPathComponent, of: name) }.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
-    /// True for `<name> <stamp>.tandem`, a backup of `<name>.tandem`. A
-    /// version saved beside it (`<name> v2.tandem`) has backups that start
-    /// the same way, `<name> v2 <stamp>.tandem`, and they aren't this
+    /// True for `<name> <stamp>.substo`, a backup of `<name>.substo`. A
+    /// version saved beside it (`<name> v2.substo`) has backups that start
+    /// the same way, `<name> v2 <stamp>.substo`, and they aren't this
     /// project's to prune.
     static func isBackup(_ fileName: String, of name: String) -> Bool {
         let prefix = name + " "
@@ -143,7 +143,7 @@ public enum ProjectFile {
     /// (an upgrade would drop the explicit values made since).
     public static func migrate(_ project: Project) throws -> Project {
         guard project.schemaVersion <= Project.currentSchemaVersion else {
-            throw EditError.invalid("This project was saved by a newer Tandem (schema \(project.schemaVersion)).")
+            throw EditError.invalid("This project was saved by a newer Substo Video (schema \(project.schemaVersion)).")
         }
         var project = project
         if project.schemaVersion < 2 { LegacyTextStyles.upgrade(&project) }
@@ -177,7 +177,7 @@ public final class ProjectJournal: @unchecked Sendable {
     public var url: URL { folder.url.appendingPathComponent(fileName) }
     private let folder: FolderAnchor
     private let fileName: String
-    private let queue = DispatchQueue(label: "com.mikerosoft.tandem.journal")
+    private let queue = DispatchQueue(label: "com.substo.video.journal")
 
     public init(url: URL) {
         folder = FolderAnchor(url.deletingLastPathComponent())
@@ -295,9 +295,9 @@ public final class ProjectJournal: @unchecked Sendable {
                     for command in batch.commands {
                         try Editing.apply(command, to: &working, context: &context)
                     }
-                    // An older Tandem wrote full styles where it meant
+                    // An older Substo Video wrote full styles where it meant
                     // "the preset's". Every edit before this one was that
-                    // older Tandem's too, so the whole project reads its way.
+                    // older Substo Video's too, so the whole project reads its way.
                     if (entry.schemaVersion ?? 1) < 2 { LegacyTextStyles.upgrade(&working) }
                     replayed?(entry, current, working)
                     current = working
@@ -314,7 +314,7 @@ public final class ProjectJournal: @unchecked Sendable {
 }
 
 /// A folder that can be renamed or moved while it's in use (Finder lets
-/// Mike rename a video folder with the project open). Holds a descriptor on
+/// the creator rename a video folder with the project open). Holds a descriptor on
 /// the folder and asks the system where it is now, so files written into
 /// it keep landing in it rather than at the old path.
 public final class FolderAnchor: @unchecked Sendable {

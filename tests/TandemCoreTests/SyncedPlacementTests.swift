@@ -2,12 +2,12 @@ import XCTest
 @testable import TandemCore
 
 /// Another camera angle and an external mic, synced to the camera take by
-/// sound (`tandem sync <file>` sets their take), put alongside it with
+/// sound (`substo sync <file>` sets their take), put alongside it with
 /// `placeSynced`, and `showAngle` to pick which angle shows where.
 final class SyncedPlacementTests: XCTestCase {
     /// A 120 s camera take on Camera and Voice, plus a 60 s close-up and a
     /// 60 s mic that started 3 s before the camera (their take offsets say
-    /// so, as `tandem sync` sets them).
+    /// so, as `substo sync` sets them).
     static func project(angleOffset: Double = 0, micOffset: Double = 0) throws -> ProjectCoordinator {
         var project = Project.standard(name: "Interview")
         project.media = [
@@ -118,7 +118,7 @@ final class SyncedPlacementTests: XCTestCase {
         let c = try Self.project()
         try c.run("Out of the take", .updateMedia(mediaID: "med_mic", patch: .object(["takeID": .null])))
         XCTAssertThrowsError(try c.run("Mic", .placeSynced(mediaID: "med_mic"))) { error in
-            XCTAssertTrue("\(error)".contains("tandem sync"), "\(error)")
+            XCTAssertTrue("\(error)".contains("substo sync"), "\(error)")
         }
         try c.run("Angle", .placeSynced(mediaID: "med_angle"))
         XCTAssertThrowsError(try c.run("Again", .placeSynced(mediaID: "med_angle"))) { error in

@@ -172,7 +172,7 @@ public enum TranscriptTools {
 
     // MARK: - Tightening
 
-    /// What `tighten` keeps when given Mike's rules (`--mike`): 0.4 s
+    /// What `tighten` keeps when given the creator's rules (`--mike`): 0.4 s
     /// between sentences, the feel of his old Filmora silence detection;
     /// 0.12 s after a comma and 0.08 s mid-sentence, so a sentence sounds
     /// like one thought; only pauses of 0.5 s or more change, so breaths and
@@ -257,7 +257,7 @@ public enum TranscriptTools {
     /// are left alone. With `snug` the cut is as long as whole frames allow
     /// and centred in the pause, so what's kept is within a frame of the
     /// keep (never under it). Rounding both edges inwards instead can keep
-    /// two frames more, which is most of Mike's 0.08 s mid-sentence keep.
+    /// two frames more, which is most of the creator's 0.08 s mid-sentence keep.
     public static func plan(_ pauses: [Pause], rules: PauseRules, frameRate: FrameRate, snug: Bool = true) -> [PlannedCut] {
         let frame = frameRate.frameDuration
         return pauses.compactMap { pause in
@@ -441,7 +441,7 @@ public enum TranscriptTools {
     ///
     /// Agents put section markers on the first word, where its transcript
     /// starts it, and room made right there left the word's first sound
-    /// before the room and the rest after it (Mike heard "Now" clipped). So
+    /// before the room and the rest after it (the creator heard "Now" clipped). So
     /// the cut goes in the pause beside the word the marker is on or near:
     /// the one before it, or after it when the marker is in the word's
     /// second half. It keeps `sectionLead` of silence beside each word, or

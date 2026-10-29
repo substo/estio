@@ -2,13 +2,13 @@ import AppKit
 import TandemCore
 
 /// Starts the app: menus, the keymap, projects from the command line,
-/// Finder and `open -a`, and the `tandem://` URL scheme.
+/// Finder and `open -a`, and the `substo://` URL scheme.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling {
     private let documents = ProjectDocuments.shared
     private var launched = false
     private var pendingURLs: [URL] = []
-    /// What a tandem:// link must carry for the app to act on it (see
+    /// What a substo:// link must carry for the app to act on it (see
     /// `AppURLKey`). Nil if it couldn't be read or made: then no link acts.
     private var urlKey: AppURLKey?
     private var terminationSignal: DispatchSourceSignal?
@@ -19,7 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         // you're still looking.
         UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 500])
         documents.keymap = KeymapStore.load(report: { message in
-            NSLog("Tandem keymap: %@", message)
+            NSLog("Substo Video keymap: %@", message)
         })
         NSApp.appearance = NSAppearance(named: .darkAqua)
         NSApp.mainMenu = MainMenu.build(keymap: documents.keymap, recentDelegate: documents)
@@ -28,12 +28,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
     func applicationDidFinishLaunching(_ notification: Notification) {
         launched = true
         quitCleanlyOnSIGTERM()
-        // Made at launch, before any link is handled, so `tandem url` can
+        // Made at launch, before any link is handled, so `substo url` can
         // read it.
         do {
             urlKey = try AppURLKey.load()
         } catch {
-            NSLog("Tandem: no key for tandem:// links, so they're ignored: %@", error.localizedDescription)
+            NSLog("Substo Video: no key for substo:// links, so they're ignored: %@", error.localizedDescription)
         }
         MainThreadMeter.install()
         ShortcutHints.shared.install()
@@ -50,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         if documents.windows.isEmpty && !documents.isOpening { documents.showWelcome() }
         // No activate() here: Finder, the Dock and `open` bring the app
         // forward themselves, and `open -g` (agents, scripts) must leave
-        // whatever Mike is using in front.
+        // whatever the creator is using in front.
         scheduleLaunchScreenshot()
     }
 
@@ -96,7 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         return .terminateLater
     }
 
-    /// Set when SIGTERM asked Tandem to quit.
+    /// Set when SIGTERM asked Substo Video to quit.
     private var quittingOnSignal = false
 
     /// `kill` (and `kill.sh`) quits like Cmd-Q: projects save, the API
@@ -109,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
                 self?.quittingOnSignal = true
                 // From the run loop, not from inside this main queue
                 // block, so work queued on the main actor can still run
-                // while Tandem quits.
+                // while Substo Video quits.
                 NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)
             }
         }
@@ -124,10 +124,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
             if url.isFileURL {
                 documents.open(url)
             } else if let command = AppURLCommand.parse(url) {
-                // Any app or web page can open a tandem:// link, so only
-                // links with this Mac's key act (`tandem url` adds it).
+                // Any app or web page can open a substo:// link, so only
+                // links with this Mac's key act (`substo url` adds it).
                 guard urlKey?.accepts(url) == true else {
-                    NSLog("Tandem: ignored a tandem://%@ link without this Mac's key (send it with `tandem url`)", url.host ?? "")
+                    NSLog("Substo Video: ignored a substo://%@ link without this Mac's key (send it with `substo url`)", url.host ?? "")
                     continue
                 }
                 guard let name = AppURLCommand.project(in: url) else {
@@ -137,14 +137,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
                 // A named project gets the command or nothing does: falling
                 // back to the front window would act on the wrong project.
                 guard let target = documents.window(named: name) else {
-                    NSLog("Tandem: no open project called %@", name)
+                    NSLog("Substo Video: no open project called %@", name)
                     continue
                 }
                 run(command, for: target)
             } else {
-                // Not the whole link: a mistyped `tandem url` command would
+                // Not the whole link: a mistyped `substo url` command would
                 // put this Mac's key in the log.
-                NSLog("Tandem: ignored a %@://%@ link", url.scheme ?? "", url.host ?? "")
+                NSLog("Substo Video: ignored a %@://%@ link", url.scheme ?? "", url.host ?? "")
             }
         }
     }
@@ -157,11 +157,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 MainActor.assumeIsolated {
                     let window = front?.window ?? NSApp.windows.first { $0.isVisible }
-                    guard let window else { return NSLog("Tandem: no window to capture") }
+                    guard let window else { return NSLog("Substo Video: no window to capture") }
                     do {
                         try WindowSnapshot.write(window, to: URL(fileURLWithPath: out))
                     } catch {
-                        NSLog("Tandem: screenshot failed: %@", error.localizedDescription)
+                        NSLog("Substo Video: screenshot failed: %@", error.localizedDescription)
                     }
                 }
             }
@@ -204,7 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
             let size = NSSize(width: max(width, window.contentMinSize.width), height: max(height, window.contentMinSize.height))
             window.setContentSize(size)
         case .windowOrder(let toFront):
-            // Without activating the app, so whatever Mike is typing into
+            // Without activating the app, so whatever the creator is typing into
             // keeps the keys.
             guard let window = front?.window ?? NSApp.windows.first(where: { $0.isVisible }) else { return }
             if toFront { window.orderFrontRegardless() } else { window.orderBack(nil) }
@@ -215,7 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         case .newProject(let folder):
             var isFolder: ObjCBool = false
             guard FileManager.default.fileExists(atPath: folder, isDirectory: &isFolder), isFolder.boolValue else {
-                return NSLog("Tandem: no folder at %@", folder)
+                return NSLog("Substo Video: no folder at %@", folder)
             }
             documents.createProject(inFolder: URL(fileURLWithPath: folder, isDirectory: true))
         case .assets(let section, let search, let scope, let online):
@@ -227,22 +227,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         case .saveVersion(let out):
             // Links never replace a file; Save As in the app asks first.
             guard let front, !FileManager.default.fileExists(atPath: out) else {
-                return NSLog("Tandem: not saving a version to %@", out)
+                return NSLog("Substo Video: not saving a version to %@", out)
             }
             documents.saveVersion(of: front.model, to: URL(fileURLWithPath: out))
         }
     }
 
-    /// `TANDEM_SCREENSHOT=<path>` writes a screenshot of the first window a
-    /// couple of seconds after launch; `TANDEM_SCREENSHOT_QUIT=1` quits after.
+    /// `SUBSTO_SCREENSHOT=<path>` writes a screenshot of the first window a
+    /// couple of seconds after launch; `SUBSTO_SCREENSHOT_QUIT=1` quits after.
     private func scheduleLaunchScreenshot() {
         let environment = ProcessInfo.processInfo.environment
-        guard let path = environment["TANDEM_SCREENSHOT"], !path.isEmpty else { return }
-        let delay = Double(environment["TANDEM_SCREENSHOT_DELAY"] ?? "") ?? 2
+        guard let path = environment["SUBSTO_SCREENSHOT"], !path.isEmpty else { return }
+        let delay = Double(environment["SUBSTO_SCREENSHOT_DELAY"] ?? "") ?? 2
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             MainActor.assumeIsolated {
                 self.run(.screenshot(out: path), for: self.documents.frontmost)
-                if environment["TANDEM_SCREENSHOT_QUIT"] == "1" {
+                if environment["SUBSTO_SCREENSHOT_QUIT"] == "1" {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1) { NSApp.terminate(nil) }
                 }
             }
@@ -269,7 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         return command == .newProject || command == .openProject
     }
 
-    /// Tandem > Settings…: where the shared library is.
+    /// Substo Video > Settings…: where the shared library is.
     @objc func showSettings(_ sender: Any?) {
         SettingsWindowController.show()
     }

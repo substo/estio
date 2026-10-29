@@ -12,7 +12,7 @@ import Foundation
 /// decode, so it isn't used. For WebM the decoder matters: ffmpeg's built-in
 /// VP9 decoder drops the alpha channel, `libvpx-vp9` keeps it. RGB sources
 /// (Animation, PNG) are converted with the BT.709 matrix and tagged so, like
-/// every other sticker Tandem writes. WebM keeps its YUV and is tagged with
+/// every other sticker Substo Video writes. WebM keeps its YUV and is tagged with
 /// what that YUV is (`webColour`).
 public enum HEVCTranscoder {
     /// Transcodes `input` into `output`, a QuickTime movie, and returns

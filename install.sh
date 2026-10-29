@@ -8,9 +8,9 @@ TARGET_DIR="${1:-$HOME/.local/bin}"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "Usage: bash install.sh [target_bin_dir]"
-  echo "Links tandem into target_bin_dir (default: ~/.local/bin), and the tandem"
+  echo "Links substo into target_bin_dir (default: ~/.local/bin), and the Substo Video"
   echo "skill into ~/.claude/skills and ~/.agents/skills for Claude Code and Codex."
-  echo "Set TANDEM_SKILL_DIRS to other folders (space separated), or to nothing to skip that."
+  echo "Set SUBSTO_SKILL_DIRS to other folders (space separated), or to nothing to skip that."
   echo "Build the app first with bash setup_mac.sh."
   exit 0
 fi
@@ -20,34 +20,34 @@ if [[ $# -gt 1 || "$TARGET_DIR" == -* ]]; then
 fi
 
 mkdir -p "$TARGET_DIR"
-DEST="$TARGET_DIR/tandem"
+DEST="$TARGET_DIR/substo"
 # Repoint old launcher symlinks, but don't overwrite someone's own executable.
 if [[ -e "$DEST" && ! -L "$DEST" ]]; then
   echo "Refusing to replace $DEST: it is not a symlink." >&2
   exit 1
 fi
-chmod +x "$SCRIPT_DIR/tandem"
-ln -sfn "$SCRIPT_DIR/tandem" "$DEST"
-echo "Installed $DEST -> $SCRIPT_DIR/tandem"
+chmod +x "$SCRIPT_DIR/substo"
+ln -sfn "$SCRIPT_DIR/substo" "$DEST"
+echo "Installed $DEST -> $SCRIPT_DIR/substo"
 
-# The skill that teaches agents to edit with Tandem. Like the launcher, a
+# The skill that teaches agents to edit with Substo Video. Like the launcher, a
 # skill of the same name that isn't a link is someone's own: left alone.
-if [[ -n "${TANDEM_SKILL_DIRS+set}" ]]; then
-  read -r -a SKILL_DIRS <<< "$TANDEM_SKILL_DIRS"
+if [[ -n "${SUBSTO_SKILL_DIRS+set}" ]]; then
+  read -r -a SKILL_DIRS <<< "$SUBSTO_SKILL_DIRS"
 else
   SKILL_DIRS=("$HOME/.claude/skills" "$HOME/.agents/skills")
 fi
 for dir in ${SKILL_DIRS[@]+"${SKILL_DIRS[@]}"}; do
   mkdir -p "$dir"
-  if [[ -e "$dir/tandem" && ! -L "$dir/tandem" ]]; then
-    echo "Left $dir/tandem alone: it isn't a link, so it's not this skill." >&2
+  if [[ -e "$dir/substo-video" && ! -L "$dir/substo-video" ]]; then
+    echo "Left $dir/substo-video alone: it isn't a link, so it's not this skill." >&2
     continue
   fi
-  ln -sfn "$SCRIPT_DIR/skills/tandem" "$dir/tandem"
-  echo "Linked the tandem skill into $dir"
+  ln -sfn "$SCRIPT_DIR/skills/substo-video" "$dir/substo-video"
+  echo "Linked the Substo Video skill into $dir"
 done
 case ":${PATH}:" in
   *":$TARGET_DIR:"*) ;;
   *) printf 'Add this directory to PATH in ~/.zshrc: export PATH="%s:$PATH"\n' "$TARGET_DIR" ;;
 esac
-echo "Run tandem app to open the editor, or tandem help for CLI commands."
+echo "Run substo app to open the editor, or substo help for CLI commands."

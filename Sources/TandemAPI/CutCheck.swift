@@ -2,11 +2,11 @@ import Foundation
 import TandemCore
 import TandemMedia
 
-/// `tandem check --cuts`: does a cut on the speech tracks clip a word?
+/// `substo check --cuts`: does a cut on the speech tracks clip a word?
 ///
 /// Transcript word edges can be half a second out and a final "s" barely
 /// registers below 4 kHz, so cuts placed from the transcript (or snapped to
-/// the quietest point near a word's end) clipped words Mike then heard in
+/// the quietest point near a word's end) clipped words the creator then heard in
 /// review: "takes" cut to "ta", "example", "They're". This reads each
 /// file's own sound either side of every edit (no render, so it's quick),
 /// judges it with `CutAudit`, and gives the trim that moves each clipped
@@ -133,7 +133,7 @@ enum CutCheck {
         }
 
         var cut = CheckProblem.CutEdge(clipID: clip.id, edge: edge.edge)
-        var advice = "No pause within \(String(format: "%.1f", CutAudit.reach)) s either side: listen with tandem clip and recut it by hand."
+        var advice = "No pause within \(String(format: "%.1f", CutAudit.reach)) s either side: listen with substo clip and recut it by hand."
         if let delta = shift(edge, verdict, project: project) {
             let to = edge.time + delta
             cut.to = to

@@ -275,8 +275,8 @@ enum LibraryDrag: Equatable {
     case template(String)
 
     private static let prefixes = (
-        asset: "tandem-asset:", transition: "tandem-transition:", effect: "tandem-effect:",
-        title: "tandem-title:", template: "tandem-template:"
+        asset: "substo-asset:", transition: "substo-transition:", effect: "substo-effect:",
+        title: "substo-title:", template: "substo-template:"
     )
 
     var payload: String {

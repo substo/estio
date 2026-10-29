@@ -89,7 +89,7 @@ final class ScannerTests: TempFolderTestCase {
     func testWalkSkipsTandemExportsHiddenAndToolingFolders() throws {
         for path in [
             "source/a-camera.mov", "music/bed.mp3", "graphics/logo.png", "top.wav",
-            ".tandem/cache/proxy/x/proxy.mov", "exports/final.mp4", "node_modules/pkg/demo.mp4",
+            ".substo/cache/proxy/x/proxy.mov", "exports/final.mp4", "node_modules/pkg/demo.mp4",
             ".build/debug/x.mov", ".git/objects/y.mov", ".hidden/z.mov", "Old.wfp.dir/clip.mov",
             "source/.DS_Store", "notes.txt", "source/.partial.mov", "motion-graphics/node_modules/a.mp4"
         ] { touch(path) }
@@ -169,7 +169,7 @@ final class ScannerTests: TempFolderTestCase {
     }
 
     func testKnownFilesOutsideTheFolderAreKeptWhileTheyExist() async throws {
-        let outside = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-outside-\(UUID().uuidString).wav")
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent("substo-outside-\(UUID().uuidString).wav")
         defer { try? FileManager.default.removeItem(at: outside) }
         try SyntheticMedia.writeAudioFile(to: outside, segments: [(1, 0.5)])
         let item = try await MediaScanner.probe(outside, folder: folder)

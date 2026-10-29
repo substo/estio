@@ -38,10 +38,10 @@ final class CacheAssets: RenderAssets, @unchecked Sendable {
 
 /// Levels on Mike's demo project, read only: the player on proxies and on
 /// originals, paused stills, export and the camera file itself. Opt in with
-/// TANDEM_REAL_MEDIA=1 (release, -enable-testing).
+/// SUBSTO_REAL_MEDIA=1 (release, -enable-testing).
 final class RealColourTests: XCTestCase {
     let scratch = URL(fileURLWithPath: "/private/tmp/claude-501/tandem-render/colour")
-    let demo = URL(fileURLWithPath: NSString(string: "~/dev/me/tandem-research/demo/decision-models-v14/decision-models-v14.tandem").expandingTildeInPath)
+    let demo = URL(fileURLWithPath: NSString(string: "~/dev/me/tandem-research/demo/decision-models-v14/decision-models-v14.substo").expandingTildeInPath)
 
     /// What the viewer's player shows at `seconds`: the compositor's own
     /// buffers, as the app's `AVPlayerItemVideoOutput` gets them.
@@ -83,12 +83,12 @@ final class RealColourTests: XCTestCase {
     }
 
     func testMeasureDemoPaths() async throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["TANDEM_REAL_MEDIA"] == "1", "set TANDEM_REAL_MEDIA=1 to run")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBSTO_REAL_MEDIA"] == "1", "set SUBSTO_REAL_MEDIA=1 to run")
         guard FileManager.default.fileExists(atPath: demo.path) else { throw XCTSkip("no demo project") }
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         let (project, _) = try ProjectFile.load(from: demo)
         let folder = ProjectFolder(projectFile: demo)
-        let assets = CacheAssets(project: project, cache: demo.deletingLastPathComponent().appendingPathComponent(".tandem/cache"))
+        let assets = CacheAssets(project: project, cache: demo.deletingLastPathComponent().appendingPathComponent(".substo/cache"))
         print("COLOUR proxies \(assets.proxies.count), mattes \(assets.mattes.count)")
         var bare = project
         for i in bare.media.indices { bare.media[i].look = [] }
@@ -160,10 +160,10 @@ final class RealColourTests: XCTestCase {
 
 /// The viewer's two layers side by side in a real window, captured from the
 /// screen: the proxy player on the left, the paused still on the right.
-/// Opt in with TANDEM_REAL_MEDIA=1 and TANDEM_SCREEN=1 (it shows a window).
+/// Opt in with SUBSTO_REAL_MEDIA=1 and SUBSTO_SCREEN=1 (it shows a window).
 final class ColourOnScreenTests: XCTestCase {
     let scratch = URL(fileURLWithPath: "/private/tmp/claude-501/tandem-render/colour")
-    let demo = URL(fileURLWithPath: NSString(string: "~/dev/me/tandem-research/demo/decision-models-v14/decision-models-v14.tandem").expandingTildeInPath)
+    let demo = URL(fileURLWithPath: NSString(string: "~/dev/me/tandem-research/demo/decision-models-v14/decision-models-v14.substo").expandingTildeInPath)
 
     func capture(_ windowNumber: Int, _ name: String) -> CGImage? {
         let png = scratch.appendingPathComponent(name)
@@ -234,7 +234,7 @@ final class ColourOnScreenTests: XCTestCase {
     /// Patch values as captured: the player (left) and still (right) halves
     /// of each row, rows top first.
     func testPatchesOnScreen() async throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["TANDEM_SCREEN"] == "1", "set TANDEM_SCREEN=1")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBSTO_SCREEN"] == "1", "set SUBSTO_SCREEN=1")
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         let (project, folder) = try patchProject(width: 3840, height: 2160)
         let full = RenderContext(project: project, folder: folder)
@@ -251,7 +251,7 @@ final class ColourOnScreenTests: XCTestCase {
             NSApp.setActivationPolicy(.accessory)
             NSApp.finishLaunching()
             let window = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 960, height: 270 * rows.count), styleMask: [.titled], backing: .buffered, defer: false)
-            window.title = "Tandem patch check"
+            window.title = "Substo Video patch check"
             let view = NSView(frame: window.contentView!.bounds)
             view.wantsLayer = true
             window.contentView = view
@@ -304,13 +304,13 @@ final class ColourOnScreenTests: XCTestCase {
     }
 
     func testPlayerAndStillOnScreen() async throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["TANDEM_REAL_MEDIA"] == "1" && ProcessInfo.processInfo.environment["TANDEM_SCREEN"] == "1", "set TANDEM_REAL_MEDIA=1 TANDEM_SCREEN=1")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBSTO_REAL_MEDIA"] == "1" && ProcessInfo.processInfo.environment["SUBSTO_SCREEN"] == "1", "set SUBSTO_REAL_MEDIA=1 SUBSTO_SCREEN=1")
         guard FileManager.default.fileExists(atPath: demo.path) else { throw XCTSkip("no demo project") }
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
-        let seconds = Double(ProcessInfo.processInfo.environment["TANDEM_AT"] ?? "35") ?? 35
+        let seconds = Double(ProcessInfo.processInfo.environment["SUBSTO_AT"] ?? "35") ?? 35
         let (project, _) = try ProjectFile.load(from: demo)
         let folder = ProjectFolder(projectFile: demo)
-        let assets = CacheAssets(project: project, cache: demo.deletingLastPathComponent().appendingPathComponent(".tandem/cache"))
+        let assets = CacheAssets(project: project, cache: demo.deletingLastPathComponent().appendingPathComponent(".substo/cache"))
         let proxied = RenderContext(project: project, folder: folder, useProxies: true, assets: assets)
         let originals = RenderContext(project: project, folder: folder, useProxies: false, assets: assets)
         let built = try await CompositionBuilder.build(proxied)
@@ -322,7 +322,7 @@ final class ColourOnScreenTests: XCTestCase {
             NSApp.setActivationPolicy(.accessory)
             NSApp.finishLaunching()
             let window = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 960, height: 270), styleMask: [.titled], backing: .buffered, defer: false)
-            window.title = "Tandem colour check"
+            window.title = "Substo Video colour check"
             let view = NSView(frame: window.contentView!.bounds)
             view.wantsLayer = true
             window.contentView = view
@@ -373,9 +373,9 @@ final class ColourOnScreenTests: XCTestCase {
 
 /// How much a still part of the camera shot flickers from frame to frame:
 /// the original, the proxy the app plays, and the same frames encoded as
-/// proxies at other qualities. Opt in with TANDEM_REAL_MEDIA=1.
+/// proxies at other qualities. Opt in with SUBSTO_REAL_MEDIA=1.
 final class ProxyNoiseTests: XCTestCase {
-    let demo = URL(fileURLWithPath: NSString(string: "~/dev/me/tandem-research/demo/decision-models-v14/decision-models-v14.tandem").expandingTildeInPath)
+    let demo = URL(fileURLWithPath: NSString(string: "~/dev/me/tandem-research/demo/decision-models-v14/decision-models-v14.substo").expandingTildeInPath)
 
     func frames(_ url: URL, from seconds: Double, count: Int, scaleTo size: CGSize? = nil) async throws -> (frames: [CVPixelBuffer], fps: Float) {
         let asset = AVURLAsset(url: url)
@@ -516,16 +516,16 @@ final class ProxyNoiseTests: XCTestCase {
         CGImageDestinationFinalize(destination)
     }
 
-    /// TANDEM_MEDIA picks the file by name ending (the camera by default,
-    /// or main-screen.mov) and TANDEM_AT the source time.
+    /// SUBSTO_MEDIA picks the file by name ending (the camera by default,
+    /// or main-screen.mov) and SUBSTO_AT the source time.
     func testProxyFlicker() async throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["TANDEM_REAL_MEDIA"] == "1", "set TANDEM_REAL_MEDIA=1 to run")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBSTO_REAL_MEDIA"] == "1", "set SUBSTO_REAL_MEDIA=1 to run")
         guard FileManager.default.fileExists(atPath: demo.path) else { throw XCTSkip("no demo project") }
         let (project, _) = try ProjectFile.load(from: demo)
-        let assets = CacheAssets(project: project, cache: demo.deletingLastPathComponent().appendingPathComponent(".tandem/cache"))
-        let suffix = ProcessInfo.processInfo.environment["TANDEM_MEDIA"] ?? "2026-09-24_105434-camera.mov"
+        let assets = CacheAssets(project: project, cache: demo.deletingLastPathComponent().appendingPathComponent(".substo/cache"))
+        let suffix = ProcessInfo.processInfo.environment["SUBSTO_MEDIA"] ?? "2026-09-24_105434-camera.mov"
         let item = try XCTUnwrap(project.media.first { $0.path.hasSuffix(suffix) })
-        let start = Double(ProcessInfo.processInfo.environment["TANDEM_AT"] ?? "150") ?? 150
+        let start = Double(ProcessInfo.processInfo.environment["SUBSTO_AT"] ?? "150") ?? 150
         let count = 30
         let isCamera = suffix.hasSuffix("camera.mov")
         let regions: [(String, (Double, Double, Double, Double))] = isCamera

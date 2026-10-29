@@ -3,24 +3,24 @@ import TandemAPI
 import TandemCore
 import TandemImport
 
-/// `tandem import`: Filmora projects, agent EDLs, and comparing two cuts.
+/// `substo import`: Filmora projects, agent EDLs, and comparing two cuts.
 struct ImportCommand {
     let directory: URL
 
     func run(_ args: Arguments) async throws -> Int32 {
         guard let kind = args.positionals.first else {
-            throw UsageError(message: "`tandem import` needs filmora, edl or compare, like tandem import filmora \"Decision Models v14.wfp\".")
+            throw UsageError(message: "`substo import` needs filmora, edl or compare, like substo import filmora \"Decision Models v14.wfp\".")
         }
         let json = args.has("json")
         switch kind {
         case "filmora":
             try args.expectPositionals(atMost: 2, command: "import")
-            let source = try url(args.positional(1, "a .wfp file, like tandem import filmora \"Video v3.wfp\"", command: "import"))
+            let source = try url(args.positional(1, "a .wfp file, like substo import filmora \"Video v3.wfp\"", command: "import"))
             return try await perform(.filmora(source), args, json: json)
         case "edl":
             try args.expectPositionals(atMost: 2, command: "import")
             guard let recipeName = args.options["recipe"] else {
-                throw UsageError(message: "`tandem import edl` needs --recipe (built in: \(EDLRecipe.builtInNames.joined(separator: ", ")), or a recipe JSON file).")
+                throw UsageError(message: "`substo import edl` needs --recipe (built in: \(EDLRecipe.builtInNames.joined(separator: ", ")), or a recipe JSON file).")
             }
             let recipe: EDLRecipe
             if let builtIn = try EDLRecipe.builtIn(recipeName) {
@@ -32,8 +32,8 @@ struct ImportCommand {
             return try await perform(.edl(edl, recipe: recipe), args, json: json)
         case "compare":
             try args.expectPositionals(atMost: 3, command: "import")
-            let a = url(try args.positional(1, "two .tandem files", command: "import"))
-            let b = url(try args.positional(2, "a second .tandem file", command: "import"))
+            let a = url(try args.positional(1, "two .substo files", command: "import"))
+            let b = url(try args.positional(2, "a second .substo file", command: "import"))
             let comparison = CutComparison.compare(
                 try ProjectFile.load(from: a).project, named: a.deletingPathExtension().lastPathComponent,
                 try ProjectFile.load(from: b).project, named: b.deletingPathExtension().lastPathComponent
@@ -45,8 +45,8 @@ struct ImportCommand {
             }
             return 0
         default:
-            let hint = Arguments.closest(kind, in: ["filmora", "edl", "compare"]).map { " Did you mean `tandem import \($0)`?" } ?? ""
-            throw UsageError(message: "`tandem import` can do filmora, edl or compare, not \(kind).\(hint)")
+            let hint = Arguments.closest(kind, in: ["filmora", "edl", "compare"]).map { " Did you mean `substo import \($0)`?" } ?? ""
+            throw UsageError(message: "`substo import` can do filmora, edl or compare, not \(kind).\(hint)")
         }
     }
 

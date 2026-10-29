@@ -432,7 +432,7 @@ final class SectionCardCommandTests: XCTestCase {
         assertValid(c.project)
     }
 
-    /// `cuts` moves where the take is cut for a marker's room (`tandem cards
+    /// `cuts` moves where the take is cut for a marker's room (`substo cards
     /// --insert` puts it in the pause before the section's first word, when
     /// the marker sits on the word). The card hides the frame from the cut
     /// on, the next section starts as the wipe out shows it, and the marker

@@ -214,10 +214,10 @@ enum CompositionAssembler {
         for segment in plan.videoSegments.sorted(by: { $0.timeline.start < $1.timeline.start }) {
             guard let u = url(for: segment), let source = sources[u] else { continue }
             guard let assetTrack = source.video else {
-                // Scanned before Tandem checked, so nothing converted it.
+                // Scanned before Substo Video checked, so nothing converted it.
                 if let codec = source.undecodableCodec {
                     let path = media[segment.mediaID]?.path ?? u.lastPathComponent
-                    warnings.add("Left out \(path): macOS can't decode its \(MediaItem.codecName(codec)). Rescan the folder (tandem media --refresh) and Tandem converts it.")
+                    warnings.add("Left out \(path): macOS can't decode its \(MediaItem.codecName(codec)). Rescan the folder (substo media --refresh) and Substo Video converts it.")
                 }
                 continue
             }
@@ -372,7 +372,7 @@ enum CompositionAssembler {
         videoComposition.frameDuration = CMTime(value: rate.denominator, timescale: CMTimeScale(rate.numerator))
         // No colour properties here: with them AVFoundation hands the
         // compositor every source frame tagged BT.709 without converting
-        // it, so BT.601 footage (Mike's camera) decoded with the wrong
+        // it, so BT.601 footage (the creator's camera) decoded with the wrong
         // matrix (red 180/40/50 came out 192/54/48). Frames keep their own
         // tags, and the compositor tags its output BT.709 itself.
         videoComposition.instructions = plan.instructions.map {

@@ -2,7 +2,7 @@ import XCTest
 @testable import TandemAPI
 @testable import TandemCore
 
-/// `tandem join`: through-edits found, listed and joined, with what plays
+/// `substo join`: through-edits found, listed and joined, with what plays
 /// left exactly as it was.
 final class JoinAPITests: XCTestCase {
     /// The fixture cut through at 10 s and 45 s (camera, screen, voice and
@@ -166,29 +166,29 @@ final class JoinAPITests: XCTestCase {
     }
 }
 
-/// `tandem join` as agents run it.
+/// `substo join` as agents run it.
 final class JoinCLITests: XCTestCase {
     private let cli = CLITests()
 
     func testAnAgentListsThenJoinsTheThroughEdits() throws {
-        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "substo isn't built")
         let folder = TempFolder()
         let url = try APIFixture.write(to: folder.url)
-        let cut = try cli.tandem("apply", #"[{"blade": {"at": 10}}, {"blade": {"at": 45}}]"#, "--author", "claude", in: folder.url)
+        let cut = try cli.substo("apply", #"[{"blade": {"at": 10}}, {"blade": {"at": 45}}]"#, "--author", "claude", in: folder.url)
         XCTAssertEqual(cut.status, 0, cut.stderr)
         let before = try ProjectFile.load(from: url).project
 
-        let plan = try cli.tandem("join", in: folder.url)
+        let plan = try cli.substo("join", in: folder.url)
         XCTAssertEqual(plan.status, 0, plan.stderr)
         XCTAssertTrue(plan.stdout.hasPrefix("Join 4 through-edits (dry run, revision 2)"), plan.stdout)
         XCTAssertEqual(try ProjectFile.load(from: url).project, before, "a dry run changes nothing")
 
-        let json = try cli.tandem("join", "--from", "40", "--to", "0:50", "--json", in: folder.url)
+        let json = try cli.substo("join", "--from", "40", "--to", "0:50", "--json", in: folder.url)
         XCTAssertEqual(json.status, 0, json.stderr)
         let decoded = try ServiceJSON.decoder().decode(JoinResult.self, from: Data(json.stdout.utf8))
         XCTAssertEqual(decoded.joins.map(\.time), [t(45), t(45)])
 
-        let applied = try cli.tandem("join", "--apply", "--expect", "2", "--label", "Join the take back up", "--author", "claude", in: folder.url)
+        let applied = try cli.substo("join", "--apply", "--expect", "2", "--label", "Join the take back up", "--author", "claude", in: folder.url)
         XCTAssertEqual(applied.status, 0, applied.stderr)
         XCTAssertTrue(applied.stdout.contains("Applied as revision 3 (\"Join the take back up\")"), applied.stdout)
         let joined = try ProjectFile.load(from: url).project
@@ -199,11 +199,11 @@ final class JoinCLITests: XCTestCase {
         JoinAPITests.assertPlaysTheSame(before, joined)
 
         // One cut through apply, and why one can't join.
-        let refused = try cli.tandem("apply", #"{"join": {"clipID": "clip_cam1"}}"#, in: folder.url)
+        let refused = try cli.substo("apply", #"{"join": {"clipID": "clip_cam1"}}"#, in: folder.url)
         XCTAssertEqual(refused.status, 1)
         XCTAssertTrue(refused.stderr.contains("doesn't carry straight on"), refused.stderr)
 
-        let help = try cli.tandem("help", "join", in: folder.url)
-        XCTAssertTrue(help.stdout.hasPrefix("Usage: tandem join"), help.stdout)
+        let help = try cli.substo("help", "join", in: folder.url)
+        XCTAssertTrue(help.stdout.hasPrefix("Usage: substo join"), help.stdout)
     }
 }

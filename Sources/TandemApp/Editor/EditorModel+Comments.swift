@@ -9,12 +9,12 @@ struct CommentBoxRequest: Equatable {
     var comment: Marker?
 }
 
-/// Comments: notes Mike leaves at a moment for the next round of agent
+/// Comments: notes the creator leaves at a moment for the next round of agent
 /// edits. He writes them in a box on the timeline and they show in a strip
-/// under the ruler; agents read them with `tandem comments` and remove
+/// under the ruler; agents read them with `substo comments` and remove
 /// each one they do.
 extension EditorModel {
-    /// Opens the comment box at the playhead, paused, so Mike can say what
+    /// Opens the comment box at the playhead, paused, so the creator can say what
     /// should change there. `time` comes from a menu's click instead.
     @discardableResult
     func beginComment(at time: Time? = nil) -> Bool {

@@ -38,10 +38,10 @@ extension EditorModel {
 
     /// The playhead moved. Played forwards at up to double speed, the
     /// stretch it went through counts as watched, and the agent changes
-    /// Mike has now watched in full are reviewed: their highlights go as
+    /// the creator has now watched in full are reviewed: their highlights go as
     /// he plays past them. A jump, a scrub, playing backwards or fast
     /// forwards doesn't count. Pausing and playing on from the same spot
-    /// does: Mike often stops halfway through a change to think.
+    /// does: the creator often stops halfway through a change to think.
     func notePlayhead() {
         let now = playback.time
         guard !reviewLog.isEmpty else {
@@ -71,7 +71,7 @@ extension EditorModel {
         }
     }
 
-    /// Mike watched `from` to `to` on the timeline as it is now: what he's
+    /// the creator watched `from` to `to` on the timeline as it is now: what he's
     /// watched in full is reviewed.
     func noteWatched(from: Time, to: Time) {
         // An edit moves things, so what he watched before it no longer
@@ -84,7 +84,7 @@ extension EditorModel {
         session.review.markWatched(watched, in: project)
     }
 
-    /// Mike has seen what the agents changed: the log starts again empty
+    /// the creator has seen what the agents changed: the log starts again empty
     /// and the highlights go.
     @discardableResult
     func markAgentChangesReviewed() -> Bool {

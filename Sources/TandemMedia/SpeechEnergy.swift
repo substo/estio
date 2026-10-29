@@ -9,7 +9,7 @@ import Foundation
 /// registers below 4 kHz, so a cut that only looks at the full band (or at
 /// the cached waveform's peaks) can land after "take" and before its "s".
 /// Agents who checked their own cuts (about 15 times, with ffmpeg RMS
-/// envelopes) found the same: the cuts Mike heard clipped were the ones the
+/// envelopes) found the same: the cuts the creator heard clipped were the ones the
 /// full band called quiet and the high band didn't.
 public struct SpeechEnergy: Sendable {
     public static let frameSeconds = 0.01
@@ -121,9 +121,9 @@ public struct SpeechEnergy: Sendable {
 ///
 /// Quiet is 10 dB over the floor, and never more than 25 dB under the loud
 /// tenth in the full band, or 15 dB under it above 4 kHz. Breath, mouth
-/// noise and room tone reach above 4 kHz too, and on the Tandem video
+/// noise and room tone reach above 4 kHz too, and on the Substo Video video
 /// (October 2026) a high-band threshold set from the floor alone called
-/// them voice at half the edges of an edit Mike had approved. Speech, the
+/// them voice at half the edges of an edit the creator had approved. Speech, the
 /// level a clipped word has to reach to count, is within 20 dB of the loud
 /// tenth in the full band and 10 dB above 4 kHz, where an "s" sits.
 public struct SpeechLevels: Equatable, Sendable {
@@ -190,7 +190,7 @@ public struct SpeechLevels: Equatable, Sendable {
 /// no 80 ms pause between words, so a cut between them lands in a dip
 /// (12 dB under the voice either side) and is fine; the exception is the
 /// end of a clip in a closure, with the "k" or "t" released at speech
-/// level right after it. On the Tandem video, an edit Mike approved, the
+/// level right after it. On the Substo Video video, an edit the creator approved, the
 /// first version of this check flagged 144 of 758 edges; these rules leave
 /// 6, each a cut through a sound.
 public enum CutAudit {

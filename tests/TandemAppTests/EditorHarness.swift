@@ -27,10 +27,10 @@ final class EditorHarness {
     /// (whose media are only names), so the viewer plays real picture and
     /// sound. Either way it never makes a sound.
     init(sound: SoundTakes? = nil, file: StaticString = #filePath, line: UInt = #line) throws {
-        folder = sound?.folder ?? FileManager.default.temporaryDirectory.appendingPathComponent("tandem-behaviour-\(UUID().uuidString)", isDirectory: true)
+        folder = sound?.folder ?? FileManager.default.temporaryDirectory.appendingPathComponent("substo-behaviour-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         PlaybackController.muted = true
-        let session = try ProjectSession.create(at: folder.appendingPathComponent("Behaviour.tandem"), name: "Behaviour", owner: .app)
+        let session = try ProjectSession.create(at: folder.appendingPathComponent("Behaviour.substo"), name: "Behaviour", owner: .app)
         model = EditorModel(session: session)
         if let sound {
             model.apply(EditBatch(label: "Build", commands: sound.build()))
@@ -248,7 +248,7 @@ final class EditorHarness {
 
     /// The titles of the right-click menu at `point`.
     func menu(at point: CGPoint) throws -> String {
-        let out = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-menu-\(UUID().uuidString).txt")
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("substo-menu-\(UUID().uuidString).txt")
         defer { try? FileManager.default.removeItem(at: out) }
         run(InputSimulator.Gesture(kind: .menu(out: out.path), at: point, modifiers: []))
         return try String(contentsOf: out, encoding: .utf8)
@@ -264,7 +264,7 @@ final class EditorHarness {
         run(InputSimulator.Gesture(kind: .drag(to: to, steps: 12), at: from, modifiers: modifiers))
     }
 
-    /// Drops a library item (`tandem-transition:push`, `tandem-effect:...`)
+    /// Drops a library item (`substo-transition:push`, `substo-effect:...`)
     /// at a point, as if dragged there from its tab.
     func drop(_ payload: String, at point: CGPoint) {
         run(InputSimulator.Gesture(kind: .drop(payload: payload), at: point, modifiers: []))

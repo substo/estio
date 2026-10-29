@@ -3,7 +3,7 @@ import XCTest
 @testable import TandemAPI
 @testable import TandemCore
 
-/// `tandem check` through the service: what it checks, what it reports.
+/// `substo check` through the service: what it checks, what it reports.
 final class CheckAPITests: XCTestCase {
     /// Grey frames at 30 fps from `start`, with a flat white flash at `flash`.
     private func frames(from start: Double, to end: Double, flash: Double? = nil) -> [FrameStats] {
@@ -57,7 +57,7 @@ final class CheckAPITests: XCTestCase {
         XCTAssertEqual(result.revision, h.service.coordinator.revision)
         let text = result.readableText
         XCTAssertTrue(text.contains("Hold the frame before it: holdFrame on clip_scr1."), text)
-        XCTAssertTrue(text.contains(#"Fix: tandem apply --expect \#(h.service.coordinator.revision) --label "Hold the frame before each flicker" '[{"holdFrame":"#), text)
+        XCTAssertTrue(text.contains(#"Fix: substo apply --expect \#(h.service.coordinator.revision) --label "Hold the frame before each flicker" '[{"holdFrame":"#), text)
         let json = String(decoding: try ServiceJSON.encoder().encode(result), as: UTF8.self)
         XCTAssertTrue(json.contains(#""commands":[{"holdFrame""#), json)
 
@@ -302,7 +302,7 @@ final class CheckAPITests: XCTestCase {
         let text = result.readableText
         XCTAssertTrue(text.hasPrefix("Checked 00:00.000-01:00.000 (4 cut edges) in "), text)
         XCTAssertTrue(text.contains("  00:30.000  Clipped word at the end of clip_voc1: the voice runs on 0.12 s past the cut. Trim the end 0.167 s later, into the pause after it.  On: clip_voc1 take1-camera, clip_voc2 take1-camera"), text)
-        XCTAssertTrue(text.contains("Fix: tandem apply --expect \(result.revision ?? 0) --label \"Move clipped cuts into pauses\" '[{\"trim\":"), text)
+        XCTAssertTrue(text.contains("Fix: substo apply --expect \(result.revision ?? 0) --label \"Move clipped cuts into pauses\" '[{\"trim\":"), text)
 
         // Applying the fix leaves nothing to find.
         try h.service.apply(ApplyRequest(label: "fix", commands: result.commands), context: h.context)

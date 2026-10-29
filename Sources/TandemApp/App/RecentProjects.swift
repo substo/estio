@@ -50,12 +50,12 @@ struct RecentProjects: Equatable {
     }
 }
 
-/// Names for Save As versions: `Video.tandem` becomes `Video v2.tandem`,
-/// `Video v2.tandem` becomes `Video v3.tandem`, skipping names in use.
+/// Names for Save As versions: `Video.substo` becomes `Video v2.substo`,
+/// `Video v2.substo` becomes `Video v3.substo`, skipping names in use.
 enum VersionNaming {
     static func nextName(after fileName: String, existing: Set<String>) -> String {
         let url = URL(fileURLWithPath: fileName)
-        let ext = url.pathExtension.isEmpty ? "tandem" : url.pathExtension
+        let ext = url.pathExtension.isEmpty ? "substo" : url.pathExtension
         var base = url.deletingPathExtension().lastPathComponent
         var version = 1
         if let match = base.range(of: #" v(\d+)$"#, options: .regularExpression) {

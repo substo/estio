@@ -7,7 +7,7 @@ import TandemCore
 /// folder or as a copy somewhere else (Bruce's archive share). It opens with
 /// a dry run of the choice (what would be copied, the sizes, anything
 /// missing), shows progress while it copies, and says where the archive
-/// went. `ProjectArchiver` does the work, the same as `tandem archive`.
+/// went. `ProjectArchiver` does the work, the same as `substo archive`.
 @MainActor
 @Observable
 final class ArchiveSheetModel {
@@ -220,7 +220,7 @@ struct ArchiveSheetView: View {
                         Row(label: "Cache") {
                             HStack(spacing: 10) {
                                 GraphiteSwitch(isOn: model.withCache) { if !model.isRunning { model.withCache.toggle() } }
-                                Text("Keep proxies and mattes too. Left out, Tandem makes them again; transcripts always go.")
+                                Text("Keep proxies and mattes too. Left out, Substo Video makes them again; transcripts always go.")
                                     .font(.ui(11.5))
                                     .foregroundStyle(Theme.textMuted.color)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -305,7 +305,7 @@ struct ArchiveSheetView: View {
                     Text("\(Self.count(plan.folderFiles, "file")), \(Self.size(plan.folderBytes)), to \(Self.display(plan.folder))")
                     let left = plan.leftOut.reduce(Int64(0)) { $0 + $1.bytes }
                     if left > 0 {
-                        Text("Leaves out \(Self.size(left)) Tandem can make again (proxies, mattes) or npm can install.")
+                        Text("Leaves out \(Self.size(left)) Substo Video can make again (proxies, mattes) or npm can install.")
                             .font(.ui(11.5))
                             .foregroundStyle(Theme.textMuted.color)
                     }

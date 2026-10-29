@@ -14,7 +14,7 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
     public var proxyMaxWidth: Int
     public var proxyMaxHeight: Int
     /// VideoToolbox constant quality, 0...1. With a keyframe every 15
-    /// frames, 0.78 is about 97 MB a minute of Mike's 4K camera (all-intra
+    /// frames, 0.78 is about 97 MB a minute of the creator's 4K camera (all-intra
     /// proxies at 0.6 were 105, the original is 104) and 11 of screen
     /// recording (was 57). VideoToolbox rounds quality in steps: 0.76 and
     /// 0.77 make the same file, as do 0.79 and 0.8, the next step up at
@@ -32,7 +32,7 @@ public struct AnalysisSettings: Codable, Equatable, Sendable {
     /// still show every frame both ways. Every 30 frames saves little and
     /// drops frames dragging backwards. docs/RENDER.md has the numbers.
     public var proxyKeyFrameInterval: Int
-    /// SpeechAnalyzer locale. en-US beat en-AU on Mike's voice (7.1% against
+    /// SpeechAnalyzer locale. en-US beat en-AU on the creator's voice (7.1% against
     /// 8.8% word error rate in the transcription spike).
     public var transcriptLocale: String
     /// What makes the cutout matte: RVM by default, with Vision (version 2)
@@ -141,7 +141,7 @@ public enum MatteModel: String, Codable, Sendable, CaseIterable {
     case vision
     /// Robust Video Matting (MobileNetV3), a video matting model that
     /// carries what it saw from frame to frame: steadier than Vision on
-    /// Mike's takes, with soft edges (their light rim trimmed, see
+    /// the creator's takes, with soft edges (their light rim trimmed, see
     /// `RVMMatte.cleanEdge`). The default. GPL-3.0: the model is downloaded
     /// on first use and never bundled (see `RVMMatte`).
     case robustVideoMatting
@@ -149,7 +149,7 @@ public enum MatteModel: String, Codable, Sendable, CaseIterable {
 
 /// Vision person segmentation quality. Accurate is about 60 frames a second
 /// on the M5 Pro on its own, fast about 240. Fast and balanced shimmer less
-/// where Mike sits still but lose hair and fingers and pop more when he
+/// where the creator sits still but lose hair and fingers and pop more when he
 /// moves; see docs/MEDIA.md.
 public enum MatteQuality: String, Codable, Sendable, CaseIterable {
     case fast, balanced, accurate
@@ -178,7 +178,7 @@ public enum MatteSmoothing: String, Codable, Sendable, CaseIterable {
 
 /// Which AUSoundIsolation model to run. `voice` has 3,665 samples of
 /// latency at 48 kHz, `highQualityVoice` 6,360 and sounds the same on
-/// Mike's takes.
+/// the creator's takes.
 public enum VoiceIsolationModel: String, Codable, Sendable, CaseIterable {
     case voice, highQualityVoice
 }

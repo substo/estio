@@ -11,7 +11,7 @@ final class SegmentLibraryTests: XCTestCase {
     /// A saved segment in a temp shared library: a card, a title asking for
     /// its words, and a whoosh.
     func savedSegment() throws -> (StoredSegment, URL) {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-app-segments-\(UUID().uuidString)", isDirectory: true)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("substo-app-segments-\(UUID().uuidString)", isDirectory: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let video = root.appendingPathComponent("video", isDirectory: true)
         try FileManager.default.createDirectory(at: video.appendingPathComponent("sfx"), withIntermediateDirectories: true)
@@ -29,7 +29,7 @@ final class SegmentLibraryTests: XCTestCase {
         let ids = ["clip_card", "clip_title"] + coordinator.project.track(named: "SFX")!.clips.map(\.id)
         var setup = SegmentSaveSetup.make(clipIDs: ids, in: coordinator.project)
         setup.titles[0].asked = true
-        let library = SharedLibrary(root: root.appendingPathComponent("Tandem Library", isDirectory: true))
+        let library = SharedLibrary(root: root.appendingPathComponent("Substo Library", isDirectory: true))
         let draft = try SegmentMaker.draft(name: setup.name, clipIDs: ids, in: coordinator.project, folder: ProjectFolder(root: video), fields: setup.fields)
         return (try SegmentStore(library: library).save(draft), root)
     }
@@ -78,7 +78,7 @@ final class SegmentLibraryTests: XCTestCase {
 
     @MainActor
     func testTheSheetSavesTheSelectionAndAsksBeforeReplacing() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-app-sheet-\(UUID().uuidString)", isDirectory: true)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("substo-app-sheet-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let fixture = try AppFixture()
@@ -86,11 +86,11 @@ final class SegmentLibraryTests: XCTestCase {
         try fixture.apply(EditBatch(label: "Title", commands: [
             .insertClip(trackID: text, clip: Clip(id: "clip_cta", name: "Call", content: .text(TextContent(text: "Comment below", preset: "callout")), start: t(5), duration: t(2)))
         ]))
-        let library = SharedLibrary(root: root.appendingPathComponent("Tandem Library", isDirectory: true))
+        let library = SharedLibrary(root: root.appendingPathComponent("Substo Library", isDirectory: true))
         let model = SaveSegmentModel(project: fixture.project, folder: ProjectFolder(root: root), clipIDs: ["clip_cta"], library: library)
         model.discard = { try FileManager.default.removeItem(at: $0) }
         XCTAssertEqual(model.setup.name, "Comment below")
-        XCTAssertTrue(model.destination.hasSuffix("/Tandem Library/Segments/Comment below"), model.destination)
+        XCTAssertTrue(model.destination.hasSuffix("/Substo Library/Segments/Comment below"), model.destination)
         model.setup.titles[0].asked = true
 
         func save() async throws -> StoredSegment {

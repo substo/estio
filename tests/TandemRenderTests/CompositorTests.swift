@@ -117,7 +117,7 @@ final class CompositorTests: XCTestCase {
     }
 
     func testImagesAreDrawnByTheCompositor() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-render-tests-\(UUID().uuidString)")
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-render-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let png = folder.appendingPathComponent("shot.png")

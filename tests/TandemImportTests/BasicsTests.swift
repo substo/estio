@@ -206,7 +206,7 @@ final class ImportRequestTests: XCTestCase {
             prober: FakeProbe(media: FilmoraImporterTests.media, undecodable: ["Subscribe Element.webm"])
         )
         let (url, result) = try await request.perform()
-        XCTAssertEqual(url.path, folder.appendingPathComponent("Mini Filmora/Mini Filmora.tandem").path)
+        XCTAssertEqual(url.path, folder.appendingPathComponent("Mini Filmora/Mini Filmora.substo").path)
         let loaded = try ProjectFile.load(from: url)
         XCTAssertEqual(loaded.project, result.project)
         let report = try JSONDecoder().decode(ImportReport.self, from: Data(contentsOf: folder.appendingPathComponent("Mini Filmora/Mini Filmora.import.json")))
@@ -227,7 +227,7 @@ final class ImportRequestTests: XCTestCase {
         let folder = try Fixtures.temporaryFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
         let (url, first) = try await miniImport(into: folder).perform()
-        // Mike edits the import in Tandem, then runs the import again.
+        // Mike edits the import in Substo Video, then runs the import again.
         var edited = first.project
         edited.markers.append(Marker(id: "mk_mike", time: t(1), name: "Mike's"))
         try ProjectFile.save(edited, revision: 12, to: url)

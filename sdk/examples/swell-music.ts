@@ -1,6 +1,6 @@
 // Swell the music bed +6 dB in every pause long enough, skipping pauses a sound effect plays in.
 // audio.gainDB keyframes set the gain outright and are clip-relative.
-//   bun sdk/run.ts Video.tandem sdk/examples/swell-music.ts
+//   bun sdk/run.ts Video.substo sdk/examples/swell-music.ts
 import { cmd, type Keyframe, type Tandem } from "../tandem";
 
 const MIN_PAUSE = Number(process.env.MIN_PAUSE ?? 1.6);

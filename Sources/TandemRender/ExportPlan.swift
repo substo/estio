@@ -66,7 +66,7 @@ public enum ExportPlanError: Error, Equatable, CustomStringConvertible, Localize
         case let .noPortrait(width, height):
             let canvas = ExportPreset.standard(forFrame: width, height).cliName
             return "This \(width)x\(height) project has no 9:16 frame for the short: its canvas isn't 9:16 and it has no portrait format. "
-                + "Make one with `tandem short --apply` (screen on top, camera below), or add the portrait format with updateSettings "
+                + "Make one with `substo short --apply` (screen on top, camera below), or add the portrait format with updateSettings "
                 + "(alternateFormats) and place clips in it with setFormatLayout. To export the canvas as it is, use --preset \(canvas)."
         case let .noFormat(id, known):
             return "No output format \"\(id)\". This project has: \((["main"] + known).joined(separator: ", "))."

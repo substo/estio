@@ -2,14 +2,14 @@ import AVFoundation
 import Foundation
 import TandemCore
 
-/// When each of a file's frames shows, in file time, for `tandem check`'s
+/// When each of a file's frames shows, in file time, for `substo check`'s
 /// low frame rate note: a screen recording's frame rate wanders, as macOS
 /// records the screen when it changes.
 ///
 /// The times come from the sample table, so nothing is decoded: about a
 /// second for an hour of screen recording. They're cached per file (by its
 /// fingerprint, or its size and modification time) in the project's
-/// `.tandem/cache/frametimes`, so a check after the first reads them back in
+/// `.substo/cache/frametimes`, so a check after the first reads them back in
 /// milliseconds.
 public enum FrameTimes {
     /// Bump when what's stored changes.

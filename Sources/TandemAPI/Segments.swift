@@ -9,7 +9,7 @@ import TandemMedia
 // fields) plus copies of the media it uses, so it keeps working whatever
 // happens to the project it came from:
 //
-//     Tandem Library/Segments/Intro/
+//     Substo Library/Segments/Intro/
 //       segment.json      the template and the media items, paths relative
 //       intro-card.mov    the files its clips play
 //       sting.wav
@@ -304,8 +304,8 @@ public struct SegmentStore: Sendable {
         return try read(target)
     }
 
-    static let savingMark = ".tandem-saving-"
-    static let replacedMark = ".tandem-replaced-"
+    static let savingMark = ".substo-saving-"
+    static let replacedMark = ".substo-replaced-"
 
     /// After a save of `name` that was cut short: a replaced segment whose
     /// successor never arrived goes back in its place, and half-made copies
@@ -451,7 +451,7 @@ public enum SegmentMaker {
                 if media[mediaID] == nil {
                     let url = folder.url(for: item)
                     guard FileCopier.fileInfo(url) != nil else {
-                        throw ServiceError(.notFound, "\(item.path) is missing, so the segment can't carry it. Relink it first (tandem relink).")
+                        throw ServiceError(.notFound, "\(item.path) is missing, so the segment can't carry it. Relink it first (substo relink).")
                     }
                     var copy = item
                     copy.path = try files.add(url)

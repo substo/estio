@@ -4,7 +4,7 @@ import TandemAssets
 import TandemCore
 import TandemRender
 
-/// The `tandem` command. Each subcommand builds a service request, sends
+/// The `substo` command. Each subcommand builds a service request, sends
 /// it through `ProjectClient` (to the app when it has the project open,
 /// otherwise straight to the file) and prints the result as text, or as
 /// JSON with `--json`.
@@ -29,7 +29,7 @@ struct CLI {
             return usage(error.localizedDescription, command: nil)
         }
         if parsed.has("version") && parsed.command == nil {
-            print("tandem \(TandemAPI.version)")
+            print("substo \(TandemAPI.version)")
             return 0
         }
         guard let name = parsed.command else {
@@ -37,7 +37,7 @@ struct CLI {
             return parsed.has("help") ? 0 : 2
         }
         // Titles can use the shared library's fonts wherever this process
-        // draws them (an export, a frame, tandem serve).
+        // draws them (an export, a frame, substo serve).
         ProjectFonts.libraryFolders = [SharedLibrary.locate(environment: environment).url(.fonts)]
         // On stderr, so --json output (and MCP's stdout) stays clean.
         ProjectClient.waitNotice = { FileHandle.standardError.write(Data(($0 + "\n").utf8)) }
@@ -45,7 +45,7 @@ struct CLI {
             if let topic = parsed.positionals.first {
                 guard let text = Help.topic(topic) else {
                     let names = Help.commands.map(\.name) + CommandCase.allCases.map(\.rawValue)
-                    let hint = Arguments.closest(topic, in: names).map { " Did you mean `tandem help \($0)`?" } ?? ""
+                    let hint = Arguments.closest(topic, in: names).map { " Did you mean `substo help \($0)`?" } ?? ""
                     return usage("There's no `\(topic)` command or edit command.\(hint)", command: nil)
                 }
                 print(text)
@@ -55,7 +55,7 @@ struct CLI {
             return 0
         }
         guard let command = Help.command(name) else {
-            let hint = Arguments.closest(name, in: Help.commands.map(\.name)).map { " Did you mean `tandem \($0)`?" } ?? ""
+            let hint = Arguments.closest(name, in: Help.commands.map(\.name)).map { " Did you mean `substo \($0)`?" } ?? ""
             return usage("There's no `\(name)` command.\(hint)", command: nil)
         }
         if parsed.has("help") {
@@ -151,13 +151,13 @@ struct CLI {
         case "diff":
             try args.expectPositionals(atMost: 1, command: name)
             guard let since = args.options["since"] ?? args.positionals.first else {
-                throw UsageError(message: "`tandem diff` needs --since: a revision, a .tandem file or an export, like tandem diff --since 95.")
+                throw UsageError(message: "`substo diff` needs --since: a revision, a .substo file or an export, like substo diff --since 95.")
             }
             return show(try await client().call(DiffRequest(since: reference(since))), json: json)
         case "restore":
             try args.expectPositionals(atMost: 0, command: name)
             guard let from = args.options["from"] else {
-                throw UsageError(message: "`tandem restore` needs --from: a revision, a .tandem file or an export, like tandem restore --from 95 --clips clip_a,clip_b.")
+                throw UsageError(message: "`substo restore` needs --from: a revision, a .substo file or an export, like substo restore --from 95 --clips clip_a,clip_b.")
             }
             let clips = args.values("clips").flatMap { $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } }.filter { !$0.isEmpty }
             let request = RestoreRequest(
@@ -208,7 +208,7 @@ struct CLI {
         case "comments":
             guard args.positionals.first == "resolve" else {
                 try args.expectPositionals(atMost: 0, command: name)
-                if args.has("all") { throw UsageError(message: "--all goes with resolve: tandem comments resolve --all.") }
+                if args.has("all") { throw UsageError(message: "--all goes with resolve: substo comments resolve --all.") }
                 return show(try await client().call(CommentsRequest()), json: json)
             }
             return try await resolveComments(Array(args.positionals.dropFirst()), all: args.has("all"), label: args.options["label"], client: try client(), json: json)
@@ -217,7 +217,7 @@ struct CLI {
             let request = TranscriptRequest(id: args.positionals.first, from: try time(args, "from"), to: try time(args, "to"))
             let client = try client()
             if args.has("make") {
-                guard let id = args.positionals.first else { throw UsageError(message: "--make needs a media or clip ID, like tandem transcript med_x --make.") }
+                guard let id = args.positionals.first else { throw UsageError(message: "--make needs a media or clip ID, like substo transcript med_x --make.") }
                 let made = try await client.call(TranscribeRequest(media: [mediaReference(id)], wait: true, timeout: try args.number("timeout")), onEvent: progress(WaitRequest(what: .transcript, media: [id]), json: json))
                 guard made.ok else {
                     _ = show(made, json: json)
@@ -227,7 +227,7 @@ struct CLI {
             return show(try await client.call(request), json: json)
         case "transcribe":
             guard !args.positionals.isEmpty else {
-                throw UsageError(message: "`tandem transcribe` needs media, like tandem transcribe med_x or tandem transcribe source/generated/cartoon.mp4.")
+                throw UsageError(message: "`substo transcribe` needs media, like substo transcribe med_x or substo transcribe source/generated/cartoon.mp4.")
             }
             if args.has("wait") && args.has("no-wait") { throw UsageError(message: "Pick one of --wait and --no-wait.") }
             let client = try client()
@@ -243,7 +243,7 @@ struct CLI {
             var what = WaitTarget.jobs
             if let word = args.positionals.first {
                 guard let target = WaitTarget(rawValue: word) else {
-                    throw UsageError(message: "`tandem wait` waits for transcript, matte, proxy, jobs or export, not \"\(word)\".")
+                    throw UsageError(message: "`substo wait` waits for transcript, matte, proxy, jobs or export, not \"\(word)\".")
                 }
                 what = target
             }
@@ -254,7 +254,7 @@ struct CLI {
             return result.ok ? 0 : 1
         case "search":
             let phrase = args.positionals.joined(separator: " ")
-            guard !phrase.isEmpty else { throw UsageError(message: "`tandem search` needs a phrase, like tandem search \"decision models\".") }
+            guard !phrase.isEmpty else { throw UsageError(message: "`substo search` needs a phrase, like substo search \"decision models\".") }
             return show(try await client().call(SearchRequest(phrase: phrase, limit: try args.integer("limit"))), json: json)
         case "pauses":
             try args.expectPositionals(atMost: 0, command: name)
@@ -306,7 +306,7 @@ struct CLI {
             return show(try await client().call(request), json: json)
         case "frame":
             try args.expectPositionals(atMost: 1, command: name)
-            let at = try parseTime(try args.positional(0, "a time, like tandem frame 01:23.500", command: name))
+            let at = try parseTime(try args.positional(0, "a time, like substo frame 01:23.500", command: name))
             let output = absolute(args.options["output"] ?? "frame-\(TimeText.fileSafe(at)).png")
             let request = FrameRequest(time: at, maxWidth: try args.integer("width"), maxHeight: try args.integer("height"), output: output, format: args.options["format"])
             return show(try await client().call(request), json: json)
@@ -314,7 +314,7 @@ struct CLI {
             let times = try args.positionals.map(parseTime)
             let every = try time(args, "every")
             guard !times.isEmpty || every != nil else {
-                throw UsageError(message: "`tandem frames` needs times, like tandem frames 0:10 0:20 0:30, or --every <seconds>.")
+                throw UsageError(message: "`substo frames` needs times, like substo frames 0:10 0:20 0:30, or --every <seconds>.")
             }
             let from = try time(args, "from"), to = try time(args, "to")
             let output = absolute(args.options["output"] ?? Self.sheetName(times: times, every: every, from: from, to: to))
@@ -325,12 +325,12 @@ struct CLI {
             return show(try await client().call(request), json: json)
         case "screenshot":
             try args.expectPositionals(atMost: 0, command: name)
-            let output = absolute(args.options["output"] ?? "tandem-window.png")
+            let output = absolute(args.options["output"] ?? "substo-window.png")
             return show(try await client().call(ScreenshotRequest(output: output)), json: json)
         case "clip":
             try args.expectPositionals(atMost: 2, command: name)
-            let start = try parseTime(try args.positional(0, "a start and an end, like tandem clip 1:00 1:20", command: name))
-            let end = try parseTime(try args.positional(1, "an end time too, like tandem clip 1:00 1:20", command: name))
+            let start = try parseTime(try args.positional(0, "a start and an end, like substo clip 1:00 1:20", command: name))
+            let end = try parseTime(try args.positional(1, "an end time too, like substo clip 1:00 1:20", command: name))
             let request = ClipRequest(
                 start: start, end: end, output: args.options["output"].map(absolute), preset: args.options["preset"],
                 tracks: AssetNames.split(args.options["tracks"]).nilIfEmpty, audioOnly: args.has("audio-only") ? true : nil
@@ -370,7 +370,7 @@ struct CLI {
 
     private func newProject(_ args: Arguments) async throws -> Int32 {
         try args.expectPositionals(atMost: 1, command: "new")
-        var url = URL(fileURLWithPath: absolute(try args.positional(0, "a path, like tandem new \"Decision Models.tandem\"", command: "new")))
+        var url = URL(fileURLWithPath: absolute(try args.positional(0, "a path, like substo new \"Decision Models.substo\"", command: "new")))
         var isFolder: ObjCBool = false
         if FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder), isFolder.boolValue {
             url = url.appendingPathComponent(url.lastPathComponent).appendingPathExtension(ProjectFile.fileExtension)
@@ -401,12 +401,12 @@ struct CLI {
         }
         print("Created \(url.path), \(project.settings.width)x\(project.settings.height), with \(project.allTracks.count) tracks (\(project.allTracks.map(\.name).joined(separator: ", "))).")
         let added = refresh.added
-        print(added.isEmpty ? "No media found in the folder yet. Add files and run `tandem media --refresh`." : "Added \(added.count) media file\(added.count == 1 ? "" : "s") from the folder.")
+        print(added.isEmpty ? "No media found in the folder yet. Add files and run `substo media --refresh`." : "Added \(added.count) media file\(added.count == 1 ? "" : "s") from the folder.")
         for line in Self.newMediaLines(refresh, in: project) { print(line) }
         return 0
     }
 
-    /// What `tandem new` says about the media it found: the Live Photos, and
+    /// What `substo new` says about the media it found: the Live Photos, and
     /// which file it treated as the camera take, why, and how to change it.
     static func newMediaLines(_ refresh: MediaRefresh, in project: Project) -> [String] {
         let added = refresh.added.compactMap { project.media($0) }
@@ -416,7 +416,7 @@ struct CLI {
             lines.append("\(livePhotos) \(livePhotos == 1 ? "is a Live Photo" : "are Live Photos"): the still is the media item, with its motion clip kept on it (livePhotoVideo) rather than added on its own.")
         }
         func command(_ id: String, role: MediaRole) -> String {
-            #"tandem apply '{"updateMedia": {"mediaID": "\#(id)", "patch": {"role": "\#(role.rawValue)"}}}'"#
+            #"substo apply '{"updateMedia": {"mediaID": "\#(id)", "patch": {"role": "\#(role.rawValue)"}}}'"#
         }
         let takes = refresh.cameraTakes
         if !takes.isEmpty {
@@ -426,7 +426,7 @@ struct CLI {
                 let label = project.media(take.mediaID)?.kind == .audio ? "Voice take" : "Camera take"
                 lines.append("\(label): \(take.path) (\(take.mediaID)), \(take.reason).")
             }
-            if takes.count > shown { lines.append("And \(takes.count - shown) more camera takes; `tandem media` lists them.") }
+            if takes.count > shown { lines.append("And \(takes.count - shown) more camera takes; `substo media` lists them.") }
             lines.append("Not the camera? \(command(takes.count == 1 ? takes[0].mediaID : "<id>", role: .other))")
         } else if added.contains(where: { $0.kind == .video }) {
             // The likeliest take is the longest video with sound that nothing
@@ -440,7 +440,7 @@ struct CLI {
             lines.append("Another angle: \(angle.path) (\(angle.mediaID)), \(angle.reason), so it's b-roll rather than a second camera take. To make it a camera take: \(command(angle.mediaID, role: .camera))")
         }
         if let rate = refresh.frameRate {
-            lines.append("Frame rate: \(String(format: "%g", rate.framesPerSecond)) fps, the camera take's. To change it: tandem apply '{\"updateSettings\": {\"patch\": {\"frameRate\": {\"numerator\": 30, \"denominator\": 1}}}}'")
+            lines.append("Frame rate: \(String(format: "%g", rate.framesPerSecond)) fps, the camera take's. To change it: substo apply '{\"updateSettings\": {\"patch\": {\"frameRate\": {\"numerator\": 30, \"denominator\": 1}}}}'")
         }
         return lines
     }
@@ -543,7 +543,7 @@ struct CLI {
     }
 
     private func author(_ args: Arguments) -> String {
-        args.options["author"] ?? environment["TANDEM_AUTHOR"] ?? "cli"
+        args.options["author"] ?? environment["SUBSTO_AUTHOR"] ?? "cli"
     }
 
     /// A revision stays as it is; a path is made absolute from here.
@@ -558,7 +558,7 @@ struct CLI {
         return directory.appendingPathComponent(expanded).standardizedFileURL.path
     }
 
-    /// `tandem frames`'s default file: named for its times, with dots
+    /// `substo frames`'s default file: named for its times, with dots
     /// where the times have colons, since ffmpeg and others read a colon
     /// in a file name as a protocol.
     static func sheetName(times: [Time], every: Time?, from: Time?, to: Time?) -> String {
@@ -636,10 +636,10 @@ struct CLI {
         let value = text.trimmingCharacters(in: .whitespaces).lowercased()
         if value.hasSuffix("ms"), let ms = Double(value.dropLast(2)) { return Time(seconds: ms / 1000) }
         if let seconds = Double(value.hasSuffix("s") ? String(value.dropLast()) : value) { return Time(seconds: seconds) }
-        throw UsageError(message: "\(text) isn't a delay or a file. Give seconds, like tandem sync 0.08, milliseconds, like tandem sync 80ms, or files to line up with the camera by sound, like tandem sync mic.wav.")
+        throw UsageError(message: "\(text) isn't a delay or a file. Give seconds, like substo sync 0.08, milliseconds, like substo sync 80ms, or files to line up with the camera by sound, like substo sync mic.wav.")
     }
 
-    /// Whether `tandem sync`'s argument names a file to line up by sound
+    /// Whether `substo sync`'s argument names a file to line up by sound
     /// rather than a delay: a media ID, or something with a slash or an
     /// extension that isn't a number.
     static func isSyncFile(_ text: String) -> Bool {
@@ -650,12 +650,12 @@ struct CLI {
     /// Clears comments an agent has done: one undoable edit, credited to it.
     private func resolveComments(_ ids: [String], all: Bool, label: String?, client: ProjectClient, json: Bool) async throws -> Int32 {
         guard all != !ids.isEmpty else {
-            throw UsageError(message: all ? "Give comment IDs or --all, not both." : "`tandem comments resolve` needs the IDs of the comments you've done (from tandem comments), or --all.")
+            throw UsageError(message: all ? "Give comment IDs or --all, not both." : "`substo comments resolve` needs the IDs of the comments you've done (from substo comments), or --all.")
         }
         let listed = try await client.call(CommentsRequest())
         let known = Set(listed.comments.map(\.id))
         if let stranger = ids.first(where: { !known.contains($0) }) {
-            throw UsageError(message: "\(stranger) isn't a project comment. tandem comments lists them.")
+            throw UsageError(message: "\(stranger) isn't a project comment. substo comments lists them.")
         }
         let chosen = all ? listed.comments.map(\.id) : ids
         guard !chosen.isEmpty else {
@@ -688,7 +688,7 @@ struct CLI {
 
     private func usage(_ message: String, command: CommandHelp?) -> Int32 {
         var text = "error: \(message)\n"
-        if let command { text += "Usage: \(command.usage)\n" } else { text += "Run `tandem help` for the commands.\n" }
+        if let command { text += "Usage: \(command.usage)\n" } else { text += "Run `substo help` for the commands.\n" }
         FileHandle.standardError.write(Data(text.utf8))
         return 2
     }
@@ -722,7 +722,7 @@ enum Signals {
 
     static func wait(for signals: [Int32], or trigger: Trigger? = nil) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let queue = DispatchQueue(label: "com.mikerosoft.tandem.signals")
+            let queue = DispatchQueue(label: "com.substo.video.signals")
             let once = SignalOnce()
             // Ignore the default handling so the sources below see the signal.
             let sources = signals.map { number -> DispatchSourceSignal in

@@ -5,7 +5,7 @@ Recipes for the PiP camera layout, zooming into the screen recording, and gradin
 ## Set the PiP layout
 
 Put the camera in the bottom-right corner with the cutout and shadow, the
-way Mike does:
+way the creator does:
 
 ```json
 {"label": "Camera to PiP", "commands": [
@@ -31,19 +31,19 @@ Zoom the screen clip into the top-right quarter at 1:12 and back out at
 ]}
 ```
 
-`tandem check` notes a zoom past three times the picture's own pixels as
+`substo check` notes a zoom past three times the picture's own pixels as
 soft.
 
 ## Grade the camera take
 
-Mike grades a camera take once, on the file's look (`MediaItem.look`), so
+the creator grades a camera take once, on the file's look (`MediaItem.look`), so
 every clip from it gets the same grade; the Colour tab calls that the whole
 take. A clip's own colour effects go on top of it, for one shot that needs
 more, and they can animate like any effect parameter
 (`video.effects.<effectID>.<param>`). The look can't.
 
 The Colour tab shows a grade as fixed sections, each backed by one effect
-(`tandem effects` has each parameter's range and default):
+(`substo effects` has each parameter's range and default):
 
 | Section | Effect | Parameters |
 | --- | --- | --- |
@@ -57,7 +57,7 @@ The Colour tab shows a grade as fixed sections, each backed by one effect
 
 Write a grade the way the tab reads it: one effect of each type, with the
 Light and Colour values in the same `colorAdjust`, as Filmora imports have
-them. A section switched off is its effect turned off, so when Mike turns
+them. A section switched off is its effect turned off, so when the creator turns
 Light off while Colour has values the tab splits them into two
 `colorAdjust` effects, Light's first; a section that's reset loses its
 effect (or, when it shares one, its values). Anything the tab can't place,
@@ -70,7 +70,7 @@ yellow, 120 green, 180 cyan, 240 blue, 300 magenta, the same degrees as the
 mixer's ranges) and its amount how far: 10 to 25 is a normal grade, 100 is
 strong, and the hue does nothing while the amount is 0. A wheel changes the
 colour of its range, not its brightness; that's what the wheel's brightness
-(-100 to 100) is for. Teal shadows and warm highlights, on top of Mike's
+(-100 to 100) is for. Teal shadows and warm highlights, on top of the creator's
 usual grade:
 
 ```json
@@ -85,6 +85,6 @@ usual grade:
 ]}
 ```
 
-`look` is replaced as a whole, so read it first (`tandem timeline --json`,
+`look` is replaced as a whole, so read it first (`substo timeline --json`,
 under `media`) and send it back with your change. Check the result with
-`tandem frame`.
+`substo frame`.

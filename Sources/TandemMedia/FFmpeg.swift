@@ -2,7 +2,7 @@ import Foundation
 
 /// The ffmpeg command line tool, for what AVFoundation can't read: WebM,
 /// QuickTime Animation and PNG video (stock alpha stickers), Ogg audio.
-/// Optional: without it those files can't be used, and Tandem says so.
+/// Optional: without it those files can't be used, and Substo Video says so.
 public struct FFmpeg: Sendable {
     public let url: URL
 
@@ -10,12 +10,12 @@ public struct FFmpeg: Sendable {
         self.url = url
     }
 
-    /// Finds ffmpeg: `TANDEM_FFMPEG`, then the PATH, then the usual install
+    /// Finds ffmpeg: `SUBSTO_FFMPEG`, then the PATH, then the usual install
     /// folders. Apps opened from the Finder get a minimal PATH, so the
     /// folders matter.
     public static func locate(environment: [String: String] = ProcessInfo.processInfo.environment) -> FFmpeg? {
         var candidates: [String] = []
-        if let explicit = environment["TANDEM_FFMPEG"], !explicit.isEmpty { candidates.append(explicit) }
+        if let explicit = environment["SUBSTO_FFMPEG"], !explicit.isEmpty { candidates.append(explicit) }
         for folder in (environment["PATH"] ?? "").split(separator: ":") {
             candidates.append("\(folder)/ffmpeg")
         }
@@ -27,8 +27,8 @@ public struct FFmpeg: Sendable {
         return nil
     }
 
-    /// What to tell Mike when a file needs ffmpeg and it isn't there.
-    public static let installHint = "install ffmpeg (brew install ffmpeg) or point TANDEM_FFMPEG at it"
+    /// What to tell the creator when a file needs ffmpeg and it isn't there.
+    public static let installHint = "install ffmpeg (brew install ffmpeg) or point SUBSTO_FFMPEG at it"
 
     /// ffprobe from the same folder, if it's there.
     public var ffprobe: URL? {

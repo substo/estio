@@ -77,7 +77,7 @@ public struct EDLRecipe: Codable, Equatable, Sendable {
         public var x: Double
         public var y: Double
         public var scale: Double
-        /// Cut Mike out of his background, the 2026 look.
+        /// Cut the creator out of his background, the 2026 look.
         public var cutout: Bool?
 
         public init(x: Double, y: Double, scale: Double, cutout: Bool? = true) {

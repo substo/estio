@@ -7,7 +7,7 @@ import TandemRender
 
 extension NSPasteboard.PasteboardType {
     /// Media IDs dragged from the browser, comma separated.
-    static let tandemMedia = NSPasteboard.PasteboardType("com.mikerosoft.tandem.media")
+    static let substoMedia = NSPasteboard.PasteboardType("com.substo.video.media")
 }
 
 /// The lanes: clips, transitions, the transcript and every edit gesture.
@@ -141,7 +141,7 @@ final class TimelineLanesView: TimelineChildView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        registerForDraggedTypes([.tandemMedia, .string, .fileURL])
+        registerForDraggedTypes([.substoMedia, .string, .fileURL])
         layer?.backgroundColor = Theme.window.cg
         // Tiles go in under the canvas as they're needed.
         canvas.isHidden = true
@@ -1116,7 +1116,7 @@ final class TimelineLanesView: TimelineChildView {
             sub.addItem(.separator())
             sub.add("Custom…", checked: !ClipSpeed.isPreset(clip.speed)) { model.customSpeed(clipID: clipID) }
         }
-        // With the dissolve's sound, if Mike gave it one in Settings.
+        // With the dissolve's sound, if the creator gave it one in Settings.
         if track.clip(endingAt: clip.start, excluding: clip.id) != nil, !track.transitions.contains(where: { $0.toClipID == clip.id }) {
             menu.add("Add dissolve at start", icon: Icons.transition) {
                 TransitionSoundActions.add(.dissolve, at: clip.start, trackID: trackID, in: model)
@@ -1220,7 +1220,7 @@ final class TimelineLanesView: TimelineChildView {
     /// title, transition or effect libraries.
     private func libraryDrag(from info: NSDraggingInfo) -> LibraryDrag? {
         let pasteboard = info.draggingPasteboard
-        let text = pasteboard.string(forType: .tandemMedia) ?? pasteboard.string(forType: .string) ?? ""
+        let text = pasteboard.string(forType: .substoMedia) ?? pasteboard.string(forType: .string) ?? ""
         if let drag = LibraryDrag.parse(text) { return drag }
         // Finder's drags carry files, never a browser drag's media.
         if pasteboard.types?.contains(.fileURL) == true { return nil }
@@ -1574,7 +1574,7 @@ struct TranscriptPhrase: Equatable {
 
 /// The drag payload for media from the browser.
 enum MediaDrag {
-    static let prefix = "tandem-media:"
+    static let prefix = "substo-media:"
 
     static func payload(_ ids: [String]) -> String {
         prefix + ids.joined(separator: ",")

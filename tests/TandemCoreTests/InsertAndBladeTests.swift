@@ -112,7 +112,7 @@ final class PlaceAtSpeedTests: XCTestCase {
 
 /// Inserting right at, or a hair off, a clip boundary (#29).
 final class InsertAtABoundaryTests: XCTestCase {
-    /// The take cut at 10.0003125 s, which `tandem timeline` shows as
+    /// The take cut at 10.0003125 s, which `substo timeline` shows as
     /// 00:10.000.
     func cutJustAfterTen() throws -> (Fixture, ProjectCoordinator, Time) {
         let (f, c) = try Fixture.edited()
@@ -159,7 +159,7 @@ final class InsertAtABoundaryTests: XCTestCase {
         ])
     }
 
-    /// What happened in the Tandem video: the agent took the first take to
+    /// What happened in the Substo Video video: the agent took the first take to
     /// be the screen file's 282.1 s, but it was placed at the camera file's
     /// 282.045 s, so 625.1 was 55 ms into the clip after it.
     func testAnInsertJustInsideAClipWarnsWhereItStarts() throws {

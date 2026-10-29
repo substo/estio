@@ -11,20 +11,20 @@ import VideoToolbox
 /// RVM (Lin et al. 2021, https://github.com/PeterL1n/RobustVideoMatting) is
 /// a video matting network with a recurrent state: each frame's matte is
 /// made knowing the frames before it, so it holds still where Vision's
-/// per-frame masks flicker, with no smoothing afterwards. Tandem uses the
+/// per-frame masks flicker, with no smoothing afterwards. Substo Video uses the
 /// project's own Core ML export of the MobileNetV3 model with 1280x720
 /// input and the downsample ratio 0.375 built in: the network sees 480x270
 /// and its refiner brings the matte back to 1280x720, scaled up to the
-/// matte box. The 1920x1080 export scored the same on Mike's takes and
+/// matte box. The 1920x1080 export scored the same on the creator's takes and
 /// looked the same at 1:1, but ran at 22 to 30 fps against 35 to 37. On
 /// his takes it keeps the handheld mic like version 2 does (docs/MEDIA.md
 /// has the scores).
 ///
 /// Licence: the RVM repository is GPL-3.0. The model file's own metadata
-/// says Apache 2.0; Tandem goes by the repository. So the weights are never
+/// says Apache 2.0; Substo Video goes by the repository. So the weights are never
 /// committed or bundled: `RVMModelStore` downloads them from the official
 /// v1.0.0 release on first use, into
-/// ~/Library/Application Support/Tandem/Models/rvm/, and checks the SHA-256.
+/// ~/Library/Application Support/Substo/Models/rvm/, and checks the SHA-256.
 enum RVMMatte {
     /// Bump when RVM mattes change; it's in their cache key, apart from
     /// Vision's. 2: `cleanEdge`.
@@ -154,7 +154,7 @@ struct RVMModelStore: Sendable {
 
     static let standard = RVMModelStore(
         folder: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Tandem/Models/rvm", isDirectory: true),
+            .appendingPathComponent("Substo/Models/rvm", isDirectory: true),
         fileName: RVMMatte.modelFile,
         remote: RVMMatte.modelURL,
         sha256: RVMMatte.modelSHA256,
@@ -180,7 +180,7 @@ struct RVMModelStore: Sendable {
             throw MediaError.failed("Downloading \(url.lastPathComponent) failed (HTTP \(http.statusCode))")
         }
         // URLSession's file goes when this call returns.
-        let kept = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-rvm-\(UUID().uuidString)")
+        let kept = FileManager.default.temporaryDirectory.appendingPathComponent("substo-rvm-\(UUID().uuidString)")
         try FileManager.default.moveItem(at: file, to: kept)
         return kept
     }
@@ -343,7 +343,7 @@ final class FramePrefetcher: @unchecked Sendable {
 
     func start() {
         let thread = Thread { [self] in decodeLoop() }
-        thread.name = "tandem.rvm.decode"
+        thread.name = "substo.rvm.decode"
         thread.qualityOfService = .utility
         thread.start()
     }

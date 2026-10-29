@@ -66,10 +66,10 @@ final class TranscriptToolsTests: XCTestCase {
         }
         // Music isn't a take or on a speech track, so nothing makes one
         // unless asked.
-        XCTAssertTrue(try message(.hosted).contains("tandem transcribe med_music"))
+        XCTAssertTrue(try message(.hosted).contains("substo transcribe med_music"))
         let headless = try message(.headless)
         XCTAssertTrue(headless.contains("nothing is making one"), headless)
-        XCTAssertTrue(headless.contains("tandem transcribe med_music"), headless)
+        XCTAssertTrue(headless.contains("substo transcribe med_music"), headless)
     }
 
     func testSearchMapsHitsToTheTimeline() throws {

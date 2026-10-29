@@ -55,7 +55,7 @@ final class TransitionSoundAPITests: XCTestCase {
     func testTheGainFollowsTheProjectsSpeech() {
         let media = MediaItem(id: "med_swoosh", path: "assets/sfx/swoosh.wav", kind: .audio, role: .sfx, duration: t(1), hasAudio: true)
         let resolved = Defaults.Resolved(assetID: Defaults.lightSwoosh.assetID, name: "Swoosh", media: media, sound: TransitionSound(mediaID: media.id, gainDB: -23.3, offset: t(-0.39)))
-        // The fixture's voice plays at -14 LUFS, 6 LU over Tandem's -20.
+        // The fixture's voice plays at -14 LUFS, 6 LU over Substo Video's -20.
         let project = APIFixture.project()
         XCTAssertEqual(AudioLevels.speechLevel(in: project), -14)
         XCTAssertEqual(resolved.levelled(for: project).sound.gainDB, -17.3)
@@ -77,7 +77,7 @@ final class TransitionSoundAPITests: XCTestCase {
     /// Using the default copies the file into the project's assets/sfx and
     /// gives the sound it plays with.
     func testUsingTheSwooshCopiesItIn() async throws {
-        let temp = TempFolder("tandem-transition-sounds")
+        let temp = TempFolder("substo-transition-sounds")
         let library = try CardSoundsFixture.library(at: temp.url.appendingPathComponent("library"), withSounds: false)
         XCTAssertFalse(Defaults.available(Defaults.lightSwoosh, in: library))
         var asset = Asset(provider: "elevenlabs", providerID: "sfx_2ybnc2tu", kind: .sfx, name: "A quick light swoosh", duration: 1)

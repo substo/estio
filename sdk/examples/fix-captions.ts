@@ -1,5 +1,5 @@
 // Patch the captions' misheard words (text, per-word list and name) in one labelled edit.
-//   bun sdk/run.ts "Video Shorts.tandem" sdk/examples/fix-captions.ts
+//   bun sdk/run.ts "Video Shorts.substo" sdk/examples/fix-captions.ts
 import { fixCaptionWords, type Tandem } from "../tandem";
 
 export default async (t: Tandem) => {

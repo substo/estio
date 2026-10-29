@@ -4,7 +4,7 @@ import Foundation
 /// the project, placed on an SFX track when its sweep starts.
 public struct SectionCardSound: Codable, Equatable, Sendable {
     public var mediaID: String
-    /// Clip gain in dB. Default -15, Mike's usual for sound effects.
+    /// Clip gain in dB. Default -15, the creator's usual for sound effects.
     public var gainDB: Double?
     /// When the sound starts, in seconds after its sweep starts. Default
     /// 0.2 for the sweep in (so a whoosh that peaks early lands as the

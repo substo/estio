@@ -3,7 +3,7 @@ import XCTest
 @testable import TandemCore
 
 /// Agents find the colour wheels where they find every effect: in
-/// `tandem effects`, in the edit schema, and in edits that apply.
+/// `substo effects`, in the edit schema, and in edits that apply.
 final class ColourWheelsCatalogTests: XCTestCase {
     func testTheEffectsCatalogueListsTheWheels() throws {
         XCTAssertTrue(try EffectsResult.catalog().effects.contains { $0.type == "colorWheels" })

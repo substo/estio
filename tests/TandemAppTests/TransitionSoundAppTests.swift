@@ -10,7 +10,7 @@ import TandemAssets
 import TandemMedia
 
 /// The sounds transitions get in the app: Mike's picks in Settings over
-/// Tandem's own, on drops and Cmd-D, and how a sound follows a new type.
+/// Substo Video's own, on drops and Cmd-D, and how a sound follows a new type.
 @MainActor
 final class TransitionSoundAppTests: XCTestCase {
     typealias Defaults = TransitionSoundDefaults
@@ -30,11 +30,11 @@ final class TransitionSoundAppTests: XCTestCase {
     // MARK: - Settings
 
     func testMikesPicksInSettingsWinOverTandems() throws {
-        let suite = "tandem-transition-sounds-\(UUID().uuidString)"
+        let suite = "substo-transition-sounds-\(UUID().uuidString)"
         let store = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { store.removePersistentDomain(forName: suite) }
         let settings = TransitionSoundSettings(store: store)
-        XCTAssertEqual(settings.sound(for: .push, library: nil), Defaults.lightSwoosh, "Tandem's")
+        XCTAssertEqual(settings.sound(for: .push, library: nil), Defaults.lightSwoosh, "Substo Video's")
         XCTAssertNil(settings.sound(for: .dissolve, library: nil))
         XCTAssertNil(settings.choice(for: .push))
 
@@ -44,20 +44,20 @@ final class TransitionSoundAppTests: XCTestCase {
         XCTAssertEqual(settings.sound(for: .dissolve, library: nil), Defaults.lightSwoosh)
         XCTAssertEqual(TransitionSoundSettings(store: store).choices, ["push": "", "dissolve": Defaults.lightSwoosh.assetID], "kept")
         settings.set(nil, for: .push)
-        XCTAssertEqual(settings.sound(for: .push, library: nil), Defaults.lightSwoosh, "back to Tandem's")
+        XCTAssertEqual(settings.sound(for: .push, library: nil), Defaults.lightSwoosh, "back to Substo Video's")
         settings.set("import:sfx/Boom.wav", for: .zoom)
         XCTAssertNil(settings.sound(for: .zoom, library: nil), "a pick the library can't look up plays nothing")
     }
 
     /// A pick from the library plays at its own level and moment.
     func testAPickFromTheLibraryIsLevelledAndTimed() async throws {
-        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-transition-picks-\(UUID().uuidString)", isDirectory: true)
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("substo-transition-picks-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: temp) }
         let library = try AssetLibrary(root: temp, previewFolder: temp.appendingPathComponent("previews"), transport: OfflineTransport(), secrets: StaticSecretStore())
         var boom = Asset(provider: "import", providerID: "sfx/Boom.wav", kind: .sfx, name: "Boom", duration: 1, loudness: Loudness(integratedLUFS: -20, truePeakDBTP: -2, loudnessRange: 0))
         boom.state = .normalised
         try library.catalog.upsert(boom)
-        let suite = "tandem-transition-picks-\(UUID().uuidString)"
+        let suite = "substo-transition-picks-\(UUID().uuidString)"
         let store = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { store.removePersistentDomain(forName: suite) }
         let settings = TransitionSoundSettings(store: store)
@@ -68,7 +68,7 @@ final class TransitionSoundAppTests: XCTestCase {
     /// A drop on a transition asks the same picks as everything else, so
     /// a swoosh on a push Mike made silent counts as his own and stays.
     func testADropOnATransitionAsksMikesPicks() throws {
-        let suite = "tandem-transition-drop-picks-\(UUID().uuidString)"
+        let suite = "substo-transition-drop-picks-\(UUID().uuidString)"
         let store = try XCTUnwrap(UserDefaults(suiteName: suite))
         let saved = TransitionSoundActions.settings
         TransitionSoundActions.settings = TransitionSoundSettings(store: store)
@@ -76,7 +76,7 @@ final class TransitionSoundAppTests: XCTestCase {
             TransitionSoundActions.settings = saved
             store.removePersistentDomain(forName: suite)
         }
-        XCTAssertEqual(TransitionSoundActions.soundFor()(.push), Defaults.lightSwoosh, "Tandem's")
+        XCTAssertEqual(TransitionSoundActions.soundFor()(.push), Defaults.lightSwoosh, "Substo Video's")
         TransitionSoundActions.settings.set("", for: .push)
         XCTAssertNil(TransitionSoundActions.soundFor()(.push), "none, as Settings has it")
 
@@ -201,7 +201,7 @@ final class TransitionSoundAppTests: XCTestCase {
 }
 
 /// The transition inspector with its sound, and the Settings rows, drawn
-/// offscreen to look at (`TANDEM_TRANSITION_UI_OUT`, as
+/// offscreen to look at (`SUBSTO_TRANSITION_UI_OUT`, as
 /// `TransitionSnapshots`).
 @MainActor
 final class TransitionSoundSnapshots: XCTestCase {
@@ -220,7 +220,7 @@ final class TransitionSoundSnapshots: XCTestCase {
         window.close()
         let image = try XCTUnwrap(rep.cgImage)
         XCTAssertGreaterThan(image.height, 100)
-        guard let out = ProcessInfo.processInfo.environment["TANDEM_TRANSITION_UI_OUT"], !out.isEmpty else { return }
+        guard let out = ProcessInfo.processInfo.environment["SUBSTO_TRANSITION_UI_OUT"], !out.isEmpty else { return }
         let dir = URL(fileURLWithPath: NSString(string: out).expandingTildeInPath, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(dir.appendingPathComponent(name + ".png") as CFURL, UTType.png.identifier as CFString, 1, nil))
@@ -229,10 +229,10 @@ final class TransitionSoundSnapshots: XCTestCase {
     }
 
     func testTheInspectorsSoundRows() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-transition-inspector-\(UUID().uuidString)", isDirectory: true)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-transition-inspector-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let session = try ProjectSession.create(at: folder.appendingPathComponent("Inspector.tandem"), name: "Inspector", owner: .app)
+        let session = try ProjectSession.create(at: folder.appendingPathComponent("Inspector.substo"), name: "Inspector", owner: .app)
         let model = EditorModel(session: session)
         defer {
             model.tearDown()
@@ -269,16 +269,16 @@ final class TransitionSoundSnapshots: XCTestCase {
 final class TransitionSoundActionsTests: XCTestCase {
     func testADroppedPushBringsItsSwooshInAsOneEdit() async throws {
         guard AssetLibraryHost.shared.library == nil else { throw XCTSkip("the asset library is already open in this run") }
-        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-transition-actions-\(UUID().uuidString)", isDirectory: true)
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("substo-transition-actions-\(UUID().uuidString)", isDirectory: true)
         let root = temp.appendingPathComponent("assets", isDirectory: true)
         let video = temp.appendingPathComponent("video", isDirectory: true)
         try FileManager.default.createDirectory(at: video, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: temp) }
-        setenv("TANDEM_ASSETS_ROOT", root.path, 1)
-        setenv("TANDEM_ASSETS_OFFLINE", "1", 1)
+        setenv("SUBSTO_ASSETS_ROOT", root.path, 1)
+        setenv("SUBSTO_ASSETS_OFFLINE", "1", 1)
         defer {
-            unsetenv("TANDEM_ASSETS_ROOT")
-            unsetenv("TANDEM_ASSETS_OFFLINE")
+            unsetenv("SUBSTO_ASSETS_ROOT")
+            unsetenv("SUBSTO_ASSETS_OFFLINE")
         }
 
         // The swoosh under its real ID, as a quiet second of sine.
@@ -289,7 +289,7 @@ final class TransitionSoundActionsTests: XCTestCase {
         asset.files = AssetFiles(original: "original.wav")
         try library.catalog.upsert(asset)
 
-        let session = try ProjectSession.create(at: video.appendingPathComponent("Drop.tandem"), name: "Drop", owner: .app)
+        let session = try ProjectSession.create(at: video.appendingPathComponent("Drop.substo"), name: "Drop", owner: .app)
         let model = EditorModel(session: session)
         defer {
             model.tearDown()

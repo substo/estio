@@ -169,9 +169,9 @@ final class PlaybackController {
         }
     }
 
-    /// `TANDEM_MUTED=1` silences playback and previews. Tests set it too,
+    /// `SUBSTO_MUTED=1` silences playback and previews. Tests set it too,
     /// before they make a viewer.
-    nonisolated(unsafe) static var muted = ProcessInfo.processInfo.environment["TANDEM_MUTED"] == "1"
+    nonisolated(unsafe) static var muted = ProcessInfo.processInfo.environment["SUBSTO_MUTED"] == "1"
 
     func invalidate() {
         keepAwake.hold(false)

@@ -3,7 +3,7 @@ import TandemCore
 
 /// How late a file's picture is against its sound (`MediaItem.pictureDelay`),
 /// as the Info tab and Settings offer it: a webcam's picture lags its mic,
-/// Mike's by about 80 ms.
+/// the creator's by about 80 ms.
 enum PictureDelay {
     /// The choices, in milliseconds.
     static let choices = [0, 40, 60, 80, 100, 120, 150]

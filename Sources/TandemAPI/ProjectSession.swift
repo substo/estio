@@ -9,7 +9,7 @@ import TandemMedia
 /// agents go through the app's API. When the app is closed the CLI opens the
 /// file itself. Two writers never share a file, so there's nothing to merge.
 ///
-/// The lock is `.tandem/<name>.lock`, held with `flock` for as long as the
+/// The lock is `.substo/<name>.lock`, held with `flock` for as long as the
 /// session is open. The kernel drops the lock if the process dies, so a
 /// crash never leaves a project locked, and two processes racing to open
 /// the same project can't both win. The file's contents (pid, owner, API
@@ -26,7 +26,7 @@ public final class ProjectSession: @unchecked Sendable {
         public var token: String?
     }
 
-    /// Where the project file is now. If Mike renames or moves the video
+    /// Where the project file is now. If the creator renames or moves the video
     /// folder while it's open, saves follow it there. (`folder`, which
     /// media paths resolve against, stays where it was opened until the
     /// project is opened again.)
@@ -36,11 +36,11 @@ public final class ProjectSession: @unchecked Sendable {
     private let fileName: String
     public let coordinator: ProjectCoordinator
     public let analysis: MediaAnalysis
-    /// Agent edits Mike hasn't reviewed yet, kept as edits commit here
+    /// Agent edits the creator hasn't reviewed yet, kept as edits commit here
     /// whoever has the project open, so the app finds the CLI's too.
     public let review: ReviewRecorder
     /// Every change, with who made it and where, kept in
-    /// `.tandem/<name>.history.jsonl` across restarts.
+    /// `.substo/<name>.history.jsonl` across restarts.
     public let history: HistoryRecorder
     public let owner: Owner
     public private(set) var savedRevision: Int
@@ -49,7 +49,7 @@ public final class ProjectSession: @unchecked Sendable {
 
     private let journal: ProjectJournal
     private let lockHandle: LockHandle
-    private let queue = DispatchQueue(label: "com.mikerosoft.tandem.session")
+    private let queue = DispatchQueue(label: "com.substo.video.session")
     private var autosaveWork: DispatchWorkItem?
     private var observerToken: UUID?
     private var closed = false
@@ -133,7 +133,7 @@ public final class ProjectSession: @unchecked Sendable {
         }
     }
 
-    /// Reads the project file. When it isn't a project Tandem can read (cut
+    /// Reads the project file. When it isn't a project Substo Video can read (cut
     /// short, or broken by a hand edit), says where the previous saves are.
     static func load(_ url: URL) throws -> (project: Project, revision: Int) {
         do {
@@ -142,13 +142,13 @@ public final class ProjectSession: @unchecked Sendable {
             let reason = DecodingErrorText.describe(error)
             var message = "\(url.lastPathComponent) couldn't be read: \(reason)\(reason.hasSuffix(".") ? "" : ".")"
             if let newest = ProjectFile.backups(of: url).last {
-                message += " The previous saves are in .tandem/backups/ next to it; the newest is \"\(newest.lastPathComponent)\". Copy one over \(url.lastPathComponent) to go back to it."
+                message += " The previous saves are in .substo/backups/ next to it; the newest is \"\(newest.lastPathComponent)\". Copy one over \(url.lastPathComponent) to go back to it."
             }
             throw ServiceError(.invalid, message)
         }
     }
 
-    /// Creates a new project with Mike's usual tracks in `url`'s folder.
+    /// Creates a new project with the creator's usual tracks in `url`'s folder.
     public static func create(at url: URL, name: String? = nil, settings: ProjectSettings? = nil, owner: Owner) throws -> ProjectSession {
         let url = url.standardizedFileURL
         guard !FileManager.default.fileExists(atPath: url.path) else {
@@ -168,7 +168,7 @@ public final class ProjectSession: @unchecked Sendable {
 
     /// The frame rate a new project takes from its camera takes: the
     /// longest one with a picture. A rate up to 30 is taken as it is, so
-    /// a RED take at 23.976 makes a 23.976 project and Mike's 30 fps
+    /// a RED take at 23.976 makes a 23.976 project and the creator's 30 fps
     /// webcam keeps 30. A faster one is divided down to the fastest rate
     /// up to 30 that drops whole frames (60 to 30, 59.94 to 29.97, 50 to
     /// 25), so a 60 fps webcam keeps his usual 30 too. Nil, keeping the
@@ -240,7 +240,7 @@ public final class ProjectSession: @unchecked Sendable {
         return failure
     }
 
-    /// For long-lived sessions (the app and `tandem serve`, not one-shot CLI
+    /// For long-lived sessions (the app and `substo serve`, not one-shot CLI
     /// commands): starts the usual background analysis for the project's
     /// media, timeline media first, and watches the folder so files that
     /// land in it (a new record-it take, a downloaded sound) join the
@@ -303,7 +303,7 @@ public final class ProjectSession: @unchecked Sendable {
     ///
     /// The project can change while the folder is scanned: another scan
     /// can add the same new files first (opening a project in the app
-    /// starts two), or Mike can edit. So the edit is worked out against the
+    /// starts two), or the creator can edit. So the edit is worked out against the
     /// project as it is when it's applied, and worked out again if it
     /// changes in between.
     @discardableResult
@@ -312,7 +312,7 @@ public final class ProjectSession: @unchecked Sendable {
     }
 
     /// `refreshMedia`, also saying which of the files it added are camera
-    /// takes and why, for `tandem new` to tell Mike.
+    /// takes and why, for `substo new` to tell the creator.
     public func refreshMediaReport() async throws -> MediaRefresh {
         let project = coordinator.project
         let report = try await MediaScanner.scanReport(folder, known: project.media)
@@ -449,7 +449,7 @@ public final class ProjectSession: @unchecked Sendable {
                     throw EditError.locked("\(projectURL.lastPathComponent) is already open in this process.")
                 }
                 let who = holder.map { " (\($0.owner.rawValue), pid \($0.pid))" } ?? ""
-                throw EditError.locked("\(projectURL.lastPathComponent) is open in Tandem\(who). Use its API instead.")
+                throw EditError.locked("\(projectURL.lastPathComponent) is open in Substo Video\(who). Use its API instead.")
             case .replaced:
                 continue
             }

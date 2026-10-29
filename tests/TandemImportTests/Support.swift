@@ -37,7 +37,7 @@ enum Fixtures {
 
     /// A fresh temporary folder, removed by the caller.
     static func temporaryFolder() throws -> URL {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-import-\(UUID().uuidString)")
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-import-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         return folder
     }

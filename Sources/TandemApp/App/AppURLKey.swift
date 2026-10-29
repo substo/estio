@@ -1,28 +1,28 @@
 import Foundation
 import TandemAPI
 
-/// The key a `tandem://` link has to carry before the app acts on it.
+/// The key a `substo://` link has to carry before the app acts on it.
 ///
-/// Any app or web page can open a tandem:// link, and the links click,
+/// Any app or web page can open a substo:// link, and the links click,
 /// type, drop, run editor commands and write screenshots: enough for a
 /// page to edit and save the open project. So each Mac gets its own random
 /// key, in a file only its user can read, and the app ignores a link
-/// without it. Smoke tests and agents send links with `tandem url`, which
+/// without it. Smoke tests and agents send links with `substo url`, which
 /// adds the key:
 ///
-///     tandem url "simulate?click=600,700"
-///     tandem url "screenshot?out=/tmp/shot.png"
+///     substo url "simulate?click=600,700"
+///     substo url "screenshot?out=/tmp/shot.png"
 ///
 /// To change the key, delete the file and restart the app.
 struct AppURLKey: Equatable {
     let value: String
 
-    /// `~/Library/Application Support/Tandem/url-key`, where the `tandem`
+    /// `~/Library/Application Support/Substo/url-key`, where the `substo`
     /// launcher reads it.
     static var defaultFile: URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        return support.appendingPathComponent("Tandem/url-key")
+        return support.appendingPathComponent("Substo/url-key")
     }
 
     /// The key in `file`, made the first time.

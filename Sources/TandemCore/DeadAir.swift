@@ -1,8 +1,8 @@
 import Foundation
 
-// Dead air for `tandem check`: a still picture with nothing to hear.
+// Dead air for `substo check`: a still picture with nothing to hear.
 //
-// Mike only caught a silent second at 3:56 of Build Your Own Convex on his
+// the creator only caught a silent second at 3:56 of Build Your Own Convex on his
 // final watch, and fixing it cost a 13.7 GB re-export. Pauses that let a
 // point land, or that run while something animates, are fine, so this is a
 // note for the agent to cut or justify, never a failure.
@@ -23,7 +23,7 @@ extension QualityCheck {
         }
 
         /// Every word said, in timeline order, with its edges on the voice
-        /// (as `tandem pauses` reads them).
+        /// (as `substo pauses` reads them).
         public var words: [Word]
         /// The audio clips the words come from: between their words they're
         /// silent. Every other clip that's heard counts as sound for as long
@@ -38,10 +38,10 @@ extension QualityCheck {
     }
 
     /// A still, silent stretch this long is dead air: twice the 0.4 s
-    /// Mike leaves between sentences, so a sentence pause never is.
+    /// the creator leaves between sentences, so a sentence pause never is.
     public static let deadAirMinimum = Time(seconds: 0.8)
     /// A tile whose luma moves by more than this (of 255) between two
-    /// frames has moved. Mike's cursor does, and so does a small badge
+    /// frames has moved. the creator's cursor does, and so does a small badge
     /// sliding across an explainer, which look the same at this size.
     static let stillNoise = 2
     /// At least this many tiles moving by more than `eventLevel` at once is
@@ -165,7 +165,7 @@ extension QualityCheck {
     /// Runs of frames, as index ranges, that hold one picture: the steps
     /// between them neither change much of it at once nor keep moving.
     ///
-    /// Mike's camera doesn't count where it's the picture on top (he moves
+    /// the creator's camera doesn't count where it's the picture on top (he moves
     /// in his corner while he's quiet), and nor does the frame's outer ring
     /// of tiles: on a screen recording that's where the Dock pops up and the
     /// menu bar ticks. The dead second at 3:56 of Build Your Own Convex had
@@ -234,7 +234,7 @@ extension QualityCheck {
         return edge
     }
 
-    /// Tiles where Mike's camera is the picture on top at `time`: the whole
+    /// Tiles where the creator's camera is the picture on top at `time`: the whole
     /// box of it, cut out or not, and not a tile past it (a demo's badge
     /// slid along just above his head in Build Your Own Convex). A
     /// full-frame camera covers every tile. Tiles under something drawn over

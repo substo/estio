@@ -8,7 +8,7 @@ final class SaveProblemTests: XCTestCase {
     var folder: URL!
 
     override func setUpWithError() throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-save-\(UUID().uuidString)")
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-save-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     }
 
@@ -18,7 +18,7 @@ final class SaveProblemTests: XCTestCase {
     }
 
     /// A folder the project file can't be written into, like a disk that
-    /// went read-only. `.tandem` inside it stays writable, as the journal's
+    /// went read-only. `.substo` inside it stays writable, as the journal's
     /// folder usually does.
     private func writable(_ on: Bool) {
         try? FileManager.default.setAttributes([.posixPermissions: on ? 0o755 : 0o555], ofItemAtPath: folder.path)
@@ -29,7 +29,7 @@ final class SaveProblemTests: XCTestCase {
     }
 
     func testAFailedSaveSaysWhyUntilOneWorks() throws {
-        let url = folder.appendingPathComponent("Video.tandem")
+        let url = folder.appendingPathComponent("Video.substo")
         let session = try ProjectSession.create(at: url, owner: .cli)
         session.autosaveDelay = 3600
         try session.coordinator.apply(marker("mk_a"))
@@ -58,7 +58,7 @@ final class SaveProblemTests: XCTestCase {
     }
 
     func testAutosaveKeepsTryingUntilItWorks() throws {
-        let url = folder.appendingPathComponent("Video.tandem")
+        let url = folder.appendingPathComponent("Video.substo")
         let session = try ProjectSession.create(at: url, owner: .cli)
         session.autosaveDelay = 0.05
         session.autosaveRetryDelay = 0.1

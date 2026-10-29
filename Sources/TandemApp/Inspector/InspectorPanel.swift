@@ -699,7 +699,7 @@ struct ClipInfo: View {
         }
     }
 
-    /// macOS can't decode QuickTime Animation or PNG video, so Tandem plays
+    /// macOS can't decode QuickTime Animation or PNG video, so Substo Video plays
     /// a converted copy; says how that's going.
     private func conversionText(_ codec: String, _ item: MediaItem) -> String {
         if model.session.analysis.convertedURL(for: item) != nil { return "\(codec) · plays from an HEVC copy" }
@@ -870,7 +870,7 @@ private struct TextSection: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.amber.color)
-                    .tip("Not installed, so it's drawn in SF Pro. Pick a font in the Fonts tab, or run: tandem assets use \(missing.assetID)")
+                    .tip("Not installed, so it's drawn in SF Pro. Pick a font in the Fonts tab, or run: substo assets use \(missing.assetID)")
             }
             Spacer()
             resetButton(["font"], own.font != nil, base.font)

@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 
 /// Previews downloaded for the browser (hover-scrub video, audio snippets,
-/// animated stickers), in `~/Library/Caches/Tandem/AssetPreviews`. The
+/// animated stickers), in `~/Library/Caches/Substo Video/AssetPreviews`. The
 /// folder is capped: when it grows past the limit, the least recently used
 /// files go first.
 public final class PreviewCache: @unchecked Sendable {

@@ -66,7 +66,7 @@ extension Transition {
 }
 
 /// Keeps each transition's sound in step with it. The sound is an ordinary
-/// clip, so Mike can nudge it, trim it or turn it down, and the transition
+/// clip, so the creator can nudge it, trim it or turn it down, and the transition
 /// only holds its ID (`Transition.soundClipID`). After every command:
 ///
 /// - A transition that went, whatever took it (a delete, its clips moved

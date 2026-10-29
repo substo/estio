@@ -36,7 +36,7 @@ public struct OwnerInfo: Codable, Equatable, Sendable {
     }
 }
 
-/// An agent edit Mike hasn't reviewed in the app yet. The app highlights
+/// An agent edit the creator hasn't reviewed in the app yet. The app highlights
 /// it on the timeline until he marks the agent edits reviewed.
 public struct PendingReview: Codable, Equatable, Sendable {
     public var label: String
@@ -90,7 +90,7 @@ public struct StatusResult: Codable, Sendable {
     /// What won't look right, with the fix: titles in a font that isn't
     /// installed. Optional so an older app's answer still reads.
     public var warnings: [String]?
-    /// Agent edits waiting for Mike's review, oldest first. Read-only:
+    /// Agent edits waiting for the creator's review, oldest first. Read-only:
     /// only Mark reviewed in the app clears them. Nil from an older app.
     public var reviewPending: [PendingReview]?
 }
@@ -151,7 +151,7 @@ public struct MediaInfo: Codable, Sendable {
     /// Analysis status by kind (`transcript`, `loudness`, `proxy`...).
     public var analysis: [String: AnalysisState]
     /// How late the file's picture is against its sound; every clip of it
-    /// shows its picture that much later (`tandem sync`).
+    /// shows its picture that much later (`substo sync`).
     public var pictureDelay: Time? = nil
     /// The lag its recorder already took out (Record It's Camera delay).
     public var pictureDelayCorrected: Time? = nil
@@ -392,7 +392,7 @@ public struct TightenRequest: ServiceCall {
     /// Comma and mid-sentence pauses at least this long change, so breaths
     /// stay. Default 0.5 s.
     public var midMin: Double?
-    /// Mike's rules (`TranscriptTools.mikeRules`); the other fields override them.
+    /// the creator's rules (`TranscriptTools.mikeRules`); the other fields override them.
     public var mike: Bool?
     /// Pauses containing any of these timeline times are left alone.
     public var protect: [Time]?
@@ -674,7 +674,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     }
 }
 
-/// One change from the edit history (`.tandem/<name>.history.jsonl`),
+/// One change from the edit history (`.substo/<name>.history.jsonl`),
 /// which lasts across restarts and from one CLI command to the next.
 public struct HistoryEdit: Codable, Equatable, Sendable {
     public var revision: Int

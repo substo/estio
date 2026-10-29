@@ -81,8 +81,8 @@ enum TransitionRenderer {
 
         case .fadeToBlack, .fadeFromBlack:
             let levels = dipLevels(progress: p, hasFrom: from != nil, hasTo: to != nil)
-            if from != nil && (to == nil || p < 0.5) { return a.tandemDarkened(levels.from).cropped(to: rect) }
-            return b.tandemDarkened(levels.to).cropped(to: rect)
+            if from != nil && (to == nil || p < 0.5) { return a.substoDarkened(levels.from).cropped(to: rect) }
+            return b.substoDarkened(levels.to).cropped(to: rect)
 
         case .push, .slide, .cutSlide:
             let o = offsets(type, direction: ref.transition.direction, progress: p)

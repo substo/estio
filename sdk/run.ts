@@ -1,7 +1,7 @@
 // Runs a script against a Tandem project and prints only what it returns.
 //
-//   bun sdk/run.ts <project.tandem | folder> script.ts
-//   bun sdk/run.ts <project.tandem | folder> -e 'const p = await t.project(); return p.transitions().length'
+//   bun sdk/run.ts <project.substo | folder> script.ts
+//   bun sdk/run.ts <project.substo | folder> -e 'const p = await t.project(); return p.transitions().length'
 //   echo '...' | bun sdk/run.ts <project> -
 //
 // A script file default-exports `async (t, sdk) => result`. Inline code (-e or stdin) runs as
@@ -14,7 +14,7 @@ import * as sdk from "./tandem";
 
 const [projectArg, scriptArg, code] = process.argv.slice(2);
 if (!projectArg || !scriptArg || (scriptArg === "-e" && !code)) {
-  console.error("Usage: bun sdk/run.ts <project.tandem | folder> <script.ts | -e '<code>' | ->");
+  console.error("Usage: bun sdk/run.ts <project.substo | folder> <script.ts | -e '<code>' | ->");
   process.exit(2);
 }
 

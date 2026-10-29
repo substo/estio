@@ -179,7 +179,7 @@ struct FrameComposer {
         // mixed in by its opacity.
         if case .adjustment = clip.content {
             let env = EffectEnvironment(registry: scene.registry, folder: scene.folder, pixelsPerUnit: scene.pixelScale)
-            return EffectRenderer.apply(video.effects, to: below, env).cropped(to: rect).tandemOpacity(video.opacity)
+            return EffectRenderer.apply(video.effects, to: below, env).cropped(to: rect).substoOpacity(video.opacity)
         }
 
         var fitToCanvas = true
@@ -275,7 +275,7 @@ struct FrameComposer {
                 color: colour
             )
         }
-        return image.cropped(to: rect).tandemOpacity(opacity)
+        return image.cropped(to: rect).substoOpacity(opacity)
     }
 
     // MARK: - Pieces

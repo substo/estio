@@ -167,7 +167,7 @@ public struct ArchiveOptions: Sendable {
     /// own folder standalone instead.
     public var destination: URL?
     /// Archive mode: also copy proxies, mattes, thumbnails and isolated
-    /// voice, which Tandem otherwise rebuilds when the archive is opened.
+    /// voice, which Substo Video otherwise rebuilds when the archive is opened.
     public var withCache: Bool
     /// Work out what would happen and change nothing.
     public var dryRun: Bool
@@ -178,7 +178,7 @@ public struct ArchiveOptions: Sendable {
     /// Finds the files of fonts titles use.
     public var fonts: any FontLocating
     /// The shared library. Its files are brought in like any other file
-    /// from outside the folder, into `media/Tandem Library/<where they
+    /// from outside the folder, into `media/Substo Library/<where they
     /// were in it>`, and so are the asset library's converted copies of
     /// them (a WebM sticker plays from one), named after the sticker.
     public var sharedLibrary: SharedLibrary?
@@ -338,7 +338,7 @@ extension ArchiveResult: ReadableResult {
                 lines.append("Run it without --dry-run (dryRun: false) to copy them in, or pass --to <folder> to write a standalone copy somewhere else instead.")
             }
         } else {
-            if let revision, mode == .consolidate, !nothingToDo { lines.append("The project is at revision \(revision); `tandem undo` points it back at the old paths (the copies stay).") }
+            if let revision, mode == .consolidate, !nothingToDo { lines.append("The project is at revision \(revision); `substo undo` points it back at the old paths (the copies stay).") }
             if let manifest { lines.append("Manifest: \(manifest)") }
         }
         return lines.joined(separator: "\n")

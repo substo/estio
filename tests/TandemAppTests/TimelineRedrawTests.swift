@@ -171,9 +171,9 @@ final class TimelineRedrawTests: XCTestCase {
     /// an async setUp: from there the run loop can't hand observation over.)
     private func showTimeline() throws {
         guard NSScreen.screens.first != nil else { throw XCTSkip("no screen") }
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-redraw-\(UUID().uuidString)", isDirectory: true)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-redraw-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let session = try ProjectSession.create(at: folder.appendingPathComponent("Redraw.tandem"), name: "Redraw", owner: .app)
+        let session = try ProjectSession.create(at: folder.appendingPathComponent("Redraw.substo"), name: "Redraw", owner: .app)
         let model = EditorModel(session: session)
         self.model = model
         addTeardownBlock { @MainActor in

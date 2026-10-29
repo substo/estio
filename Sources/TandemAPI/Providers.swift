@@ -133,13 +133,13 @@ public protocol RenderBackend: Sendable {
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> RenderedExport
     /// Every frame of `ranges`, rendered `width` wide and measured, for
-    /// `tandem check`; with `scanlines`, each frame's lines too.
+    /// `substo check`; with `scanlines`, each frame's lines too.
     func scan(context: RenderContext, ranges: [TimeRange], width: Int, scanlines: Bool) async throws -> [FrameStats]
-    /// The mix's loudness over `range` every `step`, for `tandem loudness
+    /// The mix's loudness over `range` every `step`, for `substo loudness
     /// --from --to`.
     func loudness(context: RenderContext, range: TimeRange, step: Time) async throws -> MixLoudness
     /// Whether each track's render follows its gain lane over `range`, for
-    /// `tandem loudness --gains`.
+    /// `substo loudness --gains`.
     func checkGains(context: RenderContext, range: TimeRange, trackIDs: [String]) async throws -> [GainFollow]
 }
 

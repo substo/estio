@@ -8,7 +8,7 @@ import TandemCore
 // MARK: - Requests and results
 
 /// What changed on the timeline since `since`: a revision (`95`), a
-/// project file (a backup in `.tandem/backups`, or the `.mp4.tandem`
+/// project file (a backup in `.substo/backups`, or the `.mp4.substo`
 /// snapshot every export writes) or an export (`exports/v3.mp4`, read from
 /// the snapshot beside it).
 public struct DiffRequest: ServiceCall {
@@ -259,13 +259,13 @@ extension TandemService {
                 source.revision = revision
                 return source
             }
-            var message = "Revision \(revision) is older than the edit history, which goes back to revision \(gap.earliest) (Tandem keeps it in .tandem/\(session.fileURL.deletingPathExtension().lastPathComponent).history.jsonl from this version on, and older edits weren't recorded)."
+            var message = "Revision \(revision) is older than the edit history, which goes back to revision \(gap.earliest) (Substo Video keeps it in .substo/\(session.fileURL.deletingPathExtension().lastPathComponent).history.jsonl from this version on, and older edits weren't recorded)."
             let older = backups.map(\.revision).filter { $0 < gap.earliest }
             if !older.isEmpty {
                 let listed = Array(Set(older)).sorted().suffix(8).map(String.init).joined(separator: ", ")
-                message += " Backups in .tandem/backups have revisions \(listed)."
+                message += " Backups in .substo/backups have revisions \(listed)."
             }
-            message += " Compare with one of those, a backup file, or an export's snapshot instead (every export writes <name>.mp4.tandem beside it): tandem diff --since \"exports/<name>.mp4\"."
+            message += " Compare with one of those, a backup file, or an export's snapshot instead (every export writes <name>.mp4.substo beside it): substo diff --since \"exports/<name>.mp4\"."
             throw ServiceError(.notFound, message, revision: current)
         }
     }
@@ -277,9 +277,9 @@ extension TandemService {
             let snapshot = URL(fileURLWithPath: url.path + "." + ProjectFile.fileExtension)
             guard fm.fileExists(atPath: snapshot.path) else {
                 let what = fm.fileExists(atPath: url.path)
-                    ? "\(url.lastPathComponent) has no snapshot beside it (\(snapshot.lastPathComponent)), which Tandem writes with every export."
+                    ? "\(url.lastPathComponent) has no snapshot beside it (\(snapshot.lastPathComponent)), which Substo Video writes with every export."
                     : "There's no file at \(url.path)."
-                throw ServiceError(.notFound, what + " Give a revision, a .tandem file (a backup in .tandem/backups) or an export Tandem made.")
+                throw ServiceError(.notFound, what + " Give a revision, a .substo file (a backup in .substo/backups) or an export Substo Video made.")
             }
             url = snapshot
         }
@@ -290,12 +290,12 @@ extension TandemService {
         do {
             loaded = try ProjectFile.load(from: url)
         } catch {
-            throw ServiceError(.invalid, "\(url.lastPathComponent) couldn't be read as a Tandem project: \(ServiceError.wrap(error).message)")
+            throw ServiceError(.invalid, "\(url.lastPathComponent) couldn't be read as a Substo Video project: \(ServiceError.wrap(error).message)")
         }
         let (project, current) = coordinator.snapshot()
         let clips = TimelineClips(loaded.project)
         let isExport = loaded.project.metadata["export.output"] != nil
-        let kind = isExport ? "the export snapshot" : url.path.contains("/.tandem/backups/") ? "the backup" : "the project file"
+        let kind = isExport ? "the export snapshot" : url.path.contains("/.substo/backups/") ? "the backup" : "the project file"
         var source = TimelineSource(
             description: "\(kind) \(folder.path(for: url))", clips: clips, revision: nil,
             names: ClipChanges.mediaNames(project, loaded.project),
@@ -385,7 +385,7 @@ extension TandemService {
             var trackID: String?
             if let reference = request.track {
                 guard let track = TrackLabels.find(reference, in: project) else {
-                    throw ServiceError(.notFound, "There's no track \"\(reference)\". `tandem timeline --summary` lists them.")
+                    throw ServiceError(.notFound, "There's no track \"\(reference)\". `substo timeline --summary` lists them.")
                 }
                 trackID = track.id
             }
@@ -512,7 +512,7 @@ extension TandemService {
                     || item.path.lowercased().hasSuffix("/" + wanted)
             }
             guard !matches.isEmpty else {
-                throw ServiceError(.notFound, "No media matches \"\(reference)\". `tandem media` lists the files and their IDs.", revision: revision)
+                throw ServiceError(.notFound, "No media matches \"\(reference)\". `substo media` lists the files and their IDs.", revision: revision)
             }
             mediaIDs = Set(matches.map(\.id))
         }
@@ -576,7 +576,7 @@ extension DiffResult: ReadableResult {
             lines += Self.lines(changes, indent: "  ")
         }
         if !changes.isEmpty {
-            lines.append("Full detail (each clip before and after) with --json. Put clips back with tandem restore --from <revision or file> --clips <ids>.")
+            lines.append("Full detail (each clip before and after) with --json. Put clips back with substo restore --from <revision or file> --clips <ids>.")
         }
         return lines.joined(separator: "\n")
     }
@@ -644,7 +644,7 @@ extension RestoreResult: ReadableResult {
         }
         if let problem { lines.append("It wouldn't apply as it stands: \(problem)") }
         if let applied {
-            lines.append("Applied as revision \(applied.revision) (\"\(applied.label)\"), one undo step. Undo with `tandem undo`.")
+            lines.append("Applied as revision \(applied.revision) (\"\(applied.label)\"), one undo step. Undo with `substo undo`.")
         } else if !changing.isEmpty {
             lines.append("Nothing changed yet. Run again with --apply (or apply: true) to restore them. Transitions, media and markers aren't restored.")
         }

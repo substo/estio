@@ -10,7 +10,7 @@ import XCTest
 /// Renders the timeline and its toolbar offscreen with a few agent edits
 /// waiting for review, to look at:
 ///
-///     TANDEM_REVIEW_UI_OUT=/private/tmp/review-ui \
+///     SUBSTO_REVIEW_UI_OUT=/private/tmp/review-ui \
 ///     swift test --filter ReviewSnapshots
 ///
 /// Without the variable it still renders once, so a view that can't be
@@ -22,9 +22,9 @@ final class ReviewSnapshots: XCTestCase {
     private var window: NSWindow?
 
     override func setUp() async throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-review-ui-\(UUID().uuidString)", isDirectory: true)
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-review-ui-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let session = try ProjectSession.create(at: folder.appendingPathComponent("ESLint.tandem"), name: "ESLint", owner: .app)
+        let session = try ProjectSession.create(at: folder.appendingPathComponent("ESLint.substo"), name: "ESLint", owner: .app)
         model = EditorModel(session: session)
     }
 
@@ -37,7 +37,7 @@ final class ReviewSnapshots: XCTestCase {
     }
 
     private func write(_ image: CGImage, _ name: String) throws {
-        guard let out = ProcessInfo.processInfo.environment["TANDEM_REVIEW_UI_OUT"], !out.isEmpty else { return }
+        guard let out = ProcessInfo.processInfo.environment["SUBSTO_REVIEW_UI_OUT"], !out.isEmpty else { return }
         let dir = URL(fileURLWithPath: NSString(string: out).expandingTildeInPath, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(name + ".png")

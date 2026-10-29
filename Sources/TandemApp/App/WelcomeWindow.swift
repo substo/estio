@@ -97,7 +97,7 @@ struct WelcomeView: View {
                     WelcomeButton(title: "New project…", detail: "Pick the video's folder", primary: true) {
                         state.documents?.newProject()
                     }
-                    WelcomeButton(title: "Open…", detail: "A .tandem file", primary: false) {
+                    WelcomeButton(title: "Open…", detail: "A .substo file", primary: false) {
                         state.documents?.openPanel()
                     }
                 }

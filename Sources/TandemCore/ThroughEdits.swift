@@ -142,7 +142,7 @@ public enum ThroughEdits {
     }
 
     /// What `joinThroughEdits` says about its report: that there was
-    /// nothing to join, or the cuts it left and why (the first few; `tandem
+    /// nothing to join, or the cuts it left and why (the first few; `substo
     /// join` lists them all).
     public static func warnings(_ report: Report, in p: Project) -> [String] {
         if report.joins.isEmpty && report.skipped.isEmpty { return ["No through-edits to join."] }
@@ -152,7 +152,7 @@ public enum ThroughEdits {
             return "Didn't join the through-edit at \(skip.time) on \"\(track)\" (\(skip.pair.clipID) and \(skip.pair.nextClipID)): \(skip.reason)."
         }
         if report.skipped.count > shown {
-            lines.append("Didn't join \(report.skipped.count - shown) more through-edits that would play differently joined; `tandem join` lists them all with the reasons.")
+            lines.append("Didn't join \(report.skipped.count - shown) more through-edits that would play differently joined; `substo join` lists them all with the reasons.")
         }
         return lines
     }

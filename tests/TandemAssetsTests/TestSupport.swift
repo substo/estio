@@ -6,7 +6,7 @@ import XCTest
 /// the test.
 func makeTempFolder(_ name: String = "assets", file: StaticString = #filePath, line: UInt = #line) -> URL {
     let url = FileManager.default.temporaryDirectory
-        .appendingPathComponent("tandem-assets-tests", isDirectory: true)
+        .appendingPathComponent("substo-assets-tests", isDirectory: true)
         .appendingPathComponent("\(name)-\(UUID().uuidString)", isDirectory: true)
     try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url

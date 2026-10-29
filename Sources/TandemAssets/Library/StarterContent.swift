@@ -1,7 +1,7 @@
 import Foundation
 
 /// A small starter set for developer videos, shipped as data: about 40
-/// animated emoji, 32 icons and the tech logos Mike shows most. Installing
+/// animated emoji, 32 icons and the tech logos the creator shows most. Installing
 /// it only adds catalogue rows (tagged "starter"); each file is fetched and
 /// normalised the first time it's used.
 public enum StarterContent {

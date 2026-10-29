@@ -4,7 +4,7 @@ import CoreText
 import Foundation
 import TandemCore
 
-/// Graphic templates Tandem draws itself rather than from a rendered file.
+/// Graphic templates Substo Video draws itself rather than from a rendered file.
 enum BuiltInGraphics {
     static func renders(_ template: String) -> Bool {
         template == SectionCard.template
@@ -39,7 +39,7 @@ public enum SectionCardArt {
     }
 }
 
-/// Draws Mike's section card with Core Graphics and Core Text at the
+/// Draws the creator's section card with Core Graphics and Core Text at the
 /// output size, so it's sharp at 4K and the viewer, frame grabs and export
 /// all show the same frame. The design is card B of the title card mockup
 /// (the bands) with card D's progress row; `SectionCard.Motion` has the

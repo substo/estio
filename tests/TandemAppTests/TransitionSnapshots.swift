@@ -9,7 +9,7 @@ import XCTest
 /// The timeline with a push on the B-roll track, drawn offscreen, to look
 /// at:
 ///
-///     TANDEM_TRANSITION_UI_OUT=~/dev/me/tandem-research/transitions/ui \
+///     SUBSTO_TRANSITION_UI_OUT=~/dev/me/tandem-research/transitions/ui \
 ///     swift test --filter TransitionSnapshots
 ///
 /// Without the variable it still draws them, so a timeline that can't be
@@ -27,9 +27,9 @@ final class TransitionSnapshots: XCTestCase {
     /// 500.
     private func showTimeline(pixelsPerSecond: Double = 100, scroll: Double = 5) throws {
         guard NSScreen.screens.first != nil else { throw XCTSkip("no screen") }
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-transition-ui-\(UUID().uuidString)", isDirectory: true)
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-transition-ui-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let session = try ProjectSession.create(at: folder.appendingPathComponent("Transitions.tandem"), name: "Transitions", owner: .app)
+        let session = try ProjectSession.create(at: folder.appendingPathComponent("Transitions.substo"), name: "Transitions", owner: .app)
         let model = EditorModel(session: session)
         self.model = model
         let fixture = try AppFixture()
@@ -86,7 +86,7 @@ final class TransitionSnapshots: XCTestCase {
         view.cacheDisplay(in: view.bounds, to: rep)
         let image = try XCTUnwrap(rep.cgImage)
         XCTAssertGreaterThan(image.width, 1_000)
-        guard let out = ProcessInfo.processInfo.environment["TANDEM_TRANSITION_UI_OUT"], !out.isEmpty else { return }
+        guard let out = ProcessInfo.processInfo.environment["SUBSTO_TRANSITION_UI_OUT"], !out.isEmpty else { return }
         let dir = URL(fileURLWithPath: NSString(string: out).expandingTildeInPath, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(name + ".png")

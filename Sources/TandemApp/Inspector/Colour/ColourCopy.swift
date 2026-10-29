@@ -1,7 +1,7 @@
 import Foundation
 import TandemCore
 
-/// Copying a take's grade to other files: Mike grades one camera file, and
+/// Copying a take's grade to other files: the creator grades one camera file, and
 /// the rest of the shoot, filmed in the same light, should match it.
 enum ColourCopy {
     /// Files a grade can go to: the other files of the same kind and role,

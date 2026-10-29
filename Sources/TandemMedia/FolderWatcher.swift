@@ -3,7 +3,7 @@ import Foundation
 
 /// Watches a project folder (recursively, with FSEvents) and reports media
 /// files that were added, changed or removed, as paths relative to the
-/// folder. Skipped folders (`.tandem`, `exports`, hidden ones...) and
+/// folder. Skipped folders (`.substo`, `exports`, hidden ones...) and
 /// non-media files are ignored.
 ///
 /// Events are debounced, and a file is only reported once it has stopped
@@ -30,7 +30,7 @@ public final class FolderWatcher: @unchecked Sendable {
     public let settleTime: TimeInterval
 
     private let handler: @Sendable (Changes) -> Void
-    private let queue = DispatchQueue(label: "com.mikerosoft.tandem.media.watcher", qos: .utility)
+    private let queue = DispatchQueue(label: "com.substo.video.media.watcher", qos: .utility)
     private var stream: FSEventStreamRef?
     /// What each media file looked like when last reported (or at start).
     private var known: [String: FileStat] = [:]
@@ -155,7 +155,7 @@ public final class FolderWatcher: @unchecked Sendable {
             guard let relative = relativePath(path), !MediaScanner.isSkippedPath(relative) else { continue }
             if flag & kFSEventStreamEventFlagItemIsDir != 0 {
                 // A folder moved or vanished: look at everything under it.
-                // Tandem's own cache and exports churn constantly and hold no
+                // Substo Video's own cache and exports churn constantly and hold no
                 // media, so they never trigger that.
                 let name = (relative as NSString).lastPathComponent
                 if !MediaScanner.isSkippedFolder(name: name),

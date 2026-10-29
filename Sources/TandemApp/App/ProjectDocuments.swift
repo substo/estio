@@ -19,11 +19,11 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
     var isTerminating = false
     private var welcome: WelcomeWindowController?
 
-    static let tandemType = UTType(filenameExtension: ProjectFile.fileExtension) ?? .json
+    static let substoType = UTType(filenameExtension: ProjectFile.fileExtension) ?? .json
 
     // MARK: - Opening
 
-    /// Projects waiting for a CLI command or `tandem serve` to let go.
+    /// Projects waiting for a CLI command or `substo serve` to let go.
     private var opening: Set<URL> = []
     /// True while a project is still on its way, so launch doesn't show the
     /// welcome window in the meantime.
@@ -51,10 +51,10 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
         }
     }
 
-    /// A CLI command has the project for a moment, or `tandem serve` has
+    /// A CLI command has the project for a moment, or `substo serve` has
     /// it open: wait, asking the server to hand it over. Agents keep
-    /// working while Tandem restarts, so a slow command (a media refresh,
-    /// captions) may have it when Tandem opens again; the wait is long
+    /// working while Substo Video restarts, so a slow command (a media refresh,
+    /// captions) may have it when Substo Video opens again; the wait is long
     /// enough for that, and ends the moment the project is free.
     private func openWhenFree(_ url: URL, frame: NSRect?) {
         guard opening.insert(url).inserted else { return }
@@ -74,7 +74,7 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
     private func opened(_ session: ProjectSession, url: URL, frame: NSRect?) -> ProjectWindowController {
         let controller = present(EditorModel(session: session), frame: frame)
         noteRecent(url)
-        // Pick up files added to the folder while Tandem was closed.
+        // Pick up files added to the folder while Substo Video was closed.
         controller.model.rescanMedia(ifOlderThan: 0)
         // A project from another Mac, or a tidied folder, may have lost some.
         RelinkPrompt.checkAfterOpening(controller)
@@ -113,16 +113,16 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
 
     func openPanel() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [Self.tandemType]
+        panel.allowedContentTypes = [Self.substoType]
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
-        panel.message = "Choose a Tandem project"
+        panel.message = "Choose a Substo Video project"
         guard panel.runModal() == .OK else { return }
         for url in panel.urls { open(url) }
     }
 
     /// New project: pick the video's folder and a project named after it is
-    /// made inside, with Mike's standard tracks, and the folder is scanned.
+    /// made inside, with the creator's standard tracks, and the folder is scanned.
     func newProject() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -134,7 +134,7 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
         createProject(inFolder: folder)
     }
 
-    /// Makes `<folder>/<folder name>.tandem` and opens it, or opens the
+    /// Makes `<folder>/<folder name>.substo` and opens it, or opens the
     /// project that's already there.
     @discardableResult
     func createProject(inFolder folder: URL) -> ProjectWindowController? {
@@ -159,13 +159,13 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
         return first.uppercased() + words.dropFirst()
     }
 
-    /// Save As for versions: writes the project to `Name v2.tandem` (or a
+    /// Save As for versions: writes the project to `Name v2.substo` (or a
     /// name you pick) and continues editing the new file.
     func saveVersion(of model: EditorModel) {
         let folder = model.fileURL.deletingLastPathComponent()
         let existing = Set((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [Self.tandemType]
+        panel.allowedContentTypes = [Self.substoType]
         panel.directoryURL = folder
         panel.nameFieldStringValue = VersionNaming.nextName(after: model.fileName, existing: existing)
         panel.message = "Save a new version. You keep editing the new file; the old one stays as it is now."
@@ -195,7 +195,7 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
             // bring back its old edits.
             ProjectFile.forgetHistory(of: target)
             try ProjectFile.save(moved, revision: revision, to: target)
-            // Agent edits waiting for review go with Mike to the version he
+            // Agent edits waiting for review go with the creator to the version he
             // carries on in; its clips keep their IDs.
             try? model.session.review.log.save(to: ProjectFile.reviewURL(for: target))
         } catch {
@@ -239,14 +239,14 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
         }
     }
 
-    /// Rename on the project list: the file and the name Tandem shows
+    /// Rename on the project list: the file and the name Substo Video shows
     /// (`ProjectRenamer`), keeping its place in the list and where its
     /// timeline and window were.
     func renameProject(_ url: URL) {
         let current = url.deletingPathExtension().lastPathComponent
         let prompt = NSAlert()
         prompt.messageText = "Rename \(current)"
-        prompt.informativeText = "The project file and the name Tandem shows both change. Its media and exports stay as they are."
+        prompt.informativeText = "The project file and the name Substo Video shows both change. Its media and exports stay as they are."
         let field = NSTextField(string: current)
         field.frame = NSRect(x: 0, y: 0, width: 300, height: 24)
         prompt.accessoryView = field

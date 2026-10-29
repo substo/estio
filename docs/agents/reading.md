@@ -14,7 +14,7 @@ that's enough to clip a word.
 
 ## The timeline view
 
-`tandem timeline` (MCP `timeline`) is the view to start from:
+`substo timeline` (MCP `timeline`) is the view to start from:
 
 ```
 Decision Models: 01:00.000 long, 3840x2160 at 30 fps, revision 7
@@ -71,7 +71,7 @@ clips in the range).
   `transcript <media ID>` gives the whole file in file time; with no ID you
   get everything said on the timeline.
 - Word times are trimmed to the voice. SpeechAnalyzer times its words end
-  to end, so each pause hides inside a word; Tandem pulls every word in to
+  to end, so each pause hides inside a word; Substo Video pulls every word in to
   where the take's waveform is over its noise floor (about what ffmpeg's
   silencedetect hears at -32 dB on a phone take) when it reads the
   transcript, including transcripts made before it did.
@@ -92,8 +92,8 @@ clips in the range).
   is part of the pause, so `tighten` cuts it with the silence.
 - `media` shows each file's analysis state. Transcripts, loudness, proxies
   and cutout mattes are made in the background; tools that need a
-  transcript say which files don't have one yet. `tandem wait` waits for
-  them, and `tandem transcribe` makes a transcript of a file Tandem
+  transcript say which files don't have one yet. `substo wait` waits for
+  them, and `substo transcribe` makes a transcript of a file Substo Video
   wouldn't transcribe by itself (see [setup.md](setup.md#background-work-transcripts-mattes-proxies)).
 
 ## Finding clips
@@ -105,7 +105,7 @@ path or file name). `--ids` prints just the IDs, one a line. Use it to find
 clip IDs instead of reading the whole timeline JSON:
 
 ```
-$ tandem clips --track B-roll --from 0:15 --to 0:30
+$ substo clips --track B-roll --from 0:15 --to 0:30
 1 clip (revision 7):
   clip_brl1  V3 B-roll  00:20.000-00:25.000  servers.mp4 [00:01.000-00:06.000]
 ```
@@ -140,4 +140,4 @@ $ tandem clips --track B-roll --from 0:15 --to 0:30
   quietly: `frame`, `clip`, `export`, `captions`, `status` and `validate`
   all say so with the fix, like `Tilt Warp, the caption preset's font, isn't
   installed, so 42 text clips are drawn in SF Pro instead. Install it with:
-  tandem assets use fontsource:tilt-warp`.
+  substo assets use fontsource:tilt-warp`.

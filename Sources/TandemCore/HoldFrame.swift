@@ -3,7 +3,7 @@ import Foundation
 extension Editing {
     /// `holdFrame`: the picture `clipID` shows a frame before `range`
     /// starts, held over `range`, so a flash there (a stale frame, the
-    /// preview jumping as Mike clicked) is gone. Only this clip is cut, so
+    /// preview jumping as the creator clicked) is gone. Only this clip is cut, so
     /// its sound and the clips linked to it carry on uncut, and every piece
     /// stays in the clip's link group, so they still move together. The held
     /// piece is a freeze frame; it's the clip's own ID when `range` starts at

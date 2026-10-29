@@ -28,14 +28,14 @@ struct MediaProbe: Sendable {
     /// True when a camera made the file rather than a webcam: it has a
     /// timecode track (cinema cameras, and REDline's renders of their
     /// clips) or its metadata names a make or model (phones and cameras).
-    /// Mike's webcam and Record It write neither. Camera takes like these
+    /// the creator's webcam and Record It write neither. Camera takes like these
     /// record picture and sound in step, so they don't get the webcam's
     /// picture delay.
     var shotOnCamera = false
 
     /// Record It's tag for the camera delay it took out of the picture, in
     /// seconds (QuickTime metadata).
-    static let cameraDelayKey = "com.mikerosoft.record-it.camera-delay"
+    static let cameraDelayKey = "com.substo.video.camera-delay"
 
     func apply(to item: inout MediaItem) {
         item.kind = kind

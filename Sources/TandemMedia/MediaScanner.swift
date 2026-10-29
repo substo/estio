@@ -3,19 +3,19 @@ import TandemCore
 
 /// Finds media in a project folder and describes it.
 public enum MediaScanner {
-    /// File extensions Tandem treats as media.
+    /// File extensions Substo Video treats as media.
     public static let videoExtensions: Set<String> = ["mov", "mp4", "m4v"]
     public static let audioExtensions: Set<String> = ["m4a", "mp3", "wav", "aif", "aiff", "caf"]
     public static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "heic", "gif", "webp"]
 
     /// Folders that never hold project media. Hidden folders (a leading dot)
     /// and Filmora's `*.wfp.dir` folders are skipped as well.
-    public static let skippedFolderNames: Set<String> = [".tandem", "exports", "node_modules", ".build", ".git"]
+    public static let skippedFolderNames: Set<String> = [".substo", "exports", "node_modules", ".build", ".git"]
 
     /// How many files are probed at once.
     static let probeConcurrency = 6
 
-    /// Scans the folder for media, skipping `.tandem`, `exports`,
+    /// Scans the folder for media, skipping `.substo`, `exports`,
     /// `node_modules` and hidden folders. Known paths keep their IDs; new
     /// files get new items. record-it takes (`<base>-camera.mov` and
     /// `<base>-screen.mov`) share a take ID and carry take offsets. A Live
@@ -26,7 +26,7 @@ public enum MediaScanner {
     /// outside the folder or in `exports/`, that still exist). Known files
     /// that are gone are left out; use
     /// `scanReport` to get them, along with files that couldn't be read yet
-    /// and anything worth telling Mike.
+    /// and anything worth telling the creator.
     public static func scan(_ folder: ProjectFolder, known: [MediaItem], settings: TandemSettings = .load()) async throws -> [MediaItem] {
         try await scanReport(folder, known: known, settings: settings).items
     }
@@ -275,7 +275,7 @@ public enum MediaScanner {
         if isVideo || isAudio {
             if stem.hasSuffix("-camera") { return (.camera, true) }
             if stem.hasSuffix("-screen") { return (.screen, true) }
-            // An audio-only take is Mike talking, so it's treated like the
+            // An audio-only take is the creator talking, so it's treated like the
             // camera: Voice track, transcript before it's placed.
             if stem.hasSuffix("-audio") { return (.camera, true) }
         }
@@ -324,7 +324,7 @@ public enum MediaScanner {
 
     static func examine(_ url: URL, path: String, known: MediaItem?, folder: ProjectFolder) async -> FileOutcome {
         // Unchanged known files keep everything they had. Scans from before
-        // Tandem checked for codecs macOS can't decode didn't mark them;
+        // Substo Video checked for codecs macOS can't decode didn't mark them;
         // stock stickers are where they turn up, so unmarked alpha video gets
         // a quick look at its header and a full probe if it needs one.
         if let known, let stamp = known.fingerprint.flatMap(Fingerprint.init), stamp.matchesStat(of: url), known.hasProbeData {
@@ -409,9 +409,9 @@ public struct ScanReport: Sendable {
     /// Files that couldn't be read, usually because they're still being
     /// written. A later scan picks them up.
     public var skipped: [SkippedMedia] = []
-    /// Things worth telling Mike, such as a take offset that was clamped.
+    /// Things worth telling the creator, such as a take offset that was clamped.
     public var notes: [String] = []
-    /// New files taken for camera takes, and why, so `tandem new` can say.
+    /// New files taken for camera takes, and why, so `substo new` can say.
     public var cameraTakes: [CameraTakeNote] = []
     /// New videos from a second camera on a camera take (camera B's angle
     /// on camera A's take), made b-roll rather than camera takes.

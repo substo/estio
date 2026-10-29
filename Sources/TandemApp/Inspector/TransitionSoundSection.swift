@@ -67,7 +67,7 @@ enum TransitionSoundText {
     static let soundRowTip = "A sound effect that plays with the transition: a clip on SFX that moves with it and goes when it goes"
 
     static func soundMenuTip(_ type: TransitionType) -> String {
-        "None, the \(type.displayName.lowercased())'s own sound (Tandem > Settings picks it), or a favourite or recently used sound effect from the library"
+        "None, the \(type.displayName.lowercased())'s own sound (Substo Video > Settings picks it), or a favourite or recently used sound effect from the library"
     }
 
     /// "Push's own: Light swoosh", or "Dissolve's own: none".
@@ -75,13 +75,13 @@ enum TransitionSoundText {
         "\(type.displayName)'s own: \(name(of: assetID(for: type), choices: choices))"
     }
 
-    /// What a type plays: Mike's pick, else Tandem's, "" for none.
+    /// What a type plays: the creator's pick, else Substo Video's, "" for none.
     static func assetID(for type: TransitionType) -> String {
         TransitionSoundActions.settings.choice(for: type) ?? TransitionSoundDefaults.builtIn(type)?.assetID ?? ""
     }
 
     /// A sound's name as the pickers show it: "Light swoosh" for the one
-    /// Tandem ships with, else its name in the library, or "none".
+    /// Substo Video ships with, else its name in the library, or "none".
     static func name(of assetID: String, choices: [Asset]) -> String {
         if assetID.isEmpty { return "none" }
         if assetID == TransitionSoundDefaults.lightSwoosh.assetID { return "Light swoosh" }
@@ -93,6 +93,6 @@ enum TransitionSoundText {
         let length = String(format: "%.2f s", type.defaultDuration.seconds)
         let choice = assetID(for: type)
         let sound = choice.isEmpty ? "" : " with \(name(of: choice, choices: []).lowercased())"
-        return "\(type.displayName), \(length)\(sound). Double-click for the cut nearest the playhead, or drag onto a cut. Tandem > Settings picks each type's sound."
+        return "\(type.displayName), \(length)\(sound). Double-click for the cut nearest the playhead, or drag onto a cut. Substo Video > Settings picks each type's sound."
     }
 }

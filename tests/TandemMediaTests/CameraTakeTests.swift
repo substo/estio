@@ -18,7 +18,7 @@ final class CameraTakeTests: TempFolderTestCase {
     /// eight seconds) and `music.wav`.
     func soundFolder() async throws -> URL {
         if let sounds = Self.sounds { return sounds }
-        let sounds = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-camera-sounds-\(UUID().uuidString)")
+        let sounds = FileManager.default.temporaryDirectory.appendingPathComponent("substo-camera-sounds-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: sounds, withIntermediateDirectories: true)
         let spoken = try await SyntheticMedia.writeSpeech(
             "Hi, I'm building a workbench today. First I cut the legs to length, then I glue the rails, and then I screw the top on.",

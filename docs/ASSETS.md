@@ -5,7 +5,7 @@ one browser, from several sources, with the licence of every asset recorded.
 Research from 2026-09-25 checked about 45 sources against their API, pricing
 and licence pages; this is what it decided.
 
-## What Mike uses (Filmora audit, 51 projects)
+## What the creator uses (Filmora audit, 51 projects)
 
 - A music bed in 42 projects (about -31 dB, 2 s fade out).
 - Sound effects in 29 projects, 393 clips: whooshes, clicks, typing (about -15 dB).
@@ -18,8 +18,8 @@ So music, SFX, stickers and titles come first. LUTs can wait.
 
 - Filmora's asset licence forbids using its assets outside Filmora, and a
   company channel needs Filmora's Business plan, which excludes the asset
-  library. Nothing from Filmora's store moves to Tandem, and past use on the
-  Convex channel may not have been covered. Tandem records the licence of
+  library. Nothing from Filmora's store moves to Substo Video, and past use on the
+  Convex channel may not have been covered. Substo Video records the licence of
   every asset so this can't happen quietly again.
 - Personal plans (Epidemic Creator, Artlist Social, Storyblocks Individual,
   Musicbed Individual) exclude company or client work.
@@ -37,7 +37,7 @@ So music, SFX, stickers and titles come first. LUTs can wait.
 
 | Source | Kind | Access | Licence | V1 |
 | --- | --- | --- | --- | --- |
-| Shared library | anything, plus saved segments | Mike's own folder, `~/Movies/Tandem Library`, watched; used where it is | the nearest `tandem-licence.json` above a file | yes |
+| Shared library | anything, plus saved segments | the creator's own folder, `~/Movies/Substo Library`, watched; used where it is | the nearest `substo-licence.json` above a file | yes |
 | Import folders | anything | watched folders, one per library, with a licence note | per folder | yes |
 | ElevenLabs sound effects | SFX, generated | `POST /v1/sound-generation`, key in Keychain service `elevenlabs` (needs the `sound_generation` permission turned on) | commercial on paid plans | yes |
 | ElevenLabs music | music, generated | `POST /v1/music` | commercial on paid plans | yes |
@@ -47,12 +47,12 @@ So music, SFX, stickers and titles come first. LUTs can wait.
 | Google Fonts / Fontsource | fonts | no key | OFL / Apache | yes |
 | Pexels, Pixabay | stock video and images | free API keys | commercial, no credit | when keys exist |
 | Freesound | SFX | token for previews, OAuth for originals | CC0 and CC BY only; API commercial use needs UPF's written OK | off until OK'd |
-| Epidemic Sound | music and SFX | personal-key MCP endpoint | depends on plan tier | when Mike subscribes |
-| Lordicon | animated icons | bearer API, PRO $8/mo | PRO: no credit | when Mike subscribes |
+| Epidemic Sound | music and SFX | personal-key MCP endpoint | depends on plan tier | when the creator subscribes |
+| Lordicon | animated icons | bearer API, PRO $8/mo | PRO: no credit | when the creator subscribes |
 
 ## Catalogue
 
-- SQLite with FTS5 (system `sqlite3`), in `~/Library/Application Support/Tandem/Assets/catalog.sqlite`.
+- SQLite with FTS5 (system `sqlite3`), in `~/Library/Application Support/Substo/Assets/catalog.sqlite`.
 - Asset rows: provider, provider ID, kind (music, sfx, sticker, overlay, video,
   image, font, icon, logo, lut, title, transition), name, tags, duration, BPM,
   key, has alpha, size, sha256, state (remote, preview, original, normalised),
@@ -64,33 +64,33 @@ So music, SFX, stickers and titles come first. LUTs can wait.
 ## Disk layout
 
 ```
-~/Library/Application Support/Tandem/Assets/<provider>/<id>/
+~/Library/Application Support/Substo/Assets/<provider>/<id>/
   meta.json  thumbnail.jpg  original.<ext>  normalised.<ext>  peaks.bin  loudness.json
-~/Library/Caches/Tandem/AssetPreviews/     size-capped, least recently used goes first
+~/Library/Caches/Substo Video/AssetPreviews/     size-capped, least recently used goes first
 ```
 
 Originals are pinned while favourited or used in a project. Using a
 downloaded, generated or import folder asset in a project copies it into the
 project's `assets/` folder so projects stay self-contained. A different file
-already there under the same name (a copy Mike reworked, or an older version
+already there under the same name (a copy the creator reworked, or an older version
 the timeline still plays) is never replaced: the new copy goes beside it.
 Shared library assets are the exception: they're used where they are (see
 below).
 
 ## The shared library
 
-One visible folder on this Mac for everything Mike reuses across videos:
-`~/Movies/Tandem Library` (Backblaze backs it up with the rest of the Mac).
-Tandem > Settings… moves it; the choice is `sharedLibrary` in the asset
-library's `settings.json`, and `$TANDEM_LIBRARY` moves it for one process.
+One visible folder on this Mac for everything the creator reuses across videos:
+`~/Movies/Substo Library` (Backblaze backs it up with the rest of the Mac).
+Substo Video > Settings… moves it; the choice is `sharedLibrary` in the asset
+library's `settings.json`, and `$SUBSTO_LIBRARY` moves it for one process.
 An asset library anywhere other than the standard place (tests,
-`$TANDEM_ASSETS_ROOT`) keeps its shared library inside itself, `<root>/Tandem
+`$SUBSTO_ASSETS_ROOT`) keeps its shared library inside itself, `<root>/Substo Video
 Library`, so nothing but the app touches the real one. The app makes the
 folder the first time it opens after installing; opening the library
 (the CLI, MCP, tests) never does.
 
 ```
-~/Movies/Tandem Library/
+~/Movies/Substo Library/
   README.txt                what the folder is for
   Stickers/                 animated stickers: HEVC with alpha, WebM, GIF, WebP, Lottie
   Graphics/                 logos, lower thirds, overlays, stills (PNG, JPEG, SVG, MOV)
@@ -101,7 +101,7 @@ folder the first time it opens after installing; opening the library
   Segments/<name>/          saved segments: segment.json and the media they play
 ```
 
-Each folder has a README. Tandem never writes over one Mike edited.
+Each folder has a README. Substo Video never writes over one the creator edited.
 
 **How it's indexed.** `SharedLibraryProvider` (source `shared`, the "Shared
 library" chip) indexes the folder with the import folder machinery and
@@ -114,23 +114,23 @@ so; SVGs by their name), LUTs in Looks and fonts in Fonts. Subfolder names
 become search words. `Segments/` and the READMEs aren't indexed. Asset IDs
 are the path inside the library (`shared:Stickers/Party/Dance.gif`), so they
 survive the library moving; a row whose file is somewhere else now is
-described again. Licences: the nearest `tandem-licence.json` at or above a
-file covers it (one in the library's top folder for Mike's own things,
+described again. Licences: the nearest `substo-licence.json` at or above a
+file covers it (one in the library's top folder for the creator's own things,
 another in `Sound effects/Envato/` for a subscription); without one a file
 is Unknown licence, and the credits say so. Fonts in `Fonts/` are
-registered by whatever renders a project (the app, `tandem serve`, a CLI
+registered by whatever renders a project (the app, `substo serve`, a CLI
 export) along with the project's own `assets/font/`, so titles can use them
 without installing them for the whole Mac; archiving copies the ones a
 project uses into it.
 
 **Reference, don't copy.** Using a shared asset (double-click, drag,
-`tandem assets use shared:...`) adds the library's file to the project where
+`substo assets use shared:...`) adds the library's file to the project where
 it is, by its absolute path, and records the use for the credits. Nothing is
 copied into `assets/`, so improving a sticker or re-exporting an intro in
 the library improves every project that uses it the next time it plays or
 renders. Files a project can't play as they are (WebM, Lottie, SVG, TIFF,
 FLAC, Ogg, animated GIF, WebP and PNG, QuickTime Animation) play from the
-library's converted copy in `~/Library/Application Support/Tandem/Assets/
+library's converted copy in `~/Library/Application Support/Substo/Assets/
 shared/<file>/`, which is made again when the file changes and a project
 uses it (`refreshChangedSharedFiles`, run by every rescan: the app's
 watcher, its scan at launch, a CLI search). The new copy is made beside the
@@ -145,13 +145,13 @@ are used from the library too.
 | Import folder (`import:`) | copied into `assets/<kind>/` |
 | Downloaded or generated (Noto, Iconify, SVGL, Fontsource, Pexels, Pixabay, ElevenLabs) | copied into `assets/<kind>/` |
 
-**Segments.** A segment is a reusable bit of timeline (Mike's intro, outro,
+**Segments.** A segment is a reusable bit of timeline (the creator's intro, outro,
 like and subscribe, comment below): a `Template` of clips with their
 offsets, the transitions between them and optional fields, plus copies of
 every file those clips play (with a Live Photo's movie) and their LUTs,
 beside `segment.json` in `Segments/<name>/`, so it keeps working whatever
 happens to the project it came from. Save one with Timeline > Save
-selection as segment… (or right-click a clip), `tandem segments save` or
+selection as segment… (or right-click a clip), `substo segments save` or
 `segments_save`; they're in the Text tab under Segments. Saving again
 under the same name replaces it but keeps every file only the old version
 had, since projects it went into play them from there. Inserting one is a
@@ -165,20 +165,20 @@ See AGENTS.md for the commands.
 
 ## Shared files and archived projects
 
-Effects, title styles and transitions are data built into Tandem (packs
+Effects, title styles and transitions are data built into Substo Video (packs
 later), so a project never needs their files. A project can still end up
 using files from outside its folder: the shared library's files and the
 converted copies of them, a segment's media, an import's absolute paths, a
 sound from another video's folder, a LUT picked from Downloads, a font a
 title names that's only installed on this Mac. Archiving (File > Archive
-project…, `tandem archive`, see ARCHITECTURE.md) copies all of those into
+project…, `substo archive`, see ARCHITECTURE.md) copies all of those into
 the project folder and points the project at the copies, so the folder opens
 on another Mac (Bruce) with nothing missing:
 
-- shared library files into `media/Tandem Library/<where they were in it>`
-  (`media/Tandem Library/Stickers/Star.mov`, `media/Tandem Library/Segments/
+- shared library files into `media/Substo Library/<where they were in it>`
+  (`media/Substo Library/Stickers/Star.mov`, `media/Substo Library/Segments/
   Intro/sting.wav`), and the converted copy of one beside where its original
-  would go, named after it (`media/Tandem Library/Stickers/Spin.mov` for
+  would go, named after it (`media/Substo Library/Stickers/Spin.mov` for
   `Stickers/Spin.webm`);
 - other media into `media/<the folder it was in>/`;
 - LUTs into `assets/lut/` and fonts into `assets/font/`.
@@ -190,7 +190,7 @@ library's `Fonts/` and among the library's downloaded fonts, which the CLI
 doesn't register. `archive.json` records where each file came from, so the
 licence trail (the catalogue's usage and licence tables) can still be
 followed from an archived copy. A project opened on another Mac without
-being archived finds its shared files again by relinking: `tandem relink`
+being archived finds its shared files again by relinking: `substo relink`
 and the app look in that Mac's shared library after the project folder.
 
 ## Normalising on import (tested on this Mac)
@@ -256,9 +256,9 @@ and the app look in that Mac's shared library after the project folder.
 
 ## Decisions for Mike
 
-- Decided 2026-09-29: Mike makes the Convex videos as a Convex employee, so
+- Decided 2026-09-29: the creator makes the Convex videos as a Convex employee, so
   Convex videos need company-channel licences (Epidemic Sound Business, not
-  Pro; a Remotion company licence for Convex motion graphics). Tandem itself
+  Pro; a Remotion company licence for Convex motion graphics). Substo Video itself
   is for any project, so personal projects can use personal licences; the
   catalogue records each asset's licence so the credits and checks follow
   the project.
@@ -270,7 +270,7 @@ and the app look in that Mac's shared library after the project folder.
 
 ## The section card's sounds and fonts
 
-The section card (RENDER.md) is part of Tandem, like the title presets,
+The section card (RENDER.md) is part of Substo Video, like the title presets,
 so its typefaces ship with it; its two whooshes are ordinary library
 assets, so their licence and every use are recorded.
 
@@ -283,7 +283,7 @@ assets, so their licence and every use are recorded.
   from Fontsource because the renderer has to draw the card in every
   process, CLI exports included, and on Bruce, without anything installed.
 - **Sounds.** Two soft, airy swishes made for the card with ElevenLabs on
-  2026-09-30 on Mike's paid plan (commercial use, no credit), one a sweep
+  2026-09-30 on the creator's paid plan (commercial use, no credit), one a sweep
   (`SectionCardSounds` in TandemAPI names them). Both are takes of one
   prompt, asked for 1.0 s:
 
@@ -304,7 +304,7 @@ assets, so their licence and every use are recorded.
     half its energy is over 4 kHz, so it hisses.
 
   **Level.** The gains put both at -35 LUFS over their loudest 400 ms, 15
-  LU under speech at Tandem's -20, which is where Mike's own section
+  LU under speech at Substo Video's -20, which is where the creator's own section
   swipes sit in Decision Models (`swipe.wav`, `in.wav` and `out.wav` at
   -43.2 to -44.4 LUFS against his speech at -28.7). In a project whose
   speech plays elsewhere the gains move with it
@@ -312,7 +312,7 @@ assets, so their licence and every use are recorded.
   `AudioLevels.speechLevel(in:)`): the Decision Models import, whose
   speech plays at -28.7 until it's levelled, gets -14.1 and -17 dB.
 
-  **Why they replaced the first pair.** Mike found the whoosh in "a
+  **Why they replaced the first pair.** the creator found the whoosh in "a
   little bit too much because it's a little bit jarring", an explosion.
   Measured: the first whoosh in (`elevenlabs:sfx_vda2xhs6`, "a big airy
   whoosh ... a little deeper than a light swoosh") had 73% of its energy
@@ -325,19 +325,19 @@ assets, so their licence and every use are recorded.
   clipped samples, so it went too. And they were loud: at -14 and -19 dB
   they sat 11 LU under speech at -20, and in the Decision Models demo,
   whose speech plays at -28.7, the whoosh in reached -16.1 LUFS in a mix
-  mastered to -14, about as loud as Mike's voice. In the second demo the
+  mastered to -14, about as loud as the creator's voice. In the second demo the
   new pair reach -25.4 to -26.8 LUFS in the same kind of mix, 11 to 13 LU
-  under the voice, and 9 to 12 LU under it where Mike talks over the sweep
+  under the voice, and 9 to 12 LU under it where the creator talks over the sweep
   out.
   The first pair and a first take (`elevenlabs:sfx_2z7iwkfd`) stay in the
   library, unused. The measurements are in
   `~/dev/me/tandem-research/title-cards/tandem/sounds/`.
-- **Into projects.** `tandem cards --apply`, the Section card tile (a
+- **Into projects.** `substo cards --apply`, the Section card tile (a
   double-click, or a drag, which copies them as it starts) and Timeline >
   Add section cards at section markers copy both into `assets/sfx/` with
   `use` before the edit, so the card and its sounds are one undo step.
   A Mac whose library doesn't have them makes silent cards and says so.
-  To make them there, generate the prompt above (`tandem assets generate
+  To make them there, generate the prompt above (`substo assets generate
   sfx "<prompt>" --duration 1 --variations 3`), measure the takes the same
   way and point `SectionCardSounds` at the two gentlest with their gains,
   or copy the two `elevenlabs/` asset folders across and rebuild the
@@ -346,7 +346,7 @@ assets, so their licence and every use are recorded.
 ## Transition sounds
 
 Push, slide, cut slide and wipe come with a sound effect in the app; the
-rest are silent. Mike picks others per type in Tandem > Settings (kept in
+rest are silent. the creator picks others per type in Substo Video > Settings (kept in
 the app's preferences as asset IDs), and `TransitionSoundDefaults` in
 TandemAPI says what each type plays. Dropping a transition, double-clicking
 one in the Effects tab, Cmd-D and changing a transition's type all copy the
@@ -356,7 +356,7 @@ doesn't have the sound adds the transition silent and says so.
 
 - **The light swoosh**, `elevenlabs:sfx_2ybnc2tu` ("A quick light swoosh
   sweeping from left to right as a stripe of colour slides off the
-  screen...", 1.0 s, made on 2026-09-29): the one on a push in Mike's
+  screen...", 1.0 s, made on 2026-09-29): the one on a push in the creator's
   ESLint video, which he asked for on every push. It was the section
   card's first whoosh out, dropped there for its hard peak (its loudest
   50 ms 6.9 dB over its loudest 300 ms, 114 clipped samples; see above).
@@ -386,7 +386,7 @@ doesn't have the sound adds the transition silent and says so.
 
 ## Implementation (TandemAssets)
 
-Built on the `tandem-assets` branch as the `TandemAssets` library (depends
+Built on the `substo-assets` branch as the `TandemAssets` library (depends
 on Core, Media and `lottie-ios`). Everything goes through `AssetLibrary`;
 results are Codable so the CLI and MCP can return them as JSON.
 
@@ -406,7 +406,7 @@ results are Codable so the CLI and MCP can return them as JSON.
 | Fonts | `registerFonts()` at launch; a project's own `assets/font/` and the shared library's `Fonts/` (`ProjectFonts.libraryFolders`) are registered by whatever renders it (`ProjectFonts` in TandemRender) |
 | Housekeeping | `prune()`, `evictUnpinnedFiles()`, `rebuildCatalogFromDisk()` |
 
-An import folder's licence note is `tandem-licence.json` in the folder
+An import folder's licence note is `substo-licence.json` in the folder
 (`source`, `licence`, `licenceClass`, `url`, `credit`, `certificate`,
 `kind`, `notes`); presets exist for Envato, Mixkit, Pixabay, Sonniss, the
 YouTube Audio Library, Epidemic, Artlist, Motion Array and Storyblocks.
@@ -428,7 +428,7 @@ Choices made while building it:
   icons come in white for dark screens (`AssetSettings.iconColour`).
 - Thumbnails with transparency are `thumbnail.png`, the rest
   `thumbnail.jpg`.
-- ElevenLabs music uses `music_v2_5` and `mp3_48000_192`, as Mike's music
+- ElevenLabs music uses `music_v2_5` and `mp3_48000_192`, as the creator's music
   scripts do. Sound effects ask for `pcm_48000` and wrap it in WAV.
 - Keys are read with the `security` tool, never `SecItemCopyMatching`, so
   a headless run can't stall on a Keychain dialog.
@@ -442,5 +442,5 @@ provider remembers and shows in its status. Pexels, Pixabay and Freesound
 have no keys on this Mac and are tested against fixtures.
 
 Tests: `swift test --package-path . --filter TandemAssetsTests`.
-`TANDEM_LIVE_ASSETS=1` adds the free live tests; `TANDEM_LIVE_ELEVENLABS=1`
+`SUBSTO_LIVE_ASSETS=1` adds the free live tests; `SUBSTO_LIVE_ELEVENLABS=1`
 makes one paid sound effect and one paid music cue.

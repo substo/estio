@@ -9,7 +9,7 @@ A field marked `?` can be missing (or `null`), so read it with a default
 
 ## timeline
 
-`tandem timeline --json` (MCP `timeline` with `format: json`) wraps the
+`substo timeline --json` (MCP `timeline` with `format: json`) wraps the
 project. Tracks are in two lists, not one `tracks`, and video tracks go
 bottom to top (`videoTracks[0]` is V1, Screen). With `--from`/`--to`, each
 track keeps only the clips that overlap the range.
@@ -67,7 +67,7 @@ file's own. `clipID` is set on timeline transcripts.
 
 ## wait and transcribe
 
-`tandem wait --json` (and `waited` in `tandem transcribe --json`, which also
+`substo wait --json` (and `waited` in `substo transcribe --json`, which also
 has `revision`, `applied`, `files` and `headless`):
 
 ```
@@ -125,17 +125,17 @@ clip that only moved along its track.
 
 ## restore and apply
 
-`tandem restore --json` gives `{"revision", "from", "items": [{"id",
+`substo restore --json` gives `{"revision", "from", "items": [{"id",
 "action": "putBack" | "changeBack" | "remove" | "unchanged", "track",
 "start", "end", "content", "details"}], "commands", "applied"?,
 "problem"?}`.
 
-`tandem apply --json` gives `{"revision", "label", "author", "createdIDs",
+`substo apply --json` gives `{"revision", "label", "author", "createdIDs",
 "added", "changed", "removed", "duration", "warnings", "dryRun",
 "repeated"}`; `createdIDs` lists new clips, tracks, transitions and markers
 in the order the commands made them.
 
-`tandem check --cuts --json` has `commands` (the fixes, latest first) and
+`substo check --cuts --json` has `commands` (the fixes, latest first) and
 `revision`, and each problem's `cut` has `clipID`, `edge`, `to` and `fix`.
-A plain `tandem check --json` has `commands` and `revision` too when it
+A plain `substo check --json` has `commands` and `revision` too when it
 can fix a flicker, and that problem's `fix` is the `holdFrame`.

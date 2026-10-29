@@ -1,7 +1,7 @@
 import Foundation
 import TandemCore
 
-/// Importers that turn projects made elsewhere into Tandem projects.
+/// Importers that turn projects made elsewhere into Substo Video projects.
 ///
 /// - `FilmoraImporter` reads Filmora `.wfp` projects, zipped or unzipped.
 /// - `EDLImporter` rebuilds a video from the JSON EDL agents cut it from,

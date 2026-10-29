@@ -15,7 +15,7 @@ import TandemMedia
 /// review, and an ID of its own.
 public enum ProjectDuplicator {
     /// Duplicates `source` into `folder` and returns the new project file:
-    /// the same name, or `Name copy.tandem` when that's taken there.
+    /// the same name, or `Name copy.substo` when that's taken there.
     @discardableResult
     public static func duplicate(_ source: URL, into folder: URL) throws -> URL {
         let source = source.standardizedFileURL
@@ -52,7 +52,7 @@ public enum ProjectDuplicator {
         return try ProjectArchiver.rewritten(project, map: map).project
     }
 
-    /// `ESLint.tandem`, or `ESLint copy.tandem`, `ESLint copy 2.tandem`...
+    /// `ESLint.substo`, or `ESLint copy.substo`, `ESLint copy 2.substo`...
     /// whichever is free in `folder`.
     static func freeName(for fileName: String, in folder: URL) -> String {
         let file = URL(fileURLWithPath: fileName)

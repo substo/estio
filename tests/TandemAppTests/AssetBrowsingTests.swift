@@ -146,8 +146,8 @@ final class AssetBrowsingTests: XCTestCase {
             XCTAssertEqual(LibraryDrag.parse(drag.payload), drag, drag.payload)
         }
         XCTAssertEqual(LibraryDrag.parse(MediaDrag.payload(["med_a"])), .media(["med_a"]), "the media browser's payload still works")
-        XCTAssertNil(LibraryDrag.parse("tandem-transition:teleport"))
-        XCTAssertNil(LibraryDrag.parse("tandem-asset:"))
+        XCTAssertNil(LibraryDrag.parse("substo-transition:teleport"))
+        XCTAssertNil(LibraryDrag.parse("substo-asset:"))
         XCTAssertNil(LibraryDrag.parse("hello"))
     }
 

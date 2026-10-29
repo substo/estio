@@ -3,14 +3,14 @@ import TandemAssets
 import TandemCore
 import TandemMedia
 
-// Section cards at every section marker: `tandem cards`, the `cards` MCP
+// Section cards at every section marker: `substo cards`, the `cards` MCP
 // tool and POST /v1/cards. A dry run returns the plan unless asked to
 // apply; applying adds the cards (the `addSectionCards` command) with the
 // section card whooshes from the asset library, as one undo step.
 
 /// The two whooshes that go with the section cards, one for each sweep:
 /// soft, airy swishes made with ElevenLabs on 2026-09-30 (the gentlest two
-/// of three takes of one prompt, by measurement) and kept in Mike's asset
+/// of three takes of one prompt, by measurement) and kept in the creator's asset
 /// library, so every use is recorded there with its licence. They replaced
 /// the first pair, whose whoosh in read as an explosion. A Mac whose
 /// library doesn't have them makes silent cards. docs/ASSETS.md has the
@@ -18,9 +18,9 @@ import TandemMedia
 public enum SectionCardSounds {
     public struct Sound: Equatable, Sendable {
         public var assetID: String
-        /// Clip gain in dB for speech at -20 LUFS, Tandem's level: each
+        /// Clip gain in dB for speech at -20 LUFS, Substo Video's level: each
         /// lands at -35 LUFS over its loudest 400 ms, 15 LU under the voice,
-        /// where Mike's own section swipes sit in Decision Models.
+        /// where the creator's own section swipes sit in Decision Models.
         /// `Resolved.levelled(for:)` moves it with a project whose speech
         /// plays elsewhere.
         public var gainDB: Double
@@ -28,7 +28,7 @@ public enum SectionCardSounds {
         public var offset: Double?
     }
 
-    /// The level the gains are set against: Tandem's speech level.
+    /// The level the gains are set against: Substo Video's speech level.
     public static let speechLevel = AudioLevels.defaultSpeechLoudness
 
     /// The gentlest: a smooth swell with almost no low end, loudest 0.46 s
@@ -106,7 +106,7 @@ public enum SectionCardSounds {
 
     /// Copies both sounds into the project's `assets/sfx/` and records the
     /// use (for credits), or explains why they aren't there.
-    /// (Levelled for Tandem's speech level; `Resolved.levelled(for:)` moves
+    /// (Levelled for Substo Video's speech level; `Resolved.levelled(for:)` moves
     /// them for the project's.)
     public static func use(in library: AssetLibrary, folder: ProjectFolder, projectID: String, projectFile: URL?) async throws -> Resolved {
         guard available(in: library) else {
@@ -352,7 +352,7 @@ extension CardsResult: ReadableResult {
         lines.append("Sound: \(sounds).")
         for warning in warnings { lines.append("Warning: \(warning)") }
         if let applied {
-            lines.append("Applied as revision \(applied.revision) (\"\(applied.label)\"). Undo with `tandem undo`.")
+            lines.append("Applied as revision \(applied.revision) (\"\(applied.label)\"). Undo with `substo undo`.")
         } else {
             lines.append("Nothing changed yet. Run again with --apply (or apply: true) to add them.")
         }

@@ -14,9 +14,9 @@ with its own gains, or made before the speech level existed, gets there
 with one command:
 
 ```bash
-tandem loudness                              # each file's loudness, each track's levels
-tandem apply - <<< '{"normalizeSpeech": {}}'
-tandem loudness                              # "Speech is levelled to -20.0 LUFS" and no stragglers
+substo loudness                              # each file's loudness, each track's levels
+substo apply - <<< '{"normalizeSpeech": {}}'
+substo loudness                              # "Speech is levelled to -20.0 LUFS" and no stragglers
 ```
 
 To move the voice for the whole video, change the level (clips normalised
@@ -37,22 +37,22 @@ A separate mic recorded quietly gets lifted a long way to reach the speech
 level, and its bumps, claps and shouts come up with it: Ian's whiteboard
 mic is lifted 23.5 dB, which puts a knock at 0:14.8 at +23.5 dBFS.
 Export's limiter would squash all of that, which sounds artificial.
-`tandem loudness` says when it's coming:
+`substo loudness` says when it's coming:
 
 ```bash
-tandem loudness
+substo loudness
 # 1 speech clip peaks over the -1.0 dBTP ceiling once levelled (up to +23.5 dBTP) ...
-tandem apply - <<< '{"normalizeSpeech": {}}'
+substo apply - <<< '{"normalizeSpeech": {}}'
 # Warning: ... it has a compressor and a limiter holding its peaks under -1 dBFS (clip_mic1) ...
 ```
 
 The speech stays at the speech level. The compressor rides the passages
 where the speaker gets louder and the limiter catches what's left, both in
-the clip's audio effects, where `tandem timeline` shows them as
+the clip's audio effects, where `substo timeline` shows them as
 `fx compressor,limiter`. Their levels are dBFS as the clip plays (after
-levelling), the numbers `tandem loudness --tracks Voice` shows. To set
-them by hand, or on a clip of music, add them yourself; `tandem effects
-compressor` and `tandem effects limiter` list the parameters:
+levelling), the numbers `substo loudness --tracks Voice` shows. To set
+them by hand, or on a clip of music, add them yourself; `substo effects
+compressor` and `substo effects limiter` list the parameters:
 
 ```json
 {"label": "Hold the voice's peaks", "commands": [
@@ -63,7 +63,7 @@ compressor` and `tandem effects limiter` list the parameters:
 
 They render ahead of time over the whole file (a few seconds for a long
 take), and then every cut of that take shares the render. Check them with
-`tandem loudness --from 4:50 --to 5:20 --tracks Voice --step 0.4`: no
+`substo loudness --from 4:50 --to 5:20 --tracks Voice --step 0.4`: no
 peaks over the ceiling, and the normal speech where it was.
 
 ## Clean up a roomy mic
@@ -84,24 +84,24 @@ Isolation is Apple's voice isolation (`AUSoundIsolation`), run over the
 file in the background. It's made for noise and takes some of the echo
 with it, but it isn't a de-reverb, and macOS doesn't ship one. Put the expander's
 threshold a few dB over the quiet between sentences as the clip plays:
-`tandem loudness --tracks Voice --step 0.1` over a pause shows it. Ian's
+`substo loudness --tracks Voice --step 0.1` over a pause shows it. Ian's
 mic sits around -38 there, so -35; the default, -40, suits a quieter
 room. Keep the clean-up first in the effects, so the compressor and
 limiter work on the cleaned voice.
 
 ## Check the sound
 
-Don't run ffmpeg on a review clip to hear how loud something is. Tandem
+Don't run ffmpeg on a review clip to hear how loud something is. Substo Video
 measures the mix itself, through the same composition, gain taps and
 time-pitch as export:
 
 ```bash
-tandem loudness --from 1:00 --to 1:30              # the mix, a row every 0.5 s
-tandem loudness --from 1:00 --to 1:30 --tracks Music --step 0.2
-tandem loudness --from 1:00 --to 1:30 --gains      # does the render follow the gain lanes?
-tandem loudness --from 0 --to 18:00 --tracks Voice --over 0   # where does the voice clip?
-tandem clip 1:00 1:30 --tracks Music --audio-only  # listen to the music bed alone
-tandem assets show elevenlabs:music_2p839smz       # its prompt, licence, loudness and file
+substo loudness --from 1:00 --to 1:30              # the mix, a row every 0.5 s
+substo loudness --from 1:00 --to 1:30 --tracks Music --step 0.2
+substo loudness --from 1:00 --to 1:30 --gains      # does the render follow the gain lanes?
+substo loudness --from 0 --to 18:00 --tracks Voice --over 0   # where does the voice clip?
+substo clip 1:00 1:30 --tracks Music --audio-only  # listen to the music bed alone
+substo assets show elevenlabs:music_2p839smz       # its prompt, licence, loudness and file
 ```
 
 Each row has the momentary loudness (the 400 ms centred on its time), the
@@ -124,23 +124,23 @@ gain, gain keyframes and fades). It renders each track (the `--tracks`
 ones, or every one that plays there) as it is and again with its gain
 flattened, and compares their difference with the lane 10 ms at a time.
 It says when a change lands late and by how much, and lists where the
-render plays more than 1 dB off the lane. If Mike says a gain change
+render plays more than 1 dB off the lane. If the creator says a gain change
 plays late, run it before arguing: it checks the render does what the
 lanes say (a lane set in the wrong place is a different problem, which
-`tandem timeline` shows).
+`substo timeline` shows).
 
 ## Put a swoosh on every push
 
 A swoosh belongs to its transition: give a push a `sound` and it goes
-where the push goes, and away with it. The light swoosh Mike likes (the
+where the push goes, and away with it. The light swoosh the creator likes (the
 app's default for push, slide, cut slide and wipe) is
 `elevenlabs:sfx_2ybnc2tu` in his asset library. Copy it into the project
 once, find the pushes that have no sound yet, and give them all one in one
 batch:
 
 ```bash
-tandem assets use elevenlabs:sfx_2ybnc2tu     # adds it to the media: med_rgm8r7d7
-tandem timeline --json | jq -r '.project.videoTracks[].transitions[] | select(.type == "push" and .soundClipID == null) | .id'
+substo assets use elevenlabs:sfx_2ybnc2tu     # adds it to the media: med_rgm8r7d7
+substo timeline --json | jq -r '.project.videoTracks[].transitions[] | select(.type == "push" and .soundClipID == null) | .id'
 # tr_k3f9x2mq
 # tr_p8zq4w2m
 ```
@@ -154,9 +154,9 @@ tandem timeline --json | jq -r '.project.videoTracks[].transitions[] | select(.t
 
 Each goes on SFX (SFX 2 where SFX is taken) starting 0.39 s before the
 cut, so its loudest moment lands where the push moves fastest (the light
-swoosh is loudest 0.39 s in). -23.3 dB is for speech at Tandem's -20 LUFS:
+swoosh is loudest 0.39 s in). -23.3 dB is for speech at Substo Video's -20 LUFS:
 its loudest 400 ms then sits 15 LU under the voice, as the section card
-whooshes do. In a project whose speech plays elsewhere (`tandem loudness`
+whooshes do. In a project whose speech plays elsewhere (`substo loudness`
 says where), move the gain by the difference: -32 for speech at -28.7. For
 another sound, `offset` is minus the moment it's loudest, and the gain puts
 that 15 LU under the speech. A push that already has a whoosh placed by

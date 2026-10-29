@@ -116,7 +116,7 @@ extension JoinResult: ReadableResult {
         }
         for warning in warnings { lines.append("Warning: \(warning)") }
         if let applied {
-            lines.append("Applied as revision \(applied.revision) (\"\(applied.label)\"). Undo with `tandem undo`.")
+            lines.append("Applied as revision \(applied.revision) (\"\(applied.label)\"). Undo with `substo undo`.")
         } else if !joins.isEmpty {
             lines.append("Nothing changed yet. Run again with --apply (or apply: true) to join them.")
         }

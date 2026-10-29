@@ -213,7 +213,7 @@ enum TimelineEdits {
         return item.kind == .video && item.hasVideo
     }
 
-    /// "Show this angle" on a clip of a take synced by sound (`tandem
+    /// "Show this angle" on a clip of a take synced by sound (`substo
     /// sync`): that clip's track shows from in to out when they're marked,
     /// otherwise over the clip, with the take's other angles off there.
     /// Nil when that's not an angle `showAngle` can switch to there, or it
@@ -294,7 +294,7 @@ enum TimelineEdits {
 
     /// Hold previous frame (a clip's menu): the frame of `clipID` the
     /// playhead is on shows the one before it instead, to cover a one-frame
-    /// flash like the preview jumping in a screen recording as Mike clicked.
+    /// flash like the preview jumping in a screen recording as the creator clicked.
     /// Picture only: the sound and the clips linked to it carry on uncut
     /// (`holdFrame`). Nil when there's no frame of the clip before it.
     static func holdPreviousFrame(_ project: Project, clipID: String, at time: Time) -> EditBatch? {

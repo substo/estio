@@ -17,7 +17,7 @@ public struct AssetPlacement: Codable, Sendable {
     /// files where they are.
     public var files: [String]
     public var role: MediaRole
-    /// The track it belongs on in Mike's standard layout.
+    /// The track it belongs on in the creator's standard layout.
     public var trackName: String?
     /// Suggested clip audio: music at -31 dB with a 2 s fade out, sound
     /// effects at -15 dB (from the Filmora audit of 51 projects).
@@ -138,7 +138,7 @@ extension AssetLibrary {
                 (try? fileManager.attributesOfItem(atPath: url.path))?[.size] as? Int64
             }
             let sourceSize = size(file)
-            // A file already there that isn't this one (Mike reworked the
+            // A file already there that isn't this one (the creator reworked the
             // copy, or the library's file changed since the timeline started
             // using it) is never replaced: the copy goes beside it.
             let stem = (name as NSString).deletingPathExtension

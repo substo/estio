@@ -42,7 +42,7 @@ final class SectionCardsAPITests: XCTestCase {
     }
 
     func testDryRunThenApplyWithTheWhooshes() async throws {
-        let folder = TempFolder("tandem-cards")
+        let folder = TempFolder("substo-cards")
         let h = try ServiceHarness(project: Self.project())
         defer { h.close() }
         h.service.soundLibrary = try CardSoundsFixture.library(at: folder.url.appendingPathComponent("library"))
@@ -123,12 +123,12 @@ final class SectionCardsAPITests: XCTestCase {
         for index in standard.audioTracks[0].clips.indices {
             standard.audioTracks[0].clips[index].audio = AudioProperties(normalizeTo: -20)
         }
-        XCTAssertEqual(sounds.levelled(for: standard), sounds, "at Tandem's speech level they're as set")
+        XCTAssertEqual(sounds.levelled(for: standard), sounds, "at Substo Video's speech level they're as set")
         XCTAssertEqual(levelled.levelled(for: standard).soundIn.gainDB, -5.4, "and back")
     }
 
     func testSilentWithoutTheWhooshes() async throws {
-        let folder = TempFolder("tandem-cards")
+        let folder = TempFolder("substo-cards")
         let h = try ServiceHarness(project: Self.project())
         defer { h.close() }
         h.service.soundLibrary = try CardSoundsFixture.library(at: folder.url.appendingPathComponent("library"), withSounds: false)
@@ -154,7 +154,7 @@ final class SectionCardsAPITests: XCTestCase {
         let h = try ServiceHarness()
         defer { h.close() }
         // The pause from "section." (29.9) to "Now" (30.5), across the cut
-        // at 30, tightened the way `tandem tighten` does it: 0.1 s kept on
+        // at 30, tightened the way `substo tighten` does it: 0.1 s kept on
         // each side of the cut, which stays at 30.
         let tightened = try h.service.tighten(TightenRequest(min: 0.5, keep: 0.15, apply: true, from: t(29.5), to: t(31)), context: h.context)
         XCTAssertEqual(tightened.cuts.map(\.cut), [TimeRange(start: t(30), end: t(30.4))])
@@ -261,30 +261,30 @@ final class SectionCardsAPITests: XCTestCase {
 
     func testTheCLIPlansThenAddsThem() async throws {
         let cli = CLITests()
-        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
-        let folder = TempFolder("tandem-cards-cli")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "substo isn't built")
+        let folder = TempFolder("substo-cards-cli")
         let root = folder.url.appendingPathComponent("library", isDirectory: true)
         _ = try CardSoundsFixture.library(at: root)
-        let env = ["TANDEM_ASSETS_ROOT": root.path, "TANDEM_ASSETS_OFFLINE": "1"]
+        let env = ["SUBSTO_ASSETS_ROOT": root.path, "SUBSTO_ASSETS_OFFLINE": "1"]
         let video = folder.url.appendingPathComponent("video", isDirectory: true)
         try FileManager.default.createDirectory(at: video, withIntermediateDirectories: true)
         let projectURL = try APIFixture.write(to: video, project: Self.project())
 
-        let plan = try cli.tandem("cards", in: video, env: env)
+        let plan = try cli.substo("cards", in: video, env: env)
         XCTAssertEqual(plan.status, 0, plan.stderr)
         XCTAssertTrue(plan.stdout.hasPrefix("2 section cards (dry run, revision 1):"), plan.stdout)
         XCTAssertEqual(cards(try ProjectFile.load(from: projectURL).project).count, 0)
 
-        let applied = try cli.tandem("cards", "--kicker", "Tip", "--apply", "--author", "claude", in: video, env: env)
+        let applied = try cli.substo("cards", "--kicker", "Tip", "--apply", "--author", "claude", in: video, env: env)
         XCTAssertEqual(applied.status, 0, applied.stderr)
         XCTAssertTrue(applied.stdout.contains("Sound: a whoosh on each sweep"), applied.stdout)
         let project = try ProjectFile.load(from: projectURL).project
         XCTAssertEqual(cards(project).map(\.props.kickerLine), ["Tip 1 of 2", "Tip 2 of 2"])
         XCTAssertEqual(project.track(named: "SFX")?.clips.count, 4)
-        let history = try cli.tandem("history", in: video)
+        let history = try cli.substo("history", in: video)
         XCTAssertTrue(history.stdout.contains("Add 2 section cards  (claude)"), history.stdout)
 
-        let usage = try cli.tandem("cards", "--insert", "--bogus", in: video, env: env)
+        let usage = try cli.substo("cards", "--insert", "--bogus", in: video, env: env)
         XCTAssertEqual(usage.status, 2, "a usage mistake")
     }
 }

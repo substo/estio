@@ -6,7 +6,7 @@ public protocol SecretStore: Sendable {
     func secret(service: String) -> String?
 }
 
-/// Keys in the login Keychain, read the same way Mike reads them in a
+/// Keys in the login Keychain, read the same way the creator reads them in a
 /// shell: `security find-generic-password -s <service> -w`.
 ///
 /// Going through the `security` tool rather than `SecItemCopyMatching`

@@ -4,7 +4,7 @@ import TandemMedia
 
 // MARK: - wait
 
-/// What `tandem wait` waits for.
+/// What `substo wait` waits for.
 public enum WaitTarget: String, Codable, Sendable, CaseIterable {
     case transcript, matte, proxy
     /// Every background analysis job.
@@ -116,7 +116,7 @@ extension WaitResult: ReadableResult {
     public var readableText: String {
         if finished.isEmpty && pending.isEmpty {
             switch what {
-            case .export: return "No exports running. (A `tandem export` run with the app closed renders in its own process and returns when it's done.)"
+            case .export: return "No exports running. (A `substo export` run with the app closed renders in its own process and returns when it's done.)"
             case .jobs: return "No background jobs running."
             case .transcript: return "No transcripts to make."
             case .matte: return "No cutout mattes to make."
@@ -132,7 +132,7 @@ extension WaitResult: ReadableResult {
             lines.append("Still going after \(seconds), when the wait timed out:")
         }
         for item in finished + pending { lines.append("  \(label(item)): \(item.stateText)") }
-        if timedOut { lines.append("Run the same `tandem wait` again to keep waiting.") }
+        if timedOut { lines.append("Run the same `substo wait` again to keep waiting.") }
         return lines.joined(separator: "\n")
     }
 
@@ -146,7 +146,7 @@ extension WaitResult: ReadableResult {
 
 // MARK: - transcribe
 
-/// Asks for transcripts of files Tandem wouldn't otherwise transcribe
+/// Asks for transcripts of files Substo Video wouldn't otherwise transcribe
 /// (anything with sound, whatever its role or track), with the same
 /// on-device SpeechAnalyzer as camera takes. The request is saved on the
 /// media (`transcribe: true`), so it's made wherever the project is opened
@@ -202,14 +202,14 @@ extension TranscribeResult: ReadableResult {
             if let id = waiting.first {
                 let more = waiting.count > 1 ? " --media \(waiting.dropFirst().joined(separator: " --media "))" : ""
                 if headless {
-                    lines.append("Nothing has the project open, so they're made when the app or `tandem serve` opens it, or now with `tandem wait transcript --media \(id)\(more)`.")
+                    lines.append("Nothing has the project open, so they're made when the app or `substo serve` opens it, or now with `substo wait transcript --media \(id)\(more)`.")
                 } else {
-                    lines.append("`tandem wait transcript --media \(id)\(more)` waits for them.")
+                    lines.append("`substo wait transcript --media \(id)\(more)` waits for them.")
                 }
             }
         }
         if let id = files.first(where: { $0.state == "ready" })?.mediaID {
-            lines.append("`tandem transcript \(id)` reads it.")
+            lines.append("`substo transcript \(id)` reads it.")
         }
         return lines.joined(separator: "\n")
     }
@@ -220,7 +220,7 @@ extension TranscribeResult: ReadableResult {
 extension TandemService {
     public func transcribe(_ request: TranscribeRequest, context: CallContext) async throws -> TranscribeResult {
         guard !request.media.isEmpty else {
-            throw ServiceError(.badRequest, "Name the media to transcribe, like tandem transcribe med_x or a path.")
+            throw ServiceError(.badRequest, "Name the media to transcribe, like substo transcribe med_x or a path.")
         }
         let project = coordinator.project
         let items = try resolveMedia(request.media, in: project)
@@ -353,7 +353,7 @@ extension TandemService {
         case .transcript where !item.hasAudio:
             return "\(item.path) has no sound, so it has no transcript."
         case .transcript:
-            return "Nothing makes a transcript of \(item.path): Tandem makes them for camera takes, what's on a speech track and files someone asked for. `tandem transcribe \(item.id)` asks for one and waits for it."
+            return "Nothing makes a transcript of \(item.path): Substo Video makes them for camera takes, what's on a speech track and files someone asked for. `substo transcribe \(item.id)` asks for one and waits for it."
         case .matte:
             return "Nothing makes a cutout matte of \(item.path): no clip of it on the timeline has its cutout on. Turn one on (updateClip with video.cutout.enabled) and the matte is made."
         case .proxy:
@@ -374,7 +374,7 @@ extension TandemService {
             result.message = message
         case .unreadable:
             result.state = "failed"
-            result.message = "Tandem can't read the file. Is it missing? (`tandem relink` finds moved files.)"
+            result.message = "Substo Video can't read the file. Is it missing? (`substo relink` finds moved files.)"
         case .notApplicable:
             result.state = "failed"
             result.message = "\(need.kind.rawValue) doesn't apply to this file."
@@ -419,7 +419,7 @@ extension TandemService {
                 }
             }
             guard let item else {
-                throw ServiceError(.notFound, "No media with ID or path \(reference). `tandem media` lists them, and `tandem media --refresh` adds new files in the folder.")
+                throw ServiceError(.notFound, "No media with ID or path \(reference). `substo media` lists them, and `substo media --refresh` adds new files in the folder.")
             }
             if !found.contains(where: { $0.id == item.id }) { found.append(item) }
         }

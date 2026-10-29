@@ -1,14 +1,14 @@
 import Foundation
 
-/// Who made an edit. Mike's edits in the app are credited to "user",
-/// Tandem's own (new media found in the folder, a reload) to "system", and
+/// Who made an edit. the creator's edits in the app are credited to "user",
+/// Substo Video's own (new media found in the folder, a reload) to "system", and
 /// anything else is an agent or a command line tool, whose edits wait in
 /// the review log until he's looked at them.
 public enum EditAuthor {
     public static let person = "user"
     public static let system = "system"
 
-    /// Old files and journals can have an empty author, which was Mike too.
+    /// Old files and journals can have an empty author, which was the creator too.
     public static func isPerson(_ author: String) -> Bool {
         author == person || author.isEmpty
     }
@@ -71,7 +71,7 @@ public struct ReviewRemoval: Codable, Equatable, Sendable {
     }
 }
 
-/// One agent batch waiting for Mike's review: who, what and when, and the
+/// One agent batch waiting for the creator's review: who, what and when, and the
 /// clips it touched by ID, so the highlight follows them through later
 /// moves and ripples.
 public struct ReviewEntry: Codable, Equatable, Identifiable, Sendable {
@@ -137,8 +137,8 @@ public struct ReviewEntry: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
-/// The agent edits Mike hasn't reviewed yet, kept in
-/// `.tandem/<name>.review.json` beside the journal so it survives
+/// The agent edits the creator hasn't reviewed yet, kept in
+/// `.substo/<name>.review.json` beside the journal so it survives
 /// restarts. `ReviewRecorder` keeps it as edits commit; Mark reviewed in
 /// the app clears it.
 public struct ReviewLog: Codable, Equatable, Sendable {
@@ -162,7 +162,7 @@ public struct ReviewLog: Codable, Equatable, Sendable {
     public var isEmpty: Bool { entries.isEmpty }
 
     /// Records a batch if an agent made it and it changed the timeline.
-    /// Mike's own edits (and Tandem's) never are. A batch already here (the
+    /// the creator's own edits (and Substo Video's) never are. A batch already here (the
     /// journal replaying one the log heard before a crash) isn't recorded
     /// twice.
     @discardableResult
@@ -346,7 +346,7 @@ extension ReviewLog {
 
     /// The stretches with changes in them, by start, merged where they're
     /// closer than `mergeGap`: the ruler's violet band, and what
-    /// `tandem check --changed` looks at.
+    /// `substo check --changed` looks at.
     public func changedRegions(in project: Project, mergeGap: Time = Time(seconds: 2)) -> [TimeRange] {
         let spans = changes(in: project).map { (start: $0.start, end: $0.end) }.sorted { ($0.start, $0.end) < ($1.start, $1.end) }
         var regions: [TimeRange] = []
@@ -360,7 +360,7 @@ extension ReviewLog {
         return regions
     }
 
-    /// Clears what Mike has watched in the app: each clip and transition
+    /// Clears what the creator has watched in the app: each clip and transition
     /// whose whole stretch lies in `watched` (give or take `slack` at
     /// either end, for starting play a moment late), and each cut he played
     /// across. Entries with nothing left go. Returns whether anything did.

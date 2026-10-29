@@ -1,12 +1,12 @@
 import Foundation
 
-/// Something `tandem check` found wrong in a stretch of the timeline.
+/// Something `substo check` found wrong in a stretch of the timeline.
 ///
-/// Mike caught these in the ESLint video before the agent did, and each
+/// the creator caught these in the ESLint video before the agent did, and each
 /// cost a review round: an eight-frame white box where a green screen
 /// didn't key, a one-frame flicker from a stale still, and a 1080p shot
 /// zoomed until it went soft on the 4K frame. An agent runs the check
-/// before handing an edit back, so Mike's rounds go on the edit itself.
+/// before handing an edit back, so the creator's rounds go on the edit itself.
 public struct CheckProblem: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable, CaseIterable {
         /// Nothing on any shown video track: black.
@@ -30,13 +30,13 @@ public struct CheckProblem: Codable, Equatable, Sendable {
         /// frame: usually rounding in an agent's batch.
         case sliver
         /// The voice runs right up to a cut in its file: a word is clipped
-        /// (`tandem check --cuts`).
+        /// (`substo check --cuts`).
         case clippedWord
         /// A screen recording playing at a low frame rate while its picture
         /// moves, so it looks choppy.
         case lowFrameRate
 
-        /// Worth knowing rather than wrong: Mike signed off softer zooms on
+        /// Worth knowing rather than wrong: the creator signed off softer zooms on
         /// cartoon B-roll than on screen recordings, a pause can let a point
         /// land, and not every big change on screen is a page that should
         /// push. So these don't fail a check.
@@ -175,13 +175,13 @@ public struct FrameStats: Equatable, Sendable {
     public var isBlack: Bool { luma < 0.02 && brightestTile < 0.05 }
 }
 
-/// The checks behind `tandem check`. The model checks (gaps, slivers, soft
+/// The checks behind `substo check`. The model checks (gaps, slivers, soft
 /// pictures) read the project; the frame checks read `FrameStats` for each
 /// rendered frame.
 public enum QualityCheck {
     /// A picture shown at more than this many frame pixels for each of its
     /// own looks soft: 1080p is shown at 2x on a 4K frame, and zooming it
-    /// past 150% goes beyond this. That's where Mike saw a shot go blurry in
+    /// past 150% goes beyond this. That's where the creator saw a shot go blurry in
     /// the ESLint video.
     public static let softUpscale = 3.0
     /// Frames this different from both neighbours, while the neighbours
@@ -391,8 +391,8 @@ public enum QualityCheck {
     /// picture flashed: the only video on screen, or with the camera over
     /// the screen recording, the recording when its own scan
     /// (`screenFrames`) flickers there too and the other one when it
-    /// doesn't. In the Tandem video it was the preview in a screen
-    /// recording jumping for a frame as Mike clicked.
+    /// doesn't. In the Substo Video video it was the preview in a screen
+    /// recording jumping for a frame as the creator clicked.
     static func holdFixes(_ problems: [CheckProblem], in project: Project, screenFrames: [FrameStats]?) -> [CheckProblem] {
         let frame = project.settings.frameRate.frameDuration
         let screens = Set(project.media.filter { $0.role == .screen }.map(\.id))

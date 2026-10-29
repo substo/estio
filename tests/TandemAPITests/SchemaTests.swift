@@ -225,7 +225,7 @@ final class SchemaTests: XCTestCase {
 
     func testHelpForAnEditCommandShowsItsArgumentsAndExample() throws {
         let help = CommandSchema.help(.addTransition)
-        XCTAssertTrue(help.hasPrefix("addTransition (an edit command for tandem apply): Adds a transition"), help)
+        XCTAssertTrue(help.hasPrefix("addTransition (an edit command for substo apply): Adds a transition"), help)
         XCTAssertTrue(help.contains("\n  trackID     string, required. Track ID or name, like Music.\n"), help)
         XCTAssertTrue(help.contains("\n  transition  Transition, required\n"), help)
         // A shared model is opened up one level, so its fields are there too.

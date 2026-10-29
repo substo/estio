@@ -41,7 +41,7 @@ final class ActivityLogTests: XCTestCase {
 
     func testDisplayNames() {
         XCTAssertEqual(ActivityLog.displayName("user"), "You")
-        XCTAssertEqual(ActivityLog.displayName("system"), "Tandem")
+        XCTAssertEqual(ActivityLog.displayName("system"), "Substo Video")
         XCTAssertEqual(ActivityLog.displayName("claude"), "Claude")
     }
 }
@@ -49,21 +49,21 @@ final class ActivityLogTests: XCTestCase {
 final class RecentProjectsTests: XCTestCase {
     func testNewestFirstWithoutDuplicates() {
         var recent = RecentProjects()
-        recent.add("/videos/a/A.tandem")
-        recent.add("/videos/b/B.tandem")
-        recent.add("/videos/a/./A.tandem")
-        XCTAssertEqual(recent.paths, ["/videos/a/A.tandem", "/videos/b/B.tandem"])
-        for index in 0..<20 { recent.add("/videos/\(index).tandem") }
+        recent.add("/videos/a/A.substo")
+        recent.add("/videos/b/B.substo")
+        recent.add("/videos/a/./A.substo")
+        XCTAssertEqual(recent.paths, ["/videos/a/A.substo", "/videos/b/B.substo"])
+        for index in 0..<20 { recent.add("/videos/\(index).substo") }
         XCTAssertEqual(recent.paths.count, RecentProjects.limit)
-        XCTAssertEqual(recent.existing { $0.hasSuffix("19.tandem") }.map(\.lastPathComponent), ["19.tandem"])
+        XCTAssertEqual(recent.existing { $0.hasSuffix("19.substo") }.map(\.lastPathComponent), ["19.substo"])
     }
 
     func testVersionNames() {
-        XCTAssertEqual(VersionNaming.nextName(after: "Decision Models.tandem", existing: []), "Decision Models v2.tandem")
-        XCTAssertEqual(VersionNaming.nextName(after: "Decision Models v2.tandem", existing: []), "Decision Models v3.tandem")
-        XCTAssertEqual(VersionNaming.nextName(after: "Video.tandem", existing: ["Video v2.tandem", "video v3.tandem"]), "Video v4.tandem")
-        XCTAssertEqual(VersionNaming.exportName(projectFile: "Video v3.tandem", preset: "", existing: []), "Video v3.mp4")
-        XCTAssertEqual(VersionNaming.exportName(projectFile: "Video.tandem", preset: "Short 9:16", existing: ["Video (Short 9:16).mp4"]), "Video (Short 9:16) 2.mp4")
+        XCTAssertEqual(VersionNaming.nextName(after: "Decision Models.substo", existing: []), "Decision Models v2.substo")
+        XCTAssertEqual(VersionNaming.nextName(after: "Decision Models v2.substo", existing: []), "Decision Models v3.substo")
+        XCTAssertEqual(VersionNaming.nextName(after: "Video.substo", existing: ["Video v2.substo", "video v3.substo"]), "Video v4.substo")
+        XCTAssertEqual(VersionNaming.exportName(projectFile: "Video v3.substo", preset: "", existing: []), "Video v3.mp4")
+        XCTAssertEqual(VersionNaming.exportName(projectFile: "Video.substo", preset: "Short 9:16", existing: ["Video (Short 9:16).mp4"]), "Video (Short 9:16) 2.mp4")
     }
 
     func testVersionsSavedElsewhereStillFindTheirMedia() {
@@ -168,48 +168,48 @@ final class MediaCatalogTests: XCTestCase {
 
 final class AppURLCommandTests: XCTestCase {
     func testParsesCommands() {
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://screenshot?out=/tmp/a.png")!), .screenshot(out: "/tmp/a.png"))
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://command?name=bladeAtPlayhead")!), .command(.bladeAtPlayhead))
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://seek?t=12.5")!), .seek(t(12.5)))
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://select?clips=clip_a,clip_b")!), .select(clipIDs: ["clip_a", "clip_b"]))
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://panel?inspector=color&library=effects")!), .panels(library: .effects, inspector: .colour, exportSheet: nil))
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://panel?sheet=none")!), .panels(library: nil, inspector: nil, exportSheet: false))
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://zoom?pps=40")!), .zoom(pixelsPerSecond: 40, scrollSeconds: nil))
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://tool?name=slip")!), .tool(.slip))
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://inout?in=2&out=5")!), .inOut(start: t(2), end: t(5)))
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://new?folder=/videos/static-hosting")!), .newProject(folder: "/videos/static-hosting"))
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://version?out=/videos/a/Video%20v2.tandem")!), .saveVersion(out: "/videos/a/Video v2.tandem"))
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://debug?out=/tmp/tree.txt")!), .debug(out: "/tmp/tree.txt"))
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://debug?out=/tmp/tree.txt&reset=1")!), .debug(out: "/tmp/tree.txt", resetTimings: true))
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://window?order=back")!), .windowOrder(toFront: false))
-        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://window?order=sideways")!))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://screenshot?out=/tmp/a.png")!), .screenshot(out: "/tmp/a.png"))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://command?name=bladeAtPlayhead")!), .command(.bladeAtPlayhead))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://seek?t=12.5")!), .seek(t(12.5)))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://select?clips=clip_a,clip_b")!), .select(clipIDs: ["clip_a", "clip_b"]))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://panel?inspector=color&library=effects")!), .panels(library: .effects, inspector: .colour, exportSheet: nil))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://panel?sheet=none")!), .panels(library: nil, inspector: nil, exportSheet: false))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://zoom?pps=40")!), .zoom(pixelsPerSecond: 40, scrollSeconds: nil))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://tool?name=slip")!), .tool(.slip))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://inout?in=2&out=5")!), .inOut(start: t(2), end: t(5)))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://new?folder=/videos/static-hosting")!), .newProject(folder: "/videos/static-hosting"))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://version?out=/videos/a/Video%20v2.substo")!), .saveVersion(out: "/videos/a/Video v2.substo"))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://debug?out=/tmp/tree.txt")!), .debug(out: "/tmp/tree.txt"))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://debug?out=/tmp/tree.txt&reset=1")!), .debug(out: "/tmp/tree.txt", resetTimings: true))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://window?order=back")!), .windowOrder(toFront: false))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "substo://window?order=sideways")!))
         XCTAssertEqual(
-            AppURLCommand.parse(URL(string: "tandem://simulate?scroll=900,1100,-12,0&steps=90&interval=16")!),
+            AppURLCommand.parse(URL(string: "substo://simulate?scroll=900,1100,-12,0&steps=90&interval=16")!),
             .simulate(InputSimulator.Gesture(kind: .scroll(dx: -12, dy: 0, steps: 90), at: CGPoint(x: 900, y: 1_100), modifiers: [], interval: 0.016))
         )
         XCTAssertEqual(
-            AppURLCommand.parse(URL(string: "tandem://simulate?scroll=900,1100,0,4&mods=option")!),
+            AppURLCommand.parse(URL(string: "substo://simulate?scroll=900,1100,0,4&mods=option")!),
             .simulate(InputSimulator.Gesture(kind: .scroll(dx: 0, dy: 4, steps: 1), at: CGPoint(x: 900, y: 1_100), modifiers: .option))
         )
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://assets?section=icons&search=rocket&online=1")!), .assets(section: .icons, search: "rocket", scope: nil, online: true))
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://assets?section=sfx&scope=recent")!), .assets(section: .sfx, search: nil, scope: .recent, online: false))
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://assets?section=looks")!), .assets(section: .looks, search: nil, scope: nil, online: false))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://assets?section=icons&search=rocket&online=1")!), .assets(section: .icons, search: "rocket", scope: nil, online: true))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://assets?section=sfx&scope=recent")!), .assets(section: .sfx, search: nil, scope: .recent, online: false))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://assets?section=looks")!), .assets(section: .looks, search: nil, scope: nil, online: false))
         XCTAssertEqual(AssetSection.fonts.libraryTab, .text, "fonts are in the Text tab")
-        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://assets?section=trumpets")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "substo://assets?section=trumpets")!))
     }
 
-    /// With two projects open and Tandem in the background, the "front"
+    /// With two projects open and Substo Video in the background, the "front"
     /// window is whichever was last main, so a check meant for one project
     /// landed on the other. `project=` names the one a command is for.
     func testCommandsCanNameTheirProject() throws {
-        let url = try XCTUnwrap(URL(string: "tandem://select?clips=clip_a&project=Decision%20Models%20v14"))
+        let url = try XCTUnwrap(URL(string: "substo://select?clips=clip_a&project=Decision%20Models%20v14"))
         XCTAssertEqual(AppURLCommand.parse(url), .select(clipIDs: ["clip_a"]))
         XCTAssertEqual(AppURLCommand.project(in: url), "Decision Models v14")
-        XCTAssertNil(AppURLCommand.project(in: try XCTUnwrap(URL(string: "tandem://seek?t=3"))))
-        XCTAssertNil(AppURLCommand.project(in: try XCTUnwrap(URL(string: "tandem://seek?t=3&project="))))
+        XCTAssertNil(AppURLCommand.project(in: try XCTUnwrap(URL(string: "substo://seek?t=3"))))
+        XCTAssertNil(AppURLCommand.project(in: try XCTUnwrap(URL(string: "substo://seek?t=3&project="))))
 
-        let file = URL(fileURLWithPath: "/Users/mike/Movies/Workbench Short/Workbench.tandem")
-        for name in ["Workbench", "workbench", "Workbench.tandem", "/Users/mike/Movies/Workbench Short/Workbench.tandem", "Workbench Short"] {
+        let file = URL(fileURLWithPath: "/Users/mike/Movies/Workbench Short/Workbench.substo")
+        for name in ["Workbench", "workbench", "Workbench.substo", "/Users/mike/Movies/Workbench Short/Workbench.substo", "Workbench Short"] {
             XCTAssertTrue(ProjectDocuments.names(name, fileURL: file, projectName: "Workbench Short"), name)
         }
         for name in ["Decision Models v14", "Work", "Short"] {
@@ -218,48 +218,48 @@ final class AppURLCommandTests: XCTestCase {
     }
 
     func testRejectsNonsense() {
-        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://command?name=launchRockets")!))
-        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://screenshot")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "substo://command?name=launchRockets")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "substo://screenshot")!))
         XCTAssertNil(AppURLCommand.parse(URL(string: "https://example.com/screenshot?out=/tmp/a.png")!))
     }
 
-    /// Any app or web page can open a tandem:// link, so commands that write
+    /// Any app or web page can open a substo:// link, so commands that write
     /// files only write the kind of file they're for, at an absolute path.
     func testFileWritesStayInTheirLane() {
-        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://screenshot?out=/Users/mike/.zshrc")!))
-        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://screenshot?out=shot.png")!))
-        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://debug?out=/tmp/tree.png")!))
-        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://version?out=/tmp/Video.json")!))
-        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://version?out=Video%20v2.tandem")!))
-        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://new?folder=videos")!))
-        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://simulate?menu=10,10&out=/Users/mike/.zshrc")!))
-        XCTAssertNotNil(AppURLCommand.parse(URL(string: "tandem://simulate?menu=10,10&out=/tmp/menu.txt")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "substo://screenshot?out=/Users/mike/.zshrc")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "substo://screenshot?out=shot.png")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "substo://debug?out=/tmp/tree.png")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "substo://version?out=/tmp/Video.json")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "substo://version?out=Video%20v2.substo")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "substo://new?folder=videos")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "substo://simulate?menu=10,10&out=/Users/mike/.zshrc")!))
+        XCTAssertNotNil(AppURLCommand.parse(URL(string: "substo://simulate?menu=10,10&out=/tmp/menu.txt")!))
         XCTAssertEqual(
-            AppURLCommand.parse(URL(string: "tandem://simulate?drop=tandem-effect:vignette&at=600,700")!),
-            .simulate(InputSimulator.Gesture(kind: .drop(payload: "tandem-effect:vignette"), at: CGPoint(x: 600, y: 700), modifiers: []))
+            AppURLCommand.parse(URL(string: "substo://simulate?drop=substo-effect:vignette&at=600,700")!),
+            .simulate(InputSimulator.Gesture(kind: .drop(payload: "substo-effect:vignette"), at: CGPoint(x: 600, y: 700), modifiers: []))
         )
-        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://simulate?drop=hello&at=600,700")!), "only library payloads")
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://screenshot?out=/tmp/Shot.PNG")!), .screenshot(out: "/tmp/Shot.PNG"))
-        XCTAssertEqual(AppURLCommand.parse(URL(string: "tandem://window?width=900&height=620")!), .windowSize(width: 900, height: 620))
-        XCTAssertNil(AppURLCommand.parse(URL(string: "tandem://window?width=0&height=620")!))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "substo://simulate?drop=hello&at=600,700")!), "only library payloads")
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://screenshot?out=/tmp/Shot.PNG")!), .screenshot(out: "/tmp/Shot.PNG"))
+        XCTAssertEqual(AppURLCommand.parse(URL(string: "substo://window?width=900&height=620")!), .windowSize(width: 900, height: 620))
+        XCTAssertNil(AppURLCommand.parse(URL(string: "substo://window?width=0&height=620")!))
         XCTAssertEqual(
-            AppURLCommand.parse(URL(string: "tandem://simulate?type=Guest%20mic%0A")!),
+            AppURLCommand.parse(URL(string: "substo://simulate?type=Guest%20mic%0A")!),
             .simulate(InputSimulator.Gesture(kind: .type("Guest mic\n"), at: .zero, modifiers: []))
         )
         XCTAssertEqual(
-            AppURLCommand.parse(URL(string: "tandem://simulate?menu=30,640&choose=Move%20up")!),
+            AppURLCommand.parse(URL(string: "substo://simulate?menu=30,640&choose=Move%20up")!),
             .simulate(InputSimulator.Gesture(kind: .choose("Move up"), at: CGPoint(x: 30, y: 640), modifiers: []))
         )
     }
 }
 
-/// Any app or web page can open a tandem:// link, so a link only acts
+/// Any app or web page can open a substo:// link, so a link only acts
 /// when it carries this Mac's key.
 final class AppURLKeyTests: XCTestCase {
     private var folder: URL!
 
     override func setUpWithError() throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-url-key-\(UUID().uuidString)", isDirectory: true)
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-url-key-\(UUID().uuidString)", isDirectory: true)
     }
 
     override func tearDownWithError() throws {
@@ -267,7 +267,7 @@ final class AppURLKeyTests: XCTestCase {
     }
 
     func testTheKeyIsMadeOnceAndOnlyItsOwnerCanReadIt() throws {
-        let file = folder.appendingPathComponent("Tandem/url-key")
+        let file = folder.appendingPathComponent("Substo/url-key")
         let key = try AppURLKey.load(from: file)
         XCTAssertEqual(key.value.count, 64, "256 bits as hex")
         XCTAssertEqual(try AppURLKey.load(from: file), key, "kept, not made again")
@@ -289,11 +289,11 @@ final class AppURLKeyTests: XCTestCase {
         }
     }
 
-    /// The `tandem url` launcher reads `$HOME/Library/Application
-    /// Support/Tandem/url-key`, so the app has to make it there.
+    /// The `substo url` launcher reads `$HOME/Library/Application
+    /// Support/Substo Video/url-key`, so the app has to make it there.
     func testTheAppKeepsTheKeyWhereTandemURLReadsIt() {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        XCTAssertEqual(AppURLKey.defaultFile.standardizedFileURL.path, home + "/Library/Application Support/Tandem/url-key")
+        XCTAssertEqual(AppURLKey.defaultFile.standardizedFileURL.path, home + "/Library/Application Support/Substo/url-key")
     }
 
     func testAKeyFileOthersCanReadIsMadeOwnerOnly() throws {
@@ -309,13 +309,13 @@ final class AppURLKeyTests: XCTestCase {
     func testALinkActsOnlyWithTheKey() throws {
         let key = try AppURLKey.load(from: folder.appendingPathComponent("url-key"))
         let other = try AppURLKey.load(from: folder.appendingPathComponent("other-key"))
-        let link = try XCTUnwrap(URL(string: "tandem://command?name=save&key=\(key.value)"))
+        let link = try XCTUnwrap(URL(string: "substo://command?name=save&key=\(key.value)"))
         XCTAssertTrue(key.accepts(link))
         XCTAssertEqual(AppURLCommand.parse(link), .command(.save), "the key isn't part of the command")
-        XCTAssertFalse(key.accepts(try XCTUnwrap(URL(string: "tandem://command?name=save"))))
-        XCTAssertFalse(key.accepts(try XCTUnwrap(URL(string: "tandem://command?name=save&key="))))
-        XCTAssertFalse(key.accepts(try XCTUnwrap(URL(string: "tandem://command?name=save&key=\(other.value)"))))
-        XCTAssertFalse(key.accepts(try XCTUnwrap(URL(string: "tandem://command?name=save&key=\(key.value.prefix(32))"))))
+        XCTAssertFalse(key.accepts(try XCTUnwrap(URL(string: "substo://command?name=save"))))
+        XCTAssertFalse(key.accepts(try XCTUnwrap(URL(string: "substo://command?name=save&key="))))
+        XCTAssertFalse(key.accepts(try XCTUnwrap(URL(string: "substo://command?name=save&key=\(other.value)"))))
+        XCTAssertFalse(key.accepts(try XCTUnwrap(URL(string: "substo://command?name=save&key=\(key.value.prefix(32))"))))
     }
 }
 
@@ -516,11 +516,11 @@ final class AgentPresenceTests: XCTestCase {
     }
 
     func testMCPConfigPointsAtTheProject() throws {
-        let text = ActivityFeed.mcpConfig(for: URL(fileURLWithPath: "/videos/a/Video v2.tandem"))
+        let text = ActivityFeed.mcpConfig(for: URL(fileURLWithPath: "/videos/a/Video v2.substo"))
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
-        let server = try XCTUnwrap((object["mcpServers"] as? [String: Any])?["tandem"] as? [String: Any])
-        XCTAssertEqual(server["args"] as? [String], ["mcp", "--project", "/videos/a/Video v2.tandem"])
-        XCTAssertEqual((server["command"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent }, "tandem")
+        let server = try XCTUnwrap((object["mcpServers"] as? [String: Any])?["substo"] as? [String: Any])
+        XCTAssertEqual(server["args"] as? [String], ["mcp", "--project", "/videos/a/Video v2.substo"])
+        XCTAssertEqual((server["command"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent }, "substo")
     }
 
     func testAnyCallOrOpenWatchCountsAsConnected() {
@@ -543,7 +543,7 @@ final class AgentPresenceTests: XCTestCase {
         XCTAssertEqual(ActivityLog.displayName("cli"), "CLI")
         XCTAssertEqual(ActivityLog.displayName("mcp"), "MCP")
         XCTAssertEqual(ActivityLog.displayName("user"), "You")
-        XCTAssertEqual(ActivityLog.displayName("system"), "Tandem")
+        XCTAssertEqual(ActivityLog.displayName("system"), "Substo Video")
     }
 
     func testChangeRegionNamesTheSection() throws {
@@ -666,7 +666,7 @@ final class ClipSpeedTests: XCTestCase {
         XCTAssertEqual(try ClipSpeed.parse("110%").get(), 1.1)
         XCTAssertEqual(try ClipSpeed.parse(" 87.5 % ").get(), 0.875)
         XCTAssertEqual(try ClipSpeed.parse("0.5").get(), 0.005)
-        XCTAssertEqual(try ClipSpeed.parse("10000%").get(), Editing.maximumSpeed, "as fast as Tandem plays")
+        XCTAssertEqual(try ClipSpeed.parse("10000%").get(), Editing.maximumSpeed, "as fast as Substo Video plays")
     }
 
     func testAnythingElseSaysWhy() {

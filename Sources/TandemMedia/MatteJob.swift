@@ -158,12 +158,12 @@ final class MattePipeline: @unchecked Sendable {
 
     func start() {
         let decoder = Thread { [self] in decodeLoop() }
-        decoder.name = "tandem.matte.decode"
+        decoder.name = "substo.matte.decode"
         decoder.qualityOfService = .utility
         decoder.start()
         for index in 0..<workerCount {
             let worker = Thread { [self] in workLoop() }
-            worker.name = "tandem.matte.vision.\(index)"
+            worker.name = "substo.matte.vision.\(index)"
             worker.qualityOfService = .utility
             worker.start()
         }

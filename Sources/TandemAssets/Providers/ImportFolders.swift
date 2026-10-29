@@ -3,7 +3,7 @@ import CoreServices
 import CryptoKit
 import Foundation
 
-/// The licence note an import folder carries, as `tandem-licence.json` in
+/// The licence note an import folder carries, as `substo-licence.json` in
 /// the folder. It covers everything in the folder, so a folder should hold
 /// one library's downloads (Envato in one, Mixkit in another).
 ///
@@ -18,7 +18,7 @@ import Foundation
 /// }
 /// ```
 public struct FolderLicence: Codable, Equatable, Sendable {
-    public static let fileName = "tandem-licence.json"
+    public static let fileName = "substo-licence.json"
 
     /// Where the files came from, for people and credits.
     public var source: String
@@ -45,7 +45,7 @@ public struct FolderLicence: Codable, Equatable, Sendable {
         self.notes = notes
     }
 
-    /// Notes for the libraries the research found Mike is likely to use.
+    /// Notes for the libraries the research found the creator is likely to use.
     public static let presets: [String: FolderLicence] = [
         "envato": FolderLicence(
             source: "Envato Elements", licence: "Envato Elements licence", licenceClass: .subscription,
@@ -138,7 +138,7 @@ public struct ImportScanReport: Codable, Equatable, Sendable {
     public var relicensed: Int = 0
     /// Files that aren't media, relative to the folder.
     public var skipped: [String] = []
-    /// True when the folder has no `tandem-licence.json`.
+    /// True when the folder has no `substo-licence.json`.
     public var missingLicence: Bool = false
     /// Parts of the folder that couldn't be read. When there are any,
     /// nothing is removed from the index, since missing isn't the same as
@@ -174,7 +174,7 @@ public class ImportFolderProvider: AssetProvider, @unchecked Sendable {
     let catalog: AssetCatalog
 
     public convenience init(catalog: AssetCatalog) {
-        self.init(catalog: catalog, id: "import", displayName: "Import folders", rules: ProviderRules(cacheTTL: 0, notes: ["Each folder's tandem-licence.json says what its files may be used for."]))
+        self.init(catalog: catalog, id: "import", displayName: "Import folders", rules: ProviderRules(cacheTTL: 0, notes: ["Each folder's substo-licence.json says what its files may be used for."]))
     }
 
     /// For providers built on the same folder indexing (the shared library).
@@ -563,7 +563,7 @@ final class ProblemList: @unchecked Sendable {
 /// the folders that changed.
 public final class ImportFolderWatcher: @unchecked Sendable {
     private var stream: FSEventStreamRef?
-    private let queue = DispatchQueue(label: "tandem.assets.import-watcher")
+    private let queue = DispatchQueue(label: "substo.assets.import-watcher")
     private static let queueKey = DispatchSpecificKey<Bool>()
 
     /// What the FSEvents callback reaches. The stream retains it, so a

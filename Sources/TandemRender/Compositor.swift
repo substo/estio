@@ -35,7 +35,7 @@ final class TandemInstruction: NSObject, AVVideoCompositionInstructionProtocol, 
     }
 }
 
-/// Tandem's `AVVideoCompositing`: renders each frame with `FrameComposer`
+/// Substo Video's `AVVideoCompositing`: renders each frame with `FrameComposer`
 /// on the shared Metal-backed Core Image context. Used by the viewer, frame
 /// grabs and export alike.
 class TandemCompositor: NSObject, AVVideoCompositing {
@@ -44,7 +44,7 @@ class TandemCompositor: NSObject, AVVideoCompositing {
     /// True for frame grabs, where every frame is a seek.
     class var rendersStills: Bool { false }
 
-    private let queue = DispatchQueue(label: "com.mikerosoft.tandem.compositor", qos: .userInitiated, attributes: .concurrent)
+    private let queue = DispatchQueue(label: "com.substo.video.compositor", qos: .userInitiated, attributes: .concurrent)
     private let lock = NSLock()
     private var generation = 0
 

@@ -6,12 +6,12 @@ import TandemCore
 /// When no app has the project open, each CLI command (and each MCP tool
 /// call) opens the file, edits it and closes it again, so the coordinator's
 /// in-memory undo stack only ever lives for one call. This keeps the undo
-/// history in `.tandem/<name>.undo.json` instead: a snapshot of the project
+/// history in `.substo/<name>.undo.json` instead: a snapshot of the project
 /// before each headless edit, plus the results of recent idempotent batches
 /// so a retried batch isn't applied twice.
 ///
 /// The history is only valid while the project is still at `revision`. Any
-/// edit made elsewhere (the app, `tandem serve`) moves the revision on, and
+/// edit made elsewhere (the app, `substo serve`) moves the revision on, and
 /// the stale history is dropped the next time it's touched.
 final class HeadlessHistory: @unchecked Sendable {
     struct Entry: Codable {
@@ -53,7 +53,7 @@ final class HeadlessHistory: @unchecked Sendable {
 
     private func load() -> State? {
         guard let data = try? Data(contentsOf: url), var state = try? ServiceJSON.decoder().decode(State.self, from: data) else { return nil }
-        // Snapshots an older Tandem kept read the way it wrote them, as the
+        // Snapshots an older Substo Video kept read the way it wrote them, as the
         // project file does.
         func upgraded(_ entry: Entry) -> Entry {
             var entry = entry

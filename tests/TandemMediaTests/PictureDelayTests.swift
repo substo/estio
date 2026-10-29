@@ -3,7 +3,7 @@ import TandemCore
 import XCTest
 @testable import TandemMedia
 
-/// A webcam's picture lags its mic: Tandem's setting for it, and new
+/// A webcam's picture lags its mic: Substo Video's setting for it, and new
 /// camera takes getting it as they join a project.
 final class PictureDelayTests: TempFolderTestCase {
     var folder: ProjectFolder { ProjectFolder(root: temp) }
@@ -35,7 +35,7 @@ final class PictureDelayTests: TempFolderTestCase {
 
     func testATakeRecordItAlreadyCorrectedGetsNoMoreDelay() async throws {
         var spec = SyntheticMedia.Video(width: 320, height: 180, duration: 1)
-        spec.metadata = [AVMetadataItem.identifier(forKey: "com.mikerosoft.record-it.camera-delay", keySpace: .quickTimeMetadata)!: "0.080"]
+        spec.metadata = [AVMetadataItem.identifier(forKey: "com.substo.video.camera-delay", keySpace: .quickTimeMetadata)!: "0.080"]
         try await SyntheticMedia.writeMovie(to: file("source/2026-10-03_101500-camera.mov"), spec)
         try await SyntheticMedia.writeMovie(to: file("source/2026-09-30_090000-camera.mov"), .init(width: 320, height: 180, duration: 1))
         let report = try await MediaScanner.scanReport(folder, known: [], settings: TandemSettings(cameraPictureDelay: 0.08))
@@ -44,7 +44,7 @@ final class PictureDelayTests: TempFolderTestCase {
         XCTAssertNil(corrected.pictureDelay, "in sync as recorded: no second delay")
         let older = try XCTUnwrap(report.items.first { $0.path.contains("2026-09-30") })
         XCTAssertNil(older.pictureDelayCorrected)
-        XCTAssertEqual(older.pictureDelay, Time(seconds: 0.08), "a take from before Record It corrected them still gets Tandem's")
+        XCTAssertEqual(older.pictureDelay, Time(seconds: 0.08), "a take from before Record It corrected them still gets Substo Video's")
     }
 
     func testOnlyWebcamTakesGetTheDelay() async throws {
@@ -89,7 +89,7 @@ final class PictureDelayTests: TempFolderTestCase {
         XCTAssertEqual(TandemSettings.load(from: url).cameraPictureDelay, 0.1)
         try Data("not json".utf8).write(to: url)
         XCTAssertEqual(TandemSettings.load(from: url), TandemSettings())
-        XCTAssertNotEqual(TandemSettings.url.path, FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Tandem/settings.json").path, "tests never use Mike's")
+        XCTAssertNotEqual(TandemSettings.url.path, FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Substo/settings.json").path, "tests never use Mike's")
     }
 
     func testTheDelayRoundTripsInTheProject() throws {

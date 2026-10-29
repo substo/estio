@@ -117,7 +117,7 @@ struct AudioEffectChain {
 /// Renders clips' dynamics effects ahead of time. The whole source file is
 /// run through the clip's chain once, into a cached lossless file the
 /// composition then plays instead of the original, so playback, review
-/// clips, `tandem loudness` and export all hear the same thing. Like
+/// clips, `substo loudness` and export all hear the same thing. Like
 /// `PitchShift`, but per file rather than per segment: the effects don't
 /// animate, so every clip of a take with the same effects and level shares
 /// one render, cuts and trims don't render again, and the compressor's
@@ -134,7 +134,7 @@ enum AudioEffects {
     static let chunk = 8192
     /// Where rendered copies are kept (tests point it elsewhere).
     nonisolated(unsafe) static var cacheFolder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("Tandem/dynamics", isDirectory: true)
+        .appendingPathComponent("Substo/dynamics", isDirectory: true)
 
     /// The clip's enabled dynamics effects, in order.
     static func effects(of clip: Clip, registry: EffectRegistry) -> [Effect] {

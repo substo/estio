@@ -4,12 +4,12 @@ import TandemCore
 import TandemMedia
 import TandemRender
 
-/// What `tandem check` measured in each 10 s piece of the timeline, kept
-/// between runs in `.tandem/cache/check`, so the next check only renders
+/// What `substo check` measured in each 10 s piece of the timeline, kept
+/// between runs in `.substo/cache/check`, so the next check only renders
 /// the pieces that changed.
 ///
 /// `check --changed` took 9 to 13 minutes over about 22 minutes of the
-/// Tandem video's changed timeline, a long wait between review rounds, and
+/// Substo Video video's changed timeline, a long wait between review rounds, and
 /// most of what it read hadn't changed since the round before. A piece is
 /// keyed by everything that draws in it: the project's settings, the video
 /// tracks with the clips and transitions over it (and a margin either side,

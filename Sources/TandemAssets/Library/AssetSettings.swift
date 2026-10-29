@@ -1,6 +1,6 @@
 import Foundation
 
-/// Library settings Mike might change, in `<root>/settings.json`.
+/// Library settings the creator might change, in `<root>/settings.json`.
 public struct AssetSettings: Codable, Equatable, Sendable {
     /// Freesound stays off until its operator (UPF) gives written
     /// permission for commercial API use.
@@ -9,8 +9,8 @@ public struct AssetSettings: Codable, Equatable, Sendable {
     public var iconColour: String
     /// Size cap for cached previews, in bytes.
     public var previewCacheLimit: Int64
-    /// Where the shared library folder is, when Mike moved it from the
-    /// default (`~/Movies/Tandem Library`; see `SharedLibrary`).
+    /// Where the shared library folder is, when the creator moved it from the
+    /// default (`~/Movies/Substo Library`; see `SharedLibrary`).
     public var sharedLibrary: String?
 
     public init(freesoundEnabled: Bool = false, iconColour: String = "#FFFFFF", previewCacheLimit: Int64 = 2 * 1024 * 1024 * 1024, sharedLibrary: String? = nil) {

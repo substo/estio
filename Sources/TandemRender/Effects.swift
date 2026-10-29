@@ -197,7 +197,7 @@ enum EffectRenderer {
         let radians = angle * .pi / 180
         shadow = shadow
             .transformed(by: CGAffineTransform(translationX: -distance * CGFloat(cos(radians)), y: -distance * CGFloat(sin(radians))))
-            .tandemOpacity(min(opacity, 1) * color.a)
+            .substoOpacity(min(opacity, 1) * color.a)
         return image.composited(over: shadow)
     }
 

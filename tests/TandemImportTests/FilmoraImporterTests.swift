@@ -138,7 +138,7 @@ final class FilmoraImporterTests: XCTestCase {
     func testKeepingFilmorasLevels() async throws {
         let result = try await importMini(speechLevels: .keepFilmora)
         let p = result.project
-        // Filmora's Auto Normalization levels to about -24 LUFS on Tandem's
+        // Filmora's Auto Normalization levels to about -24 LUFS on Substo Video's
         // meter, then adds the clip's LoudnessGain.
         let voice = p.clips(on: "Voice")
         XCTAssertEqual(voice[0].audio?.normalizeTo, -24)
@@ -188,7 +188,7 @@ final class FilmoraImporterTests: XCTestCase {
         let title = p.clips(on: "Camera").first { $0.mediaID == nil }!
         XCTAssertEqual(title.range, TimeRange(start: t(1), end: t(4)))
         guard case .text(let text) = title.content else { return XCTFail("expected text") }
-        XCTAssertEqual(text.text, "Hello\nTandem")
+        XCTAssertEqual(text.text, "Hello\nSubsto Video")
         XCTAssertEqual(text.style.font, "Arial Black")
         XCTAssertEqual(text.style.weight, 900)
         XCTAssertEqual(text.style.color, RGBA(r: 1, g: 0, b: 0))

@@ -67,7 +67,7 @@ public final class ViewerAudio: @unchecked Sendable {
     public var onInterruption: (() -> Void)?
 
     let synchronizer = AVSampleBufferRenderSynchronizer()
-    /// `TANDEM_MUTED=1`, or a test: it plays, silently.
+    /// `SUBSTO_MUTED=1`, or a test: it plays, silently.
     public let muted: Bool
     /// The device it plays to, nil for the system's default output.
     private let outputDeviceUID: String?
@@ -83,7 +83,7 @@ public final class ViewerAudio: @unchecked Sendable {
     private var priming: (time: Time, reverse: Bool)?
     private var waiting: [() -> Void] = []
     /// Where the synchronizer is told what to do, in order.
-    private let control = DispatchQueue(label: "com.mikerosoft.tandem.viewer-audio.control", qos: .userInteractive)
+    private let control = DispatchQueue(label: "com.substo.video.viewer-audio.control", qos: .userInteractive)
     /// Only touched on `control`.
     private var observers: [NSObjectProtocol] = []
     private var saidRendererFailed = false
@@ -444,7 +444,7 @@ public final class ViewerAudio: @unchecked Sendable {
 /// One prime's sound on its way to the renderer: its stream, made on its
 /// own queue, and how much it has handed over.
 private final class Feed: @unchecked Sendable {
-    let queue = DispatchQueue(label: "com.mikerosoft.tandem.viewer-audio", qos: .userInitiated)
+    let queue = DispatchQueue(label: "com.substo.video.viewer-audio", qos: .userInitiated)
     var onReady: (() -> Void)?
     private let readyFrames: Int
     private let make: () -> ViewerSound
@@ -719,7 +719,7 @@ final class ReverseSound: ViewerSound {
 final class OutputHold: @unchecked Sendable {
     /// How long it holds the output after the last `hold`.
     static let duration: TimeInterval = 30
-    private let queue = DispatchQueue(label: "com.mikerosoft.tandem.viewer-audio.output")
+    private let queue = DispatchQueue(label: "com.substo.video.viewer-audio.output")
     /// Only touched on `queue`.
     private var device = AudioObjectID(kAudioObjectUnknown)
     private var holding = false

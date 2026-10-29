@@ -2,7 +2,7 @@ import Foundation
 import TandemAssets
 import TandemCore
 
-// Plain-text forms of the asset results, for `tandem assets` and the MCP
+// Plain-text forms of the asset results, for `substo assets` and the MCP
 // tools. They keep asset IDs visible, since that's what the next call needs.
 
 enum AssetText {
@@ -162,10 +162,10 @@ extension AssetUseResult: ReadableResult {
             if !fonts.isEmpty {
                 lines.append("Installed the font \(asset.name) (\(fonts.joined(separator: ", "))). Use it in a title's style: {\"font\": \"\(fonts[0])\"}.")
                 if referencedInPlace == true {
-                    lines.append("It stays in the shared library (\(files.joined(separator: ", "))), where every Tandem render finds it; archiving copies it into the project's assets/font/.")
+                    lines.append("It stays in the shared library (\(files.joined(separator: ", "))), where every Substo Video render finds it; archiving copies it into the project's assets/font/.")
                 }
                 if let owner = fontsReached {
-                    lines.append(owner == "app" ? "The Tandem app has it now too." : "tandem serve has it now too.")
+                    lines.append(owner == "app" ? "The Substo Video app has it now too." : "substo serve has it now too.")
                 }
                 for warning in fontWarnings ?? [] { lines.append("Warning: \(warning)") }
             } else if referencedInPlace == true {

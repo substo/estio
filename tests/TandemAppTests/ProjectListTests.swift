@@ -15,8 +15,8 @@ final class ProjectListTests: XCTestCase {
     }
 
     func testIconsLiveBesideTheJournal() {
-        let url = URL(fileURLWithPath: "/videos/static hosting/Static hosting v2.tandem")
-        XCTAssertEqual(ProjectIconFile.url(for: url).path, "/videos/static hosting/.tandem/Static hosting v2.icon.png")
+        let url = URL(fileURLWithPath: "/videos/static hosting/Static hosting v2.substo")
+        XCTAssertEqual(ProjectIconFile.url(for: url).path, "/videos/static hosting/.substo/Static hosting v2.icon.png")
     }
 
     func testTheIconFrameIsATenthInWhenThereIsAPicture() {
@@ -51,7 +51,7 @@ final class ProjectListTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("icon-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let projectURL = root.appendingPathComponent("Icon.tandem")
+        let projectURL = root.appendingPathComponent("Icon.substo")
         var project = Project.standard(name: "Icon")
         project.videoTracks[1].clips = [Clip(content: .solid(color: RGBA(r: 0.9, g: 0.5, b: 0.1)), start: t(0), duration: t(5))]
         let file = ProjectIconFile.url(for: projectURL)
@@ -95,7 +95,7 @@ func XCTUnwrapAsync<T>(_ value: @autoclosure () async throws -> T?, file: Static
 @MainActor
 final class ProjectIconMenuTests: XCTestCase {
     func testOpenRecentShowsAPlaceholderUntilThereIsAnIcon() {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("no-icon-\(UUID().uuidString)/None.tandem")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("no-icon-\(UUID().uuidString)/None.substo")
         let image = ProjectIcons.shared.menuImage(for: url)
         XCTAssertEqual(image.size, NSSize(width: 32, height: 18))
         XCTAssertTrue(image === ProjectIcons.menuPlaceholder, "never waits for the disk")

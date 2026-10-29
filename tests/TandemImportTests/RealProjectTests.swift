@@ -5,10 +5,10 @@ import XCTest
 
 /// Imports Mike's real projects. Opt-in, since they need his media:
 ///
-///     TANDEM_REAL_MEDIA=1 swift test --package-path . --filter RealProjectTests
+///     SUBSTO_REAL_MEDIA=1 swift test --package-path . --filter RealProjectTests
 ///
 /// Each import must validate with no errors and no failed steps, and is
-/// written to /private/tmp/claude-501/tandem-importer/<name>/<name>.tandem
+/// written to /private/tmp/claude-501/tandem-importer/<name>/<name>.substo
 /// with its report beside it. The source folders are only ever read.
 final class RealProjectTests: XCTestCase {
     static let output = URL(fileURLWithPath: "/private/tmp/claude-501/tandem-importer")
@@ -16,8 +16,8 @@ final class RealProjectTests: XCTestCase {
 
     override func setUpWithError() throws {
         try XCTSkipUnless(
-            ProcessInfo.processInfo.environment["TANDEM_REAL_MEDIA"] == "1",
-            "Set TANDEM_REAL_MEDIA=1 to import Mike's real projects."
+            ProcessInfo.processInfo.environment["SUBSTO_REAL_MEDIA"] == "1",
+            "Set SUBSTO_REAL_MEDIA=1 to import Mike's real projects."
         )
     }
 
@@ -107,12 +107,12 @@ final class RealProjectTests: XCTestCase {
         try await importFilmora("decision-models/Magic Jev Ball.wfp", name: "magic-jev-ball")
     }
 
-    /// Imports every `.wfp` under TANDEM_FILMORA_CORPUS (for example the
+    /// Imports every `.wfp` under SUBSTO_FILMORA_CORPUS (for example the
     /// Filmora audit's corpus) as a robustness check: each must validate
     /// with no failed steps. Nothing is written.
     func testFilmoraCorpus() async throws {
-        guard let root = ProcessInfo.processInfo.environment["TANDEM_FILMORA_CORPUS"] else {
-            throw XCTSkip("Set TANDEM_FILMORA_CORPUS to a folder of .wfp files.")
+        guard let root = ProcessInfo.processInfo.environment["SUBSTO_FILMORA_CORPUS"] else {
+            throw XCTSkip("Set SUBSTO_FILMORA_CORPUS to a folder of .wfp files.")
         }
         let files = FileManager.default.enumerator(at: URL(fileURLWithPath: root), includingPropertiesForKeys: nil)?
             .compactMap { $0 as? URL }.filter { $0.pathExtension == "wfp" }.sorted { $0.path < $1.path } ?? []
@@ -137,10 +137,10 @@ final class RealProjectTests: XCTestCase {
     }
 
     /// Prints the report for one project, for looking into an import:
-    /// TANDEM_IMPORT_ONE=/path/to/project.wfp
+    /// SUBSTO_IMPORT_ONE=/path/to/project.wfp
     func testImportOne() async throws {
-        guard let path = ProcessInfo.processInfo.environment["TANDEM_IMPORT_ONE"] else {
-            throw XCTSkip("Set TANDEM_IMPORT_ONE to a .wfp to print its import report.")
+        guard let path = ProcessInfo.processInfo.environment["SUBSTO_IMPORT_ONE"] else {
+            throw XCTSkip("Set SUBSTO_IMPORT_ONE to a .wfp to print its import report.")
         }
         let result = try await FilmoraImporter().importProject(at: URL(fileURLWithPath: path))
         assertValid(result.project)

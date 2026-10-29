@@ -7,11 +7,11 @@ import TandemCore
 /// ruler's time code or gets in the way of a click there. Each strip
 /// shows while it has anything in it.
 enum MarkerStrip: CaseIterable {
-    /// Mike's markers, sections and chapters.
+    /// the creator's markers, sections and chapters.
     case markers
     /// Notes left for Mike: a shot to record or find, a title to make.
     case todos
-    /// Mike's notes for the next round of agent edits.
+    /// the creator's notes for the next round of agent edits.
     case comments
 
     func holds(_ marker: Marker) -> Bool {

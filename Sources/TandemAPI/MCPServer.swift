@@ -1,7 +1,7 @@
 import Foundation
 import TandemCore
 
-/// `tandem mcp`: the service as MCP tools over stdio (newline-delimited
+/// `substo mcp`: the service as MCP tools over stdio (newline-delimited
 /// JSON-RPC 2.0).
 ///
 /// It speaks both eras of MCP. Clients on 2025-11-25 and earlier open with
@@ -20,7 +20,7 @@ public final class MCPServer: @unchecked Sendable {
         public var project: String?
         /// Where to look for a project when none is named.
         public var directory: URL
-        /// `--author` or `$TANDEM_AUTHOR`. Otherwise edits are credited to
+        /// `--author` or `$SUBSTO_AUTHOR`. Otherwise edits are credited to
         /// the client's name (claude, codex...).
         public var author: String?
         public var environment: [String: String]
@@ -250,15 +250,15 @@ public final class MCPServer: @unchecked Sendable {
     }
 
     static let serverInfo: JSONValue = .object([
-        "name": .string("tandem"),
-        "title": .string("Tandem video editor"),
+        "name": .string("substo-video"),
+        "title": .string("Substo Video editor"),
         "version": .string(TandemAPI.version)
     ])
 
     static let instructions = """
     Tandem is a video editor for working in turns: an agent edits, then the creator reviews changes in the app, where edits \
     stay highlighted until they are played through or marked reviewed. Before changing anything, check `status`: if edits are still \
-    waiting for review, ask whether to continue with N unreviewed changes. These tools read and edit a .tandem project: the app's copy when the app has it open, \
+    waiting for review, ask whether to continue with N unreviewed changes. These tools read and edit a .substo project: the app's copy when the app has it open, \
     otherwise the file. Start with `timeline` (add words: true to see what's said in each voice clip). Change things with `apply`, a batch \
     of edit commands applied atomically as one undo step credited to you; label it with what it does (the creator reads the labels), pass \
     expectedRevision from the read you based the edit on (not a fresh status right before applying) so you never edit a timeline that \
@@ -273,7 +273,7 @@ public final class MCPServer: @unchecked Sendable {
     another angle or an external mic up with the camera by sound and places it. Transcripts, mattes and proxies are \
     made in the background: `wait` waits for them (never poll in a loop), and `transcribe` makes a transcript of any file with sound. Only change the project through \
     these tools, and never quit \
-    or restart the app. Times are seconds or mm:ss.mmm. Pass `project` (a .tandem path) when the server wasn't started in the video's folder.
+    or restart the app. Times are seconds or mm:ss.mmm. Pass `project` (a .substo path) when the server wasn't started in the video's folder.
     """
 
     private func callTool(_ params: JSONValue, clientName: String?) async throws -> JSONValue {
@@ -290,7 +290,7 @@ public final class MCPServer: @unchecked Sendable {
         if case .string(let path)? = arguments["project"] { projectPath = path }
         arguments.removeValue(forKey: "project")
         arguments.removeValue(forKey: "json")
-        let author = options.author ?? options.environment["TANDEM_AUTHOR"] ?? clientName.map(Self.author(fromClient:)) ?? "agent"
+        let author = options.author ?? options.environment["SUBSTO_AUTHOR"] ?? clientName.map(Self.author(fromClient:)) ?? "agent"
         do {
             let body = try JSONEncoder().encode(JSONValue.object(tool.defaults.merging(arguments) { _, given in given }))
             let content: [JSONValue]
@@ -311,7 +311,7 @@ public final class MCPServer: @unchecked Sendable {
     }
 
     /// The asset library, opened on first use: the per-user one, or
-    /// `$TANDEM_ASSETS_ROOT`. Tests set it.
+    /// `$SUBSTO_ASSETS_ROOT`. Tests set it.
     var assetService: AssetService? {
         get { stateLock.withLock { assets } }
         set { stateLock.withLock { assets = newValue } }
@@ -427,7 +427,7 @@ public final class MCPServer: @unchecked Sendable {
     }
 
     private func log(_ text: String) {
-        FileHandle.standardError.write(Data("tandem mcp: \(text)\n".utf8))
+        FileHandle.standardError.write(Data("substo mcp: \(text)\n".utf8))
     }
 }
 
@@ -463,7 +463,7 @@ enum MCPTools {
         var definition: JSONValue {
             var properties = self.properties
             if usesProject {
-                properties["project"] = S.string("Path to the .tandem file (or its folder). Defaults to the one the server was started with, or the one in its folder.")
+                properties["project"] = S.string("Path to the .substo file (or its folder). Defaults to the one the server was started with, or the one in its folder.")
             }
             properties["json"] = S.boolean("Return the raw JSON result instead of readable text.")
             var schema: [String: JSONValue] = [
@@ -561,10 +561,10 @@ enum MCPTools {
         ),
         Tool(
             name: "tighten", title: "Tighten pauses",
-            description: "Shortens pauses with frame-aligned ripple deletes that cut the whole take and let B-roll, music and titles follow: by what each pause follows (mike: true for Mike's rules, 0.4 s after a sentence, 0.12 s after a comma, 0.08 s mid-sentence, only pauses of 0.5 s or more; or sentence, comma and mid keeps of your own), or every pause longer than min down to keep. protect leaves pauses containing those times alone; widen: true also widens joins between speech clips that leave less than the keep, from silence in the take either side. A dry run that returns the plan and the commands unless apply: true.",
+            description: "Shortens pauses with frame-aligned ripple deletes that cut the whole take and let B-roll, music and titles follow: by what each pause follows (mike: true for the creator's rules, 0.4 s after a sentence, 0.12 s after a comma, 0.08 s mid-sentence, only pauses of 0.5 s or more; or sentence, comma and mid keeps of your own), or every pause longer than min down to keep. protect leaves pauses containing those times alone; widen: true also widens joins between speech clips that leave less than the keep, from silence in the take either side. A dry run that returns the plan and the commands unless apply: true.",
             operation: .tighten,
             properties: [
-                "mike": S.boolean("Mike's rules: sentence 0.4, comma 0.12, mid 0.08, min 0.5, midMin 0.5. The other fields override them."),
+                "mike": S.boolean("the creator's rules: sentence 0.4, comma 0.12, mid 0.08, min 0.5, midMin 0.5. The other fields override them."),
                 "sentence": time("Keep this much after a word ending . ? or !"),
                 "comma": time("Keep this much after a word ending , ; or : (default: the mid keep)."),
                 "mid": time("Keep this much of a mid-sentence pause."),
@@ -594,7 +594,7 @@ enum MCPTools {
         ),
         Tool(
             name: "captions", title: "Add word captions",
-            description: "Adds word-by-word captions from the transcripts (a few words at a time, the spoken word highlighted, Mike's shorts style) on a Captions track. A dry run that returns the plan and the commands unless apply: true.",
+            description: "Adds word-by-word captions from the transcripts (a few words at a time, the spoken word highlighted, the creator's shorts style) on a Captions track. A dry run that returns the plan and the commands unless apply: true.",
             operation: .captions,
             properties: [
                 "from": time("Only speech after this time."), "to": time("Only speech before this time."),
@@ -609,11 +609,11 @@ enum MCPTools {
         ),
         Tool(
             name: "short", title: "Lay out a 9:16 short",
-            description: "Adds the portrait output format and places every video clip in it the way Mike's shorts look: screen, B-roll and graphics in the top half, the camera in the bottom half with its background, full-frame camera moments filling the frame. The landscape edit is untouched. With copy: true the short becomes its own 1080x1920 project instead, which the app shows portrait. A dry run unless apply: true. Then export with the short preset.",
+            description: "Adds the portrait output format and places every video clip in it the way the creator's shorts look: screen, B-roll and graphics in the top half, the camera in the bottom half with its background, full-frame camera moments filling the frame. The landscape edit is untouched. With copy: true the short becomes its own 1080x1920 project instead, which the app shows portrait. A dry run unless apply: true. Then export with the short preset.",
             operation: .short,
             properties: [
                 "apply": S.boolean("Lay it out. Without it nothing changes."),
-                "copy": S.boolean("Make the short a 1080x1920 project of its own beside this one (\"<Name> Short.tandem\"), laid out and made portrait, so the app shows it portrait. This project isn't edited. What you usually want."),
+                "copy": S.boolean("Make the short a 1080x1920 project of its own beside this one (\"<Name> Short.substo\"), laid out and made portrait, so the app shows it portrait. This project isn't edited. What you usually want."),
                 "copyPath": S.string("The copy's file name or path, relative to the project's folder."),
                 "label": S.string("Undo label."), "author": S.string("Who made the edit."),
                 "expectedRevision": S.integer("Refuse unless the project is at this revision.")
@@ -665,10 +665,10 @@ enum MCPTools {
         ),
         Tool(
             name: "diff", title: "What changed since",
-            description: "What changed on the timeline since a revision, a backup or an export, clip by clip: added, removed, moved, trimmed, and changed settings (transform, gain, keyframes, effects...), with timeline times and track names. Since a revision, it's grouped by edit with who made it (the edit history lasts across restarts). An export is read from the .mp4.tandem snapshot beside it. Use it to find what Mike changed since you last looked, instead of diffing timeline JSON yourself. Pass json: true for each clip before and after.",
+            description: "What changed on the timeline since a revision, a backup or an export, clip by clip: added, removed, moved, trimmed, and changed settings (transform, gain, keyframes, effects...), with timeline times and track names. Since a revision, it's grouped by edit with who made it (the edit history lasts across restarts). An export is read from the .mp4.substo snapshot beside it. Use it to find what the creator changed since you last looked, instead of diffing timeline JSON yourself. Pass json: true for each clip before and after.",
             operation: .diff,
             properties: [
-                "since": S.string("A revision (95), a .tandem file (a backup in .tandem/backups or an export's .mp4.tandem snapshot), or an export (exports/v3.mp4). Paths are absolute or relative to the project folder.")
+                "since": S.string("A revision (95), a .substo file (a backup in .substo/backups or an export's .mp4.substo snapshot), or an export (exports/v3.mp4). Paths are absolute or relative to the project folder.")
             ],
             required: ["since"], readOnly: true, idempotent: true
         ),
@@ -677,7 +677,7 @@ enum MCPTools {
             description: "Puts clips back as they were in a revision, a backup or an export's snapshot: their place, trims, settings and keyframes. Name the clips, or give fromTime and toTime (and track) for every clip that was in that stretch; clips that weren't there come out. One undo step through the usual edit path. A dry run that returns the plan and the commands unless apply: true. Transitions, media and markers aren't restored.",
             operation: .restore,
             properties: [
-                "from": S.string("A revision (95), a .tandem file, or an export (exports/v3.mp4)."),
+                "from": S.string("A revision (95), a .substo file, or an export (exports/v3.mp4)."),
                 "clips": S.ids("Clip IDs to restore."),
                 "fromTime": time("With toTime: every clip there in this stretch (in that timeline's times)."),
                 "toTime": time("End of the stretch."),
@@ -708,7 +708,7 @@ enum MCPTools {
         ),
         Tool(
             name: "check", title: "Check for problems",
-            description: "Looks for what Mike would otherwise catch in review: black frames and gaps, one-frame flickers, green screens that didn't key and white blocks that come and go. Notes, which don't fail it, are judgement calls: pictures zoomed past their own pixels; dead air (0.8 s or more of a still picture with nothing said and no sound effect or music swell: cut it, or keep it if the pause earns it); and page changes on the screen recording with no transition (push them if they're pages in an explainer or slides); and slivers, clips or gaps between clips on a track shorter than a frame. Renders the frames small, so a minute takes seconds. Run it with changed: true on what you changed before handing back. With cuts: true it checks only for words clipped at cuts, and gives the trims that fix them. ok is false when it finds a problem.",
+            description: "Looks for what the creator would otherwise catch in review: black frames and gaps, one-frame flickers, green screens that didn't key and white blocks that come and go. Notes, which don't fail it, are judgement calls: pictures zoomed past their own pixels; dead air (0.8 s or more of a still picture with nothing said and no sound effect or music swell: cut it, or keep it if the pause earns it); and page changes on the screen recording with no transition (push them if they're pages in an explainer or slides); and slivers, clips or gaps between clips on a track shorter than a frame. Renders the frames small, so a minute takes seconds. Run it with changed: true on what you changed before handing back. With cuts: true it checks only for words clipped at cuts, and gives the trims that fix them. ok is false when it finds a problem.",
             operation: .check,
             properties: [
                 "from": time("Start. Default 0."),
@@ -722,12 +722,12 @@ enum MCPTools {
         ),
         Tool(
             name: "sync", title: "Sync picture and sound",
-            description: "Two jobs. With delay: a webcam's picture lags its mic (Mike's by about 0.08 s), so lips and voice drift apart; every camera take (or the media files named) shows its picture that much later in the file, in the app, frames, review clips, check and exports; the sound, the cuts and word times stay put. 0 puts it back as recorded. Never slip clips by hand as well, or the delay doubles. Without delay or files it lists each file's delay and the default new camera takes get. With files (another camera angle, an external mic): lines each up with the camera take by sound, however much of the take it covers, and reports how much further into the file the same moment is (offset, positive when it started first), how far the clocks drift apart over the overlap, and a confidence (unrelated sound scores under 10; under 15 is refused and nothing changes). Then, as one undo step, it puts each file in the camera's take and places it beside the take's clips, linked (placeSynced): an angle on its own track above the camera's (\"Angle 2\"), off until the showAngle edit command shows it over a range, its own sound not placed; a sound file on Voice, with the camera's own sound there moved to a muted \"Camera sound\" track. Takes about 20 s for a 46 min camera take.",
+            description: "Two jobs. With delay: a webcam's picture lags its mic (the creator's by about 0.08 s), so lips and voice drift apart; every camera take (or the media files named) shows its picture that much later in the file, in the app, frames, review clips, check and exports; the sound, the cuts and word times stay put. 0 puts it back as recorded. Never slip clips by hand as well, or the delay doubles. Without delay or files it lists each file's delay and the default new camera takes get. With files (another camera angle, an external mic): lines each up with the camera take by sound, however much of the take it covers, and reports how much further into the file the same moment is (offset, positive when it started first), how far the clocks drift apart over the overlap, and a confidence (unrelated sound scores under 10; under 15 is refused and nothing changes). Then, as one undo step, it puts each file in the camera's take and places it beside the take's clips, linked (placeSynced): an angle on its own track above the camera's (\"Angle 2\"), off until the showAngle edit command shows it over a range, its own sound not placed; a sound file on Voice, with the camera's own sound there moved to a muted \"Camera sound\" track. Takes about 20 s for a 46 min camera take.",
             operation: .sync,
             properties: [
                 "delay": time("How late the picture is against the sound, in seconds (0.08 for 80 ms). 0 puts it back."),
                 "media": S.array(S.string("A media ID."), "The files to set the delay on. Default: every camera take."),
-                "makeDefault": S.boolean("Make it the delay new camera takes get, in Tandem's settings."),
+                "makeDefault": S.boolean("Make it the delay new camera takes get, in Substo Video's settings."),
                 "files": S.array(S.string("A media ID or path."), "Files to line up with the camera take by sound, instead of a delay."),
                 "to": S.string("With files: the media ID or path of the file to line them up with. Default: the camera take."),
                 "place": S.boolean("With files: place each beside the take. Default true; false only sets their takes."),
@@ -772,7 +772,7 @@ enum MCPTools {
         ),
         Tool(
             name: "screenshot", title: "Screenshot the app",
-            description: "Captures the Tandem app's window, to see what Mike sees. Needs the app open.",
+            description: "Captures the Substo Video app's window, to see the editor view. Needs the app open.",
             operation: .screenshot, properties: ["output": S.string("Save the PNG here instead of returning it.")], readOnly: true
         ),
         Tool(
@@ -840,14 +840,14 @@ enum MCPTools {
         ),
         Tool(
             name: "watch", title: "Wait for a change",
-            description: "Waits until the project moves past a revision (default: now), for example to react when Mike edits in the app. Returns the changes, or changed: false after the timeout.",
+            description: "Waits until the project moves past a revision (default: now), for example to react when the creator edits in the app. Returns the changes, or changed: false after the timeout.",
             operation: .watch,
             properties: ["revision": S.integer("Wait for a revision after this one."), "timeout": S.number("Seconds to wait. Default 30, at most 600.")],
             readOnly: true, idempotent: true
         ),
         Tool(
             name: "wait", title: "Wait for background work",
-            description: "Waits until background work is done and says what finished: transcript, matte or proxy (the ones the project makes, or one file's with media), jobs (every analysis job, the default) or export (exports running through the app or tandem serve). With the app closed it makes the work itself while it waits. Use it instead of polling media or status. A file nothing makes a transcript for is an error pointing at `transcribe`. On timeout it returns what's still going; call it again to keep waiting.",
+            description: "Waits until background work is done and says what finished: transcript, matte or proxy (the ones the project makes, or one file's with media), jobs (every analysis job, the default) or export (exports running through the app or substo serve). With the app closed it makes the work itself while it waits. Use it instead of polling media or status. A file nothing makes a transcript for is an error pointing at `transcribe`. On timeout it returns what's still going; call it again to keep waiting.",
             operation: .wait,
             properties: [
                 "what": S.enumeration(WaitTarget.allCases.map(\.rawValue), "What to wait for. Default jobs."),
@@ -858,7 +858,7 @@ enum MCPTools {
         ),
         Tool(
             name: "assets_search", title: "Find assets",
-            description: "Searches Mike's asset library (music, sound effects, stickers, icons, logos, fonts, stock) by words, kind and source. online: true asks the providers too (Noto emoji, Iconify, SVGL, Fontsource, Pexels, Pixabay); what they find joins the library, so its ID works with assets_use right away.",
+            description: "Searches the creator's asset library (music, sound effects, stickers, icons, logos, fonts, stock) by words, kind and source. online: true asks the providers too (Noto emoji, Iconify, SVGL, Fontsource, Pexels, Pixabay); what they find joins the library, so its ID works with assets_use right away.",
             asset: .search,
             properties: [
                 "text": S.string("Words to match, like whoosh or rocket."),
@@ -979,7 +979,7 @@ public enum LineReader {
                 if !buffer.isEmpty { continuation.yield(String(decoding: buffer, as: UTF8.self)) }
                 continuation.finish()
             }
-            thread.name = "tandem line reader"
+            thread.name = "substo line reader"
             thread.start()
         }
     }

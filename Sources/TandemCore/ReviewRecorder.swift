@@ -3,7 +3,7 @@ import Foundation
 /// Keeps a project's review log as its coordinator commits: an agent's
 /// batch is recorded, every edit carries the highlights along, an undo
 /// drops what it put back, and the log is saved beside the journal after
-/// each change. Every session has one (the app, `tandem serve` and each
+/// each change. Every session has one (the app, `substo serve` and each
 /// headless CLI command), so agent edits are logged wherever they're made
 /// and the app finds them when it opens the project.
 ///
@@ -11,7 +11,7 @@ import Foundation
 /// observers hear the new log there. Reading `log` waits for the edits
 /// already heard, so a status read straight after an edit sees it.
 public final class ReviewRecorder: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.mikerosoft.tandem.review")
+    private let queue = DispatchQueue(label: "com.substo.video.review")
     private let coordinator: ProjectCoordinator
     private let folder: FolderAnchor?
     private let fileName: String
@@ -34,7 +34,7 @@ public final class ReviewRecorder: @unchecked Sendable {
         }
         token = coordinator.observe { [weak self] event in self?.heard(event) }
         // Clips taken off the timeline since the log was saved (by an older
-        // Tandem, or by hand) have nothing left to show.
+        // Substo Video, or by hand) have nothing left to show.
         queue.async { [weak self] in
             guard let self, !self.closed else { return }
             var log = self._log
@@ -64,7 +64,7 @@ public final class ReviewRecorder: @unchecked Sendable {
         queue.sync { _ = observers.removeValue(forKey: token) }
     }
 
-    /// Mike has looked at everything: the log starts again empty.
+    /// the creator has looked at everything: the log starts again empty.
     public func markReviewed() {
         queue.sync {
             guard !_log.isEmpty else { return }
@@ -72,7 +72,7 @@ public final class ReviewRecorder: @unchecked Sendable {
         }
     }
 
-    /// Mike has watched these stretches of `project`'s timeline: what lies
+    /// the creator has watched these stretches of `project`'s timeline: what lies
     /// wholly in them is reviewed (`ReviewLog.markWatched`).
     public func markWatched(_ watched: [TimeRange], in project: Project) {
         queue.sync {

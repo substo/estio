@@ -124,10 +124,10 @@ enum BuiltInTemplates {
         return all.first { $0.id == id } ?? SegmentShelf.shared.template(id)
     }
 
-    /// Mike's section card, silent.
+    /// the creator's section card, silent.
     static let sectionCard = makeSectionCard(sounds: nil)
 
-    /// Mike's section card: the built-in `sectionCard` graphic on Graphics
+    /// the creator's section card: the built-in `sectionCard` graphic on Graphics
     /// (Convex's bands wipe in, the card holds the number, title, subtitle
     /// and progress, the bands wipe out) and, given the whooshes, one on
     /// SFX for each sweep. As long as its words need; they're edited in the

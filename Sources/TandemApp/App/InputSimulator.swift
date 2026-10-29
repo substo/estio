@@ -17,15 +17,15 @@ private func isSwiftUI(_ view: NSView) -> Bool {
 /// `mouseDragged` and `mouseUp` calls AppKit makes, so smoke tests and
 /// agents can drive the timeline and viewer without screen control:
 ///
-///     tandem url "simulate?drag=600,700,700,700&mods=cmd"
-///     tandem url "simulate?drag=600,700,300,700&button=middle"
-///     tandem url "simulate?drag=600,700,900,760&steps=120&interval=8"
-///     tandem url "simulate?menu=600,700&out=/tmp/menu.txt"
-///     tandem url "simulate?drop=tandem-effect:vignette&at=600,700"
-///     tandem url "simulate?scroll=900,1100,-12,0&steps=90&interval=16"
-///     tandem url "simulate?dragover=tandem-title:label&at=600,700&to=900,700&steps=60&interval=16"
-///     tandem url "simulate?hover=900,400&hold=z"   (then tandem://debug says which cursor it set)
-///     tandem url "simulate?press=cmd&for=2"   (⌘ held for 2 s: the buttons show their keys)
+///     substo url "simulate?drag=600,700,700,700&mods=cmd"
+///     substo url "simulate?drag=600,700,300,700&button=middle"
+///     substo url "simulate?drag=600,700,900,760&steps=120&interval=8"
+///     substo url "simulate?menu=600,700&out=/tmp/menu.txt"
+///     substo url "simulate?drop=substo-effect:vignette&at=600,700"
+///     substo url "simulate?scroll=900,1100,-12,0&steps=90&interval=16"
+///     substo url "simulate?dragover=substo-title:label&at=600,700&to=900,700&steps=60&interval=16"
+///     substo url "simulate?hover=900,400&hold=z"   (then substo://debug says which cursor it set)
+///     substo url "simulate?press=cmd&for=2"   (⌘ held for 2 s: the buttons show their keys)
 ///
 /// A drop hands a library payload (see `LibraryDrag`) to the drop target
 /// under the point, as if it had been dragged there from a library tab. A
@@ -278,7 +278,7 @@ enum InputSimulator {
                 }
                 return false
             }
-            if !pick(in: menu) { NSLog("Tandem: no enabled menu item called %@", title) }
+            if !pick(in: menu) { NSLog("Substo Video: no enabled menu item called %@", title) }
         case .scroll(let dx, let dy, let steps):
             func send() {
                 guard let cgEvent = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0) else { return }
@@ -310,7 +310,7 @@ enum InputSimulator {
             var view: NSView? = target
             while let candidate = view, candidate.registeredDraggedTypes.isEmpty { view = candidate.superview }
             guard let destination = view else { return }
-            let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.mikerosoft.tandem.simulated-drop"))
+            let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.substo.video.simulated-drop"))
             pasteboard.clearContents()
             pasteboard.setString(payload, forType: .string)
             let end = windowPoint(to)
@@ -334,7 +334,7 @@ enum InputSimulator {
             var view: NSView? = target
             while let candidate = view, candidate.registeredDraggedTypes.isEmpty { view = candidate.superview }
             guard let destination = view else { return }
-            let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.mikerosoft.tandem.simulated-drop"))
+            let pasteboard = NSPasteboard(name: NSPasteboard.Name("com.substo.video.simulated-drop"))
             pasteboard.clearContents()
             if case .drop(let payload) = gesture.kind {
                 pasteboard.setString(payload, forType: .string)

@@ -8,9 +8,9 @@ import TandemMedia
 /// or its folder was tidied by hand) gets them looked for: files moved
 /// within the project folder, or in this Mac's shared library (a sticker
 /// or sound the project used from the library on another Mac), are
-/// relinked straight away, and for the rest Mike is asked for a folder to
+/// relinked straight away, and for the rest the creator is asked for a folder to
 /// search. A file is only taken when it's the same file (`MediaRelinker`,
-/// the same as `tandem relink`).
+/// the same as `substo relink`).
 ///
 /// The question waits until the window is in front: a project opened in
 /// the background (`open -g`, as scripts and agents do) isn't blocked by a
@@ -59,7 +59,7 @@ enum RelinkPrompt {
         var names = missing.prefix(6).map { "  \($0.path)" }
         if missing.count > 6 { names.append("  and \(missing.count - 6) more") }
         alert.informativeText = """
-        Tandem couldn't find \(missing.count == 1 ? "it" : "these") in the project folder or the shared library:
+        Substo Video couldn't find \(missing.count == 1 ? "it" : "these") in the project folder or the shared library:
         \(names.joined(separator: "\n"))
 
         If you know where \(missing.count == 1 ? "it is" : "they are"), choose a folder to search. Its subfolders are searched too, and a file is only used when it's the same file. Clips using a missing file show nothing until it's found.

@@ -4,7 +4,7 @@ import TandemMedia
 
 // MARK: - comments
 
-/// The comments Mike left on the timeline for the next round of edits,
+/// The comments the creator left on the timeline for the next round of edits,
 /// with what's said and what plays at each, so an agent can do what they
 /// ask without looking the moment up.
 public struct CommentsRequest: ServiceCall {
@@ -27,7 +27,7 @@ public struct CommentInfo: Codable, Sendable {
     /// The comment's marker ID: remove it (`removeMarker`) once it's done.
     public var id: String
     public var time: Time
-    /// What Mike asked.
+    /// What the creator asked.
     public var text: String
     /// What's said a few seconds either side, with `|` where the comment is.
     public var said: String?
@@ -50,7 +50,7 @@ public struct CommentClip: Codable, Sendable {
 extension CommentsResult: ReadableResult {
     public var readableText: String {
         guard !comments.isEmpty else {
-            return "No comments (revision \(revision)). Add one in Tandem with Add comment (Shift-C) or a double-click on an empty stretch; comments show in a strip under the ruler."
+            return "No comments (revision \(revision)). Add one in Substo Video with Add comment (Shift-C) or a double-click on an empty stretch; comments show in a strip under the ruler."
         }
         var lines = ["\(comments.count == 1 ? "1 comment" : "\(comments.count) comments"), earliest first (revision \(revision)):"]
         let trackWidth = comments.flatMap(\.clips).map(\.track.count).max() ?? 0
@@ -64,7 +64,7 @@ extension CommentsResult: ReadableResult {
             }
         }
         lines.append("")
-        lines.append("Do what each asks and label the edit with what you did. Remove the comment in the same apply batch, {\"removeMarker\": {\"markerID\": \"<id>\"}}, or afterwards with tandem comments resolve <id>. Comments move with ripple edits, so read them again after one.")
+        lines.append("Do what each asks and label the edit with what you did. Remove the comment in the same apply batch, {\"removeMarker\": {\"markerID\": \"<id>\"}}, or afterwards with substo comments resolve <id>. Comments move with ripple edits, so read them again after one.")
         return lines.joined(separator: "\n")
     }
 }

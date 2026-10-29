@@ -174,7 +174,7 @@ enum FileCopier {
     /// Where a file waits while it's copied and checked: hidden, beside its
     /// destination, so a copy cut short is never mistaken for the file and
     /// the folder watcher doesn't pick it up.
-    static let temporarySuffix = ".tandem-copy"
+    static let temporarySuffix = ".substo-copy"
 
     static func temporaryURL(for destination: URL) -> URL {
         destination.deletingLastPathComponent().appendingPathComponent(".\(destination.lastPathComponent)\(temporarySuffix)")

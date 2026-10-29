@@ -16,7 +16,7 @@ import TandemCore
 /// - isolated voice for media with a clip using voice isolation,
 /// - a transcript for anything on a speech track (the unmuted `cut` audio
 ///   tracks, like Voice), and for any file someone asked for one of
-///   (`MediaItem.transcribe`, set by `tandem transcribe`).
+///   (`MediaItem.transcribe`, set by `substo transcribe`).
 ///
 /// Placing a take or turning on its cutout queues the rest.
 public enum AnalysisNeeds {

@@ -9,19 +9,19 @@ import XCTest
 /// hosts it (a real editor model, laid out and drawn in a window), with
 /// all its sections open and with one at a time:
 ///
-///     TANDEM_COLOUR_TIMING=1 swift test -c release --package-path . --filter ColourInspectorTiming
+///     SUBSTO_COLOUR_TIMING=1 swift test -c release --package-path . --filter ColourInspectorTiming
 ///
-/// `TANDEM_COLOUR_TIMING_ONLY=mixer` opens just those sections and
-/// `TANDEM_COLOUR_TIMING_STEPS=4000` runs long enough to `sample` it.
+/// `SUBSTO_COLOUR_TIMING_ONLY=mixer` opens just those sections and
+/// `SUBSTO_COLOUR_TIMING_STEPS=4000` runs long enough to `sample` it.
 /// Other builds on the Mac move the numbers a lot; compare runs made
 /// back to back.
 @MainActor
 final class ColourInspectorTiming: XCTestCase {
     private func measure(_ name: String, _ makeView: (EditorModel, Clip) -> AnyView) throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-colour-timing-\(UUID().uuidString)", isDirectory: true)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-colour-timing-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let session = try ProjectSession.create(at: folder.appendingPathComponent("Timing.tandem"), name: "Timing", owner: .app)
+        let session = try ProjectSession.create(at: folder.appendingPathComponent("Timing.substo"), name: "Timing", owner: .app)
         let model = EditorModel(session: session)
         defer { model.tearDown(); _ = model.session.close() }
         let camera = MediaItem(
@@ -55,7 +55,7 @@ final class ColourInspectorTiming: XCTestCase {
         var edits: [Double] = []
         var updates: [Double] = []
         var draws: [Double] = []
-        let count = Int(ProcessInfo.processInfo.environment["TANDEM_COLOUR_TIMING_STEPS"] ?? "") ?? 120
+        let count = Int(ProcessInfo.processInfo.environment["SUBSTO_COLOUR_TIMING_STEPS"] ?? "") ?? 120
         for step in 0..<count {
             let start = ProcessInfo.processInfo.systemUptime
             model.apply(InspectorEdits.lookParam(model.project.media("med_camera")!, effectID: "fx_a", key: "contrast", value: .number(Double(20 + step % 10)), label: "Contrast"))
@@ -81,10 +81,10 @@ final class ColourInspectorTiming: XCTestCase {
     }
 
     func testRedrawAfterAnEdit() throws {
-        guard ProcessInfo.processInfo.environment["TANDEM_COLOUR_TIMING"] == "1" else { throw XCTSkip("Set TANDEM_COLOUR_TIMING=1") }
+        guard ProcessInfo.processInfo.environment["SUBSTO_COLOUR_TIMING"] == "1" else { throw XCTSkip("Set SUBSTO_COLOUR_TIMING=1") }
         try measure("nothing but the project's revision") { model, _ in AnyView(Text("r\(model.revision)")) }
         let all = ColourSection.allCases.map(\.rawValue)
-        let only = ProcessInfo.processInfo.environment["TANDEM_COLOUR_TIMING_ONLY"].map { [$0.split(separator: ",").map(String.init)] }
+        let only = ProcessInfo.processInfo.environment["SUBSTO_COLOUR_TIMING_ONLY"].map { [$0.split(separator: ",").map(String.init)] }
         for open in only ?? [[], ["light"], ["colour"], ["wheels"], ["mixer"], ["vignette"], all] {
             AppDefaults.store.set(all.filter { !open.contains($0) }.joined(separator: ","), forKey: "colourCollapsedSections")
             try measure("new tab, open: \(open.count == all.count ? "all" : open.joined(separator: ", "))") { model, clip in AnyView(ColourInspector(model: model, clip: clip)) }

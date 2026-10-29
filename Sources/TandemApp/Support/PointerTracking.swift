@@ -4,7 +4,7 @@ import SwiftUI
 /// Hover for SwiftUI views, from AppKit.
 ///
 /// SwiftUI's own hover (`onHover`, `onContinuousHover`, `.help`) never
-/// fires in Tandem's editor window, so nothing lit up under the pointer:
+/// fires in Substo Video's editor window, so nothing lit up under the pointer:
 /// no button backgrounds, no tile outlines, no scrubbing a sound by
 /// hovering it. AppKit's tracking areas work there (the timeline is built
 /// on them), so these put a see-through AppKit view over the SwiftUI view

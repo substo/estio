@@ -110,7 +110,7 @@ public enum TitlePresets {
             animationDuration: Time(seconds: 0.1),
             position: Point(x: 0.5, y: 0.42),
             highlightColor: RGBA(r: 1.0, g: 0.84, b: 0.2),
-            // Not a macOS font: Tandem installs it from Fontsource (Google
+            // Not a macOS font: Substo Video installs it from Fontsource (Google
             // Fonts, OFL) the first time captions need it.
             fontAsset: "fontsource:tilt-warp"
         )

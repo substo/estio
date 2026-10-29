@@ -1,6 +1,6 @@
 import Foundation
 
-/// Mike's comments: notes he leaves at a moment on the timeline for the
+/// the creator's comments: notes he leaves at a moment on the timeline for the
 /// next round of agent edits ("cut the umm here"). They're markers of kind
 /// `comment`, so they move with the edits around them, and the agent that
 /// does what one asks removes it, in the same batch as the fix.
@@ -33,7 +33,7 @@ public enum CommentEdits {
         ])
     }
 
-    /// Takes comments away: Mike deleting his own, or an agent clearing the
+    /// Takes comments away: the creator deleting his own, or an agent clearing the
     /// ones it has done (`label` "Resolve comment").
     public static func remove(_ ids: [String], label: String? = nil) -> EditBatch {
         EditBatch(

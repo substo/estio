@@ -11,6 +11,6 @@ final class CITimingTests: XCTestCase {
     }
 
     func testTheOptInRunsThemOnCIToo() {
-        XCTAssertFalse(skipsTimingSensitiveTests(environment: ["CI": "true", "TANDEM_TIMING_TESTS": "1"]))
+        XCTAssertFalse(skipsTimingSensitiveTests(environment: ["CI": "true", "SUBSTO_TIMING_TESTS": "1"]))
     }
 }

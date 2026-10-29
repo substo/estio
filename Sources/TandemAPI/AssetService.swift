@@ -3,9 +3,9 @@ import TandemAssets
 import TandemCore
 import TandemMedia
 
-/// The asset library for agents: what `tandem assets` and the `assets_*`
-/// MCP tools do. The library is Mike's, one per user, at
-/// `~/Library/Application Support/Tandem/Assets/`, shared with the app's
+/// The asset library for agents: what `substo assets` and the `assets_*`
+/// MCP tools do. The library is the creator's, one per user, at
+/// `~/Library/Application Support/Substo/Assets/`, shared with the app's
 /// browser; its SQLite catalogue copes with several processes at once.
 ///
 /// Searching, fetching and generating don't touch a project. `use` copies
@@ -20,19 +20,19 @@ public final class AssetService: @unchecked Sendable {
         self.library = library
     }
 
-    /// The per-user library. `$TANDEM_ASSETS_ROOT` moves it (for tests),
-    /// and `$TANDEM_ASSETS_OFFLINE=1` keeps it off the network and out of
+    /// The per-user library. `$SUBSTO_ASSETS_ROOT` moves it (for tests),
+    /// and `$SUBSTO_ASSETS_OFFLINE=1` keeps it off the network and out of
     /// the Keychain: providers fail as if offline and have no keys. The
     /// shared library is where `SharedLibrary.locate` says
-    /// (`$TANDEM_LIBRARY`, the settings, or `~/Movies/Tandem Library`).
+    /// (`$SUBSTO_LIBRARY`, the settings, or `~/Movies/Substo Library`).
     public static func standard(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> AssetService {
-        let offline = environment["TANDEM_ASSETS_OFFLINE"] == "1"
+        let offline = environment["SUBSTO_ASSETS_OFFLINE"] == "1"
         let transport: HTTPTransport = offline ? OfflineTransport() : URLSessionTransport()
         let secrets: SecretStore = offline ? StaticSecretStore() : KeychainSecretStore()
         let shared = SharedLibrary.locate(environment: environment).root
         let library: AssetLibrary
         do {
-            if let root = environment["TANDEM_ASSETS_ROOT"], !root.isEmpty {
+            if let root = environment["SUBSTO_ASSETS_ROOT"], !root.isEmpty {
                 let url = URL(fileURLWithPath: NSString(string: root).expandingTildeInPath, isDirectory: true)
                 library = try AssetLibrary(root: url, previewFolder: url.appendingPathComponent("previews", isDirectory: true), transport: transport, secrets: secrets, sharedLibrary: shared)
             } else {
@@ -119,7 +119,7 @@ public final class AssetService: @unchecked Sendable {
             throw ServiceError.wrap(error)
         }
         guard let asset = found else {
-            throw ServiceError(.notFound, "No asset \(request.id) in the library. Search for it first (tandem assets search \"...\" --online), then use the ID the search gives.")
+            throw ServiceError(.notFound, "No asset \(request.id) in the library. Search for it first (substo assets search \"...\" --online), then use the ID the search gives.")
         }
         func onDisk(_ url: URL?) -> String? {
             url.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0.path : nil }
@@ -147,7 +147,7 @@ public final class AssetService: @unchecked Sendable {
                 // A missing-font warning names the font's Fontsource ID, so
                 // that works without a search first.
                 if await lookUpFontsource(id) { return try await fetched(id) }
-                throw ServiceError(.notFound, "No asset \(id) in the library. Search for it first (tandem assets search \"...\" --online), then use the ID the search gives.")
+                throw ServiceError(.notFound, "No asset \(id) in the library. Search for it first (substo assets search \"...\" --online), then use the ID the search gives.")
             }
             throw ServiceError.wrap(error)
         }
@@ -186,7 +186,7 @@ public final class AssetService: @unchecked Sendable {
         )
         if asset.kind == .font, case .remote(_, let owner, _) = client.route {
             // This process registered the font for itself. The app (or
-            // `tandem serve`) registers new files in assets/font/ when it's
+            // `substo serve`) registers new files in assets/font/ when it's
             // asked for the status, so it draws with the font straight away.
             if let status = try? await client.call(StatusRequest()) {
                 result.fontsReached = owner
@@ -277,7 +277,7 @@ public final class AssetService: @unchecked Sendable {
     }
 }
 
-/// A transport for `TANDEM_ASSETS_OFFLINE=1`: every request fails as if
+/// A transport for `SUBSTO_ASSETS_OFFLINE=1`: every request fails as if
 /// the Mac were offline.
 public struct OfflineTransport: HTTPTransport {
     public init() {}

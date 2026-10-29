@@ -112,7 +112,7 @@ public struct BuiltComposition: @unchecked Sendable {
     }
 }
 
-/// Turns a project into an AVFoundation composition with Tandem's compositor.
+/// Turns a project into an AVFoundation composition with Substo Video's compositor.
 ///
 /// Video clips go on composition tracks from a shared pool, alternating
 /// A/B wherever a centred transition overlaps two clips; cutout mattes get
@@ -289,7 +289,7 @@ public struct ExportPreset: Codable, Equatable, Sendable {
     // 1080p rate, and HEVC at 80 is about as generous for 4K, since HEVC
     // needs roughly a third fewer bits than H.264 for the same picture.
     // That's the headroom a speed-priority hardware encoder and YouTube's
-    // own re-encode want, and it's what Mike's Filmora presets used. The
+    // own re-encode want, and it's what the creator's Filmora presets used. The
     // plan adds YouTube's half again for high frame rates. YouTube asks
     // for 384 kbps AAC stereo, more than Apple's AAC encoder takes at
     // 48 kHz, so audio gets the most it takes: 320.
@@ -326,7 +326,7 @@ public struct ExportResult: Codable, Equatable, Sendable {
 /// mastered to `loudnessTarget` under `truePeakCeiling` (a lookahead
 /// true-peak limiter), then encoded as AAC, 48 kHz stereo. The preset's
 /// loudness values are used as given; nil leaves the mix alone. A snapshot
-/// of the project is written beside the file as `<output>.tandem`.
+/// of the project is written beside the file as `<output>.substo`.
 public final class Exporter: @unchecked Sendable {
     public let context: RenderContext
     public let preset: ExportPreset
@@ -359,7 +359,7 @@ public final class Exporter: @unchecked Sendable {
         if cancelled { throw RenderError.cancelled }
         // The app's export queue, the CLI and the API all export through
         // here. It's let go however the export ends.
-        let awake = PowerAssertion(.system, reason: "Tandem is exporting \(output.lastPathComponent)")
+        let awake = PowerAssertion(.system, reason: "Substo Video is exporting \(output.lastPathComponent)")
         defer { awake?.release() }
         return try await withTaskCancellationHandler {
             try await job.run()

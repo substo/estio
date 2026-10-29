@@ -86,7 +86,7 @@ final class AlphaVideoTests: XCTestCase {
     /// can follow a camera's (plain HEVC) on one composition track.
     /// AVFoundation keeps a track's decoder while the codec and size stay
     /// the same, and the plain decoder drops the alpha: the overlay played
-    /// black over the track below, and `tandem check` found its clear
+    /// black over the track below, and `substo check` found its clear
     /// frames black (issue #10).
     func testAnOverlaysProxyAfterAPlainProxyStillShowsTheTrackBelow() async throws {
         let media = try TestMedia()

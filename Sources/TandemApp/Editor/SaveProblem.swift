@@ -1,7 +1,7 @@
 import Foundation
 
 /// What the app says when a project won't save: in the status bar while
-/// autosave keeps trying, and before a window closes or Tandem quits with
+/// autosave keeps trying, and before a window closes or Substo Video quits with
 /// edits that didn't make it to disk.
 enum SaveProblem {
     /// The status bar's lasting note.
@@ -9,15 +9,15 @@ enum SaveProblem {
 
     /// The status bar message when saving starts failing.
     static func message(file: String, reason: String) -> String {
-        "Couldn't save \(file). \(sentence(reason)) Tandem keeps trying."
+        "Couldn't save \(file). \(sentence(reason)) Substo Video keeps trying."
     }
 
     /// The alert before closing (or quitting) loses edits.
     static func closeAlert(files: [String], reason: String, quitting: Bool) -> (title: String, detail: String) {
         let names = files.count == 1 ? files[0] : "\(files.count) projects"
-        let title = "Tandem couldn't save \(names)"
+        let title = "Substo Video couldn't save \(names)"
         let action = quitting ? "Quitting" : "Closing"
-        let detail = "\(sentence(reason))\n\n\(action) now loses the edits since the last save, unless the journal in .tandem next to the project kept them (Tandem replays it when the project next opens). Keep it open to fix the problem and save with ⌘S."
+        let detail = "\(sentence(reason))\n\n\(action) now loses the edits since the last save, unless the journal in .substo next to the project kept them (Substo Video replays it when the project next opens). Keep it open to fix the problem and save with ⌘S."
         return (title, detail)
     }
 

@@ -1,6 +1,6 @@
-# Tandem architecture
+# Substo Video architecture
 
-Tandem is a native macOS video editor built for one person (Mike) and the
+Substo Video is a native macOS video editor built for one person (Mike) and the
 agents he works with. It replaces Filmora for Convex developer videos: a
 camera take and a screen recording cut together, a picture-in-picture camera
 with an AI cutout, B-roll, titles, music, sound effects and a loudness-matched
@@ -22,7 +22,7 @@ change the code and the tests with it.
 - **Fast feedback beats features.** Playback, scrubbing and export speed come
   before breadth. Proxies, caches and background jobs exist to keep the UI
   responsive.
-- **Just for Mike.** No accounts, no cloud, no plugins marketplace, no
+- **Just for the creator.** No accounts, no cloud, no plugins marketplace, no
   permission system beyond a toggle. Hackable by editing the repo.
 
 ## Modules
@@ -34,7 +34,7 @@ change the code and the tests with it.
 | `TandemRender` | Composition building, compositor, text, transitions, audio mix, the viewer's sound, frame grabs, export | Core, Media, AVFoundation, Core Image, Metal, Core Audio (keeping the output awake) |
 | `TandemAPI` | `ProjectSession`, the service (status, timeline, apply, frame, clip, export...), local HTTP server, MCP tool definitions | Core, Media, Render |
 | `TandemApp` | The macOS app (SwiftUI shell, AppKit timeline and viewer) | everything |
-| `TandemCLI` | The `tandem` command, including `tandem mcp` and `tandem export` | Core, Media, Render, API |
+| `TandemCLI` | The `substo` command, including `substo mcp` and `substo export` | Core, Media, Render, API |
 | `TandemAssets` | Asset library: catalogue, providers, normalising on import, copying into projects, credits, the shared library folder (see ASSETS.md) | Core, Media, AVFoundation, ImageIO, Core Text, Lottie |
 
 Only `TandemApp` imports AppKit or SwiftUI. One exception: the asset
@@ -43,37 +43,37 @@ drawing into its own bitmap off the main thread.
 
 ## Project folder
 
-A project is a `.tandem` JSON file in the video's folder. Media paths are
+A project is a `.substo` JSON file in the video's folder. Media paths are
 relative to that folder when the file is inside it; a file used from
 somewhere else (an import, another video's folder) has an absolute path
 until the project is archived (see Archiving).
 
 ```
 <video folder>/
-  <name>.tandem            the project (pretty JSON, sorted keys)
+  <name>.substo            the project (pretty JSON, sorted keys)
   source/                  record-it takes: <base>-camera.mov, <base>-screen.mov
   broll/ music/ sfx/ graphics/
   assets/                  library assets in use (assets/<kind>/), and LUTs and fonts
   media/                   files an archive brought in from outside the folder
-    Tandem Library/        ...from the shared library, where they were in it
+    Substo Library/        ...from the shared library, where they were in it
   archive.json             where those came from, once the project is archived
-  exports/                 renders, each with a .tandem snapshot beside it
-  .tandem/
+  exports/                 renders, each with a .substo snapshot beside it
+  .substo/
     backups/               the previous 20 saves
     <name>.journal.jsonl   committed edits since the last save (crash recovery)
     <name>.undo.json       undo history for edits made headless, and idempotency keys
-    <name>.review.json     agent edits Mike hasn't reviewed yet (see Review)
+    <name>.review.json     agent edits the creator hasn't reviewed yet (see Review)
     <name>.lock            pid and owner (app or cli), plus the API port and token
     cache/                 analysis results keyed by content hash
 ```
 
-Versions are separate files (`Video v2.tandem`), made with Save As. There are
+Versions are separate files (`Video v2.substo`), made with Save As. There are
 no forks or branches inside a project.
 
 ## Shared library
 
 Things every video reuses live once, in one visible folder on this Mac:
-`~/Movies/Tandem Library` (Settings moves it; `SharedLibrary` in
+`~/Movies/Substo Library` (Settings moves it; `SharedLibrary` in
 TandemAssets knows where it is), with `Stickers`, `Graphics`, `Sound
 effects`, `Music`, `Looks`, `Fonts` and `Segments` folders. It's the asset
 library's `shared` source, watched live (ASSETS.md has how files are
@@ -147,10 +147,10 @@ the app has copied them in from the asset library.
   `settings.speechLoudness` didn't need one: every clip stores its own
   `normalizeTo`, so an older build that drops it only resets the level new
   clips get to -20 LUFS, and the project sounds the same.
-- Backups live in `.tandem/backups/`: one at most every minute of saving,
+- Backups live in `.substo/backups/`: one at most every minute of saving,
   everything from the last hour, one per ten minutes for a day, one per day
-  for 30 days (`BackupPolicy`). Exports only replace earlier Tandem exports
-  (the ones with a `.tandem` snapshot beside them).
+  for 30 days (`BackupPolicy`). Exports only replace earlier Substo Video exports
+  (the ones with a `.substo` snapshot beside them).
 
 ## Editing
 
@@ -165,11 +165,11 @@ it. `idempotencyKey` makes retries safe.
 
 ### Review
 
-Mike reviews what agents changed instead of watching the whole video
-again. Every `ProjectSession` (the app, `tandem serve` and each headless
+the creator reviews what agents changed instead of watching the whole video
+again. Every `ProjectSession` (the app, `substo serve` and each headless
 command) has a `ReviewRecorder` that hears the coordinator's change events,
 which carry the project before and after. A committed batch whose author
-isn't Mike (`user`) or Tandem (`system`) is compared clip by clip
+isn't the creator (`user`) or Substo Video (`system`) is compared clip by clip
 (`ReviewDiff`) and recorded in the review log by ID: clips added, clips
 changed, transitions added or changed, and removals, which are marks at the
 join pinned to the clip after it. The take (the `cut` tracks) is the
@@ -179,7 +179,7 @@ half of a cut clip is the same clip, and only the join of a ripple delete
 is news. Joining through-edits (`ThroughEdits`) plays exactly what was
 there, so the old timeline is compared as if the clips an edit joined
 were one clip already: the joined clip isn't changed and the clips it
-took in aren't removals. The log is saved to `.tandem/<name>.review.json`
+took in aren't removals. The log is saved to `.substo/<name>.review.json`
 after each change, so it survives restarts, and because headless commands
 keep it too the app finds their edits when it opens the project (agent
 batches a crash left in the journal are caught up then). Later edits by
@@ -278,9 +278,9 @@ refuses a clip in a crossfade of its own.
 The viewer and the export must agree exactly:
 
 1. The source frame is aspect-fitted into the canvas, then multiplied by
-   `transform.scale`. Scale 1 fits; 0.5 is Mike's PiP.
+   `transform.scale`. Scale 1 fits; 0.5 is the creator's PiP.
 2. `transform.position` is where the centre of the uncropped source lands, in
-   canvas units: (0, 0) top left, (1, 1) bottom right. Mike's 2026 PiP is
+   canvas units: (0, 0) top left, (1, 1) bottom right. the creator's 2026 PiP is
    scale 0.5 at about (0.87, 0.77).
 3. `transform.rotation` is degrees clockwise about that centre.
 4. `crop` hides fractions of the source edges without rescaling.
@@ -314,8 +314,8 @@ transcript, so you can search what you said before placing it. The expensive
 ones only run for what the edit uses: proxies for large video on the
 timeline, a cutout matte once a clip's cutout is on, isolated voice once a
 clip uses voice isolation, and a transcript for anything on a speech track.
-Long-lived sessions (the app, `tandem serve`) re-check after every burst of
-edits, so placing a take or pressing 2 for the PiP queues its work. Results are cached under `.tandem/cache/<kind>/<key>/` where
+Long-lived sessions (the app, `substo serve`) re-check after every burst of
+edits, so placing a take or pressing 2 for the PiP queues its work. Results are cached under `.substo/cache/<kind>/<key>/` where
 `key = sha256(fingerprint, kind, algorithmVersion, settings)`.
 
 | Kind | Result | Notes |
@@ -345,7 +345,7 @@ same stretch again shows its words again.
 ## Rendering
 
 `CompositionBuilder` turns a project into an `AVMutableComposition`, an
-`AVVideoComposition` driven by Tandem's own `AVVideoCompositing` compositor,
+`AVVideoComposition` driven by Substo Video's own `AVVideoCompositing` compositor,
 and an `AVAudioMix`. The viewer plays its picture with `AVPlayer` and its
 sound with `ViewerAudio`, which reads the mix ahead of time the way export
 does, into an `AVSampleBufferAudioRenderer` on the clock the players run
@@ -371,11 +371,11 @@ Audio rules:
   effects (-15 dB) keep plain gains set against that voice. RENDER.md has
   why -20.
 - `voiceIsolation` mixes the cached isolated voice with the original.
-- The dynamics effects (compressor, limiter, voice clean-up) are Tandem's
+- The dynamics effects (compressor, limiter, voice clean-up) are Substo Video's
   own DSP (`AudioDynamics`, the limiter is the master's
   `TruePeakLimiter`), run ahead of time over the whole file into a cached
   Apple Lossless copy that the composition plays instead
-  (`AudioEffects`), so the viewer, review clips, `tandem loudness` and
+  (`AudioEffects`), so the viewer, review clips, `substo loudness` and
   export hear the same thing. They run at the clip's steady level
   (levelling plus clip gain), so their thresholds are dBFS as the
   timeline plays; fades and gain keyframes come after. The limiter's
@@ -421,18 +421,18 @@ Text and fonts:
   process hasn't seen (`ProjectFonts.registerNew`), and so do `status`,
   `validate` and a media refresh; a new registration drops cached title
   drawings, and the app's viewer builds again when any font arrives. So a
-  font `tandem assets use` copies in while the app has the project open
+  font `substo assets use` copies in while the app has the project open
   reaches the app's renders without a restart (the command also asks the
   app for its status, which registers it at once).
 - The shared library's `Fonts/` (subfolders too) is registered the same
   way, after the project's own: the app and the CLI set
   `ProjectFonts.libraryFolders` when they start (TandemRender doesn't know
   where the library is), so a title in a shared font draws in the app,
-  `tandem serve` and a CLI export alike, and a font dropped into the
+  `substo serve` and a CLI export alike, and a font dropped into the
   library reaches the next build. Archiving copies the ones a project uses
   into its `assets/font/`.
 - A title whose font can't be drawn falls back to SF Pro with a warning
-  naming the font and the `tandem assets use` that installs it, in the
+  naming the font and the `substo assets use` that installs it, in the
   build's warnings (viewer, `frame`, `clip`, `export`) and in `captions`,
   `status` and `validate`.
 - The section card's typefaces (Anton, Instrument Sans, JetBrains Mono,
@@ -459,22 +459,22 @@ itself.
 
 Operations: `status`, `media`, `transcript`, `search`, `timeline`, `apply`,
 `undo`, `redo`, `frame`, `screenshot`, `clip`, `export`, `loudness`,
-`validate`, `watch`, `archive`, `relink`. `tandem mcp` exposes the same
+`validate`, `watch`, `archive`, `relink`. `substo mcp` exposes the same
 operations as MCP tools over stdio, plus the asset library's and the
 segments' (`segments_list`, `segments_save`, `segments_insert`), which work
-on Mike's per-user library and reach the project through the same client. Every edit an agent makes shows up in the
+on the creator's per-user library and reach the project through the same client. Every edit an agent makes shows up in the
 app's activity feed and undo menu under the agent's name.
 
 ## Archiving
 
 A project folder is standalone when everything the project uses is inside
 it, so it opens on another Mac (Bruce, where finished videos live) with
-nothing missing. `ProjectArchiver` in TandemAPI makes it so, for `tandem
+nothing missing. `ProjectArchiver` in TandemAPI makes it so, for `substo
 archive`, the `archive` operation (HTTP and MCP) and File > Archive
 project… in the app. It works on an open `ProjectSession`: the project is
 saved first, and the one change it makes to a project is an edit through the
 coordinator, so the lock, journal, undo and autosave rules hold. It looks at
-the open project and every other `.tandem` file in the folder (versions).
+the open project and every other `.substo` file in the folder (versions).
 
 What counts as outside:
 
@@ -499,16 +499,16 @@ data, not files, so there's nothing to collect for them.
 Where files go: `media/<the folder it was in>/<name>` (a take's files and
 sidecar stay together, and `music/` or `sfx/` still say what's inside),
 `assets/lut/<name>` and `assets/font/<name>`. Whatever renders the project
-(the app, `tandem serve`, a CLI command) registers new files in
+(the app, `substo serve`, a CLI command) registers new files in
 `assets/font/` before it draws (see Rendering). A file keeps the name the
 project used, even when that was a link to a file called something else.
-Shared library files keep their place in the library under `media/Tandem
-Library/` (`media/Tandem Library/Stickers/Star.mov`, `media/Tandem
+Shared library files keep their place in the library under `media/Substo Video
+Library/` (`media/Substo Library/Stickers/Star.mov`, `media/Substo Video
 Library/Segments/Intro/sting.wav`), and the converted copy of one goes where
-its original would, named after it (`media/Tandem Library/Stickers/Spin.mov`
+its original would, named after it (`media/Substo Library/Stickers/Spin.mov`
 for `Stickers/Spin.webm`), found through the `meta.json` beside the copy.
 `ArchiveOptions.sharedLibrary` and `assetsRoot` say where those are; the
-service finds them the way the rest of Tandem does (`SharedLibrary.locate`).
+service finds them the way the rest of Substo Video does (`SharedLibrary.locate`).
 
 Two modes:
 
@@ -522,7 +522,7 @@ Two modes:
   something else; an earlier archive of the same project is brought up to
   date), with the outside files brought in and the project files written
   with relative paths. The original folder is left as it was. Left out:
-  proxies, mattes, thumbnails and isolated voice, which Tandem makes again
+  proxies, mattes, thumbnails and isolated voice, which Substo Video makes again
   for what the edit uses (`--with-cache` keeps them); `node_modules`; lock
   files, cache temporaries, and the archived projects' journals, headless
   undo history (they describe the old paths) and review logs; links to
@@ -545,7 +545,7 @@ Copying:
 - Every copy is checked: the original's SHA-256, the copy's size, and for a
   copy that isn't a clone its SHA-256 read back without the page cache, so a
   file on a network share is really read.
-- Copies are written under a hidden name (`.name.tandem-copy`) and moved into
+- Copies are written under a hidden name (`.name.substo-copy`) and moved into
   place once checked. Consolidating keeps them hidden until all are done,
   then moves them and edits the project straight away, so the folder watcher
   never adds one as new media first.
@@ -564,16 +564,16 @@ per file its path, original location, kind, size, SHA-256, modification date
 and when it was archived. Consolidating lists what it brought in; archiving
 elsewhere lists every file it copied except the analysis cache, and carries
 over the project folder's own manifest. An `archive.json` that isn't
-Tandem's is never written over. Missing files are listed there and in the
+Substo Video's is never written over. Missing files are listed there and in the
 result, and left pointing where they did; everything else is archived.
 
 When a project opens in the app with media missing, files moved within its
 folder, and files that are in this Mac's shared library (a project from
 another Mac that used stickers or sounds from its library), are relinked
-straight away, and Mike is asked for a folder to search for the rest.
+straight away, and the creator is asked for a folder to search for the rest.
 `MediaRelinker` takes a file with the same name and, when the item has a
 fingerprint, the same content, and a Live Photo's movie from beside the
-still it found; `tandem relink --search <folder>` does the same for
+still it found; `substo relink --search <folder>` does the same for
 agents. The shared library is searched last, only for what the
 project folder and the folders given didn't settle, so a file found twice
 by name elsewhere stays undecided rather than being picked from the library,

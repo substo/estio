@@ -1,14 +1,14 @@
 # B-roll, titles and section cards
 
-Recipes for putting B-roll over a sentence, adding and restyling titles (presets, animations, style overrides), and Mike's section cards, by marker or by hand.
+Recipes for putting B-roll over a sentence, adding and restyling titles (presets, animations, style overrides), and the creator's section cards, by marker or by hand.
 
 ## Put B-roll over a sentence
 
 Find when the sentence is said, and the B-roll file's media ID:
 
 ```bash
-tandem search "our servers handle the load"
-tandem media
+substo search "our servers handle the load"
+substo media
 ```
 
 Place the shot on the B-roll track for exactly that sentence. `sourceStart`
@@ -29,7 +29,7 @@ line can hold its last frame (`holdEdges`, in
 ## Add a title
 
 Insert a text clip on the Text track (by name, or by the ID on the `V5 Text
-trk_...` line of `tandem timeline`):
+trk_...` line of `substo timeline`):
 
 ```json
 {"label": "Title for tip 1", "commands": [
@@ -65,17 +65,17 @@ on a label stays lower case, and a callout can lose its shadow and outline:
 
 `null` for a field in a patch takes it back to the preset's. A
 `backgroundColor` with `"a": 0` switches off a preset's box, and
-`"animationIn": "none"` (or `animationOut`) its animation. `tandem timeline`
+`"animationIn": "none"` (or `animationOut`) its animation. `substo timeline`
 lists what each title sets itself (`style uppercase=false shadow=false`).
 The app's Text inspector shows the values the title is drawn with, marks the
 ones the clip sets itself in amber, and has a button beside each that goes
 back to the preset's. Sizes and outline widths are points at 1080p, and a
 font can be a family, PostScript name or full name; a font this Mac lacks
-is installed with `tandem assets use fontsource:<name>` ([assets.md](assets.md)).
+is installed with `substo assets use fontsource:<name>` ([assets.md](assets.md)).
 
 ## Add a section card
 
-Mike's section card is one clip, the built-in `sectionCard` graphic, about
+the creator's section card is one clip, the built-in `sectionCard` graphic, about
 three seconds between the cold open, the intro and each section. Convex's
 yellow, red and purple bands sweep across to wipe it in; the dark card holds
 a number chip, the title (Anton, upper case) with a yellow text cursor
@@ -92,23 +92,23 @@ app): the marker's name is the card's title and its note, if it has one,
 the subtitle. Then:
 
 ```bash
-tandem cards                              # the plan: numbers, titles, where each card goes
-tandem cards --apply                      # just the number in the chip, as Mike likes
-tandem frame 0:33 -o /tmp/card.png        # look at one
+substo cards                              # the plan: numbers, titles, where each card goes
+substo cards --apply                      # just the number in the chip, as the creator likes
+substo frame 0:33 -o /tmp/card.png        # look at one
 ```
 
 The cards go on Graphics, each starting 0.43 s before its marker so the
 card hides the whole frame from the marker on, and each as long as its
 words need: 1.4 s for the wipes and 0.8 s to take it in, then the title,
 subtitle and kicker read at 15 characters a second (a little slower than
-Netflix's 17 for subtitles: Mike found cards at 17 a bit quick), rounded up
+Netflix's 17 for subtitles: the creator found cards at 17 a bit quick), rounded up
 to a tenth of a second, at least 4 s and at most 7. `--duration` makes them
-all one length. Mike prefers no kicker (`SECTION 1 OF 9` beside the number):
+all one length. the creator prefers no kicker (`SECTION 1 OF 9` beside the number):
 only pass `--kicker` when he asks. The section keeps playing under it
-(Mike's voice too). With `--insert` each marker gets room instead: the take
+(the creator's voice too). With `--insert` each marker gets room instead: the take
 moves on by the card's hold, so the card is a pause and its wipes show the
 last shot of one section and the first of the next. A marker at 0:00 marks
-the cold open and gets no card. Run `tandem cards` again after adding or
+the cold open and gets no card. Run `substo cards` again after adding or
 moving a section: cards already at a marker are renumbered and keep their
 words. `--kicker Tip` suits a list video. It's one undo step, and in the app
 it's Timeline > Add section cards at section markers (Option-M).
@@ -121,7 +121,7 @@ frame; one in the second half of a word moves it into the pause after
 that word. Word edges come from the voice, as for `pauses`. When that would
 leave a sliver of a clip beside the room (a tightened pause, with its cut
 in the middle), the cut already in that pause is used. The cut moves at
-most 0.3 s, so the card still covers its marker and running `tandem cards`
+most 0.3 s, so the card still covers its marker and running `substo cards`
 again finds it. The plan shows `take cut at` for each card whose cut moved,
 and warns about each marker that sat on a word, one in the middle of a long
 word (no pause near enough, so it's cut there: move the marker) and speech
@@ -129,11 +129,11 @@ with no transcript yet (cut right at the marker). A section marked in the
 pause before its first word needs no move.
 
 A soft whoosh goes with each sweep: two airy swishes made for the card with
-ElevenLabs, kept in the asset library (docs/ASSETS.md). `tandem cards
+ElevenLabs, kept in the asset library (docs/ASSETS.md). `substo cards
 --apply` copies them into the project's `assets/sfx/` and puts them on SFX,
 linked to their card: one as the card starts, one as the out sweep starts,
 0.88 s before the end. Their gains (-5.4 and -8.3 dB) put their loudest
-moment 15 LU under speech at -20 LUFS, where Mike's own swipes sit; in a
+moment 15 LU under speech at -20 LUFS, where the creator's own swipes sit; in a
 project whose speech plays elsewhere they move with it (an imported edit at
 -28.7 gets -14.1 and -17). A Mac whose library doesn't have them makes
 silent cards and says so; `--no-sounds` leaves them out. By hand, that's
@@ -154,14 +154,14 @@ One card by hand, anywhere:
 Props: `title`, `subtitle`, `number` (what the chip says; a number is
 written `02`), `total` (how many sections, for the progress bars; 0 hides
 them), `kicker` (`Section` or `Tip`, shown as `SECTION 2 OF 3` beside the
-chip; off by default, and Mike prefers it off), `cursor` (`false` turns off
+chip; off by default, and the creator prefers it off), `cursor` (`false` turns off
 the cursor after the title; it's on by default), and the colours `accent`
 (the first band, the chip, the subtitle, the lit bars and the cursor),
 `band2`, `band3` and `background`, as `{"r", "g", "b"}` or a hex string
 like `"#F3B01C"`. A missing word leaves that part out; colours default to
 Convex's. Change them later with a patch, for example
 `{"updateClip": {"clipID": "clip_...", "patch": {"content": {"graphic": {"props": {"subtitle": "Let's keep it fair"}}}}}}`
-(`null` removes one). `tandem frame` shows the result. A card added by hand
+(`null` removes one). `substo frame` shows the result. A card added by hand
 is as long as you make it. After changing its words, `fitSectionCards` (the
 Video tab's Fit to text) sets the length they need, trimming the card's end
 and moving its whoosh out with the wipe out; by hand that's a `trim` of its

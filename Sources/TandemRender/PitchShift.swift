@@ -20,7 +20,7 @@ enum PitchShift {
     static let slice = 1024
     /// Where rendered copies are kept (tests point it elsewhere).
     nonisolated(unsafe) static var cacheFolder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("Tandem/pitch", isDirectory: true)
+        .appendingPathComponent("Substo/pitch", isDirectory: true)
 
     /// The clip's first enabled pitch shift that moves the pitch (a
     /// non-zero value or any keyframes), or nil.

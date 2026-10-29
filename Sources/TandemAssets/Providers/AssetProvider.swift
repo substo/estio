@@ -116,7 +116,7 @@ public struct ProviderStatus: Codable, Equatable, Sendable {
         /// Turned off on purpose, for example Freesound until its operator
         /// agrees to commercial API use.
         case disabled
-        /// Not built yet because Mike hasn't subscribed.
+        /// Not built yet because the creator hasn't subscribed.
         case stub
         /// Works, but part of it doesn't (an ElevenLabs key without the
         /// sound effects permission can still make music).

@@ -262,7 +262,7 @@ final class ProjectWindowController: NSWindowController, NSWindowDelegate, NSMen
     func windowDidBecomeKey(_ notification: Notification) {
         (window as? EditorWindow)?.layoutTrafficLights()
         model.rescanMedia()
-        // A font dropped into assets/font while Tandem was in the background.
+        // A font dropped into assets/font while Substo Video was in the background.
         model.checkFonts()
         RelinkPrompt.windowBecameKey(self)
     }

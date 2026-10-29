@@ -18,7 +18,7 @@ struct StubFonts: FontLocating {
 
 /// A video folder whose project uses files from a folder beside it:
 ///
-///     <temp>/video/Video.tandem       the project
+///     <temp>/video/Video.substo       the project
 ///     <temp>/video/broll/servers.mp4  used by a relative path
 ///     <temp>/video/sfx/whoosh.wav     used by an absolute path into the folder
 ///     <temp>/outside/source/take1-camera.mov, take1-screen.mov, take1.take.json
@@ -27,11 +27,11 @@ struct StubFonts: FontLocating {
 ///     <temp>/outside/fonts/TiltWarp.ttf  the caption preset's font (StubFonts)
 ///     <temp>/nowhere/gone.wav         missing
 final class ArchiveFixture {
-    let temp = TempFolder("tandem-archive")
+    let temp = TempFolder("substo-archive")
     var root: URL { temp.url }
     var video: URL { root.appendingPathComponent("video", isDirectory: true) }
     var outside: URL { root.appendingPathComponent("outside", isDirectory: true) }
-    var projectURL: URL { video.appendingPathComponent("Video.tandem") }
+    var projectURL: URL { video.appendingPathComponent("Video.substo") }
     var fonts: StubFonts { StubFonts(files: ["Tilt Warp": [outside.appendingPathComponent("fonts/TiltWarp.ttf")]]) }
 
     init(write: Bool = true) throws {
@@ -205,7 +205,7 @@ final class ArchiveTests: XCTestCase {
 
         let manifest = try XCTUnwrap(try ArchiveManifest.load(from: f.video))
         XCTAssertEqual(result.manifest, ArchiveManifest.url(in: f.video).path)
-        XCTAssertEqual(manifest.project, .init(id: "prj_archive", name: "Video", file: "Video.tandem"))
+        XCTAssertEqual(manifest.project, .init(id: "prj_archive", name: "Video", file: "Video.substo"))
         XCTAssertEqual(manifest.runs.map(\.mode), [.consolidate])
         XCTAssertEqual(manifest.runs.first?.complete, true)
         let bed = try XCTUnwrap(manifest.entry(for: "media/music/bed.m4a"))
@@ -348,7 +348,7 @@ final class ArchiveTests: XCTestCase {
         let archived = shelf.appendingPathComponent("video", isDirectory: true)
         XCTAssertEqual(result.mode, .archive)
         XCTAssertEqual(result.folder, archived.path)
-        XCTAssertEqual(result.projectFile, archived.appendingPathComponent("Video.tandem").path)
+        XCTAssertEqual(result.projectFile, archived.appendingPathComponent("Video.substo").path)
         XCTAssertTrue(result.collected.allSatisfy { $0.outcome == .copied }, "no clones asked for")
         XCTAssertEqual(ArchiveFixture.tree(f.video, skip: skipLock), sourceBefore, "the original folder is as it was")
         XCTAssertEqual(ArchiveFixture.tree(f.outside), outsideBefore)
@@ -361,7 +361,7 @@ final class ArchiveTests: XCTestCase {
         XCTAssertEqual(manifest.runs.last?.complete, true)
         XCTAssertEqual(manifest.runs.last?.from, f.video.path)
         XCTAssertNotNil(manifest.entry(for: "notes.md")?.sha256, "the folder's own files are listed with checksums")
-        XCTAssertNil(manifest.entry(for: ".tandem/cache/transcript"), "the cache isn't")
+        XCTAssertNil(manifest.entry(for: ".substo/cache/transcript"), "the cache isn't")
 
         // Take the original and everything outside away, as on another Mac.
         try FileManager.default.moveItem(at: f.video, to: f.root.appendingPathComponent("video-gone"))
@@ -385,27 +385,27 @@ final class ArchiveTests: XCTestCase {
         let f = try ArchiveFixture()
         let camera = try XCTUnwrap(try f.load().project.media("med_cam"))
         try Self.cacheEntries(for: camera, in: f.video)
-        let scratch = f.inVideo(".tandem/cache/proxy/.tmp-abc-123")
+        let scratch = f.inVideo(".substo/cache/proxy/.tmp-abc-123")
         try f.make(scratch.appendingPathComponent("proxy.mov"), bytes: 10)
         let shelf = f.root.appendingPathComponent("shelf", isDirectory: true)
         try FileManager.default.createDirectory(at: shelf, withIntermediateDirectories: true)
 
         let lean = try f.archive(to: shelf)
         let kinds = { (folder: URL) -> Set<String> in
-            Set((try? FileManager.default.contentsOfDirectory(atPath: folder.appendingPathComponent(".tandem/cache").path)) ?? [])
+            Set((try? FileManager.default.contentsOfDirectory(atPath: folder.appendingPathComponent(".substo/cache").path)) ?? [])
         }
         let leanFolder = URL(fileURLWithPath: lean.folder)
         XCTAssertEqual(kinds(leanFolder), ["transcript", "waveform", "loudness", "converted"])
-        XCTAssertEqual(Set(lean.leftOut.map(\.path)), [".tandem/cache/proxy", ".tandem/cache/matte", ".tandem/cache/thumbnails", ".tandem/cache/isolatedVoice"])
+        XCTAssertEqual(Set(lean.leftOut.map(\.path)), [".substo/cache/proxy", ".substo/cache/matte", ".substo/cache/thumbnails", ".substo/cache/isolatedVoice"])
         XCTAssertTrue(lean.leftOut.allSatisfy { $0.bytes > 0 })
-        XCTAssertFalse(FileManager.default.fileExists(atPath: leanFolder.appendingPathComponent(".tandem/Video.lock").path))
-        XCTAssertTrue(lean.readableText.contains("Left out .tandem/cache/proxy"), lean.readableText)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: leanFolder.appendingPathComponent(".substo/Video.lock").path))
+        XCTAssertTrue(lean.readableText.contains("Left out .substo/cache/proxy"), lean.readableText)
 
         let full = try f.archive(to: shelf, withCache: true)
         let fullFolder = URL(fileURLWithPath: full.folder)
         XCTAssertEqual(fullFolder, leanFolder, "this project's archive is brought up to date")
         XCTAssertEqual(kinds(fullFolder), Set(AnalysisKind.allCases.map(\.rawValue)))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: fullFolder.appendingPathComponent(".tandem/cache/proxy/.tmp-abc-123").path), "temporaries aren't copied")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fullFolder.appendingPathComponent(".substo/cache/proxy/.tmp-abc-123").path), "temporaries aren't copied")
         XCTAssertEqual(full.leftOut, [])
     }
 
@@ -415,7 +415,7 @@ final class ArchiveTests: XCTestCase {
         // pointing the project at it, and left another half written.
         try FileManager.default.createDirectory(at: f.inVideo("media/music"), withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: f.outside("music/bed.m4a"), to: f.inVideo("media/music/bed.m4a"))
-        try f.make(f.inVideo("media/source/.take1-camera.mov.tandem-copy"), bytes: 123, seed: 9)
+        try f.make(f.inVideo("media/source/.take1-camera.mov.substo-copy"), bytes: 123, seed: 9)
 
         let control = ArchiveControl()
         XCTAssertThrowsError(try f.archive(control: control, progress: { progress in
@@ -455,7 +455,7 @@ final class ArchiveTests: XCTestCase {
             if progress.filesDone >= 3 { control.cancel() }
         })
         let archived = shelf.appendingPathComponent("video", isDirectory: true)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: archived.appendingPathComponent("Video.tandem").path), "no project until everything's in")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: archived.appendingPathComponent("Video.substo").path), "no project until everything's in")
         XCTAssertEqual(try ArchiveManifest.load(from: archived)?.runs.last?.complete, false)
 
         let result = try f.archive(to: shelf, clone: false)
@@ -471,20 +471,20 @@ final class ArchiveTests: XCTestCase {
         let f = try ArchiveFixture()
         var older = Project(id: "prj_older", name: "Video v1")
         older.media = [try f.item("med_old_bed", f.outside("music/bed.m4a"), kind: .audio, role: .music)]
-        let olderURL = f.inVideo("Video v1.tandem")
+        let olderURL = f.inVideo("Video v1.substo")
         try ProjectFile.save(older, revision: 4, to: olderURL)
         let shelf = f.root.appendingPathComponent("shelf", isDirectory: true)
         try FileManager.default.createDirectory(at: shelf, withIntermediateDirectories: true)
 
         let archived = try f.archive(to: shelf)
-        XCTAssertEqual(archived.otherProjects, [OtherProjectFile(file: "Video v1.tandem", rewritten: 1, note: nil)])
-        let copy = try ProjectFile.load(from: URL(fileURLWithPath: archived.folder).appendingPathComponent("Video v1.tandem"))
+        XCTAssertEqual(archived.otherProjects, [OtherProjectFile(file: "Video v1.substo", rewritten: 1, note: nil)])
+        let copy = try ProjectFile.load(from: URL(fileURLWithPath: archived.folder).appendingPathComponent("Video v1.substo"))
         XCTAssertEqual(copy.project.media.first?.path, "media/music/bed.m4a")
         XCTAssertEqual(copy.revision, 4)
         XCTAssertEqual(try ProjectFile.load(from: olderURL).project.media.first?.path, f.outside("music/bed.m4a").path, "the original is untouched")
 
         let consolidated = try f.archive()
-        XCTAssertEqual(consolidated.otherProjects, [OtherProjectFile(file: "Video v1.tandem", rewritten: 1, note: nil)])
+        XCTAssertEqual(consolidated.otherProjects, [OtherProjectFile(file: "Video v1.substo", rewritten: 1, note: nil)])
         XCTAssertEqual(try ProjectFile.load(from: olderURL).project.media.first?.path, "media/music/bed.m4a")
     }
 
@@ -492,12 +492,12 @@ final class ArchiveTests: XCTestCase {
         let f = try ArchiveFixture()
         var older = Project(id: "prj_older", name: "Video v1")
         older.media = [try f.item("med_old_bed", f.outside("music/bed.m4a"), kind: .audio, role: .music)]
-        let olderURL = f.inVideo("Video v1.tandem")
+        let olderURL = f.inVideo("Video v1.substo")
         try ProjectFile.save(older, revision: 4, to: olderURL)
         let open = try ProjectSession.open(olderURL, owner: .app)
         defer { open.close() }
         let result = try f.archive()
-        XCTAssertEqual(result.otherProjects.first?.file, "Video v1.tandem")
+        XCTAssertEqual(result.otherProjects.first?.file, "Video v1.substo")
         XCTAssertEqual(result.otherProjects.first?.rewritten, 0)
         XCTAssertTrue(result.otherProjects.first?.note?.contains("open somewhere else") ?? false, "\(result.otherProjects)")
     }
@@ -677,31 +677,31 @@ final class RelinkTests: XCTestCase {
     }
 }
 
-/// `tandem archive` and `tandem relink`, run as Mike and agents run them.
+/// `substo archive` and `substo relink`, run as Mike and agents run them.
 final class ArchiveCLITests: XCTestCase {
     func testArchiveAndRelinkFromTheCommandLine() throws {
-        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "substo isn't built")
         let cli = CLITests()
         let f = try ArchiveFixture(write: false)
         var project = try f.standardProject()
         // A font every Mac has, so nothing on this Mac is looked for.
         project.videoTracks[3].clips[0].content = .text(TextContent(text: "hi", style: TextStyle(font: "Helvetica")))
         try ProjectFile.save(project, revision: 1, to: f.projectURL)
-        let env = ["TANDEM_ASSETS_ROOT": f.root.appendingPathComponent("library").path]
+        let env = ["SUBSTO_ASSETS_ROOT": f.root.appendingPathComponent("library").path]
 
-        let dry = try cli.tandem("archive", "--dry-run", in: f.video, env: env)
+        let dry = try cli.substo("archive", "--dry-run", in: f.video, env: env)
         XCTAssertEqual(dry.status, 0, dry.stderr)
         XCTAssertTrue(dry.stdout.hasPrefix("Dry run, nothing changed."), dry.stdout)
         XCTAssertTrue(dry.stdout.contains("media/music/bed.m4a"), dry.stdout)
         XCTAssertEqual(try f.load().revision, 1)
 
-        let misuse = try cli.tandem("archive", "--with-cache", in: f.video, env: env)
+        let misuse = try cli.substo("archive", "--with-cache", in: f.video, env: env)
         XCTAssertEqual(misuse.status, 2)
         XCTAssertTrue(misuse.stderr.contains("--with-cache keeps proxies and mattes in a copy made with --to"), misuse.stderr)
 
         let shelf = f.root.appendingPathComponent("shelf", isDirectory: true)
         try FileManager.default.createDirectory(at: shelf, withIntermediateDirectories: true)
-        let archived = try cli.tandem("archive", f.projectURL.path, "--to", "../shelf", "--json", in: f.video, env: env)
+        let archived = try cli.substo("archive", f.projectURL.path, "--to", "../shelf", "--json", in: f.video, env: env)
         XCTAssertEqual(archived.status, 0, archived.stderr)
         let copy = try ServiceJSON.decoder().decode(ArchiveResult.self, from: Data(archived.stdout.utf8))
         XCTAssertEqual(copy.mode, .archive)
@@ -709,24 +709,24 @@ final class ArchiveCLITests: XCTestCase {
         XCTAssertEqual(try ProjectFile.load(from: URL(fileURLWithPath: copy.projectFile)).project.media.first { $0.id == "med_bed" }?.path, "media/music/bed.m4a")
         XCTAssertEqual(try f.load().revision, 1, "the original is left alone")
 
-        let consolidated = try cli.tandem("archive", "--author", "claude", in: f.video, env: env)
+        let consolidated = try cli.substo("archive", "--author", "claude", in: f.video, env: env)
         XCTAssertEqual(consolidated.status, 0, consolidated.stderr)
-        XCTAssertTrue(consolidated.stdout.hasPrefix("Video.tandem is standalone: brought in 5 files"), consolidated.stdout)
-        let history = try cli.tandem("history", in: f.video)
+        XCTAssertTrue(consolidated.stdout.hasPrefix("Video.substo is standalone: brought in 5 files"), consolidated.stdout)
+        let history = try cli.substo("history", in: f.video)
         XCTAssertTrue(history.stdout.contains("Bring 5 files into the project folder  (claude)"), history.stdout)
 
         // Tidied away by hand, then found again.
         let elsewhere = f.root.appendingPathComponent("elsewhere", isDirectory: true)
         try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
         try FileManager.default.moveItem(at: f.inVideo("media/music/bed.m4a"), to: elsewhere.appendingPathComponent("bed.m4a"))
-        let relinked = try cli.tandem("relink", "--search", "../elsewhere", in: f.video)
+        let relinked = try cli.substo("relink", "--search", "../elsewhere", in: f.video)
         XCTAssertEqual(relinked.status, 0, relinked.stderr)
         XCTAssertTrue(relinked.stdout.contains("Relinked 1 of 2 missing files"), relinked.stdout)
         XCTAssertTrue(relinked.stdout.contains("med_gone"), relinked.stdout)
         let relinkedPath = try XCTUnwrap(try f.load().project.media("med_bed")?.path)
         XCTAssertEqual(ProjectArchiver.realPath(URL(fileURLWithPath: relinkedPath)), ProjectArchiver.realPath(elsewhere.appendingPathComponent("bed.m4a")))
 
-        let help = try cli.tandem("help", "archive", in: f.video)
-        XCTAssertTrue(help.stdout.hasPrefix("Usage: tandem archive [<project>] [--to <folder>] [--with-cache] [--dry-run]"), help.stdout)
+        let help = try cli.substo("help", "archive", in: f.video)
+        XCTAssertTrue(help.stdout.hasPrefix("Usage: substo archive [<project>] [--to <folder>] [--with-cache] [--dry-run]"), help.stdout)
     }
 }

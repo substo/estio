@@ -2,7 +2,7 @@ import AppKit
 import TandemCore
 
 /// Carries out editor commands from keys, menus, buttons and the
-/// `tandem://` URL scheme. Edits are built by `TimelineEdits` and applied
+/// `substo://` URL scheme. Edits are built by `TimelineEdits` and applied
 /// through the model; this class decides what each command acts on (the
 /// selection, the playhead, the in and out points).
 @MainActor

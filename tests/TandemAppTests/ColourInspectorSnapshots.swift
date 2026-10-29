@@ -10,7 +10,7 @@ import XCTest
 
 /// Renders the Colour tab offscreen, to look at:
 ///
-///     TANDEM_COLOUR_UI_OUT=~/dev/me/tandem-research/colour-ui \
+///     SUBSTO_COLOUR_UI_OUT=~/dev/me/tandem-research/colour-ui \
 ///     swift test --package-path . --filter ColourInspectorSnapshots
 ///
 /// Without the variable it still renders each state once, so a view that
@@ -21,9 +21,9 @@ final class ColourInspectorSnapshots: XCTestCase {
     private var model: EditorModel!
 
     override func setUp() async throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-colour-ui-\(UUID().uuidString)", isDirectory: true)
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-colour-ui-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let session = try ProjectSession.create(at: folder.appendingPathComponent("Colour.tandem"), name: "Colour", owner: .app)
+        let session = try ProjectSession.create(at: folder.appendingPathComponent("Colour.substo"), name: "Colour", owner: .app)
         model = EditorModel(session: session)
         let camera = MediaItem(
             id: "med_camera", path: "source/take1-camera.mov", kind: .video, role: .camera,
@@ -90,7 +90,7 @@ final class ColourInspectorSnapshots: XCTestCase {
         renderer.scale = 2
         let image = try XCTUnwrap(renderer.cgImage, "\(name) didn't render", file: file, line: line)
         XCTAssertGreaterThan(image.height, 200, name, file: file, line: line)
-        if let out = ProcessInfo.processInfo.environment["TANDEM_COLOUR_UI_OUT"], !out.isEmpty {
+        if let out = ProcessInfo.processInfo.environment["SUBSTO_COLOUR_UI_OUT"], !out.isEmpty {
             let dir = URL(fileURLWithPath: NSString(string: out).expandingTildeInPath, isDirectory: true)
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let url = dir.appendingPathComponent(name + ".png")
@@ -173,9 +173,9 @@ final class ColourEditorTests: XCTestCase {
     private var model: EditorModel!
 
     override func setUp() async throws {
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-colour-edit-\(UUID().uuidString)", isDirectory: true)
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-colour-edit-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let session = try ProjectSession.create(at: folder.appendingPathComponent("Colour.tandem"), name: "Colour", owner: .app)
+        let session = try ProjectSession.create(at: folder.appendingPathComponent("Colour.substo"), name: "Colour", owner: .app)
         model = EditorModel(session: session)
         let camera = MediaItem(
             id: "med_camera", path: "source/take1-camera.mov", kind: .video, role: .camera,

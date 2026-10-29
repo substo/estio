@@ -4,7 +4,7 @@ import XCTest
 @testable import TandemCore
 import TandemMedia
 
-/// `tandem sync`: how late each file's picture is against its sound.
+/// `substo sync`: how late each file's picture is against its sound.
 final class SyncTests: XCTestCase {
     func testItSetsTheCameraTakesAndLeavesTheSoundAlone() async throws {
         let h = try ServiceHarness()
@@ -51,7 +51,7 @@ extension SyncTests {
     }
 }
 
-/// `tandem sync` as agents run it.
+/// `substo sync` as agents run it.
 final class SyncCLITests: XCTestCase {
     private let cli = CLITests()
 
@@ -59,22 +59,22 @@ final class SyncCLITests: XCTestCase {
         let folder = TempFolder()
         let url = try APIFixture.write(to: folder.url)
         let settings = folder.file("settings.json")
-        let env = ["TANDEM_SETTINGS": settings.path]
+        let env = ["SUBSTO_SETTINGS": settings.path]
 
-        let set = try cli.tandem("sync", "80ms", "--default", "--author", "claude", in: folder.url, env: env)
+        let set = try cli.substo("sync", "80ms", "--default", "--author", "claude", in: folder.url, env: env)
         XCTAssertEqual(set.status, 0, set.stderr)
         XCTAssertTrue(set.stdout.contains("Applied \"Picture delay 80 ms on 1 file\" by claude"), set.stdout)
         XCTAssertTrue(set.stdout.contains("New camera takes get 80 ms"), set.stdout)
         XCTAssertEqual(try ProjectFile.load(from: url).project.media("med_camera")?.pictureDelay, t(0.08))
         XCTAssertEqual(TandemSettings.load(from: settings).cameraPictureDelay, 0.08)
 
-        let bad = try cli.tandem("sync", "soon", in: folder.url, env: env)
+        let bad = try cli.substo("sync", "soon", in: folder.url, env: env)
         XCTAssertEqual(bad.status, 2)
         XCTAssertTrue(bad.stderr.contains("isn't a delay"), bad.stderr)
     }
 }
 
-/// `tandem sync <file>...`: another angle and an external mic lined up with
+/// `substo sync <file>...`: another angle and an external mic lined up with
 /// the camera by sound, put in its take and placed beside it in one step.
 final class SoundSyncAPITests: XCTestCase {
     /// A 120 s camera take on the timeline, and a close-up and a mic that
@@ -168,24 +168,24 @@ final class SoundSyncAPITests: XCTestCase {
     }
 }
 
-/// `tandem sync <file>...` as agents run it.
+/// `substo sync <file>...` as agents run it.
 final class SoundSyncCLITests: XCTestCase {
     private let cli = CLITests()
 
     func testAnAgentSyncsAMicAndAnAngleByPathThenShowsTheAngle() throws {
         let folder = TempFolder()
         let url = try APIFixture.write(to: folder.url, project: SoundSyncAPITests.interview(in: folder.url))
-        let synced = try cli.tandem("sync", "source/close-up.wav", "source/mic.wav", "--author", "claude", in: folder.url)
+        let synced = try cli.substo("sync", "source/close-up.wav", "source/mic.wav", "--author", "claude", in: folder.url)
         XCTAssertEqual(synced.status, 0, synced.stderr)
         XCTAssertTrue(synced.stdout.contains("Lined up with source/wide.wav by sound"), synced.stdout)
         XCTAssertTrue(synced.stdout.contains("Applied \"Sync 2 files to wide by sound\" by claude"), synced.stdout)
 
-        let shown = try cli.tandem("apply", #"{"showAngle": {"range": {"start": 10, "end": 20}, "trackID": "Angle 2"}}"#, in: folder.url)
+        let shown = try cli.substo("apply", #"{"showAngle": {"range": {"start": 10, "end": 20}, "trackID": "Angle 2"}}"#, in: folder.url)
         XCTAssertEqual(shown.status, 0, shown.stderr)
         let project = try ProjectFile.load(from: url).project
         XCTAssertEqual(project.track(named: "Angle 2")?.clips.filter(\.enabled).map(\.range), [TimeRange(start: t(10), end: t(20))])
 
-        let refused = try cli.tandem("sync", "source/other.wav", in: folder.url)
+        let refused = try cli.substo("sync", "source/other.wav", in: folder.url)
         XCTAssertEqual(refused.status, 1)
         XCTAssertTrue(refused.stderr.contains("doesn't line up"), refused.stderr)
     }

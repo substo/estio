@@ -282,7 +282,7 @@ final class TimelineContainerView: NSView {
         // Down to the scroll bar, which marks the playhead itself.
         let frame = CGRect(x: (x - width / 2).rounded(), y: Theme.Metrics.rulerHeight - Theme.Metrics.playheadHeadHeight + 2, width: width, height: max(0, bounds.height - Theme.Metrics.timelineScrollerHeight - Theme.Metrics.rulerHeight + Theme.Metrics.playheadHeadHeight - 2))
         if playheadView.frame != frame { playheadView.frame = frame }
-        // The scissors ride the line where Mike left them, or at the top of
+        // The scissors ride the line where the creator left them, or at the top of
         // the tracks, under the transcript so they never hide the word
         // being said.
         let size = PlayheadCutButton.size
@@ -325,7 +325,7 @@ final class TimelineContainerView: NSView {
         }
         if event.modifierFlags.contains(.option) || event.modifierFlags.contains(.command) {
             // Around the playhead, as the zoom keys do, not the pointer:
-            // the moment Mike's looking at stays put (Filmora's way).
+            // the moment the creator's looking at stays put (Filmora's way).
             let factor = pow(1.01, Double(dy + dx))
             model.timeline.zoom(by: factor, anchorX: nil)
             return
@@ -542,7 +542,7 @@ final class PlayheadCutButton: TimelineChildView {
     /// Where the pill was left on the line, in the app's preferences.
     static let restingKey = "playheadScissorsY"
 
-    /// Points down from the top of the tracks where Mike left the pill, or
+    /// Points down from the top of the tracks where the creator left the pill, or
     /// nil for the top of the tracks, under the transcript.
     var restingY: CGFloat?
     var store: UserDefaults = AppDefaults.store {

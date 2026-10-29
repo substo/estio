@@ -3,7 +3,7 @@ import TandemAPI
 import TandemAssets
 import TandemCore
 
-/// `tandem segments`: reusable bits of timeline in the shared library's
+/// `substo segments`: reusable bits of timeline in the shared library's
 /// Segments folder. `list` works anywhere; `save` reads the project and
 /// `insert` edits it, through the app when it has the project open.
 struct SegmentsCommand {
@@ -22,8 +22,8 @@ struct SegmentsCommand {
     func run(_ args: Arguments, author: String, project: () throws -> URL) async throws -> Int32 {
         let name = args.positionals.first ?? "list"
         guard let allowed = Self.options[name] else {
-            let hint = Arguments.closest(name, in: Self.subcommands).map { " Did you mean `tandem segments \($0)`?" } ?? ""
-            throw UsageError(message: "`tandem segments` can do \(Self.subcommands.joined(separator: ", ")), not \(name).\(hint)")
+            let hint = Arguments.closest(name, in: Self.subcommands).map { " Did you mean `substo segments \($0)`?" } ?? ""
+            throw UsageError(message: "`substo segments` can do \(Self.subcommands.joined(separator: ", ")), not \(name).\(hint)")
         }
         try args.check(allowed: allowed, command: "segments \(name)")
         let json = args.has("json")
@@ -34,12 +34,12 @@ struct SegmentsCommand {
             return show(assets.segments(), json: json)
         case "save":
             try args.expectPositionals(atMost: 2, command: "segments save")
-            let segment = try args.positional(1, "a name and the clips, like tandem segments save \"Intro\" --clips clip_a,clip_b", command: "segments save")
+            let segment = try args.positional(1, "a name and the clips, like substo segments save \"Intro\" --clips clip_a,clip_b", command: "segments save")
             let clips = AssetNames.split(args.options["clips"])
             let from = try time(args, "from")
             let to = try time(args, "to")
             guard !clips.isEmpty || from != nil || to != nil else {
-                throw UsageError(message: "`tandem segments save` needs the clips: --clips clip_a,clip_b, or --from and --to for every clip between them.")
+                throw UsageError(message: "`substo segments save` needs the clips: --clips clip_a,clip_b, or --from and --to for every clip between them.")
             }
             guard clips.isEmpty || (from == nil && to == nil) else {
                 throw UsageError(message: "Give --clips or --from and --to, not both.")
@@ -50,9 +50,9 @@ struct SegmentsCommand {
             return show(try await assets.saveSegment(request, project: client), json: json)
         default:
             try args.expectPositionals(atMost: 2, command: "segments insert")
-            let segment = try args.positional(1, "a segment's name and --at, like tandem segments insert \"Intro\" --at 0", command: "segments insert")
+            let segment = try args.positional(1, "a segment's name and --at, like substo segments insert \"Intro\" --at 0", command: "segments insert")
             guard let at = try time(args, "at") else {
-                throw UsageError(message: "`tandem segments insert` needs --at, the time it starts, like --at 1:23.")
+                throw UsageError(message: "`substo segments insert` needs --at, the time it starts, like --at 1:23.")
             }
             var values: [String: String] = [:]
             for pair in args.values("value") {

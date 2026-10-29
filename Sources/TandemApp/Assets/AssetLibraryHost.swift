@@ -12,7 +12,7 @@ import TandemRender
 /// browser's state per section, which survives switching tabs.
 ///
 /// It's the same library the CLI and MCP use (`AssetService.standard`), so
-/// `$TANDEM_ASSETS_ROOT` and `$TANDEM_ASSETS_OFFLINE` move it for tests.
+/// `$SUBSTO_ASSETS_ROOT` and `$SUBSTO_ASSETS_OFFLINE` move it for tests.
 @MainActor
 @Observable
 final class AssetLibraryHost {
@@ -59,7 +59,7 @@ final class AssetLibraryHost {
     /// ElevenLabs permissions the key was refused (`sound_generation`,
     /// `music_generation`), remembered by the provider.
     private(set) var refused: Set<String> = []
-    /// The shared library folder (`~/Movies/Tandem Library`), once the
+    /// The shared library folder (`~/Movies/Substo Library`), once the
     /// library is open.
     private(set) var sharedRoot: URL?
     /// Its saved segments, by name, and folders that couldn't be read.
@@ -146,7 +146,7 @@ final class AssetLibraryHost {
                     host.reloadSegments()
                 }
                 // Files added to the import folders and the shared library
-                // while Tandem was closed.
+                // while Substo Video was closed.
                 _ = try? await library.rescanImportFolders()
                 _ = try? await library.rescanSharedLibrary()
                 await MainActor.run { AssetLibraryHost.shared.revision += 1 }
@@ -209,7 +209,7 @@ final class AssetLibraryHost {
     }
 
     /// Moves the shared library to `folder` (nil for the default,
-    /// ~/Movies/Tandem Library), making it there with its folders, and
+    /// ~/Movies/Substo Library), making it there with its folders, and
     /// watches it there.
     func moveSharedLibrary(to folder: URL?, report: @escaping (String) -> Void) {
         guard let library else { return }
@@ -246,7 +246,7 @@ final class AssetLibraryHost {
         }
     }
 
-    /// Moves a saved segment's folder to the Trash, once Mike says so:
+    /// Moves a saved segment's folder to the Trash, once the creator says so:
     /// projects that inserted it play its files from there.
     func trash(_ segment: StoredSegment, report: @escaping (String) -> Void) {
         let alert = NSAlert()

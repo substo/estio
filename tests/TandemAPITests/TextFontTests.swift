@@ -42,7 +42,7 @@ final class TextFontTests: XCTestCase {
 
         let dryRun = try await CaptionsRequest(from: t(0), to: t(10)).run(on: h.service, context: h.context)
         XCTAssertEqual(installer.requests, [], "a dry run doesn't download anything")
-        XCTAssertTrue(dryRun.warnings.contains { $0.hasPrefix("Tilt Warp, the caption preset's font, isn't installed") && $0.contains("tandem assets use fontsource:tilt-warp") }, "\(dryRun.warnings)")
+        XCTAssertTrue(dryRun.warnings.contains { $0.hasPrefix("Tilt Warp, the caption preset's font, isn't installed") && $0.contains("substo assets use fontsource:tilt-warp") }, "\(dryRun.warnings)")
 
         let applied = try await CaptionsRequest(from: t(0), to: t(10), apply: true).run(on: h.service, context: h.context)
         XCTAssertEqual(installer.requests, ["fontsource:tilt-warp"])
@@ -59,7 +59,7 @@ final class TextFontTests: XCTestCase {
         XCTAssertNotNil(applied.applied, "the captions still go in")
         XCTAssertTrue(applied.warnings.contains("Couldn't install Tilt Warp from the asset library: The Mac is offline."), "\(applied.warnings)")
         let missing = try XCTUnwrap(applied.warnings.first { $0.contains("isn't installed") })
-        XCTAssertTrue(missing.contains("tandem assets use fontsource:tilt-warp"), missing)
+        XCTAssertTrue(missing.contains("substo assets use fontsource:tilt-warp"), missing)
         XCTAssertTrue(applied.readableText.contains("Warning: Tilt Warp, the caption preset's font, isn't installed"), applied.readableText)
     }
 
@@ -96,7 +96,7 @@ final class TextFontTests: XCTestCase {
         let before = try await client.call(FrameRequest(time: t(1)))
         XCTAssertTrue(before.warnings.contains { $0.hasPrefix("\(family) isn't installed") }, "\(before.warnings)")
 
-        // The font in the project's assets/font, as `tandem assets use` or
+        // The font in the project's assets/font, as `substo assets use` or
         // an archive leaves it.
         try FontFixtures.renamed(source, family: family, to: ProjectFonts.folder(of: ProjectFolder(projectFile: url)).appendingPathComponent("face.ttf"))
         let after = try await client.call(FrameRequest(time: t(1)))
@@ -114,7 +114,7 @@ final class TextFontTests: XCTestCase {
         project[location].clips.append(Clip(id: "clip_odd", content: .text(TextContent(text: "odd", style: TextStyle(font: "Nope Sans Test"))), start: t(10), duration: t(1)))
         let h = try ServiceHarness(project: project)
         defer { h.close() }
-        let expected = "Nope Sans Test isn't installed, so 1 text clip is drawn in SF Pro instead. Install it with: tandem assets use fontsource:nope-sans-test"
+        let expected = "Nope Sans Test isn't installed, so 1 text clip is drawn in SF Pro instead. Install it with: substo assets use fontsource:nope-sans-test"
         let status = h.service.status()
         XCTAssertEqual(status.warnings, [expected])
         XCTAssertTrue(status.readableText.contains("Warning: \(expected)"), status.readableText)
@@ -141,7 +141,7 @@ final class TextFontTests: XCTestCase {
         let before = try await client.call(StatusRequest())
         XCTAssertEqual(before.warnings?.count, 1)
 
-        // What `tandem assets use` does from its own process: copy the file
+        // What `substo assets use` does from its own process: copy the file
         // in, then ask the app for the status.
         try FontFixtures.renamed(source, family: family, to: ProjectFonts.folder(of: h.session.folder).appendingPathComponent("face.ttf"))
         let after = try await client.call(StatusRequest())
@@ -197,6 +197,6 @@ final class TextFontTests: XCTestCase {
             fonts: ["TiltWarp-Regular"], licence: nil
         )
         result.fontsReached = "app"
-        XCTAssertTrue(result.readableText.contains("The Tandem app has it now too."), result.readableText)
+        XCTAssertTrue(result.readableText.contains("The Substo Video app has it now too."), result.readableText)
     }
 }

@@ -13,7 +13,7 @@ public struct MeasuredSound: Codable, Equatable, Sendable {
     }
 }
 
-/// How Tandem levels sound: which clips are speech, the gain a clip's
+/// How Substo Video levels sound: which clips are speech, the gain a clip's
 /// normalisation adds, and what new clips start with. Placement, the
 /// render, the loudness report and the app's Audio tab all use these, so
 /// they agree.
@@ -26,7 +26,7 @@ public struct MeasuredSound: Codable, Equatable, Sendable {
 /// the true peak ceiling (-1 dBTP), so the speech level sets the balance
 /// and how loud the viewer plays, not how loud the video is.
 ///
-/// Why -20 (docs/RENDER.md has the measurements): it's where Mike's voice
+/// Why -20 (docs/RENDER.md has the measurements): it's where the creator's voice
 /// played in his Filmora cuts, because Filmora's Auto Normalization levels
 /// a file to about -24 LUFS before his +2 to +4 dB, so the music and SFX
 /// gains keep the balance he mixed. It's the quiet end of the -16 to -20
@@ -188,7 +188,7 @@ public enum AudioLevels {
     // MARK: - New clips
 
     /// The sound a clip placed on `track` starts with. Speech is normalised
-    /// to the project's speech level with no gain. Music gets Mike's usual
+    /// to the project's speech level with no gain. Music gets the creator's usual
     /// bed, -31 dB with a 2 s fade out, and sound effects -15 dB.
     public static func placedAudio(role: MediaRole, on track: Track, settings: ProjectSettings) -> AudioProperties? {
         if isSpeechTrack(track) || speechRoles.contains(role) {

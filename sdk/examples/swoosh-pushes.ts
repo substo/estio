@@ -1,5 +1,5 @@
 // Give every push that has no sound yet the light swoosh, peaking on the cut.
-//   bun sdk/run.ts Video.tandem sdk/examples/swoosh-pushes.ts
+//   bun sdk/run.ts Video.substo sdk/examples/swoosh-pushes.ts
 import { cmd, type Tandem } from "../tandem";
 
 export default async (t: Tandem) => {

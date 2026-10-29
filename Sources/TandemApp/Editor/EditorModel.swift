@@ -9,12 +9,12 @@ import TandemRender
 /// Left panel tabs. Transitions share a panel with effects and looks, so
 /// they're a sub-tab of Effects rather than a tab of their own.
 enum LibraryTab: String, CaseIterable, Identifiable {
-    case media, text, transitions, effects, graphics, audio
+    case media, text, transitions, effects, graphics, audio, styles
 
     var id: String { rawValue }
 
     /// The tabs across the top of the library panel.
-    static let shown: [LibraryTab] = [.media, .text, .effects, .graphics, .audio]
+    static let shown: [LibraryTab] = [.media, .text, .effects, .graphics, .audio, .styles]
 
     /// The tab lit for this one: Effects for transitions.
     var shownTab: LibraryTab { self == .transitions ? .effects : self }
@@ -27,6 +27,7 @@ enum LibraryTab: String, CaseIterable, Identifiable {
         case .effects: return "Effects"
         case .graphics: return "Graphics"
         case .audio: return "Audio"
+        case .styles: return "Styles"
         }
     }
 }
@@ -167,7 +168,7 @@ final class EditorModel {
     @ObservationIgnored private var apiStopped = false
 
     // Review
-    /// Agent edits Mike hasn't reviewed yet, from the session's review log.
+    /// Agent edits the creator hasn't reviewed yet, from the session's review log.
     private(set) var reviewLog = ReviewLog()
     /// The same, placed on the timeline as it is now.
     private(set) var review = TimelineReview.empty
@@ -177,7 +178,7 @@ final class EditorModel {
     private(set) var nearPlayhead = NearThePlayhead.empty
     func setNearPlayhead(_ near: NearThePlayhead) { nearPlayhead = near }
     @ObservationIgnored private var reviewToken: UUID?
-    /// The stretches Mike has played through since the timeline last
+    /// The stretches the creator has played through since the timeline last
     /// changed (`notePlayhead`), where the playhead was last time, and
     /// whether that was where he paused.
     @ObservationIgnored var watched: [TimeRange] = []
@@ -247,7 +248,7 @@ final class EditorModel {
             }
         }
         if session.recoveredEdits {
-            show(.warning, "Recovered edits that hadn't been saved when Tandem last closed.")
+            show(.warning, "Recovered edits that hadn't been saved when Substo Video last closed.")
         }
     }
 
@@ -268,7 +269,7 @@ final class EditorModel {
     var folder: ProjectFolder { session.folder }
     var fileName: String { fileURL.lastPathComponent }
     var folderName: String { fileURL.deletingLastPathComponent().lastPathComponent }
-    /// The file, short: its folder and name ("daytona/Daytona.tandem"). The
+    /// The file, short: its folder and name ("daytona/Daytona.substo"). The
     /// title bar shows it, so two projects with the same name (a version
     /// beside its original, a copy elsewhere) tell apart.
     var shortPath: String { "\(folderName)/\(fileName)" }
@@ -376,7 +377,7 @@ final class EditorModel {
     /// Serves the local API while the project is open, so the CLI and MCP
     /// reach this window instead of opening the file themselves. Agent
     /// edits come back through the coordinator like any other.
-    /// `screenshot` captures the project window for `tandem screenshot`.
+    /// `screenshot` captures the project window for `substo screenshot`.
     func startAPI(screenshot: @escaping @Sendable () async throws -> Data) {
         Task { @MainActor [weak self] in
             guard let self, !self.apiStopped else { return }
@@ -444,7 +445,7 @@ final class EditorModel {
     // MARK: - Review
 
     /// The review log changed: an agent's edit arrived, an undo put one
-    /// back, or Mike marked them reviewed.
+    /// back, or the creator marked them reviewed.
     func reviewChanged(_ log: ReviewLog) {
         guard log != reviewLog else { return }
         reviewLog = log

@@ -1,6 +1,6 @@
 import Foundation
 
-/// A reusable group of clips, like Mike's section card (three text layers
+/// A reusable group of clips, like the creator's section card (three text layers
 /// over an animated background with four sound effects), Like and Subscribe,
 /// or Comment Below. Templates live in packs as JSON. Inserting one expands
 /// it into ordinary linked clips, so nothing downstream needs to know about

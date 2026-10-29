@@ -12,7 +12,7 @@ func t(_ seconds: Double) -> Time { Time(seconds: seconds) }
 final class TempFolder {
     let url: URL
 
-    init(_ name: String = "tandem-api") {
+    init(_ name: String = "substo-api") {
         url = FileManager.default.temporaryDirectory.appendingPathComponent("\(name)-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     }
@@ -125,7 +125,7 @@ enum APIFixture {
 
     /// Writes the fixture project to `folder` and returns its URL.
     static func write(to folder: URL, name: String = "Decision Models", project: Project = APIFixture.project()) throws -> URL {
-        let url = folder.appendingPathComponent("\(name).tandem")
+        let url = folder.appendingPathComponent("\(name).substo")
         try ProjectFile.save(project, revision: 1, to: url)
         return url
     }

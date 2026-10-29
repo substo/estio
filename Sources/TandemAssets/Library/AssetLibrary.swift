@@ -8,7 +8,7 @@ import TandemMedia
 /// in a project, and build the description credits.
 ///
 /// Disk layout under `root` (default
-/// `~/Library/Application Support/Tandem/Assets/`):
+/// `~/Library/Application Support/Substo/Assets/`):
 ///
 ///     catalog.sqlite           the index
 ///     settings.json            AssetSettings
@@ -18,9 +18,9 @@ import TandemMedia
 ///     providers/               small provider state (refused permissions)
 ///     staging/                 generations on their way in, emptied after
 ///
-/// Previews live in `~/Library/Caches/Tandem/AssetPreviews/`, size capped.
+/// Previews live in `~/Library/Caches/Substo Video/AssetPreviews/`, size capped.
 ///
-/// The shared library (`SharedLibrary`, `~/Movies/Tandem Library`) is a
+/// The shared library (`SharedLibrary`, `~/Movies/Substo Library`) is a
 /// source of its own, `shared`: its files are indexed like an import
 /// folder's, and a project that uses one refers to it where it is.
 public final class AssetLibrary: @unchecked Sendable {
@@ -37,24 +37,24 @@ public final class AssetLibrary: @unchecked Sendable {
     /// Where the shared library is when no shared provider is registered.
     private var fallbackShared = SharedLibrary(root: SharedLibrary.standardRoot)
 
-    /// Library settings Mike might change, in `<root>/settings.json`.
+    /// Library settings the creator might change, in `<root>/settings.json`.
     public var settings: AssetSettings {
         lock.lock()
         defer { lock.unlock() }
         return currentSettings
     }
 
-    /// `~/Library/Application Support/Tandem/Assets/`.
+    /// `~/Library/Application Support/Substo/Assets/`.
     public static var defaultRoot: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Tandem", isDirectory: true)
+            .appendingPathComponent("Substo Video", isDirectory: true)
             .appendingPathComponent("Assets", isDirectory: true)
     }
 
-    /// `~/Library/Caches/Tandem/AssetPreviews/`.
+    /// `~/Library/Caches/Substo Video/AssetPreviews/`.
     public static var defaultPreviewFolder: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Tandem", isDirectory: true)
+            .appendingPathComponent("Substo Video", isDirectory: true)
             .appendingPathComponent("AssetPreviews", isDirectory: true)
     }
 
@@ -788,7 +788,7 @@ extension AssetLibrary {
             let folder = self.folder(for: asset)
             var updated = asset
             if provider is ImportFolderProvider {
-                // The original is Mike's file in his folder; keep it.
+                // The original is the creator's file in his folder; keep it.
                 updated.state = .original
                 let original = asset.files.original
                 updated.files = AssetFiles(original: original)

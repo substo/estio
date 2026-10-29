@@ -1,6 +1,6 @@
 // Generates sdk/commands.gen.ts from Tandem's edit batch JSON schema.
 //
-//   bun sdk/gen-types.ts <project.tandem | schema.json>
+//   bun sdk/gen-types.ts <project.substo | schema.json>
 //
 // With a project it reads GET /v1/schema from the server that has it open
 // (starting `tandem serve` if nothing does). Regenerate after Tandem adds or
@@ -12,7 +12,7 @@ type Schema = Record<string, any>;
 
 const arg = process.argv[2];
 if (!arg) {
-  console.error("Usage: bun sdk/gen-types.ts <project.tandem | schema.json>");
+  console.error("Usage: bun sdk/gen-types.ts <project.substo | schema.json>");
   process.exit(2);
 }
 

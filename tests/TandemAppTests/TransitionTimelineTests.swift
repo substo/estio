@@ -392,9 +392,9 @@ final class TransitionDragWindowTests: XCTestCase {
     /// points a second scrolled to 25 s: the cut is at 500 points.
     private func showTimeline() throws {
         guard NSScreen.screens.first != nil else { throw XCTSkip("no screen") }
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-transition-drag-\(UUID().uuidString)", isDirectory: true)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-transition-drag-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let session = try ProjectSession.create(at: folder.appendingPathComponent("Drag.tandem"), name: "Drag", owner: .app)
+        let session = try ProjectSession.create(at: folder.appendingPathComponent("Drag.substo"), name: "Drag", owner: .app)
         let model = EditorModel(session: session)
         self.model = model
         addTeardownBlock { @MainActor in

@@ -369,7 +369,7 @@ enum RenderPlanner {
     /// of HEVC with alpha, even across a gap or when reading starts after
     /// the plain file. Every proxy is 1080p HEVC, so an overlay's proxy on a
     /// track after a camera's showed black wherever it was clear, while
-    /// playing and in `tandem check` (issue #10). Alpha after alpha, and
+    /// playing and in `substo check` (issue #10). Alpha after alpha, and
     /// plain after alpha, decode fine.
     ///
     /// Sound only shares a track with sound in the same audio format. With

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Describes an effect: its parameters, ranges and defaults. The inspector
-/// builds its controls from these, `tandem effects` prints them for agents,
+/// builds its controls from these, `substo effects` prints them for agents,
 /// and the renderer reads defaults for any parameter a clip doesn't set.
 ///
 /// Effects are data. A pack can add one with a JSON file; if it names a
@@ -141,7 +141,7 @@ public struct EffectRegistry: Sendable {
         return loaded
     }
 
-    /// The built-in effects, chosen from what Mike used in 51 Filmora
+    /// The built-in effects, chosen from what the creator used in 51 Filmora
     /// projects: the camera grade (contrast, black level, temperature, red
     /// saturation, vignette, sharpen), the PiP drop shadow and border, and
     /// a few utilities. He never touched colour wheels in Filmora, but
@@ -173,7 +173,7 @@ public struct EffectRegistry: Sendable {
             name: "HSL",
             category: "Colour",
             domain: .video,
-            summary: "Saturation per colour range. Mike's camera grade pulls reds down 7 or 8 to calm skin.",
+            summary: "Saturation per colour range. The sample camera grade pulls reds down 7 or 8 to calm skin.",
             params: ["red", "orange", "yellow", "green", "aqua", "blue", "purple", "magenta"].flatMap { colour in
                 [
                     ParamDefinition("\(colour)Hue", "\(colour.capitalized) hue", default: .number(0), min: -100, max: 100, step: 1),
@@ -201,7 +201,7 @@ public struct EffectRegistry: Sendable {
             name: "Vignette",
             category: "Colour",
             domain: .video,
-            summary: "Darkens the edges. Mike's camera grade uses -22 to -37.",
+            summary: "Darkens the edges. The sample camera grade uses -22 to -37.",
             params: [
                 ParamDefinition("amount", "Amount", default: .number(-30), min: -100, max: 100, step: 1),
                 ParamDefinition("size", "Size", default: .number(50), min: 0, max: 100, step: 1),
@@ -213,7 +213,7 @@ public struct EffectRegistry: Sendable {
             name: "Sharpen",
             category: "Colour",
             domain: .video,
-            summary: "Luma sharpening. Mike uses 3 or 4.",
+            summary: "Luma sharpening. the creator uses 3 or 4.",
             params: [
                 ParamDefinition("amount", "Amount", default: .number(3), min: 0, max: 10, step: 0.5)
             ]
@@ -297,7 +297,7 @@ public struct EffectRegistry: Sendable {
             ]
         ),
         // The dynamics effects. Their levels are dBFS as the clip plays,
-        // after its levelling and gain (the peaks `tandem loudness` shows),
+        // after its levelling and gain (the peaks `substo loudness` shows),
         // so a limiter at -1 holds a quiet mic lifted 24 dB under -1. They
         // render ahead of time over the whole file, so none animate.
         EffectDefinition(

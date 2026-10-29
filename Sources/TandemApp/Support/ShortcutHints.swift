@@ -5,7 +5,7 @@ import SwiftUI
 /// Holding ⌘ shows each button's key on the button, so the keys can be
 /// learned at a glance instead of by hovering one tooltip at a time.
 ///
-/// The keys show the moment ⌘ goes down on its own (Mike wanted them
+/// The keys show the moment ⌘ goes down on its own (the creator wanted them
 /// straight away, not after a hold), and go the moment it's let go or used:
 /// a shortcut, a ⌘-click or a ⌘-scroll to zoom hides them, and they don't
 /// come back until ⌘ is pressed again.
@@ -60,7 +60,7 @@ final class ShortcutHints {
         }
     }
 
-    /// For smoke tests (`tandem://simulate?press=cmd`): `flags` held on
+    /// For smoke tests (`substo://simulate?press=cmd`): `flags` held on
     /// their own for `seconds`, with the app taken as frontmost, then let go.
     func simulatePress(_ flags: NSEvent.ModifierFlags, for seconds: TimeInterval) {
         let wasActive = isAppActive

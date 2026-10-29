@@ -9,7 +9,7 @@ import TandemCore
 ///   influence. Returned as bare 48 kHz PCM, wrapped into WAV here; looping
 ///   effects only come as MP3.
 /// - Music: `POST /v1/music` with `music_v2_5`, instrumental by default,
-///   as 192 kbps MP3 at 48 kHz (what Mike's music scripts use).
+///   as 192 kbps MP3 at 48 kHz (what the creator's music scripts use).
 ///
 /// Keys can be restricted per feature. When a call comes back without the
 /// permission it needs, the provider remembers it and says so in its status
@@ -25,7 +25,7 @@ public final class ElevenLabsProvider: AssetProvider, @unchecked Sendable {
         notes: [
             "Output made on a paid plan can be used commercially (ElevenLabs Terms, section on Free and Paid Users).",
             "Sound effects cost 40 credits a second when the duration is set.",
-            "Mike's plan allows 2 requests at once.",
+            "the creator's plan allows 2 requests at once.",
             "The key needs the sound_generation permission for sound effects and music_generation for music."
         ]
     )

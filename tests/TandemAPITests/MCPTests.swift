@@ -90,7 +90,7 @@ final class MCPTests: XCTestCase {
         let mcp = try MCPHarness()
         let initialize = try await mcp.call(1, "initialize", #"{"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "claude-code", "version": "2.1"}}"#)
         XCTAssertEqual(initialize[json: "result"]?[json: "protocolVersion"], .string("2025-11-25"))
-        XCTAssertEqual(initialize[json: "result"]?[json: "serverInfo"]?[json: "name"], .string("tandem"))
+        XCTAssertEqual(initialize[json: "result"]?[json: "serverInfo"]?[json: "name"], .string("substo"))
         XCTAssertNotNil(initialize[json: "result"]?[json: "capabilities"]?[json: "tools"])
         XCTAssertNil(initialize[json: "result"]?[json: "resultType"], "legacy results stay as they were")
         mcp.send(#"{"jsonrpc": "2.0", "method": "notifications/initialized"}"#)
@@ -106,7 +106,7 @@ final class MCPTests: XCTestCase {
         let status = try await mcp.tool(3, "status")
         XCTAssertEqual(status[json: "result"]?[json: "isError"], .bool(false))
         let text = try XCTUnwrap(status[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString)
-        XCTAssertTrue(text.hasPrefix("Decision Models (Decision Models.tandem)"), text)
+        XCTAssertTrue(text.hasPrefix("Decision Models (Decision Models.substo)"), text)
 
         let edit = try await mcp.tool(4, "apply", #"{"commands": [{"blade": {"at": "00:10.000"}}], "expectedRevision": 1}"#)
         let editText = try XCTUnwrap(edit[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString)
@@ -124,7 +124,7 @@ final class MCPTests: XCTestCase {
         let discover = try await mcp.call(1, "server/discover", #"{"_meta": \#(Self.modernMeta)}"#)
         XCTAssertEqual(discover[json: "result"]?[json: "resultType"], .string("complete"))
         XCTAssertEqual(discover[json: "result"]?[json: "supportedVersions"]?[json: 0], .string("2026-07-28"))
-        XCTAssertEqual(discover[json: "result"]?[json: "_meta"]?[json: "io.modelcontextprotocol/serverInfo"]?[json: "name"], .string("tandem"))
+        XCTAssertEqual(discover[json: "result"]?[json: "_meta"]?[json: "io.modelcontextprotocol/serverInfo"]?[json: "name"], .string("substo"))
 
         let list = try await mcp.call(2, "tools/list", #"{"_meta": \#(Self.modernMeta)}"#)
         XCTAssertEqual(list[json: "result"]?[json: "cacheScope"], .string("public"))
@@ -165,7 +165,7 @@ final class MCPTests: XCTestCase {
         XCTAssertEqual(stale[json: "result"]?[json: "isError"], .bool(true))
         XCTAssertTrue(stale[json: "result"]?[json: "content"]?[json: 0]?[json: "text"]?.testString?.contains("expected revision 99") ?? false)
 
-        let elsewhere = try await mcp.tool(5, "status", #"{"project": "/nowhere/at/all.tandem"}"#)
+        let elsewhere = try await mcp.tool(5, "status", #"{"project": "/nowhere/at/all.substo"}"#)
         XCTAssertEqual(elsewhere[json: "result"]?[json: "isError"], .bool(true))
         await mcp.close()
     }

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Where each project's timeline was when its window closed: the playhead,
-/// the zoom and the scroll. Reopening it (Tandem restarting to install a
+/// the zoom and the scroll. Reopening it (Substo Video restarting to install a
 /// build, say) carries on there instead of at the start, fitted.
 enum TimelinePlacement {
     static let key = "projectTimelines"

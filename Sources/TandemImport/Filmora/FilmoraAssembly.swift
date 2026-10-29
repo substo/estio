@@ -42,7 +42,7 @@ extension FilmoraRun {
             }
             if !placed {
                 if !lanes.isEmpty {
-                    report.add(.note, "clip", "Overlapping clips on one Filmora track were spread over extra Tandem tracks.", at: clip.clip.start)
+                    report.add(.note, "clip", "Overlapping clips on one Filmora track were spread over extra Substo Video tracks.", at: clip.clip.start)
                 }
                 lanes.append([clip])
             }
@@ -116,7 +116,7 @@ extension FilmoraRun {
     }
 
     /// A colour grade shared by every clip of a file moves onto the file's
-    /// look, as Tandem keeps camera grades. Otherwise each clip keeps its own.
+    /// look, as Substo Video keeps camera grades. Otherwise each clip keeps its own.
     func assignLooks() -> [String: [Effect]] {
         func signature(_ effects: [Effect]) -> String {
             effects.map { "\($0.type):\($0.params.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" })" }.joined(separator: "|")
@@ -278,7 +278,7 @@ extension FilmoraRun {
     }
 
     /// Speech is normalised to the project's speech level, as clips placed
-    /// in Tandem are, unless the import keeps Filmora's levels. Either way
+    /// in Substo Video are, unless the import keeps Filmora's levels. Either way
     /// the report says what happened to Filmora's gains.
     func levelSpeech(_ builder: ProjectBuilder) {
         let speech = AudioLevels.speechClips(in: builder.project)
@@ -292,7 +292,7 @@ extension FilmoraRun {
         }
         let autoNormalized = builder.project.audioTracks.flatMap(\.clips).filter { $0.audio?.normalizeTo == Self.autoNormalizationLUFS }
         if !autoNormalized.isEmpty {
-            builder.report.add(.note, "audio", "Filmora's Auto Normalization became normalise to -24 LUFS (where Filmora levels, on Tandem's meter) with the clip's loudness gain on top, on \(autoNormalized.count) clip(s).")
+            builder.report.add(.note, "audio", "Filmora's Auto Normalization became normalise to -24 LUFS (where Filmora levels, on Substo Video's meter) with the clip's loudness gain on top, on \(autoNormalized.count) clip(s).")
         }
     }
 
@@ -396,7 +396,7 @@ extension FilmoraRun {
     }
 
     /// A transition across a cut, shortened when either clip lacks the
-    /// media it needs beyond the cut (Filmora freezes frames there; Tandem
+    /// media it needs beyond the cut (Filmora freezes frames there; Substo Video
     /// won't).
     func between(_ from: Clip, _ to: Clip, _ edge: Edge, track: PlannedTrack, trackID: String, project: Project) -> ProjectBuilder.Step? {
         let type = mapped(edge, track: track, placement: .between, at: to.start)

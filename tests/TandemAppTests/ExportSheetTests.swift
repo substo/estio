@@ -12,7 +12,7 @@ import TandemRender
 /// (`ExportPreset.plan(for:)`) and shows what each makes of the open
 /// project. To look at it:
 ///
-///     TANDEM_EXPORT_UI_OUT=/private/tmp/claude-501/tandem-export/ui \
+///     SUBSTO_EXPORT_UI_OUT=/private/tmp/claude-501/tandem-export/ui \
 ///     swift test --package-path . --filter ExportSheetTests
 @MainActor
 final class ExportSheetTests: XCTestCase {
@@ -60,7 +60,7 @@ final class ExportSheetTests: XCTestCase {
     func testTheShortWithoutALayoutSaysWhatToDo() {
         XCTAssertEqual(
             ExportSheetOverlay.problem(.noPortrait(width: 3840, height: 2160)),
-            "This project has no 9:16 layout for the short yet. An agent can lay one out with `tandem short --apply`, with the screen on top and the camera below."
+            "This project has no 9:16 layout for the short yet. An agent can lay one out with `substo short --apply`, with the screen on top and the camera below."
         )
     }
 
@@ -73,9 +73,9 @@ final class ExportSheetTests: XCTestCase {
             ("portrait-4k", canvas(1080, 1920), "YouTube 4K"),
             ("landscape-short", canvas(3840, 2160), "Short 9:16")
         ] {
-            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-export-ui-\(UUID().uuidString)", isDirectory: true)
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-export-ui-\(UUID().uuidString)", isDirectory: true)
             defer { try? FileManager.default.removeItem(at: folder) }
-            let session = try ProjectSession.create(at: folder.appendingPathComponent("Workbench.tandem"), settings: settings, owner: .app)
+            let session = try ProjectSession.create(at: folder.appendingPathComponent("Workbench.substo"), settings: settings, owner: .app)
             let model = EditorModel(session: session)
             defer {
                 model.tearDown()
@@ -90,7 +90,7 @@ final class ExportSheetTests: XCTestCase {
             renderer.scale = 2
             let image = try XCTUnwrap(renderer.cgImage, "\(name) didn't render")
             XCTAssertGreaterThan(image.height, 400, name)
-            if let out = ProcessInfo.processInfo.environment["TANDEM_EXPORT_UI_OUT"], !out.isEmpty {
+            if let out = ProcessInfo.processInfo.environment["SUBSTO_EXPORT_UI_OUT"], !out.isEmpty {
                 let dir = URL(fileURLWithPath: NSString(string: out).expandingTildeInPath, isDirectory: true)
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 let url = dir.appendingPathComponent(name + ".png")

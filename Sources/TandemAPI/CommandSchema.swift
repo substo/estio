@@ -4,7 +4,7 @@ import TandemRender
 
 /// JSON Schema (2020-12) for `EditBatch` and every `EditCommand`, written by
 /// hand so each field has a useful description. MCP's `apply` tool uses it
-/// as its input schema, `tandem schema` prints it, and the service checks
+/// as its input schema, `substo schema` prints it, and the service checks
 /// incoming commands against it so a misspelt field is an error rather than
 /// silently ignored.
 ///
@@ -52,12 +52,12 @@ public enum CommandSchema {
         return .object(fields)
     }
 
-    /// The whole schema as `tandem schema` prints it.
+    /// The whole schema as `substo schema` prints it.
     public static var document: JSONValue {
         var root = batch
         if case .object(var fields) = root {
             fields["$schema"] = .string("https://json-schema.org/draft/2020-12/schema")
-            fields["title"] = .string("Tandem EditBatch")
+            fields["title"] = .string("Substo Video EditBatch")
             root = .object(fields)
         }
         return root
@@ -174,7 +174,7 @@ enum S {
         .object([
             "type": .string("object"),
             "description": .string(description + " JSON merge patch: only the fields you send change, null removes one."),
-            "x-tandem-patch": .string(model)
+            "x-substo-patch": .string(model)
         ])
     }
 
@@ -266,7 +266,7 @@ extension CommandSchema {
 
     static let transform = S.object([
         "position": S.ref("Point"),
-        "scale": S.number("1 fits the canvas; Mike's PiP is 0.5."),
+        "scale": S.number("1 fits the canvas; the creator's PiP is 0.5."),
         "rotation": S.number("Degrees clockwise.")
     ])
 
@@ -348,7 +348,7 @@ extension CommandSchema {
     ])
 
     static let graphicContent = S.object([
-        "template": S.string("sectionCard (built in: Mike's section card), or a template like remotion:BarChart."),
+        "template": S.string("sectionCard (built in: the creator's section card), or a template like remotion:BarChart."),
         "props": S.map(S.ref("ParamValue"), "A sectionCard takes title, subtitle, number (like \"01\"), total (sections, for the progress bars; 0 hides them), kicker (\"Section\" or \"Tip\", shown as SECTION 1 OF 3), cursor (false turns off the text cursor blinking after the title; on by default), and colours accent (first band, chip, subtitle, lit bars, cursor), band2, band3 and background. Missing words are left off; colours default to Convex's yellow, red and purple on #141418."),
         "propsJSON": S.string()
     ], required: ["template"])
@@ -389,11 +389,11 @@ extension CommandSchema {
         "takeID": S.string(), "takeOffset": S.time(),
         "duration": S.time(), "frameRate": S.ref("FrameRate"), "width": S.integer(), "height": S.integer(),
         "hasVideo": S.boolean(), "hasAudio": S.boolean(), "hasAlpha": S.boolean(), "variableFrameRate": S.boolean(),
-        "undecodableCodec": S.string("Set by scanning: the codec macOS can't decode (\"rle \" or \"png \"). Tandem plays a converted copy."),
+        "undecodableCodec": S.string("Set by scanning: the codec macOS can't decode (\"rle \" or \"png \"). Substo Video plays a converted copy."),
         "fingerprint": S.string(),
         "look": S.array(S.ref("Effect"), "Colour grade for every clip of the file."),
         "livePhotoVideo": S.string("Set by scanning on a Live Photo's still: its motion clip (the short .mov beside it), which isn't media of its own."),
-        "transcribe": S.boolean("Make this file's transcript whatever its role or track. Set by `tandem transcribe`.")
+        "transcribe": S.boolean("Make this file's transcript whatever its role or track. Set by `substo transcribe`.")
     ], required: ["path"])
 
     static let transitionFields: [String: JSONValue] = [
@@ -485,7 +485,7 @@ extension CommandSchema {
     /// every field is optional) as `sound` in `updateTransition`'s patch.
     static func transitionSound(_ description: String, patch: Bool) -> JSONValue {
         S.object([
-            "mediaID": S.string(patch ? "Another sound from the project's media in its place." : "A sound already in the project's media (tandem assets use adds one)."),
+            "mediaID": S.string(patch ? "Another sound from the project's media in its place." : "A sound already in the project's media (substo assets use adds one)."),
             "gainDB": S.number("Clip gain in dB. Default -15; the light swoosh sits 15 LU under speech at -23.3."),
             "offset": S.time("When the sound starts, in seconds from the middle of the transition (the cut, for one between two clips): -0.39 puts the loudest moment of a sound 0.39 s in on the cut. Default: as the transition starts.")
         ], required: patch ? [] : ["mediaID"], description)
@@ -544,7 +544,7 @@ extension CommandSchema {
         ),
         Entry(
             command: .addMedia,
-            summary: "Adds a media file to the project (not the timeline). Usually `tandem media --refresh` does this for you.",
+            summary: "Adds a media file to the project (not the timeline). Usually `substo media --refresh` does this for you.",
             arguments: S.object(["item": S.ref("MediaItem")], required: ["item"]),
             example: #"{"addMedia": {"item": {"path": "broll/servers.mp4", "kind": "video", "role": "broll", "duration": 12.5, "hasVideo": true}}}"#
         ),
@@ -580,7 +580,7 @@ extension CommandSchema {
         ),
         Entry(
             command: .placeSynced,
-            summary: "Puts a file synced to a take by sound (tandem sync <file> sets its take) alongside the take's camera clips, linked to them so ripple cuts, trims and moves keep it in step. The take is cut where the file starts and stops. Another camera angle goes on its own cut track right above the camera's (\"Angle 2\"), its clips off until showAngle picks it, and its own sound isn't placed. A sound file (an external mic) goes on Voice, and the camera's own sound there moves to a muted \"Camera sound\" track, so the mic is what plays.",
+            summary: "Puts a file synced to a take by sound (substo sync <file> sets its take) alongside the take's camera clips, linked to them so ripple cuts, trims and moves keep it in step. The take is cut where the file starts and stops. Another camera angle goes on its own cut track right above the camera's (\"Angle 2\"), its clips off until showAngle picks it, and its own sound isn't placed. A sound file (an external mic) goes on Voice, and the camera's own sound there moves to a muted \"Camera sound\" track, so the mic is what plays.",
             arguments: S.object([
                 "mediaID": S.string("The synced file."),
                 "trackID": S.track("The track it goes on. Default: a new \"Angle 2\" track for a picture, Voice for sound.")
@@ -607,7 +607,7 @@ extension CommandSchema {
         ),
         Entry(
             command: .cutRanges,
-            summary: "Ripple deletes several ranges at once, every one in the timeline's times before this command (as you read them), in any order. Tandem cuts them latest first so no cut moves another, and cuts overlapping or touching ranges once. Use it instead of sorting rippleDeleteRange commands latest first yourself.",
+            summary: "Ripple deletes several ranges at once, every one in the timeline's times before this command (as you read them), in any order. Substo Video cuts them latest first so no cut moves another, and cuts overlapping or touching ranges once. Use it instead of sorting rippleDeleteRange commands latest first yourself.",
             arguments: S.object([
                 "ranges": S.array(S.ref("TimeRange"), "The stretches to cut: start plus duration, or start and end."),
                 "trackIDs": S.tracks("Only cut these tracks (and ripple from them). Default: every cut track.")
@@ -644,11 +644,11 @@ extension CommandSchema {
                 "markerIDs": S.ids("Markers to put cards at, any kind. Default: every section marker after 0:00."),
                 "trackID": S.track("Video track for the cards. Default Graphics (made on top if missing)."),
                 "duration": S.time("Every card's length. Default: each fitted to its words (4 to 7 s); the wipes keep their length and the hold changes."),
-                "kicker": S.string("Words beside the chip, like Tip (shown as TIP 1 OF 14). Default none, which Mike prefers: the number alone reads faster. Only add one when asked. On cards already there, empty removes it."),
+                "kicker": S.string("Words beside the chip, like Tip (shown as TIP 1 OF 14). Default none, which the creator prefers: the number alone reads faster. Only add one when asked. On cards already there, empty removes it."),
                 "mode": S.enumeration(["overwrite", "insert", "place"], "overwrite (default) lays the cards over the timeline, insert also makes room at each marker (the whole take moves), place fails where the card track is taken."),
                 "soundIn": sectionCardSound("A sound for the sweep in, like a whoosh. Starts 0.2 s after the card unless offset says otherwise."),
                 "soundOut": sectionCardSound("A sound for the sweep out. Starts as the sweep out does unless offset says otherwise."),
-                "cuts": S.map(S.time("Where the take is cut for this marker's room, within 0.3 s of it."), "With insert: where the take is cut for each marker's room, by marker ID, when it shouldn't be the marker itself. Put it in the pause before the section's first word, so the word isn't clipped. tandem cards --insert works these out from the voice. Default: each marker's time.")
+                "cuts": S.map(S.time("Where the take is cut for this marker's room, within 0.3 s of it."), "With insert: where the take is cut for each marker's room, by marker ID, when it shouldn't be the marker itself. Put it in the pause before the section's first word, so the word isn't clipped. substo cards --insert works these out from the voice. Default: each marker's time.")
             ]),
             example: #"{"addSectionCards": {"soundIn": {"mediaID": "med_swishin", "gainDB": -3.4, "offset": 0}, "soundOut": {"mediaID": "med_swishout", "gainDB": -6.3}}}"#
         ),
@@ -674,7 +674,7 @@ extension CommandSchema {
         ),
         Entry(
             command: .joinThroughEdits,
-            summary: "Joins every through-edit (see join) with its cut in range, both ends included, or on the whole timeline, in one go. Cuts that look like through-edits but would play differently joined are left, with a warning saying why. tandem join (the join tool) lists both first.",
+            summary: "Joins every through-edit (see join) with its cut in range, both ends included, or on the whole timeline, in one go. Cuts that look like through-edits but would play differently joined are left, with a warning saying why. substo join (the join tool) lists both first.",
             arguments: S.object(["range": S.ref("TimeRange")]),
             example: #"{"joinThroughEdits": {"range": {"start": 60, "duration": 60}}}"#
         ),
@@ -716,7 +716,7 @@ extension CommandSchema {
         ),
         Entry(
             command: .holdFrame,
-            summary: "Holds the frame a clip shows a frame before range over range, to cover a flash: a stale frame, or the preview jumping for a frame in a screen recording. Picture only: just this clip is cut, the held piece is a freeze frame, and every piece stays linked to the take, whose sound plays on uncut, so nothing moves. tandem check gives one for each flicker it can fix. The held piece is the clip's own ID when range starts at the clip's start, otherwise the first ID the batch makes. Several in one clip go latest first, as a cut keeps the clip's ID on the piece before it.",
+            summary: "Holds the frame a clip shows a frame before range over range, to cover a flash: a stale frame, or the preview jumping for a frame in a screen recording. Picture only: just this clip is cut, the held piece is a freeze frame, and every piece stays linked to the take, whose sound plays on uncut, so nothing moves. substo check gives one for each flicker it can fix. The held piece is the clip's own ID when range starts at the clip's start, otherwise the first ID the batch makes. Several in one clip go latest first, as a cut keeps the clip's ID on the piece before it.",
             arguments: S.object([
                 "clipID": S.string("A clip of a video file on a video track."),
                 "range": S.ref("TimeRange")
@@ -790,7 +790,7 @@ extension CommandSchema {
         ),
         Entry(
             command: .adoptFormat,
-            summary: "Makes an alternate output format the canvas, so the app shows it: the project takes the format's size, and each clip's placement there becomes its main one. Scale-only keyframes (a sticker's pop) are scaled to match; a zoom that also moves is dropped with a warning, since the format never showed it. A clip hidden in the format is switched off. Use it on a copy (tandem short --copy does both), as the landscape layout is gone afterwards.",
+            summary: "Makes an alternate output format the canvas, so the app shows it: the project takes the format's size, and each clip's placement there becomes its main one. Scale-only keyframes (a sticker's pop) are scaled to match; a zoom that also moves is dropped with a warning, since the format never showed it. A clip hidden in the format is switched off. Use it on a copy (substo short --copy does both), as the landscape layout is gone afterwards.",
             arguments: S.object(["format": S.string("Format ID, like portrait.")], required: ["format"]),
             example: #"{"adoptFormat": {"format": "portrait"}}"#
         ),
@@ -855,7 +855,7 @@ extension CommandSchema {
             summary: "Replaces the keyframes of one parameter, like video.transform.scale, video.opacity, audio.gainDB or video.effects.<effectID>.<param>. An empty list removes the animation.",
             arguments: S.object([
                 "clipID": S.string(),
-                "parameter": S.string("Parameter path. See `tandem effects` for the list."),
+                "parameter": S.string("Parameter path. See `substo effects` for the list."),
                 "keyframes": S.array(S.ref("Keyframe"), "Times are seconds from the clip's start.")
             ], required: ["clipID", "parameter", "keyframes"]),
             example: #"{"setKeyframes": {"clipID": "clip_scr1", "parameter": "video.transform.scale", "keyframes": [{"time": 0, "value": 1, "interpolation": "linear"}, {"time": 2, "value": 1.5}]}}"#
@@ -867,13 +867,13 @@ extension CommandSchema {
                 "measured": S.map(S.object([
                     "integratedLUFS": S.number(),
                     "truePeakDBTP": S.number()
-                ], required: ["integratedLUFS", "truePeakDBTP"]), "Each file's measured loudness by media ID. Leave it out: Tandem fills it in from its analysis.")
+                ], required: ["integratedLUFS", "truePeakDBTP"]), "Each file's measured loudness by media ID. Leave it out: Substo Video fills it in from its analysis.")
             ]),
             example: #"{"normalizeSpeech": {}}"#
         ),
         Entry(
             command: .addMarker,
-            summary: "Adds a marker (marker, section, chapter, todo, or comment: a note Mike left for the next round).",
+            summary: "Adds a marker (marker, section, chapter, todo, or comment: a note the creator left for the next round).",
             arguments: S.object(["marker": S.ref("Marker")], required: ["marker"]),
             example: #"{"addMarker": {"marker": {"time": 95, "name": "Section 2", "kind": "section"}}}"#
         ),
@@ -896,7 +896,7 @@ extension CommandSchema {
 
 /// Checks JSON against the subset of JSON Schema the command schema uses:
 /// type, properties, required, additionalProperties, items, enum, oneOf,
-/// anyOf, minimum and maximum, plus `x-tandem-patch` for merge patches.
+/// anyOf, minimum and maximum, plus `x-substo-patch` for merge patches.
 struct SchemaValidator {
     /// In a merge patch every field is optional and null removes one.
     var patch = false
@@ -915,7 +915,7 @@ struct SchemaValidator {
             return
         }
 
-        if case .string(let model)? = rules["x-tandem-patch"] {
+        if case .string(let model)? = rules["x-substo-patch"] {
             guard case .object = value else {
                 problems.append("\(at)a patch must be a JSON object")
                 return

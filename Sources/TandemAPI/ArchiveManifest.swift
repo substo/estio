@@ -7,7 +7,7 @@ import Foundation
 ///
 ///     {
 ///       "tandemArchive": 1,
-///       "project": {"id": "prj_...", "name": "Decision Models", "file": "Decision Models.tandem"},
+///       "project": {"id": "prj_...", "name": "Decision Models", "file": "Decision Models.substo"},
 ///       "runs": [{"date": ..., "mode": "archive", "from": "/Users/...", "to": "/Volumes/...", ...}],
 ///       "files": [{"path": "media/music/score.wav", "original": "/Users/.../music/score.wav",
 ///                  "kind": "media", "bytes": 192185318, "sha256": "...", "modified": ..., "archived": ...}],
@@ -81,7 +81,7 @@ public struct ArchiveManifest: Codable, Equatable, Sendable {
     }
 
     /// The manifest in `folder`, nil when there's none. Throws when an
-    /// `archive.json` is there but isn't Tandem's, so it's never written
+    /// `archive.json` is there but isn't Substo Video's, so it's never written
     /// over.
     public static func load(from folder: URL) throws -> ArchiveManifest? {
         let url = url(in: folder)
@@ -89,7 +89,7 @@ public struct ArchiveManifest: Codable, Equatable, Sendable {
         do {
             return try decoder.decode(ArchiveManifest.self, from: Data(contentsOf: url))
         } catch {
-            throw ServiceError(.invalid, "\(url.path) isn't a Tandem archive manifest, so the archive won't write over it. Rename it and try again.")
+            throw ServiceError(.invalid, "\(url.path) isn't a Substo Video archive manifest, so the archive won't write over it. Rename it and try again.")
         }
     }
 

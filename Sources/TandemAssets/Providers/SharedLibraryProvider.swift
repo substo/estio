@@ -1,6 +1,6 @@
 import Foundation
 
-/// The shared library (`SharedLibrary`, `~/Movies/Tandem Library` by
+/// The shared library (`SharedLibrary`, `~/Movies/Substo Library` by
 /// default) as an asset source: its files indexed like an import folder's,
 /// with the `Shared library` chip. What sets it apart:
 ///
@@ -9,7 +9,7 @@ import Foundation
 ///   `Fonts/` fill the right tabs;
 /// - `Segments/` isn't indexed (segments are listed by `SegmentStore`), nor
 ///   are the READMEs;
-/// - licence notes (`tandem-licence.json`) can sit in any folder, and the
+/// - licence notes (`substo-licence.json`) can sit in any folder, and the
 ///   nearest one above a file covers it;
 /// - asset IDs are the path inside the library (`shared:Stickers/wave.mov`),
 ///   so they survive the library moving;
@@ -28,8 +28,8 @@ public final class SharedLibraryProvider: ImportFolderProvider, @unchecked Senda
         super.init(
             catalog: catalog, id: Self.providerID, displayName: "Shared library",
             rules: ProviderRules(cacheTTL: 0, notes: [
-                "Files in your Tandem Library folder, used where they are: projects refer to them, and archiving copies them in.",
-                "A tandem-licence.json in a file's folder, or any folder above it, says what it may be used for."
+                "Files in your shared asset library folder, used where they are: projects refer to them, and archiving copies them in.",
+                "A substo-licence.json in a file's folder, or any folder above it, says what it may be used for."
             ])
         )
     }
@@ -51,7 +51,7 @@ public final class SharedLibraryProvider: ImportFolderProvider, @unchecked Senda
 
     public override func status() async -> ProviderStatus {
         let library = self.library
-        return library.exists ? .ready : ProviderStatus(.ready, "\(library.root.path) isn't there yet; Tandem makes it when it opens")
+        return library.exists ? .ready : ProviderStatus(.ready, "\(library.root.path) isn't there yet; Substo Video makes it when it opens")
     }
 
     /// Scans the library, if it's there.

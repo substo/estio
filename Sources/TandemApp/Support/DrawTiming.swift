@@ -2,7 +2,7 @@ import AppKit
 import QuartzCore
 
 /// Recent draw times per view, for checking the timeline stays smooth on
-/// big projects. `tandem://debug` writes them out (and `reset=1` starts
+/// big projects. `substo://debug` writes them out (and `reset=1` starts
 /// them afresh, to time one gesture).
 @MainActor
 enum DrawTiming {

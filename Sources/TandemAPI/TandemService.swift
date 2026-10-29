@@ -14,7 +14,7 @@ import TandemRender
 /// app. The service is safe to call from any thread.
 public final class TandemService: @unchecked Sendable {
     public enum Mode: Sendable {
-        /// The app or `tandem serve` holds the project open for a while.
+        /// The app or `substo serve` holds the project open for a while.
         case hosted
         /// The CLI or MCP server opened the project for one call and closes
         /// it straight after. Undo history lives on disk in this mode.
@@ -30,7 +30,7 @@ public final class TandemService: @unchecked Sendable {
     public var screenshotProvider: (@Sendable () async throws -> Data)?
     /// Installs the fonts built-in title presets need (the caption preset's
     /// Tilt Warp) the first time the project uses one that's missing. The
-    /// app, `tandem serve` and CLI commands set the asset library's; nil
+    /// app, `substo serve` and CLI commands set the asset library's; nil
     /// leaves them missing, with a warning.
     public var fontInstaller: FontInstalling?
     /// Called for every call a client makes, reads included, with the
@@ -49,7 +49,7 @@ public final class TandemService: @unchecked Sendable {
         onCall?(operation, author)
     }
 
-    /// Finds the shared library (`~/Movies/Tandem Library`), which relink
+    /// Finds the shared library (`~/Movies/Substo Library`), which relink
     /// searches for what the given folders don't have and archive names
     /// its files by. Asked each time, so a library moved in Settings is
     /// found where it is now; tests point it at a temp folder.
@@ -199,7 +199,7 @@ public final class TandemService: @unchecked Sendable {
 
     /// Titles in a font this process can't draw, with the fix. The
     /// project's own fonts are registered first, so a font added to
-    /// assets/font/ since (by `tandem assets use`, say) counts, and the app
+    /// assets/font/ since (by `substo assets use`, say) counts, and the app
     /// draws with it from then on.
     func fontWarnings(_ project: Project) -> [String] {
         ProjectFonts.registerNew(in: folder)
@@ -305,11 +305,11 @@ public final class TandemService: @unchecked Sendable {
         let wanted = analysis.needs(for: project).contains { $0.mediaID == item.id && $0.kind == .transcript }
         switch mode {
         case .hosted where wanted:
-            return "\(item.path) has no transcript yet. It's being made in the background; `tandem wait transcript --media \(item.id)` waits for it."
+            return "\(item.path) has no transcript yet. It's being made in the background; `substo wait transcript --media \(item.id)` waits for it."
         case .hosted:
-            return "\(item.path) has no transcript: Tandem only makes them for camera takes, what's on a speech track and files someone asked for. `tandem transcribe \(item.id)` makes one and waits for it."
+            return "\(item.path) has no transcript: Substo Video only makes them for camera takes, what's on a speech track and files someone asked for. `substo transcribe \(item.id)` makes one and waits for it."
         case .headless:
-            return "\(item.path) has no transcript yet, and nothing is making one, since the project isn't open in the app. `tandem transcribe \(item.id)` makes it now and waits for it."
+            return "\(item.path) has no transcript yet, and nothing is making one, since the project isn't open in the app. `substo transcribe \(item.id)` makes it now and waits for it."
         }
     }
 
@@ -434,7 +434,7 @@ public final class TandemService: @unchecked Sendable {
 
     /// The keeps and minimums a tighten request asks for: one keep for every
     /// pause, or one for each kind of pause (`sentence`, `comma`, `mid`, or
-    /// Mike's rules with `mike`, which the others override).
+    /// the creator's rules with `mike`, which the others override).
     func pauseRules(for request: TightenRequest) throws -> TranscriptTools.PauseRules {
         func time(_ seconds: Double?) -> Time? { seconds.map { Time(seconds: $0) } }
         guard request.bySentence else {
@@ -679,7 +679,7 @@ public final class TandemService: @unchecked Sendable {
         folder.url(forPath: path).standardizedFileURL
     }
 
-    /// Refuses to write a render over the project's media or a Tandem
+    /// Refuses to write a render over the project's media or a Substo Video
     /// project file (see `RenderOutputs`).
     func checkOutput(_ output: URL, what: String) throws {
         if let reason = RenderOutputs.protectedReason(output, project: coordinator.project, folder: folder) {
@@ -812,7 +812,7 @@ public final class TandemService: @unchecked Sendable {
 
     public func screenshot(output: String?) async throws -> ImageResult {
         guard let provider = screenshotProvider else {
-            throw ServiceError(.unavailable, "Screenshots capture the Tandem app's window, so they need the app open. Use `frame` for a rendered frame.")
+            throw ServiceError(.unavailable, "Screenshots capture the Substo Video app's window, so they need the app open. Use `frame` for a rendered frame.")
         }
         let output = output.map(outputURL)
         if let output { try checkOutput(output, what: "screenshot") }

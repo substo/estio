@@ -1,10 +1,10 @@
 import Foundation
 
 // Screen recordings that play at a low frame rate where the picture moves,
-// for `tandem check`.
+// for `substo check`.
 //
 // macOS records the screen when it changes, so a screen recording's frame
-// rate wanders. In the Tandem video it dropped to 4 to 7 fps while Mike was
+// rate wanders. In the Substo Video video it dropped to 4 to 7 fps while the creator was
 // away from his desk, and he spotted "a really low frame rate" in review.
 // A still page at 4 fps looks the same as at 60, so the rate alone isn't
 // enough: it's only choppy where the picture moves. The rate comes from the
@@ -107,7 +107,7 @@ extension QualityCheck {
                 let projectRate = fps.denominator == 1 ? "\(fps.numerator)" : String(format: "%.2f", fps.framesPerSecond)
                 found.append(CheckProblem(
                     kind: .lowFrameRate, start: stretch.start, end: stretch.end,
-                    message: "Low frame rate: the screen recording moves at about \(rate) fps here, against the project's \(projectRate), for \(seconds(stretch.duration)), so it looks choppy. macOS records the screen as it changes, and slowed right down here. Cover it: in the Tandem video Mike went full screen on his camera over it (B-roll works too), or cut it.",
+                    message: "Low frame rate: the screen recording moves at about \(rate) fps here, against the project's \(projectRate), for \(seconds(stretch.duration)), so it looks choppy. macOS records the screen as it changes, and slowed right down here. Cover it: in the Substo Video video the creator went full screen on his camera over it (B-roll works too), or cut it.",
                     clipIDs: [clip.id]
                 ))
             }

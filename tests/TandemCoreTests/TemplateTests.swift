@@ -87,7 +87,7 @@ final class TemplateTests: XCTestCase {
     /// inserting it adds them, once, keeping their IDs when they're free.
     func testCarriedMediaIsAddedOnceWhenTheProjectLacksIt() throws {
         let (_, c) = try Fixture.edited()
-        let path = "/Users/mike/Movies/Tandem Library/Segments/Intro/sting.wav"
+        let path = "/Users/mike/Movies/Substo Library/Segments/Intro/sting.wav"
         let sting = MediaItem(id: "med_sting", path: "sting.wav", kind: .audio, role: .sfx, duration: t(2), hasAudio: true)
         let json = #"""
         {"id": "segment:Intro", "name": "Intro", "duration": 2, "clips": [

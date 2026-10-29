@@ -3,7 +3,7 @@ import TandemCore
 
 /// A clip's speed as the timeline's Speed menu and the inspector offer it:
 /// presets from half to double speed, and Custom…, which asks for any
-/// percentage Tandem can play.
+/// percentage Substo Video can play.
 enum ClipSpeed {
     /// The presets: 1 is normal speed.
     static let presets: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2]
@@ -60,7 +60,7 @@ enum ClipSpeed {
 
     /// Asks for Custom…'s percentage, starting from `typed`, and saying
     /// what was wrong with the last try when there's a `problem`. Nil when
-    /// Mike cancels. Tests answer it themselves: a modal alert can't be
+    /// the creator cancels. Tests answer it themselves: a modal alert can't be
     /// clicked.
     @MainActor static var ask: @MainActor (_ typed: String, _ problem: String?) -> String? = { typed, problem in
         let alert = NSAlert()

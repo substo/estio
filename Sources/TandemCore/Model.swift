@@ -1,6 +1,6 @@
 import Foundation
 
-// The Tandem project model. A project is one JSON file (`*.tandem`) that
+// The Substo Video project model. A project is one JSON file (`*.substo`) that
 // lives in the video's folder next to its media. Everything here is plain
 // value types so an edit is "copy the project, change it, validate it", and
 // undo is keeping the previous copy.
@@ -10,7 +10,7 @@ import Foundation
 //   They never change once assigned, so agents can hold on to them.
 // - Times are `Time` values, written to JSON as seconds.
 // - Positions are normalised to the canvas: x and y run 0...1 from the top
-//   left, and a scale of 1 means "fit the canvas". Mike's usual camera PiP is
+//   left, and a scale of 1 means "fit the canvas". the creator's usual camera PiP is
 //   scale 0.5 at (0.89, 0.80), the same numbers Filmora used.
 // - Video tracks are ordered bottom to top: `videoTracks[0]` is V1 and draws
 //   first, the last video track draws on top.
@@ -52,7 +52,7 @@ public struct Project: Codable, Equatable, Sendable {
         self.metadata = metadata
     }
 
-    /// A new project with Mike's usual track layout: screen on V1, camera on
+    /// A new project with the creator's usual track layout: screen on V1, camera on
     /// V2, B-roll and graphics above, then voice, music and SFX.
     public static func standard(name: String) -> Project {
         Project(
@@ -161,7 +161,7 @@ public struct MediaItem: Codable, Equatable, Identifiable, Sendable {
     public var kind: MediaKind
     public var role: MediaRole
     /// Camera and screen files from the same record-it take share a take ID,
-    /// and so do files lined up with a camera by sound (`tandem sync <file>`:
+    /// and so do files lined up with a camera by sound (`substo sync <file>`:
     /// another angle, an external mic).
     public var takeID: String?
     /// How long after the start of the take this file starts. The files of
@@ -179,7 +179,7 @@ public struct MediaItem: Codable, Equatable, Identifiable, Sendable {
     public var variableFrameRate: Bool
     /// The video codec's four-character code ("rle " for QuickTime
     /// Animation, "png " for PNG) when macOS can't decode it, as with many
-    /// stock alpha stickers. Tandem converts the file to HEVC, keeping the
+    /// stock alpha stickers. Substo Video converts the file to HEVC, keeping the
     /// alpha, and plays, analyses and renders that copy (docs/MEDIA.md).
     public var undecodableCodec: String?
     /// Cheap identity check: size, modification time and a hash of the first
@@ -194,17 +194,17 @@ public struct MediaItem: Codable, Equatable, Identifiable, Sendable {
     /// media of its own, so it's kept here for later use.
     public var livePhotoVideo: String?
     /// How late the file's picture is against its own sound, in seconds: a
-    /// webcam's picture lags its microphone (Mike's by about 0.08 s). Every
+    /// webcam's picture lags its microphone (the creator's by about 0.08 s). Every
     /// clip of the file shows its picture this much later in the file, so
     /// lips match the voice, while its sound, its cuts and the transcript's
     /// word times stay where they are. Nil or zero: in sync.
     public var pictureDelay: Time?
     /// How much of the picture's lag the recorder already took out, so the
     /// file is in sync as recorded: Record It's Camera delay, read from its
-    /// `com.mikerosoft.record-it.camera-delay` tag. Tandem doesn't add its
+    /// `com.substo.video.camera-delay` tag. Substo Video doesn't add its
     /// own default delay to such a file.
     public var pictureDelayCorrected: Time?
-    /// Someone asked for this file's transcript (`tandem transcribe`), so
+    /// Someone asked for this file's transcript (`substo transcribe`), so
     /// it's made whatever the file's role or track: a generated clip checked
     /// for made-up speech, say. Nil until asked.
     public var transcribe: Bool?
@@ -329,7 +329,7 @@ public struct Track: Codable, Equatable, Identifiable, Sendable {
 public enum ClipContent: Equatable, Sendable {
     /// Part of a media file.
     case media(mediaID: String)
-    /// A text layer drawn by Tandem.
+    /// A text layer drawn by Substo Video.
     case text(TextContent)
     /// A graphic from a template (a Remotion component or a built-in),
     /// rendered to a cached file in the background.
@@ -496,7 +496,7 @@ public struct FormatOverride: Codable, Equatable, Sendable {
 public struct Transform: Codable, Equatable, Sendable {
     /// Centre of the layer on the canvas, 0...1 from the top left.
     public var position: Point
-    /// 1 fits the source inside the canvas. 0.5 is Mike's PiP size.
+    /// 1 fits the source inside the canvas. 0.5 is the creator's PiP size.
     public var scale: Double
     /// Degrees clockwise.
     public var rotation: Double
@@ -923,11 +923,11 @@ public struct GraphicContent: Codable, Equatable, Sendable {
 
 public enum MarkerKind: String, Codable, Sendable {
     case marker, section, chapter, todo
-    /// A note Mike left at a moment for the next round of agent edits. The
+    /// A note the creator left at a moment for the next round of agent edits. The
     /// agent that does what it asks removes it.
     case comment
 
-    /// A kind from a newer Tandem reads as a plain marker rather than
+    /// A kind from a newer Substo Video reads as a plain marker rather than
     /// stopping the project opening.
     public init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
@@ -1343,7 +1343,7 @@ extension Marker {
 }
 
 extension TransitionType {
-    /// Mike's Filmora medians: Cut Slide 0.57 s, Push 0.68 to 0.84 s,
+    /// the creator's Filmora medians: Cut Slide 0.57 s, Push 0.68 to 0.84 s,
     /// Dissolve 0.48 s and the closing fade to black 1.12 s.
     public var defaultDuration: Time {
         switch self {

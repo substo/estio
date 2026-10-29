@@ -35,7 +35,7 @@ extension ExportRequest: DeferredServiceCall {
 
 /// Hosts the API for an open project: the service, the HTTP server, and
 /// the port and token in the lock file. The app starts one per open
-/// project; `tandem serve` starts one headless.
+/// project; `substo serve` starts one headless.
 public final class TandemAPIHost: @unchecked Sendable {
     public let session: ProjectSession
     public let service: TandemService
@@ -73,7 +73,7 @@ public final class TandemAPIHost: @unchecked Sendable {
         return TandemAPIHost(session: session, service: service, server: server)
     }
 
-    /// For the app, when opening a project fails because `tandem serve`
+    /// For the app, when opening a project fails because `substo serve`
     /// (or a stuck CLI command) has it: asks a serving owner to save and
     /// let go, and waits up to `timeout` seconds for the lock to clear.
     /// Returns true when the project is free to open.
@@ -107,9 +107,9 @@ public final class TandemAPIHost: @unchecked Sendable {
 
 extension ProjectSession {
     /// Opens a project the way the app should: when a CLI command has it
-    /// for a moment, waits for it to finish; when `tandem serve` has it,
+    /// for a moment, waits for it to finish; when `substo serve` has it,
     /// asks it to save and let go. Gives up after `timeout` seconds with the
-    /// usual "is open in Tandem" error.
+    /// usual "is open in Substo Video" error.
     public static func open(_ url: URL, owner: Owner, waitingUpTo timeout: TimeInterval) async throws -> ProjectSession {
         let deadline = Date().addingTimeInterval(timeout)
         var asked = false
@@ -130,11 +130,11 @@ extension ProjectSession {
 
 /// Finds the project a command means.
 public enum ProjectLocator {
-    /// An explicit path (a `.tandem` file, or a folder holding exactly
-    /// one), else `$TANDEM_PROJECT`, else the single `.tandem` in the
+    /// An explicit path (a `.substo` file, or a folder holding exactly
+    /// one), else `$SUBSTO_PROJECT`, else the single `.substo` in the
     /// current folder or the nearest parent that has one.
     public static func find(_ path: String?, in directory: URL, environment: [String: String] = ProcessInfo.processInfo.environment) throws -> URL {
-        if let path = path ?? environment["TANDEM_PROJECT"], !path.isEmpty {
+        if let path = path ?? environment["SUBSTO_PROJECT"], !path.isEmpty {
             let expanded = NSString(string: path).expandingTildeInPath
             let url = expanded.hasPrefix("/") ? URL(fileURLWithPath: expanded) : directory.appendingPathComponent(expanded)
             var isFolder: ObjCBool = false
@@ -151,11 +151,11 @@ public enum ProjectLocator {
             if parent.path == folder.path { break }
             folder = parent
         }
-        throw ServiceError(.notFound, "No .tandem project in \(directory.path) or its parents. Pass --project <file.tandem>, or create one with `tandem new <name>.tandem`.")
+        throw ServiceError(.notFound, "No .substo project in \(directory.path) or its parents. Pass --project <file.substo>, or create one with `substo new <name>.substo`.")
     }
 
     /// The project as an export rendered it, which every export leaves
-    /// beside its video (`review.mp4.tandem`): a record, not a project to
+    /// beside its video (`review.mp4.substo`): a record, not a project to
     /// work on, so never the one found.
     static func isRenderSnapshot(_ url: URL) -> Bool {
         ["mp4", "mov", "m4v"].contains(url.deletingPathExtension().pathExtension.lowercased())
@@ -169,13 +169,13 @@ public enum ProjectLocator {
             let names = projects.map(\.lastPathComponent).joined(separator: ", ")
             throw ServiceError(.badRequest, "\(folder.path) has \(projects.count) projects (\(names)). Pick one with --project.")
         }
-        if explicit { throw ServiceError(.notFound, "No .tandem project in \(folder.path).") }
+        if explicit { throw ServiceError(.notFound, "No .substo project in \(folder.path).") }
         return nil
     }
 }
 
 /// Runs service calls against a project wherever it lives: over HTTP when
-/// the app (or `tandem serve`) has it open, otherwise by opening the file
+/// the app (or `substo serve`) has it open, otherwise by opening the file
 /// directly as owner `cli` for just that call. The CLI and the MCP server
 /// both go through this.
 public final class ProjectClient: @unchecked Sendable {
@@ -245,7 +245,7 @@ public final class ProjectClient: @unchecked Sendable {
                     throw ServiceError(.locked, Self.busyMessage(lock, projectURL))
                 } else if lock.owner == .app, !noticed, Date().timeIntervalSince(started) >= noticeAfter {
                     noticed = true
-                    Self.waitNotice?("Tandem has \(projectURL.lastPathComponent) open but isn't answering yet (it's opening or closing it). Waiting for it…")
+                    Self.waitNotice?("Substo Video has \(projectURL.lastPathComponent) open but isn't answering yet (it's opening or closing it). Waiting for it…")
                 }
             } else {
                 do {
@@ -277,7 +277,7 @@ public final class ProjectClient: @unchecked Sendable {
     }
 
     /// With nothing holding the project, a call that waits on background
-    /// work opens it the way `tandem serve` does, for as long as the call
+    /// work opens it the way `substo serve` does, for as long as the call
     /// runs: the analysis runs in this process, other commands reach the
     /// project through its API meanwhile, and the app opening the project
     /// asks it to let go. Returns nil when it let go before the call
@@ -349,9 +349,9 @@ public final class ProjectClient: @unchecked Sendable {
     static func busyMessage(_ lock: ProjectSession.Lock, _ url: URL) -> String {
         switch lock.owner {
         case .app:
-            return "\(url.lastPathComponent) is open in the Tandem app (pid \(lock.pid)), but the app isn't serving its API. Update or restart the app."
+            return "\(url.lastPathComponent) is open in the Substo Video app (pid \(lock.pid)), but the app isn't serving its API. Update or restart the app."
         case .cli:
-            return "\(url.lastPathComponent) is busy in another tandem command (pid \(lock.pid)). Try again when it finishes."
+            return "\(url.lastPathComponent) is busy in another substo command (pid \(lock.pid)). Try again when it finishes."
         }
     }
 

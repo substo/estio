@@ -458,7 +458,7 @@ struct ClipRenderer {
 
     /// Draws a title's or graphic's words, or with `reach` set, only
     /// measures them (with no context). Clips of media show their pictures
-    /// and sound and carry no label (Mike found them noise): their names,
+    /// and sound and carry no label (the creator found them noise): their names,
     /// layouts and levels are in the hover tooltip (`hoverDetails`).
     private func drawLabel(_ clip: Clip, lane: TimelineLane, rect: CGRect, style: Theme.ClipStyle, in context: CGContext?) {
         let left = max(rect.minX, pinX)

@@ -5,7 +5,7 @@ import TandemMedia
 // MARK: - sync
 
 /// Puts a take's picture back in step with its sound. A webcam's picture
-/// lags its microphone (Mike's by about 0.08 s), so lips and voice drift
+/// lags its microphone (the creator's by about 0.08 s), so lips and voice drift
 /// apart. This sets how late each file's picture is
 /// (`MediaItem.pictureDelay`): every clip of the file then shows its
 /// picture that much later in the file, in the app, frames, review clips,
@@ -24,7 +24,7 @@ public struct SyncRequest: ServiceCall {
     public var delay: Time?
     /// The files to set it on. Default: every camera take.
     public var media: [String]?
-    /// Make it the delay new camera takes get too (Tandem's settings).
+    /// Make it the delay new camera takes get too (Substo Video's settings).
     public var makeDefault: Bool?
     /// Files to line up with the camera by their sound: media IDs or paths.
     public var files: [String]?
@@ -75,7 +75,7 @@ public struct SyncResult: Codable, Sendable {
     public var revision: Int
     /// Every file with a moving picture, camera takes first.
     public var files: [SyncFile]
-    /// The delay new camera takes get (Tandem's settings).
+    /// The delay new camera takes get (Substo Video's settings).
     public var defaultDelay: Time
     /// The edit, when the delay changed or files were synced by sound.
     public var applied: ApplyResult?
@@ -165,8 +165,8 @@ extension SyncResult: ReadableResult {
             }
         }
         lines.append(defaultDelay == .zero
-            ? "New camera takes keep their picture as recorded (tandem sync <seconds> --default sets a delay for them)."
-            : "New camera takes get \(Self.milliseconds(defaultDelay)) (Tandem's settings).")
+            ? "New camera takes keep their picture as recorded (substo sync <seconds> --default sets a delay for them)."
+            : "New camera takes get \(Self.milliseconds(defaultDelay)) (Substo Video's settings).")
         return lines.joined(separator: "\n")
     }
 }
@@ -184,7 +184,7 @@ extension TandemService {
             let targets: [MediaItem]
             if let ids = request.media {
                 targets = try ids.map { id in
-                    guard let item = project.media(id) else { throw ServiceError(.notFound, "No media with ID \(id). tandem sync lists the files.") }
+                    guard let item = project.media(id) else { throw ServiceError(.notFound, "No media with ID \(id). substo sync lists the files.") }
                     guard item.kind == .video, item.hasVideo else { throw ServiceError(.badRequest, "\(item.path) has no moving picture to delay.") }
                     return item
                 }
@@ -205,11 +205,11 @@ extension TandemService {
                 do {
                     try settings.save()
                 } catch {
-                    throw ServiceError(.unavailable, "Couldn't save Tandem's settings: \(error.localizedDescription)")
+                    throw ServiceError(.unavailable, "Couldn't save Substo Video's settings: \(error.localizedDescription)")
                 }
             }
         } else if request.media != nil || request.makeDefault == true {
-            throw ServiceError(.badRequest, "Give the delay in seconds too, like tandem sync 0.08.")
+            throw ServiceError(.badRequest, "Give the delay in seconds too, like substo sync 0.08.")
         }
         let (project, revision) = coordinator.snapshot()
         let files = project.media.filter { $0.kind == .video && $0.hasVideo }
@@ -218,7 +218,7 @@ extension TandemService {
         return SyncResult(revision: revision, files: files, defaultDelay: Time(seconds: settings.cameraPictureDelay), applied: applied)
     }
 
-    /// `tandem sync <file>...`: lines files up with the camera by sound,
+    /// `substo sync <file>...`: lines files up with the camera by sound,
     /// puts them in its take and places them, as one undo step.
     public func syncBySound(_ request: SyncRequest, context: CallContext) async throws -> SyncResult {
         guard request.delay == nil, request.media == nil, request.makeDefault == nil else {
@@ -325,7 +325,7 @@ extension TandemService {
     private func loadSound(_ item: MediaItem) async throws -> SoundSync.Recording {
         let url = folder.url(for: item)
         guard FileManager.default.fileExists(atPath: url.path) else {
-            throw ServiceError(.notFound, "\(item.path) is missing. tandem relink finds moved files.")
+            throw ServiceError(.notFound, "\(item.path) is missing. substo relink finds moved files.")
         }
         do {
             return try await SoundSync.load(url)

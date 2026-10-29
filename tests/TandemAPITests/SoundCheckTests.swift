@@ -239,47 +239,47 @@ final class SoundCheckTests: XCTestCase {
     }
 }
 
-/// The options through the built `tandem`, rendering for real. The
+/// The options through the built `substo`, rendering for real. The
 /// fixture's files don't exist, so the mix is silent.
 final class SoundCheckCLITests: XCTestCase {
     func testLoudnessClipAndAssetsShowFromTheCommandLine() async throws {
-        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "substo isn't built")
         let cli = CLITests()
-        let folder = TempFolder("tandem-sound-cli")
+        let folder = TempFolder("substo-sound-cli")
         _ = try APIFixture.write(to: folder.url)
 
-        let curve = try cli.tandem("loudness", "--from", "0:01", "--to", "0:02", "--tracks", "Music", in: folder.url)
+        let curve = try cli.substo("loudness", "--from", "0:01", "--to", "0:02", "--tracks", "Music", in: folder.url)
         XCTAssertEqual(curve.status, 0, curve.stderr)
         XCTAssertTrue(curve.stdout.hasPrefix("Music from 00:01.000 to 00:02.000, every 0.1 s"), curve.stdout)
         XCTAssertTrue(curve.stdout.contains("00:01.500   silent"), curve.stdout)
 
-        let gains = try cli.tandem("loudness", "--from", "1", "--to", "2", "--gains", "--json", in: folder.url)
+        let gains = try cli.substo("loudness", "--from", "1", "--to", "2", "--gains", "--json", in: folder.url)
         XCTAssertEqual(gains.status, 0, gains.stderr)
         let result = try ServiceJSON.decoder().decode(LoudnessResult.self, from: Data(gains.stdout.utf8))
         XCTAssertEqual(result.gains?.map(\.track), ["Voice", "Music"])
         XCTAssertEqual(result.curve?.points.count, 11)
 
-        let over = try cli.tandem("loudness", "--from", "0", "--to", "0:02", "--over", "-1", in: folder.url)
+        let over = try cli.substo("loudness", "--from", "0", "--to", "0:02", "--over", "-1", in: folder.url)
         XCTAssertEqual(over.status, 0, over.stderr)
         XCTAssertTrue(over.stdout.contains("No window peaks over -1.0 dBFS."), over.stdout)
-        let badLevel = try cli.tandem("loudness", "--over", "loud", in: folder.url)
+        let badLevel = try cli.substo("loudness", "--over", "loud", in: folder.url)
         XCTAssertEqual(badLevel.status, 2, badLevel.stderr)
 
-        let wrong = try cli.tandem("loudness", "--tracks", "Musik", in: folder.url)
+        let wrong = try cli.substo("loudness", "--tracks", "Musik", in: folder.url)
         XCTAssertEqual(wrong.status, 1)
         XCTAssertTrue(wrong.stderr.contains("Audio tracks: Voice, Music, SFX."), wrong.stderr)
 
-        let help = try cli.tandem("help", "clip", in: folder.url)
+        let help = try cli.substo("help", "clip", in: folder.url)
         XCTAssertTrue(help.stdout.contains("--audio-only"), help.stdout)
-        let badOption = try cli.tandem("frame", "1", "--tracks", "Music", in: folder.url)
+        let badOption = try cli.substo("frame", "1", "--tracks", "Music", in: folder.url)
         XCTAssertEqual(badOption.status, 2)
 
         let root = folder.url.appendingPathComponent("library", isDirectory: true)
-        let env = ["TANDEM_ASSETS_ROOT": root.path, "TANDEM_ASSETS_OFFLINE": "1"]
-        let missing = try cli.tandem("assets", "show", "noto:zzzz", in: folder.url, env: env)
+        let env = ["SUBSTO_ASSETS_ROOT": root.path, "SUBSTO_ASSETS_OFFLINE": "1"]
+        let missing = try cli.substo("assets", "show", "noto:zzzz", in: folder.url, env: env)
         XCTAssertEqual(missing.status, 1)
         XCTAssertTrue(missing.stderr.contains("No asset noto:zzzz in the library"), missing.stderr)
-        let noID = try cli.tandem("assets", "show", in: folder.url, env: env)
+        let noID = try cli.substo("assets", "show", in: folder.url, env: env)
         XCTAssertEqual(noID.status, 2)
     }
 }

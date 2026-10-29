@@ -4,7 +4,7 @@ import XCTest
 @testable import TandemAPI
 @testable import TandemCore
 
-/// `tandem frames`: several frames rendered the way `frame` renders them,
+/// `substo frames`: several frames rendered the way `frame` renders them,
 /// laid out on one labelled contact sheet.
 final class ContactSheetTests: XCTestCase {
     func image(_ data: Data) throws -> CGImage {
@@ -74,7 +74,7 @@ final class ContactSheetTests: XCTestCase {
         assertServiceError(.badRequest) { _ = try h.service.prepareFrames(FramesRequest(every: t(0))) }
         assertServiceError(.badRequest) { _ = try h.service.prepareFrames(FramesRequest(times: [t(1)], width: 10)) }
         assertServiceError(.badRequest) { _ = try h.service.prepareFrames(FramesRequest(every: t(10), from: t(30), to: t(20))) }
-        assertServiceError(.invalid) { _ = try h.service.prepareFrames(FramesRequest(times: [t(1)], output: "Decision Models.tandem")) }
+        assertServiceError(.invalid) { _ = try h.service.prepareFrames(FramesRequest(times: [t(1)], output: "Decision Models.substo")) }
         do {
             _ = try h.service.prepareFrames(FramesRequest(every: t(0.5)))
             XCTFail("120 frames is too many for one sheet")

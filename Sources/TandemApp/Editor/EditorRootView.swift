@@ -301,6 +301,7 @@ private struct LibraryTabButton: View {
         case .effects: return "Effects, transitions and looks: drag one onto a clip or a cut"
         case .graphics: return "Graphics: icons, logos, stickers and templates"
         case .audio: return "Audio: music and sound effects"
+        case .styles: return "Styles: reference recipes for selected timeline clips"
         }
     }
 }
@@ -352,6 +353,13 @@ struct LibraryIcon: View {
                 path.move(to: p(points[0].0, points[0].1))
                 for point in points.dropFirst() { path.addLine(to: p(point.0, point.1)) }
                 context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1.3, lineCap: .round, lineJoin: .round))
+            case .styles:
+                let box = Path(roundedRect: CGRect(x: 2 * sx, y: 1 * sy, width: 12 * sx, height: 12 * sy), cornerRadius: 2)
+                context.stroke(box, with: .color(color), lineWidth: 1.2)
+                var lines = Path()
+                lines.move(to: p(5, 5)); lines.addLine(to: p(11, 5))
+                lines.move(to: p(5, 8)); lines.addLine(to: p(10, 8))
+                context.stroke(lines, with: .color(color), lineWidth: 1.2)
             }
         }
     }

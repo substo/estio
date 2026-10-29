@@ -4,7 +4,7 @@ import Foundation
 import TandemCore
 
 /// Reads every frame of stretches of the timeline, composed small, and
-/// measures each for `tandem check` (`QualityCheck`): a grid of tiles over
+/// measures each for `substo check` (`QualityCheck`): a grid of tiles over
 /// the frame, each tile's colour and how evenly lit it is.
 ///
 /// It reads the composition the way an export does (sequentially, through

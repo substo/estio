@@ -16,7 +16,7 @@ import Vision
 /// - It's a recording, not a render: its metadata names the camera that
 ///   shot it (phones and cameras write their make and model), or it's in
 ///   `source/`, where takes go. A render of an edit has a voice and a face
-///   too, and Mike's older folders keep renders beside the project.
+///   too, and the creator's older folders keep renders beside the project.
 /// - It has a voice: Apple's sound classifier hears speech in at least a
 ///   quarter of a few seconds sampled across it. record-it takes, with
 ///   typing and pauses between sentences, score 30 to 70%.
@@ -148,7 +148,7 @@ public enum CameraTakes {
     }
 
     /// True for a path in the project folder's `source/`, where record-it
-    /// and Mike put takes, at any depth.
+    /// and the creator put takes, at any depth.
     static func isInTakesFolder(_ path: String) -> Bool {
         guard !path.hasPrefix("/") else { return false }
         return path.split(separator: "/").dropLast().contains { $0.lowercased() == "source" }

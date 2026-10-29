@@ -1,7 +1,7 @@
 import Foundation
 
 extension EDLRecipe {
-    /// Names of the recipes built into the importer, for `tandem import edl --recipe`.
+    /// Names of the recipes built into the importer, for `substo import edl --recipe`.
     public static let builtInNames = ["decision-models"]
 
     /// A built-in recipe by name, or nil if there's no such recipe.
@@ -371,8 +371,8 @@ private let decisionModelsRecipeJSON = #"""
     "Takes: the three record-it sessions. EDL time is main-camera.mov, the sessions end to end, so each take starts at its session offset (build_wfp.py CAM_SESSIONS). A session's screen and camera share a clock (use_originals.py, intro.py).",
     "Voice and intro at the project's speech level (-20 LUFS), about where v14 played them (voice -20.4, intro -18.8 LUFS in its export). build_wfp.py aimed Filmora's LoudnessGain at -28.74 LUFS (+1.6 to +4.0 dB on each session), but Filmora adds it after its own Auto Normalization to about -24 LUFS; at -28.74 the voice sat 8 dB lower against the music and sound effects than in v14. level_voice.py's per-clip smoothing needed audio analysis and isn't reproduced.",
     "PiP and camera grade copied from the AI Gateway template clips build_wfp.py cloned: scale 50 at (0.890, 0.800); HSL red -17, purple -21, blue -3; vignette -34; black level +7.",
-    "Intro v5.mp4 (intro.py) replaced the Magic Jev Ball segments before take time 149.0, as in Mike's Decision Models.wfp.",
-    "Cut adjustments are fix_cutoffs.py's output as saved in Decision Models v5 (tinkerdesk).wfp. Four of them also carry trims Mike made by hand before it ran.",
+    "Intro v5.mp4 (intro.py) replaced the Magic Jev Ball segments before take time 149.0, as in the creator's Decision Models.wfp.",
+    "Cut adjustments are fix_cutoffs.py's output as saved in Decision Models v5 (tinkerdesk).wfp. Four of them also carry trims the creator made by hand before it ran.",
     "Layout override, transitions and their durations from apply_v6.py; sound rules from replace_sfx.py; the cha-ching from add_sfx.py, just after 'cheaper'.",
     "Graphics from add_gfx.py, with its v7 timeline times turned into take times through Decision Models v7.wfp.",
     "Music: one ElevenLabs cue per section, laid out as assemble.py did (1.5 s crossfades centred on the section cuts, the outro ending with the video), levelled to -20 LUFS like the stitched score, at the -27.73 dB replace_music.py gave it in v14. Beat-alignment offsets weren't recorded, so cues start at 0.",

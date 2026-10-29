@@ -4,7 +4,7 @@ import TandemAPI
 import TandemAssets
 import TandemCore
 
-/// The Text tab's Segments: bits of timeline Mike saved to reuse (an
+/// The Text tab's Segments: bits of timeline the creator saved to reuse (an
 /// intro, an outro, like and subscribe, comment below), from the shared
 /// library's Segments folder. They sit with the Text tab's templates
 /// because they are templates: a group of clips that go in together,

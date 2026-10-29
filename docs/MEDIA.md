@@ -1,4 +1,4 @@
-# Tandem media
+# Substo Video media
 
 How `TandemMedia` finds, describes and analyses the files in a video
 folder. `ARCHITECTURE.md` is the contract; this is the detail behind it.
@@ -12,7 +12,7 @@ folder. `ARCHITECTURE.md` is the contract; this is the detail behind it.
 | `Fingerprint.swift` | `size-mtime-sha256` identity |
 | `TakePairing.swift` | record-it takes and the `.take.json` sidecar |
 | `FolderWatcher.swift` | FSEvents, debounced, settled |
-| `AnalysisCache.swift` | `.tandem/cache/<kind>/<key>/`, atomic commits, eviction |
+| `AnalysisCache.swift` | `.substo/cache/<kind>/<key>/`, atomic commits, eviction |
 | `JobScheduler.swift` | Priorities, limits, dedupe, preemption, cancellation |
 | `MediaAnalysis.swift` | The public face: cached reads, requests, state |
 | `AnalysisSettings.swift` | Per-kind settings and algorithm versions |
@@ -27,7 +27,7 @@ folder. `ARCHITECTURE.md` is the contract; this is the detail behind it.
 folder (`scanReport` also says what's missing, renamed, unreadable, and
 anything worth telling Mike).
 
-- Skips hidden files and folders, `.tandem`, `exports`, `node_modules`,
+- Skips hidden files and folders, `.substo`, `exports`, `node_modules`,
   `.build`, `.git`, `*.wfp.dir` and package contents. Follows symlinks to
   files, never to folders.
 - Media extensions: video `mov mp4 m4v`, audio `m4a mp3 wav aif aiff caf`,
@@ -79,10 +79,10 @@ with "Cannot Decode".
   the conversion and then that job.
 - Frame grabs and exports wait for any conversion they need (docs/RENDER.md);
   the viewer leaves the clip out until the copy lands.
-- ffmpeg is found through `TANDEM_FFMPEG`, the PATH, `~/.local/bin`, then
+- ffmpeg is found through `SUBSTO_FFMPEG`, the PATH, `~/.local/bin`, then
   Homebrew. Without it the conversion fails, saying to install it, and the
   file is left out of renders with that warning.
-- Scans before Tandem checked this didn't mark such files. A rescan gives
+- Scans before Substo Video checked this didn't mark such files. A rescan gives
   alpha video without the mark a quick look (its header, under a
   millisecond; HEVC and ProRes are skipped, since asking about HEVC with
   alpha takes 5) and probes it again if macOS can't decode it, and renders
@@ -93,11 +93,11 @@ that says what it holds (`music`, `sfx`, `broll`, `graphics`,
 `motion-graphics`, `stickers`...), words in the file name, then the kind.
 Stray audio under 10 s is `sfx`, longer is `music`. A new video none of
 that explains can still be a camera take (below). Roles are only worked out
-for files new to the project, so a role Mike changed stays changed.
+for files new to the project, so a role the creator changed stays changed.
 
 ### Camera takes nothing names
 
-A phone video of Mike talking to the camera (`source/IMG_0151.MOV` in the
+A phone video of the creator talking to the camera (`source/IMG_0151.MOV` in the
 workbench short) used to be `other`, so it got no transcript until its role
 was set by hand. `CameraTakes` makes a new video that nothing else explains
 (role `other`, with picture and sound, 4 s or longer) the camera take when
@@ -106,7 +106,7 @@ all three hold:
 - **A recording, not a render.** Its metadata names the camera that shot
   it (phones and cameras write their make and model: "Apple iPhone XS
   Max"), or it's in `source/`. Renders of an edit have a voice and a face
-  too, and Mike's Filmora-era folders keep them beside the project
+  too, and the creator's Filmora-era folders keep them beside the project
   (`Decision Models v14.mp4`, `edit/preview/s060.mp4`); none of them has a
   camera's make or model.
 - **A voice.** Apple's built-in sound classifier
@@ -125,7 +125,7 @@ all three hold:
   (`photos/IMG_0141.MOV`: speech 21 of 22, no face). A PiP render has faces
   of 0.12 to 0.16, which is why renders are kept out by the first rule.
 
-`tandem new` prints each camera take with its reason and the `updateMedia`
+`substo new` prints each camera take with its reason and the `updateMedia`
 that changes it (`ScanReport.cameraTakes`, through
 `ProjectSession.refreshMediaReport`). The app's single-file probe, for
 files dropped from Finder, runs the same check; a dropped video lands in
@@ -152,7 +152,7 @@ isn't media of its own.
   it is.
 - Once paired, a scan skips the movie without probing it. A still whose
   movie has gone forgets it; a movie that lands after its still joins it.
-- The movie is one of the project's files: `tandem archive` copies it in
+- The movie is one of the project's files: `substo archive` copies it in
   beside its still and points `livePhotoVideo` at the copy, relink takes
   the movie beside the still it finds, and a saved segment copies it too.
 - Dropped on the app, a movie goes beside its still (`graphics/`, or
@@ -194,7 +194,7 @@ to 0 with a note in `ScanReport.notes`.
 debounced (1 s), and a file is only reported once its size and date haven't
 changed for `settleTime` (2 s) by this Mac's clock, so a recording in
 progress is reported once, at the end, and a file dated in the future
-still settles. Folder events inside `.tandem` and `exports` never cause a
+still settles. Folder events inside `.substo` and `exports` never cause a
 rescan, so analysis commits don't make the watcher walk the folder.
 The app should call `refreshMedia()` (or `scanReport`) on each batch and then
 `requestDefaults`, and `stop()` the watcher when the project closes (safe
@@ -202,7 +202,7 @@ from inside the handler too).
 
 ## Cache
 
-`.tandem/cache/<kind>/<key>/` with
+`.substo/cache/<kind>/<key>/` with
 `key = sha256("<fingerprint>|<kind>|<algorithmVersion>|<settings JSON>")`.
 Each entry holds `entry.json` (`CacheManifest`: kind, key, fingerprint,
 version, settings, source path, bytes, files) and the result files. Jobs
@@ -363,7 +363,7 @@ Notes on each:
   `matteSmoothing: .off` still makes version 1 (person instance mask filling
   holes of the closed person mask, per frame).
 
-  Why: Mike saw the cutout flicker. Scored on 20 s where he talks and
+  Why: the creator saw the cutout flicker. Scored on 20 s where he talks and
   gestures in two takes (A: 105434 from 294 s, B: 144426 from 334 s) as the
   mean matte change (0 to 255) between frames where the picture barely
   changed, plus frames where a patch of more than 0.25% of the still
@@ -404,10 +404,10 @@ Notes on each:
   frame at a time with its recurrent state carried from frame to frame,
   frames letterboxed into the model's input and the alpha scaled up to the
   matte box. The RVM repository is GPL-3.0 (the model file's metadata says
-  Apache 2.0; Tandem goes by the repository), so the 7.5 MB model is never
+  Apache 2.0; Substo Video goes by the repository), so the 7.5 MB model is never
   committed or bundled: `RVMModelStore` downloads it from the official
   v1.0.0 release on first use into
-  `~/Library/Application Support/Tandem/Models/rvm/` and checks its
+  `~/Library/Application Support/Substo/Models/rvm/` and checks its
   SHA-256. Tests never download it (the store refuses while XCTest is
   loaded). Both cutout modes share one RVM matte; its cache key has its own
   version (`RVMMatte.version`, 2 since the edge fix). Making RVM the default
@@ -487,15 +487,15 @@ Real footage, release build (`report.txt` has the latest numbers):
 
 ## Tests
 
-The speech-service test is opt-in with `TANDEM_SPEECH_TESTS=1`, because
+The speech-service test is opt-in with `SUBSTO_SPEECH_TESTS=1`, because
 SpeechAnalyzer can install a language model and needs macOS 26 speech services.
 Default tests do not download models.
 
 ```bash
 swift test --package-path .                      # about 9 s of media tests
-TANDEM_REAL_MEDIA=1 swift test -c release -Xswiftc -enable-testing \
+SUBSTO_REAL_MEDIA=1 swift test -c release -Xswiftc -enable-testing \
   --package-path . --filter RealMediaTests       # about a minute
-TANDEM_REAL_MEDIA_FULL=1 ...                                # adds the whole-take transcript
+SUBSTO_REAL_MEDIA_FULL=1 ...                                # adds the whole-take transcript
 ```
 
 The default tests make their media on the fly (AVAssetWriter frames and

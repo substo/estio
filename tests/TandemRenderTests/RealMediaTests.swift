@@ -4,10 +4,10 @@ import TandemCore
 import TandemMedia
 @testable import TandemRender
 
-/// Speed and look on Mike's real footage. Opt in with TANDEM_REAL_MEDIA=1,
+/// Speed and look on Mike's real footage. Opt in with SUBSTO_REAL_MEDIA=1,
 /// ideally in release:
 ///
-///     TANDEM_REAL_MEDIA=1 swift test -c release -Xswiftc -enable-testing \
+///     SUBSTO_REAL_MEDIA=1 swift test -c release -Xswiftc -enable-testing \
 ///         --package-path . --filter RealMediaTests
 ///
 /// Reads ~/dev/convex/convex-videos/decision-models (never writes there) and
@@ -20,7 +20,7 @@ final class RealMediaTests: XCTestCase {
     let start = 1010.0
 
     override func setUpWithError() throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["TANDEM_REAL_MEDIA"] == "1", "set TANDEM_REAL_MEDIA=1 to run")
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SUBSTO_REAL_MEDIA"] == "1", "set SUBSTO_REAL_MEDIA=1 to run")
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
     }
 
@@ -90,7 +90,7 @@ final class RealMediaTests: XCTestCase {
 
     // MARK: The imported v14 edit against Filmora's export
 
-    let v14Project = URL(fileURLWithPath: NSString(string: "~/dev/me/tandem-research/imports/decision-models-v14/decision-models-v14.tandem").expandingTildeInPath)
+    let v14Project = URL(fileURLWithPath: NSString(string: "~/dev/me/tandem-research/imports/decision-models-v14/decision-models-v14.substo").expandingTildeInPath)
 
     func v14() throws -> RenderContext {
         guard FileManager.default.fileExists(atPath: v14Project.path) else { throw XCTSkip("no imported v14 project") }
@@ -99,7 +99,7 @@ final class RealMediaTests: XCTestCase {
         return RenderContext(project: project, folder: ProjectFolder(projectFile: v14Project))
     }
 
-    /// Frames from Tandem and from Filmora's v14 export at the same times,
+    /// Frames from Substo Video and from Filmora's v14 export at the same times,
     /// saved side by side, with the mean difference per pixel.
     func testDecisionModelsV14AgainstFilmora() async throws {
         let context = try v14()
@@ -154,7 +154,7 @@ final class RealMediaTests: XCTestCase {
     /// Frames AVFoundation couldn't seek to in the remuxed screen recording
     /// (open-GOP leading frames, long variable frame rate gaps, cuts that
     /// start on leading frames) against Filmora's export: grabbed the way
-    /// `tandem frame` does, and range exports starting on them (which used
+    /// `substo frame` does, and range exports starting on them (which used
     /// to stall).
     func testV14HardFramesMatchFilmora() async throws {
         let context = try v14()
@@ -201,7 +201,7 @@ final class RealMediaTests: XCTestCase {
             exported.requestedTimeToleranceAfter = .zero
             // The first frame against Filmora; the next ones against our own
             // grabs. Filmora shows the nearest frame of variable frame rate
-            // footage, and Tandem the last one at or before the time, so
+            // footage, and Substo Video the last one at or before the time, so
             // mid-scroll they can be a frame apart.
             let first = Bitmap(try await exported.image(at: .zero).image)
             let filmora = blockDifference(first, Bitmap(try await generator.image(at: CMTime(seconds: seconds, preferredTimescale: 600)).image))

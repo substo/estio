@@ -4,7 +4,7 @@ import TandemCore
 /// The review log as the timeline shows it now: the clips an agent added
 /// or changed, the marks where it took something out, the stretches of
 /// time with changes in them for the ruler's band, and the places the next
-/// and previous change commands stop, so Mike watches only what changed.
+/// and previous change commands stop, so the creator watches only what changed.
 struct TimelineReview: Equatable {
     /// One agent edit, for the band's tooltip.
     struct Edit: Equatable {

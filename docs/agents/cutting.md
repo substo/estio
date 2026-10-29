@@ -5,14 +5,14 @@ Recipes for tightening pauses, cutting a phrase or a rough cut, joining through-
 ## Tighten pauses
 
 ```bash
-tandem pauses --min 0.5                      # what's there
-tandem tighten --mike                        # the plan, nothing changes
-tandem tighten --mike --protect 2:14.5,5:03 --widen --apply
-tandem clip 0:00 1:00 -o /tmp/review.mp4     # watch the result
-tandem undo                                  # if it's too tight
+substo pauses --min 0.5                      # what's there
+substo tighten --mike                        # the plan, nothing changes
+substo tighten --mike --protect 2:14.5,5:03 --widen --apply
+substo clip 0:00 1:00 -o /tmp/review.mp4     # watch the result
+substo undo                                  # if it's too tight
 ```
 
-`--mike` is Mike's rules ("How Mike likes a take cut" in the skill): 0.4 s
+`--mike` is the creator's rules ("How the creator likes a take cut" in the skill): 0.4 s
 after a sentence, 0.12 s after a comma and 0.08 s for a thinking pause
 mid-sentence, and only pauses of 0.5 s or more change, so breaths and
 natural pauses stay as he said them. What a pause follows comes from the
@@ -25,7 +25,7 @@ shortest comma or mid-sentence one. Each cut is as many whole frames as fit,
 centred in the pause, so what's kept is within a frame of the keep.
 
 `--protect` takes timeline times, comma separated (or the option again):
-the pauses containing them are left alone, for the beats Mike wants kept (a
+the pauses containing them are left alone, for the beats the creator wants kept (a
 point landing, a reaction, something animating on screen). The plan lists
 what it protected.
 
@@ -57,7 +57,7 @@ plan's revision>`.
 ## Cut a phrase
 
 ```bash
-tandem search "as I said before"
+substo search "as I said before"
 ```
 
 ```
@@ -66,7 +66,7 @@ tandem search "as I said before"
 ```
 
 Cut that range from the whole take, reaching into the pauses either side so
-no breath is left behind (`tandem pauses --from 2:10 --to 2:20` shows them):
+no breath is left behind (`substo pauses --from 2:10 --to 2:20` shows them):
 
 ```json
 {"label": "Cut the repeated phrase", "expectedRevision": 57, "commands": [
@@ -74,13 +74,13 @@ no breath is left behind (`tandem pauses --from 2:10 --to 2:20` shows them):
 ]}
 ```
 
-Then check it with `tandem check --cuts --from 2:10 --to 2:20` (it gives the
-trim if a word got clipped) and listen with `tandem clip 2:08 2:20`.
+Then check it with `substo check --cuts --from 2:10 --to 2:20` (it gives the
+trim if a word got clipped) and listen with `substo clip 2:08 2:20`.
 
 For several phrases, or a rough cut that drops false starts and retakes,
 list every range as you read it in one `cutRanges` command rather than
 working out the order of ripple deletes. Its ranges are all in the times
-before it, in any order; Tandem cuts them latest first, cuts overlapping or
+before it, in any order; Substo Video cuts them latest first, cuts overlapping or
 touching ranges once, and one undo puts them all back. To keep only some
 stretches, cut the gaps between them:
 
@@ -98,15 +98,15 @@ so nothing changes there, but the timeline still looks cut up. Join them
 rather than lifting and trimming clips by hand:
 
 ```bash
-tandem join                                  # what it would join, and the cuts it leaves and why
-tandem join --apply                          # one undo step
-tandem join --from 2:00 --to 3:30 --apply    # only cuts in that stretch
-tandem apply '{"join": {"clipID": "clip_k3f9x2mq"}}'   # only the cut after that clip
+substo join                                  # what it would join, and the cuts it leaves and why
+substo join --apply                          # one undo step
+substo join --from 2:00 --to 3:30 --apply    # only cuts in that stretch
+substo apply '{"join": {"clipID": "clip_k3f9x2mq"}}'   # only the cut after that clip
 ```
 
 Each joined clip keeps the first clip's ID and link group and plays exactly
 what the two did; the camera, screen and voice of a take join together,
-and hundreds of cuts join in one go. As nothing Mike would see or hear
+and hundreds of cuts join in one go. As nothing the creator would see or hear
 changes, a join (with `join` or by hand) adds nothing to his review, and a
 piece still waiting for it is highlighted in the clip it joined. A cut is
 left, and listed with the reason, when joining would change what plays: a
@@ -119,26 +119,26 @@ that cut should go too. In MCP: `join {}`, then `join {"apply": true,
 ## Keep the camera in sync
 
 ```bash
-tandem sync                                  # how late each file's picture is
-tandem sync 0.08                             # every camera take: picture 80 ms late
-tandem sync 0.05 --media med_screen          # one file
-tandem sync 0.08 --default                   # also what new camera takes get
+substo sync                                  # how late each file's picture is
+substo sync 0.08                             # every camera take: picture 80 ms late
+substo sync 0.05 --media med_screen          # one file
+substo sync 0.08 --default                   # also what new camera takes get
 ```
 
-A webcam's picture lags its microphone (Mike's by about 75 ms), so lips
+A webcam's picture lags its microphone (the creator's by about 75 ms), so lips
 and voice drift apart. A file's `pictureDelay` makes every clip of it show
 its picture that much later in the file, in the app, frames, review clips,
 `check` and exports. The sound, the cuts and the transcript's word times
-stay where they are, so nothing else moves. New webcam takes get Tandem's
+stay where they are, so nothing else moves. New webcam takes get Substo Video's
 default (Settings in the app, or `--default`); a camera's take (a timecode
 track, or a phone's make and model) records in step and gets none. Never slip clips by hand as
-well, or the delay doubles. `tandem media` shows it as "picture 80 ms
+well, or the delay doubles. `substo media` shows it as "picture 80 ms
 late, shown in sync". In MCP: `sync {"delay": 0.08}`.
 
 Record It now takes the lag out as it records (its Settings → Camera
-delay) and tags the file `com.mikerosoft.record-it.camera-delay`. Tandem
-reads the tag (`pictureDelayCorrected`, "in sync as recorded" in `tandem
-media`), gives those takes no delay of its own, and `tandem sync` leaves
+delay) and tags the file `com.substo.video.camera-delay`. Substo Video
+reads the tag (`pictureDelayCorrected`, "in sync as recorded" in `substo
+media`), gives those takes no delay of its own, and `substo sync` leaves
 them alone.
 
 ## Add another angle or an external mic
@@ -147,9 +147,9 @@ A second camera or a separate recorder starts at its own moment, so line
 it up with the camera take by sound rather than by hand:
 
 ```bash
-tandem sync "source/Ian close-up.mov" "source/Ian mic.wav"   # measure, set their take, place them
-tandem apply '{"showAngle": {"range": {"start": "4:57", "end": "5:18"}, "trackID": "Angle 2"}}'
-tandem clip 4:50 5:25 -o /tmp/angle.mp4                       # watch and listen
+substo sync "source/Ian close-up.mov" "source/Ian mic.wav"   # measure, set their take, place them
+substo apply '{"showAngle": {"range": {"start": "4:57", "end": "5:18"}, "trackID": "Angle 2"}}'
+substo clip 4:50 5:25 -o /tmp/angle.mp4                       # watch and listen
 ```
 
 ```
@@ -169,7 +169,7 @@ Unrelated sound scores under 10 for confidence, and under 15 is refused
 with nothing changed, so check the file before trying again.
 
 In one undo step each file joins the camera's take (`takeID`,
-`takeOffset`, shown by `tandem media`) and goes beside the take's clips,
+`takeOffset`, shown by `substo media`) and goes beside the take's clips,
 linked one clip a track, so ripple cuts, trims and moves keep it in step.
 The take is cut where the file starts and stops (through-edits; nothing
 plays differently).

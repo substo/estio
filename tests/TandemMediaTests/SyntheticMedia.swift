@@ -342,7 +342,7 @@ class TempFolderTestCase: XCTestCase {
 
     override func setUpWithError() throws {
         temp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("tandem-media-tests", isDirectory: true)
+            .appendingPathComponent("substo-media-tests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
     }

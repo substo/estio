@@ -3,7 +3,7 @@ import XCTest
 import TandemCore
 
 /// What a new project takes from the media it finds. The end-to-end
-/// `tandem new` runs are in CLITests.
+/// `substo new` runs are in CLITests.
 final class NewProjectTests: XCTestCase {
     func take(_ path: String, _ rate: FrameRate?, seconds: Double, role: MediaRole = .camera, kind: MediaKind = .video, variable: Bool = false) -> MediaItem {
         var item = MediaItem(path: path, kind: kind, role: role, duration: Time(seconds: seconds), hasVideo: kind == .video, hasAudio: true)

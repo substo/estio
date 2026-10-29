@@ -1,7 +1,7 @@
 import CoreText
 import Foundation
 
-/// The section card's typefaces, which ship with Tandem (SIL Open Font
+/// The section card's typefaces, which ship with Substo Video (SIL Open Font
 /// Licence, the licences beside them in `Resources/Fonts`): Anton for the
 /// title, Instrument Sans for the subtitle and the kicker, JetBrains Mono
 /// for the number and the count. They're read from the resource bundle
@@ -16,7 +16,7 @@ enum CardFonts {
     /// app's Resources (the app, and the CLI inside it), beside the
     /// executable (a `swift build` binary), or beside a test bundle.
     static let folder: URL? = {
-        let name = "Tandem_TandemRender.bundle"
+        let name = "Substo_TandemRender.bundle"
         var candidates: [URL?] = [
             Bundle.main.resourceURL,
             Bundle(for: Marker.self).resourceURL,

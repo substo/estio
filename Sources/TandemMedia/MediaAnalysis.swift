@@ -4,7 +4,7 @@ import TandemCore
 
 /// Background analysis for one project folder: thumbnails, waveforms,
 /// loudness, proxies, transcripts, cutout mattes and isolated voice. Results
-/// are cached under `.tandem/cache`, keyed by the file's fingerprint, the
+/// are cached under `.substo/cache`, keyed by the file's fingerprint, the
 /// analysis kind, its algorithm version and its settings, so they survive
 /// renames and are rebuilt when the algorithm changes.
 ///

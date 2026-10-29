@@ -29,6 +29,47 @@ final class EditorBehaviourTests: XCTestCase {
         editor = nil
     }
 
+    func testStylesProposalUsesTheTextClipSelectedOnTheTimeline() throws {
+        let track = try XCTUnwrap(editor.project.track(named: "Text"))
+        let clip = Clip(id: "clip_style_selected", content: .text(TextContent(text: "HELLO")), start: t(10), duration: t(2))
+        XCTAssertNotNil(editor.model.apply(EditBatch(label: "Text for style", commands: [.insertClip(trackID: track.id, clip: clip)])))
+        editor.settle()
+        editor.click(editor.point(of: clip.id, at: 11))
+        XCTAssertTrue(editor.model.selection.contains(clip.id))
+        editor.model.libraryTab = .styles
+        editor.settle()
+
+        let revision = editor.model.revision
+        let proposal = try XCTUnwrap(StyleProposal.editorV1(selection: editor.model.selection, project: editor.model.project, projectFile: editor.model.fileURL.path, revision: revision))
+        XCTAssertEqual(proposal.batch?.expectedRevision, revision)
+        XCTAssertTrue(proposal.batchJSON.contains(clip.id))
+        XCTAssertEqual(editor.model.revision, revision, "preparing a style never edits the timeline")
+    }
+
+    func testReviewedStyleBatchAppliesAsOneUndoStepAndStaleProposalCannotApply() throws {
+        let track = try XCTUnwrap(editor.project.track(named: "Text"))
+        let first = Clip(id: "clip_style_apply", content: .text(TextContent(text: "HELLO")), start: t(10), duration: t(2))
+        XCTAssertNotNil(editor.model.apply(EditBatch(label: "Text for style", commands: [.insertClip(trackID: track.id, clip: first)])))
+        let proposal = try XCTUnwrap(StyleProposal.editorV1(selection: [first.id], project: editor.model.project, projectFile: editor.model.fileURL.path, revision: editor.model.revision))
+        let before = editor.model.revision
+        XCTAssertTrue(proposal.canApply(to: editor.model))
+        XCTAssertTrue(proposal.apply(to: editor.model))
+        XCTAssertEqual(editor.model.revision, before + 1)
+        guard case .text(let styled) = try XCTUnwrap(editor.model.project.clip(first.id)).content else { return XCTFail("text clip expected") }
+        XCTAssertEqual(styled.style.weight, 800)
+        XCTAssertFalse(proposal.apply(to: editor.model), "the same reviewed proposal cannot apply twice")
+        editor.model.undo()
+        guard case .text(let restored) = try XCTUnwrap(editor.model.project.clip(first.id)).content else { return XCTFail("text clip expected") }
+        XCTAssertNil(restored.style.weight)
+
+        let stale = try XCTUnwrap(StyleProposal.editorV1(selection: [first.id], project: editor.model.project, projectFile: editor.model.fileURL.path, revision: editor.model.revision))
+        XCTAssertNotNil(editor.model.apply(EditBatch(label: "Another edit", commands: [.updateClip(clipID: first.id, patch: .object(["name": .string("Renamed")]))])))
+        XCTAssertFalse(stale.canApply(to: editor.model))
+        XCTAssertFalse(stale.apply(to: editor.model))
+        guard case .text(let unchanged) = try XCTUnwrap(editor.model.project.clip(first.id)).content else { return XCTFail("text clip expected") }
+        XCTAssertNil(unchanged.style.weight)
+    }
+
     // MARK: - Cutting
 
     func testTheBladeToolCutsAClipWhereItsClicked() {
@@ -161,7 +202,7 @@ final class EditorBehaviourTests: XCTestCase {
     /// A preferences store of the scissors' own, so they start in their
     /// usual place and leave Mike's alone.
     private func scissorsStore() throws -> UserDefaults {
-        let suite = "tandem-tests-scissors"
+        let suite = "substo-tests-scissors"
         UserDefaults.standard.removePersistentDomain(forName: suite)
         addTeardownBlock { UserDefaults.standard.removePersistentDomain(forName: suite) }
         return try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -732,7 +773,7 @@ final class EditorBehaviourTests: XCTestCase {
     /// queued there, the viewer's builds included.
     private func soundEditor(seconds: Double = 30) throws -> EditorHarness {
         editor.close()
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-behaviour-\(UUID().uuidString)", isDirectory: true)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-behaviour-\(UUID().uuidString)", isDirectory: true)
         final class Box: @unchecked Sendable { var result: Result<SoundTakes, Error>? }
         let box = Box()
         let written = DispatchSemaphore(value: 0)
@@ -1011,7 +1052,7 @@ final class EditorBehaviourTests: XCTestCase {
         let right = editor.clip("Camera", 1)
         var at = editor.point(of: left.id)
         at.x = editor.x(at: 40)
-        editor.drop("tandem-transition:push", at: at)
+        editor.drop("substo-transition:push", at: at)
         // A dropped transition goes on once its sound is ready, and the
         // first drop of a run waits for the asset library to open too,
         // which on a fresh CI runner takes longer than a settle.
@@ -1025,7 +1066,7 @@ final class EditorBehaviourTests: XCTestCase {
 
     func testATransitionDroppedAtAnOverlaysEndGoesOnItAlone() throws {
         let broll = editor.clip("B-roll")
-        editor.drop("tandem-transition:push", at: editor.point(of: broll.id, at: broll.end.seconds - 0.2))
+        editor.drop("substo-transition:push", at: editor.point(of: broll.id, at: broll.end.seconds - 0.2))
         // As on a cut: it goes on once its sound is ready.
         editor.wait(for: "the push at the B-roll's end") { editor.project.track(named: "B-roll")?.transitions.isEmpty == false }
         let transition = try XCTUnwrap(editor.project.track(named: "B-roll")?.transitions.first)
@@ -1096,7 +1137,7 @@ final class EditorBehaviourTests: XCTestCase {
 
     func testACompressorDroppedOnTheVoiceGoesInItsAudioEffects() throws {
         let voice = editor.clip("Voice")
-        editor.drop("tandem-effect:compressor", at: editor.point(of: voice.id))
+        editor.drop("substo-effect:compressor", at: editor.point(of: voice.id))
         editor.wait(for: "the compressor on the voice") { editor.clip("Voice").audio?.effects.isEmpty == false }
         XCTAssertEqual(editor.clip("Voice").audio?.effects.map(\.type), ["compressor"])
         XCTAssertEqual(editor.clip("Camera").video?.effects ?? [], [], "not on the picture")

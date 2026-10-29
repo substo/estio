@@ -1,15 +1,15 @@
 import Foundation
 import TandemCore
 
-/// Tandem's own settings, shared by the app and the `tandem` command so
+/// Substo Video's own settings, shared by the app and the `substo` command so
 /// both make projects the same way. Kept as JSON in
-/// `~/Library/Application Support/Tandem/settings.json`, or the file
-/// `$TANDEM_SETTINGS` names (tests use their own).
+/// `~/Library/Application Support/Substo/settings.json`, or the file
+/// `$SUBSTO_SETTINGS` names (tests use their own).
 public struct TandemSettings: Codable, Equatable, Sendable {
     /// How late a new camera take's picture is against its sound, in
     /// seconds. Each camera file gets it as it joins a project
     /// (`MediaItem.pictureDelay`), so its clips play in sync from the
-    /// start. Mike's webcam lags his mic by about 0.08 s (a clap test on
+    /// start. the creator's webcam lags his mic by about 0.08 s (a clap test on
     /// 2026-10-02 measured 75 ms). Zero leaves new files as they are.
     public var cameraPictureDelay: Double
 
@@ -24,15 +24,15 @@ public struct TandemSettings: Codable, Equatable, Sendable {
 
     /// Where they're kept.
     public static var url: URL {
-        if let path = ProcessInfo.processInfo.environment["TANDEM_SETTINGS"], !path.isEmpty {
+        if let path = ProcessInfo.processInfo.environment["SUBSTO_SETTINGS"], !path.isEmpty {
             return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
         }
-        // Tests never read (or write) Mike's own.
+        // Tests never read (or write) the creator's own.
         if NSClassFromString("XCTestCase") != nil {
-            return FileManager.default.temporaryDirectory.appendingPathComponent("tandem-tests-\(ProcessInfo.processInfo.processIdentifier)-settings.json")
+            return FileManager.default.temporaryDirectory.appendingPathComponent("substo-tests-\(ProcessInfo.processInfo.processIdentifier)-settings.json")
         }
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return support.appendingPathComponent("Tandem/settings.json")
+        return support.appendingPathComponent("Substo/settings.json")
     }
 
     /// The saved settings, or the defaults when there are none (or the file

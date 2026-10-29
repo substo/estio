@@ -18,7 +18,7 @@ enum SyncedPlacement {
     static func place(_ p: inout Project, mediaID: String, trackID: String?, _ context: inout EditContext) throws {
         guard let item = p.media(mediaID) else { throw EditError.notFound("media \(mediaID)") }
         guard let take = item.takeID else {
-            throw EditError.invalid("\(item.path) isn't synced to a take yet; tandem sync \"\(item.path)\" lines it up with the camera by sound")
+            throw EditError.invalid("\(item.path) isn't synced to a take yet; substo sync \"\(item.path)\" lines it up with the camera by sound")
         }
         guard item.kind != .image, item.hasVideo || item.hasAudio, let length = item.duration, length > .zero else {
             throw EditError.invalid("\(item.path) has no picture or sound to place")
@@ -238,7 +238,7 @@ enum SyncedPlacement {
             throw EditError.invalid("\"\(shown.name)\" is under the take's camera track; angles go above it")
         }
         guard !angles.isEmpty else {
-            throw EditError.invalid("the take has no other angle between \(range.start) and \(range.end); tandem sync <file> adds one")
+            throw EditError.invalid("the take has no other angle between \(range.start) and \(range.end); substo sync <file> adds one")
         }
         for index in angles { try Editing.requireUnlocked(p.videoTracks[index]) }
 

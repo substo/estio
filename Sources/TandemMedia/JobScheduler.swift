@@ -86,7 +86,7 @@ final class JobScheduler: @unchecked Sendable {
     private var observers: [UUID: @Sendable ([JobStatus]) -> Void] = [:]
     private var sequence = 0
     private var notifyPending = false
-    private let notifyQueue = DispatchQueue(label: "com.mikerosoft.tandem.media.jobs", qos: .utility)
+    private let notifyQueue = DispatchQueue(label: "com.substo.video.media.jobs", qos: .utility)
     let encoderLock: EncoderLock
 
     init(limits: Limits = .standard, encoderLock: EncoderLock = .shared) {

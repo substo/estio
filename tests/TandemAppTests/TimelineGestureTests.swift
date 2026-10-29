@@ -81,11 +81,11 @@ final class TimelinePanTests: XCTestCase {
 final class SimulatedGestureTests: XCTestCase {
     func testParsesMiddleButtonAndPacedDrags() {
         XCTAssertEqual(
-            AppURLCommand.parse(URL(string: "tandem://simulate?drag=600,700,400,650&button=middle")!),
+            AppURLCommand.parse(URL(string: "substo://simulate?drag=600,700,400,650&button=middle")!),
             .simulate(InputSimulator.Gesture(kind: .drag(to: CGPoint(x: 400, y: 650), steps: 12), at: CGPoint(x: 600, y: 700), modifiers: [], button: .middle))
         )
         XCTAssertEqual(
-            AppURLCommand.parse(URL(string: "tandem://simulate?drag=600,700,400,650&steps=90&interval=8")!),
+            AppURLCommand.parse(URL(string: "substo://simulate?drag=600,700,400,650&steps=90&interval=8")!),
             .simulate(InputSimulator.Gesture(kind: .drag(to: CGPoint(x: 400, y: 650), steps: 90), at: CGPoint(x: 600, y: 700), modifiers: [], interval: 0.008))
         )
         XCTAssertEqual(InputSimulator.parse(["drag": "1,2,3,4", "button": "left"])?.button, .left)
@@ -95,7 +95,7 @@ final class SimulatedGestureTests: XCTestCase {
 
     func testPressHoldsModifiersOnTheirOwn() {
         XCTAssertEqual(
-            AppURLCommand.parse(URL(string: "tandem://simulate?press=cmd&for=1.5")!),
+            AppURLCommand.parse(URL(string: "substo://simulate?press=cmd&for=1.5")!),
             .simulate(InputSimulator.Gesture(kind: .press(seconds: 1.5), at: .zero, modifiers: .command))
         )
         XCTAssertEqual(InputSimulator.parse(["press": "cmd"])?.kind, .press(seconds: 2), "two seconds unless told")

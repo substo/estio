@@ -295,7 +295,7 @@ final class LevelTests: XCTestCase {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let url = folder.appendingPathComponent("old.tandem")
+        let url = folder.appendingPathComponent("old.substo")
         try JSONSerialization.data(withJSONObject: json).write(to: url)
         let loaded = try ProjectFile.load(from: url)
         XCTAssertEqual(loaded.project.settings.speechLoudness, -20)

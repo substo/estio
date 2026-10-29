@@ -2,7 +2,7 @@ import XCTest
 @testable import TandemCore
 @testable import TandemMedia
 
-/// A file's frame times, read from its sample table for `tandem check`'s
+/// A file's frame times, read from its sample table for `substo check`'s
 /// low frame rate note, and cached per file.
 final class FrameTimesTests: TempFolderTestCase {
     func testReadsAScreenRecordingsUnevenFramesAndCachesThem() async throws {

@@ -1,7 +1,7 @@
-# Tandem render module
+# Substo Video render module
 
 How a project becomes pixels and sound: the viewer, frame grabs and export
-all go through the same path, so what Mike sees is what YouTube gets.
+all go through the same path, so what the creator sees is what YouTube gets.
 
 ```
 Project ──RenderPlanner──▶ RenderPlan (pure)
@@ -56,7 +56,7 @@ Project ──RenderPlanner──▶ RenderPlan (pure)
   asked for, even across a gap or when reading starts after the plain file.
   Every proxy is 1080p HEVC, so an overlay's proxy on a track after a
   camera's or screen's played black wherever the overlay was clear, and
-  `tandem check` found its clear frames black (issue #10). Originals of the
+  `substo check` found its clear frames black (issue #10). Originals of the
   same codec and size did it too, in exports; frame grabs decoded them
   right. Alpha after alpha keeps each file's alpha and its straight or
   premultiplied mode, and plain after alpha decodes fine.
@@ -82,7 +82,7 @@ Project ──RenderPlanner──▶ RenderPlan (pure)
   the sticker is in the picture. The viewer doesn't wait: the clip is left
   out, with a warning, until the background conversion lands. A file that
   can't be converted (no ffmpeg) is left out with a warning saying why,
-  and a source that turns out undecodable anyway (scanned before Tandem
+  and a source that turns out undecodable anyway (scanned before Substo Video
   checked) is loaded without its video. One undecodable track used to fail
   the whole composition with "Cannot Decode".
 
@@ -193,7 +193,7 @@ aliases (`popIn`, `fadeOut`...).
 
 ## Section cards
 
-A `sectionCard` graphic clip is Mike's section card, the design he picked
+A `sectionCard` graphic clip is the creator's section card, the design he picked
 from `~/dev/me/tandem-research/title-cards/mockup-template.html`: card B's
 Convex bands (yellow #F3B01C, red #EE342F, purple #8D2676 on #141418)
 with card D's progress row. `SectionCardRenderer` draws each frame with
@@ -227,7 +227,7 @@ export all show the same frame.
   come in 0.52 s after the start over 0.45 s with `cubic-bezier(.16, 1,
   .3, 1)`, from transparent, 2.5cqw lower and 98% of their size, about the
   frame's centre.
-- **Cursor.** Mike asked for a little life on the hold: a text cursor
+- **Cursor.** the creator asked for a little life on the hold: a text cursor
   after the last letter of the title's last line, a solid bar in the
   accent 0.1em wide (of the title's size) from the baseline up to the
   capitals' height, 0.07em after the letter and its letter-spacing. The
@@ -247,10 +247,10 @@ export all show the same frame.
   them about 0.7 s before the end), 0.8 s to find the card and take it
   in, then the title, subtitle and kicker as the card shows them, spaces
   included, at 15 characters a second: a little slower than Netflix's 17
-  for adult subtitles, since Mike found cards at 17 went by a bit fast.
+  for adult subtitles, since the creator found cards at 17 went by a bit fast.
   Rounded up to a tenth of a second (and to a frame), at least 4 s and at
   most 7 s (about 72 characters; longer stops being a breather), so
-  METHODOLOGY / LET'S KEEP IT FAIR (30 characters) gets 4.2 s. `addSectionCards`, `tandem cards` and
+  METHODOLOGY / LET'S KEEP IT FAIR (30 characters) gets 4.2 s. `addSectionCards`, `substo cards` and
   the Templates tile use it unless given a length, and the Video tab's Fit
   to text sets it for a card whose words changed, moving its whoosh out
   with the wipe out.
@@ -268,12 +268,12 @@ export all show the same frame.
   frame) and leave. Its card switched in and out at single moments
   (1.28 s and 3.62 s), which showed as a pop across the right fifth of
   the frame; here the reveal follows the bands. Timings count from the
-  clip. D's lit bars were Tandem's amber and sat at the top of the row
+  clip. D's lit bars were Substo Video's amber and sat at the top of the row
   beside the count; here they're the accent and centred on it.
 - **Checked against the mockup.** `title-cards/tandem/reference-b-with-
   progress.html` is the mockup's CSS with those changes (the reveal is a
   clip-path set from where Chrome put the bands). Its frames from headless
-  Chrome and Tandem's for the same moments of the four sample cards, 1920
+  Chrome and Substo Video's for the same moments of the four sample cards, 1920
   by 1080, differ by under 1 level on average and in under 1% of pixels by
   more than 24, all on antialiased edges: positions agree to a pixel.
   `SectionCardRenderTests` pins the chip, title, subtitle and bars to
@@ -324,7 +324,7 @@ export all show the same frame.
 - Speed changes keep their pitch (spectral time-pitch).
 - `pitchShift` (semitones, keyframable) renders the clip's sound once
   through Apple's time-pitch unit, offline, into a cached copy in
-  `~/Library/Caches/Tandem/pitch` (keyed by the file, range, pitch and,
+  `~/Library/Caches/Substo/pitch` (keyed by the file, range, pitch and,
   for keyframes, the timing), and the composition plays the copy. The unit
   adds no delay offline, so sync is untouched; a speed change on the same
   clip still keeps the shifted pitch.
@@ -396,7 +396,7 @@ frames of a three-track mix arrive in about 10 ms.
   second late; this lands it at once, after a short stop.
 - The sound is padded with silence to the end of the timeline, so the
   renderer never runs dry before the picture does.
-- Scrubbing makes no sound, as before. `TANDEM_MUTED=1` (and every test)
+- Scrubbing makes no sound, as before. `SUBSTO_MUTED=1` (and every test)
   mutes the renderer.
 - With no output device to play to (a Mac with none, or CI), the renderer
   takes one buffer, fails and never asks for more. A prime then counts
@@ -440,7 +440,7 @@ Speech is levelled per take, then export masters the whole mix.
   30 dB either way, and none for a silent file. The clip gain (`gainDB`, or
   its keyframes) is added on top, then fades. A -32.2 LUFS take normalised
   to -20 with +2 dB plays at about -18. The maths is in `AudioLevels`; the
-  render plan, `tandem loudness` and the Audio tab share it, and the viewer,
+  render plan, `substo loudness` and the Audio tab share it, and the viewer,
   review clips and export all take their sound from the same plan
   (`LevelRenderTests` checks the viewer's mix against the export's). Stills
   have no sound.
@@ -459,15 +459,15 @@ Speech is levelled per take, then export masters the whole mix.
 
 The speech level is -20 LUFS because:
 
-- It's where Mike's voice played in Filmora. Filmora's Auto Normalization,
+- It's where the creator's voice played in Filmora. Filmora's Auto Normalization,
   on for the voice in every Filmora project in convex-videos (24 files
-  from five videos), levels a file to about -24 LUFS on Tandem's meter
+  from five videos), levels a file to about -24 LUFS on Substo Video's meter
   (Filmora says -23), and his LoudnessGain of +1.9 to +4.1 dB goes on top.
   On the v14 export, 62 voice clips from three takes played at -24.1 LUFS
   plus their LoudnessGain (spread 0.7 dB) and the music at its plain
   VolumeGain; the voice sits at -20.4 LUFS and the whole export at -20.1.
   The -31 and -15 dB music and SFX gains come from those projects, so they
-  keep the balance Mike mixed by ear.
+  keep the balance the creator mixed by ear.
 - It's the quiet end of the -16 to -20 LUFS that AES recommends for speech
   streams (TD1004, TD1008), and leaves the master about 6 dB to add.
 - The viewer has no limiter. Levelled to -20, the demo's 635 s of voice
@@ -505,7 +505,7 @@ reading of LoudnessGain; it now uses the speech level.
    margin, delay compensated), then AAC 48 kHz stereo. Timelines without
    sound get a silent track. The limiter aims 0.5 dB under the preset's
    ceiling, because AAC overshoots the limited mix (see Presets).
-4. `<output>.tandem` is written beside the file: the project with absolute
+4. `<output>.substo` is written beside the file: the project with absolute
    media paths and `export.*` metadata.
 
 The loudness target and true peak ceiling come from the project's settings:
@@ -520,8 +520,8 @@ held during the loudness passes, which don't encode). Outputs must be
 
 While it runs, `Exporter` holds a PreventUserIdleSystemSleep power
 assertion, so a long export left alone isn't paused by the Mac going to
-sleep; the display can still sleep. The app's export queue, `tandem
-export`, `tandem clip` and the HTTP and MCP exports all run through it,
+sleep; the display can still sleep. The app's export queue, `substo
+export`, `substo clip` and the HTTP and MCP exports all run through it,
 and it's let go however the export ends.
 
 ### Presets
@@ -533,9 +533,9 @@ app's Export dialog all use it, so they agree:
 
 - **Frame.** The main canvas, or an alternate format. "portrait" is the
   project's 9:16 frame: its portrait format, or the canvas itself when
-  that's 9:16 (`tandem new --portrait`). The short preset asks for it, so
+  that's 9:16 (`substo new --portrait`). The short preset asks for it, so
   on a landscape project without a portrait format it fails with an error
-  that names `tandem short --apply`. `tandem short` refuses a 9:16 canvas,
+  that names `substo short --apply`. `substo short` refuses a 9:16 canvas,
   which is already the short.
 - **Size.** A preset's `resolution` is the frame's short side, and the
   frame keeps its shape: YouTube 1080p is 1920x1080 on a landscape canvas,
@@ -566,7 +566,7 @@ in September 2026: 8 Mbps for 1080p and 35 to 45 for 4K at 24 to 30 fps,
 20 Mbps is 2.5 times YouTube's 1080p rate, and HEVC at 80 is about as
 generous for 4K (HEVC needs roughly a third fewer bits than H.264). That
 headroom is for the speed-priority hardware encoder and YouTube's
-re-encode, and it's what Mike's Filmora presets used ("Mike High" was
+re-encode, and it's what the creator's Filmora presets used ("the creator High" was
 1080p H.264 at 20 Mbps, the 2026 4K preset HEVC at 80). What changed:
 the high frame rate step and the area scaling come from YouTube's table,
 and audio went from 256 to 320 kbps, the most Apple's AAC encoder takes at
@@ -604,7 +604,7 @@ are a tick at each keyframe, where the noise changes all at once, and seeks
 that decode from the keyframe before.
 
 Measured on the demo footage (`ProxyRealMediaTests` pins these): a minute of
-Mike's camera and of his screen recording through `ProxyJob`, and 150 frames
+the creator's camera and of his screen recording through `ProxyJob`, and 150 frames
 of still areas in it: the wall beside him, and the sidebar and code boxes of
 the screen while only the pointer moves. Changes are the mean absolute
 change of 8x8 block means (luma levels) from one frame to the next, into
@@ -672,7 +672,7 @@ the wall (the original, all keyframes at 0.6, every 15 at 0.78).
 ## Random access
 
 The frame at a time is always the last one at or before it: variable frame
-rate recordings hold their frame through static gaps (up to 20 s in Mike's
+rate recordings hold their frame through static gaps (up to 20 s in the creator's
 screen recordings). AVFoundation gets that right on its own.
 
 What it gets wrong is open-GOP HEVC that doesn't mark its keyframes. A CRA
@@ -709,7 +709,7 @@ why full exports were fine. So:
   no frames ("reading the timeline stalled") rather than hanging, and
   cancel wakes it.
 
-Filmora shows the nearest frame of variable frame rate footage, Tandem the
+Filmora shows the nearest frame of variable frame rate footage, Substo Video the
 last one at or before the time, so mid-scroll the two can be a frame apart.
 
 ## Measured (M5 Pro, release build)
@@ -751,7 +751,7 @@ The spike's plain composite managed about 3.5x; the encoder is the limit.
   25 ms, however short the ramp: 1 to 4 takes 75 ms, 1 to 30 takes 724 ms.
   Reading or playing from part way starts each track at about the volume
   it had 0.3 s earlier and moves it from there at the same pace. So
-  Tandem never ramps volume; `GainTap` applies the gain to the samples.
+  Substo Video never ramps volume; `GainTap` applies the gain to the samples.
 - `MTAudioProcessingTap` quirks, measured the same way. A pre-effects
   tap's time stamps are exact to the sample in `AVAssetReaderAudioMixOutput`
   and in AVPlayer at rates 0.5, 1 and 2; within a call, a segment at speed
@@ -834,7 +834,7 @@ play real sound through the editor: start times, pause, a seek and an
 edit while playing, J K L and scrubbing. Real footage is opt-in:
 
 ```
-TANDEM_REAL_MEDIA=1 swift test -c release -Xswiftc -enable-testing \
+SUBSTO_REAL_MEDIA=1 swift test -c release -Xswiftc -enable-testing \
     --package-path . --filter RealMediaTests
 ```
 
@@ -844,6 +844,6 @@ writing there) and writes to `/private/tmp/claude-501/tandem-render/bench`.
 camera file, `ProxyNoiseTests` how much proxies flicker at each quality,
 and `ProxyRealMediaTests` today's proxies against all-intra ones: flicker,
 keyframe ticks, size, build speed and seek times (all with
-`TANDEM_REAL_MEDIA=1`). `ColourOnScreenTests` shows the
+`SUBSTO_REAL_MEDIA=1`). `ColourOnScreenTests` shows the
 player and a still side by side in a window and reads them back from a
-screen capture (`TANDEM_SCREEN=1`).
+screen capture (`SUBSTO_SCREEN=1`).

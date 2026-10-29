@@ -5,8 +5,8 @@ import TandemMedia
 /// Imports Filmora `.wfp` projects, best effort.
 ///
 /// Tracks keep Filmora's layering (its video tracks are listed bottom to
-/// top, like Tandem's) and clips keep their times, source ranges and speed.
-/// The settings Mike used map onto Tandem's: transform and its keyframes,
+/// top, like Substo Video's) and clips keep their times, source ranges and speed.
+/// The settings the creator used map onto Substo Video's: transform and its keyframes,
 /// the AI cutout, opacity, crop, drop shadow, border, the colour grade
 /// (moved onto the media when every clip of a file shares it), volume,
 /// loudness gain and fades, transitions, titles as text clips, and markers.
@@ -14,25 +14,25 @@ import TandemMedia
 /// their media and sounds. A picture and its sound stay linked, and so do
 /// the camera and screen clips of one record-it take.
 ///
-/// Anything else is listed in the report. Clips whose media Tandem can't
+/// Anything else is listed in the report. Clips whose media Substo Video can't
 /// play (WebM stickers) are left out with a to-do marker where they were;
 /// missing media stays on the timeline offline, with the length Filmora
 /// recorded, so it can be relinked.
 ///
 /// Speech is normalised to the project's speech level by default, like
-/// clips placed in Tandem (`SpeechLevels`).
+/// clips placed in Substo Video (`SpeechLevels`).
 public struct FilmoraImporter: Sendable {
     /// How an import levels speech: the camera's sound and anything on a
     /// take track (`AudioLevels.isSpeech`).
     public enum SpeechLevels: String, Codable, Sendable {
         /// Normalised to the project's speech level (-20 LUFS) with no
-        /// gain, like clips placed in Tandem. Filmora played Mike's voice
+        /// gain, like clips placed in Substo Video. Filmora played the creator's voice
         /// at about that level, so music and sound effects, which keep
         /// their Filmora volume, keep their balance with it.
         case normalize
         /// Filmora's own levels, the way Filmora played them: a clip with
         /// Auto Normalization is normalised to -24 LUFS (where Filmora
-        /// levels, on Tandem's meter) plus its loudness and volume gain.
+        /// levels, on Substo Video's meter) plus its loudness and volume gain.
         case keepFilmora
     }
 
@@ -60,7 +60,7 @@ public struct FilmoraImporter: Sendable {
 }
 
 /// One Filmora import in progress. Planning (this file) turns Filmora clips
-/// into planned Tandem clips; assembly (FilmoraAssembly.swift) lays them on
+/// into planned Substo Video clips; assembly (FilmoraAssembly.swift) lays them on
 /// tracks and builds the project through the coordinator.
 final class FilmoraRun {
     enum Category: CaseIterable {
@@ -74,7 +74,7 @@ final class FilmoraRun {
         var duration: Time
         /// The Filmora transition spans the cut, so it joins two clips.
         var spansCut: Bool
-        /// Filmora placed it off-centre; Tandem centres it on the cut.
+        /// Filmora placed it off-centre; Substo Video centres it on the cut.
         var offCentre: Bool
     }
 
@@ -326,7 +326,7 @@ final class FilmoraRun {
                 report.add(.approximated, "speed", "A speed ramp plays at its average speed.", at: start)
             }
             if speedInfo.reverse {
-                report.add(.unsupported, "speed", "Reversed clips play forwards; Tandem has no reverse.", at: start)
+                report.add(.unsupported, "speed", "Reversed clips play forwards; Substo Video has no reverse.", at: start)
             }
         }
         guard speed.isFinite, speed > 0 else {
@@ -338,11 +338,11 @@ final class FilmoraRun {
             speed = 100
         }
         if track.kind == .video && !(item.hasVideo || item.kind == .image) {
-            report.add(.unsupported, "clip", "\(label) has no picture Tandem can read, so its video clip was left out.", at: start)
+            report.add(.unsupported, "clip", "\(label) has no picture Substo Video can read, so its video clip was left out.", at: start)
             return nil
         }
         if track.kind == .audio && !item.hasAudio {
-            report.add(.note, "clip", "\(label) has no sound track Tandem can read, so its audio clip was left out.", at: start)
+            report.add(.note, "clip", "\(label) has no sound track Substo Video can read, so its audio clip was left out.", at: start)
             return nil
         }
         if sourceStart < 0 {
@@ -545,7 +545,7 @@ final class FilmoraRun {
                     report.add(.approximated, "colour", "Colour setting \(setting) was converted roughly.", at: time)
                 }
                 for setting in mapped.unmapped {
-                    report.add(.unsupported, "colour", "Colour setting \(setting) has no Tandem equivalent.", at: time)
+                    report.add(.unsupported, "colour", "Colour setting \(setting) has no Substo Video equivalent.", at: time)
                 }
                 continue
             case "video/effect/horizontal_filp", "video/effect/vertical_filp":
@@ -619,8 +619,8 @@ final class FilmoraRun {
 
     // MARK: - Sound
 
-    /// Where Filmora's Auto Normalization levels a file, on Tandem's
-    /// (BS.1770) meter. Filmora says -23 LUFS. Measured on Mike's v14
+    /// Where Filmora's Auto Normalization levels a file, on Substo Video's
+    /// (BS.1770) meter. Filmora says -23 LUFS. Measured on the creator's v14
     /// export against its sources: 62 voice clips from three takes played
     /// at -24.1 LUFS plus the clip's LoudnessGain (spread 0.7 dB), where
     /// the music played at its plain VolumeGain.
@@ -652,7 +652,7 @@ final class FilmoraRun {
         }
         if clip.node["enableV3Denoise"].bool == true {
             audio.voiceIsolation = min(1, max(0, (clip.node["denoiseV3Strength"].double ?? 50) / 100))
-            report.add(.approximated, "audio", "Filmora's AI denoise became Tandem's voice isolation.", at: time)
+            report.add(.approximated, "audio", "Filmora's AI denoise became Substo Video's voice isolation.", at: time)
         }
         for effect in clip.effects where effect.id.hasPrefix("audio/") {
             let active = effect.isOn && effect.params.values.contains { ($0.double ?? 0) != 0 || $0.bool == true }
@@ -662,7 +662,7 @@ final class FilmoraRun {
             case "audio/effect/audio_enhancer", "audio/effect/speech_enhance", "audio/effect/reverb_denoise":
                 if active {
                     audio.voiceIsolation = 1
-                    report.add(.approximated, "audio", "Filmora's voice enhancer became Tandem's voice isolation.", at: time)
+                    report.add(.approximated, "audio", "Filmora's voice enhancer became Substo Video's voice isolation.", at: time)
                 }
             case "audio/effect/ducking":
                 if effect.enabled == true {

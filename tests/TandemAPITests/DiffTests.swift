@@ -2,7 +2,7 @@ import XCTest
 @testable import TandemAPI
 @testable import TandemCore
 
-/// `tandem diff`, `tandem restore`, `tandem clips` and history that says
+/// `substo diff`, `substo restore`, `substo clips` and history that says
 /// where each edit was.
 final class DiffTests: XCTestCase {
     private func gain(_ db: Double) -> JSONValue { .object(["audio": .object(["gainDB": .number(db)])]) }
@@ -82,7 +82,7 @@ final class DiffTests: XCTestCase {
         let exports = h.folder.url.appendingPathComponent("exports")
         try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
         // Exports write their snapshot with revision 0.
-        try ProjectFile.encoder().encode(ProjectFile.Envelope(revision: 0, project: original)).write(to: exports.appendingPathComponent("v1.mp4.tandem"))
+        try ProjectFile.encoder().encode(ProjectFile.Envelope(revision: 0, project: original)).write(to: exports.appendingPathComponent("v1.mp4.substo"))
         try h.apply(.moveClips(clipIDs: ["clip_brl1"], delta: t(5)), label: "Move")
 
         // The export itself names its snapshot.
@@ -90,12 +90,12 @@ final class DiffTests: XCTestCase {
         XCTAssertNil(diff.edits)
         XCTAssertNil(diff.sinceRevision)
         XCTAssertEqual(diff.changes.map(\.details), [["moved +5.000s"]])
-        XCTAssertTrue(diff.since.contains("v1.mp4.tandem"), diff.since)
+        XCTAssertTrue(diff.since.contains("v1.mp4.substo"), diff.since)
 
         // A backup knows its revision, and the history reaches it.
-        let backups = h.folder.url.appendingPathComponent(".tandem/backups")
+        let backups = h.folder.url.appendingPathComponent(".substo/backups")
         try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
-        let backup = backups.appendingPathComponent("Decision Models 2026-10-17 10.00.00.tandem")
+        let backup = backups.appendingPathComponent("Decision Models 2026-10-17 10.00.00.substo")
         try ProjectFile.encoder().encode(ProjectFile.Envelope(revision: 1, project: original)).write(to: backup)
         let fromBackup = try h.service.diff(DiffRequest(since: backup.path))
         XCTAssertEqual(fromBackup.sinceRevision, 1)
@@ -113,13 +113,13 @@ final class DiffTests: XCTestCase {
             _ = try h.service.diff(DiffRequest(since: "0"))
         } catch let error as ServiceError {
             XCTAssertTrue(error.message.contains("goes back to revision 1"), error.message)
-            XCTAssertTrue(error.message.contains(".mp4.tandem"), "says snapshots work: \(error.message)")
+            XCTAssertTrue(error.message.contains(".mp4.substo"), "says snapshots work: \(error.message)")
         }
 
-        let backups = h.folder.url.appendingPathComponent(".tandem/backups")
+        let backups = h.folder.url.appendingPathComponent(".substo/backups")
         try FileManager.default.createDirectory(at: backups, withIntermediateDirectories: true)
         try ProjectFile.encoder().encode(ProjectFile.Envelope(revision: 0, project: APIFixture.project()))
-            .write(to: backups.appendingPathComponent("Decision Models 2026-10-17 09.00.00.tandem"))
+            .write(to: backups.appendingPathComponent("Decision Models 2026-10-17 09.00.00.substo"))
         let diff = try h.service.diff(DiffRequest(since: "0"))
         XCTAssertEqual(diff.sinceRevision, 0)
         XCTAssertTrue(diff.since.contains("backup"), diff.since)
@@ -175,7 +175,7 @@ final class DiffTests: XCTestCase {
     func testRestoreFromASnapshotAndItsMistakes() throws {
         let h = try ServiceHarness()
         defer { h.close() }
-        let snapshot = h.folder.file("v1.mp4.tandem")
+        let snapshot = h.folder.file("v1.mp4.substo")
         try ProjectFile.encoder().encode(ProjectFile.Envelope(revision: 0, project: h.service.coordinator.project)).write(to: snapshot)
         try h.apply(.updateClip(clipID: "clip_cam1", patch: .object(["video": .object(["transform": .object(["scale": .number(1)])])])), label: "Full frame")
         let done = try h.service.restore(RestoreRequest(from: snapshot.path, clips: ["clip_cam1"], apply: true), context: h.context)

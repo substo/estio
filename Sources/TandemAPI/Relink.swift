@@ -5,7 +5,7 @@ import TandemMedia
 /// Finding media files that aren't where the project says: a project opened
 /// on another Mac, or a folder tidied by hand. The folder scan already
 /// follows a file renamed inside the project folder (by content); this
-/// looks for files by name in the project folder and in folders Mike picks,
+/// looks for files by name in the project folder and in folders the creator picks,
 /// and takes one when its content matches what the project knew.
 public enum MediaRelinker {
     public struct Match: Codable, Equatable, Sendable {

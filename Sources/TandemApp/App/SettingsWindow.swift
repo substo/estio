@@ -5,7 +5,7 @@ import TandemAssets
 import TandemCore
 import TandemMedia
 
-/// Tandem > Settings…: where the shared library is, and the sound each type
+/// Substo Video > Settings…: where the shared library is, and the sound each type
 /// of transition plays. One window, reused.
 @MainActor
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
@@ -73,11 +73,11 @@ struct SettingsView: View {
             HStack(spacing: 10) {
                 OutlineButton(title: "Choose another folder…") { choose() }
                 if let root = host.sharedRoot, root.standardizedFileURL.path != SharedLibrary.standardRoot.standardizedFileURL.path {
-                    OutlineButton(title: "Use ~/Movies/Tandem Library") { move(to: nil) }
+                    OutlineButton(title: "Use ~/Movies/Substo Library") { move(to: nil) }
                 }
                 Spacer()
             }
-            Text("Choosing a folder doesn't move your files: move them in Finder first, then choose where they are. Tandem makes its folders in the one you choose.")
+            Text("Choosing a folder doesn't move your files: move them in Finder first, then choose where they are. Substo Video makes its folders in the one you choose.")
                 .font(.ui(11.5))
                 .foregroundStyle(Theme.textFaint.color)
                 .fixedSize(horizontal: false, vertical: true)
@@ -117,7 +117,7 @@ struct SettingsView: View {
 
 /// The picture delay new camera takes get: a webcam's picture lags its mic,
 /// so without it lips and voice drift apart (`TandemSettings`, shared with
-/// the `tandem` command).
+/// the `substo` command).
 struct CameraSyncSettingsView: View {
     @State private var milliseconds = PictureDelay.milliseconds(Time(seconds: TandemSettings.load().cameraPictureDelay))
     @State private var problem: String?
@@ -172,7 +172,7 @@ struct CameraSyncSettingsView: View {
 
 /// The sound each type of transition plays when it's added (dropped on a
 /// cut, double-clicked in Effects, Cmd-D for a dissolve, or given as a new
-/// type): a row per type with a picker, over Tandem's own (a light swoosh
+/// type): a row per type with a picker, over Substo Video's own (a light swoosh
 /// for push, slide, cut slide and wipe, and none for the rest).
 struct TransitionSoundSettingsView: View {
     var settings = TransitionSoundActions.settings
@@ -214,8 +214,8 @@ struct TransitionSoundSettingsView: View {
                 .font(.ui(12.5))
                 .foregroundStyle(Theme.text.color)
                 .frame(width: 110, alignment: .leading)
-            Menu(TransitionSoundText.name(of: current, choices: choices).capitalisedFirst + (picked == nil ? " (Tandem's)" : "")) {
-                Button("Tandem's: \(TransitionSoundText.name(of: own, choices: choices))") { pick(nil, for: type) }
+            Menu(TransitionSoundText.name(of: current, choices: choices).capitalisedFirst + (picked == nil ? " (Substo Video's)" : "")) {
+                Button("Substo Video's: \(TransitionSoundText.name(of: own, choices: choices))") { pick(nil, for: type) }
                 Button("None") { pick("", for: type) }
                 if !choices.isEmpty {
                     Divider()
@@ -228,7 +228,7 @@ struct TransitionSoundSettingsView: View {
             }
             .menuStyle(.borderlessButton)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .tip("What a \(type.displayName.lowercased()) plays when it's added: Tandem's own, none, or a favourite or recently used sound effect from the library")
+            .tip("What a \(type.displayName.lowercased()) plays when it's added: Substo Video's own, none, or a favourite or recently used sound effect from the library")
             IconButton(symbol: "play.fill", help: "Hear it", enabled: !current.isEmpty) {
                 TransitionSoundActions.preview(current)
             }

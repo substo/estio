@@ -10,7 +10,7 @@ import TandemCore
 final class UndecodableMediaTests: XCTestCase {
     /// A blue background, with a 320x180 sticker on the track above: the
     /// left third opaque red, the middle third red at half alpha, the right
-    /// third clear. `flagged: false` is a sticker scanned before Tandem
+    /// third clear. `flagged: false` is a sticker scanned before Substo Video
     /// looked for codecs it can't decode.
     func project(_ media: TestMedia, codec: String = "qtrle", flagged: Bool = true) async throws -> Project {
         guard let ffmpeg = FFmpeg.locate() else { throw XCTSkip("ffmpeg isn't installed") }

@@ -121,7 +121,7 @@ enum ChangeRegion {
         return TimeRange(start: start, end: end)
     }
 
-    /// The section a time falls in: the last marker at or before it. Mike's
+    /// The section a time falls in: the last marker at or before it. the creator's
     /// section markers read "§4 What it means", so those shorten to "§4".
     static func section(at time: Time, in project: Project) -> String? {
         guard let marker = project.markers.filter({ $0.time <= time }).max(by: { $0.time < $1.time }) else { return nil }

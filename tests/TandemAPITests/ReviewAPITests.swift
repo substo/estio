@@ -40,7 +40,7 @@ final class ReviewAPITests: XCTestCase {
         XCTAssertEqual(session.review.log.entries.map(\.label), ["Add push"])
     }
 
-    /// `tandem undo` with the app closed puts the project back from its
+    /// `substo undo` with the app closed puts the project back from its
     /// undo history, and the edit it undid stops waiting.
     func testAHeadlessUndoTakesTheEditOutOfReview() async throws {
         let folder = TempFolder()
@@ -111,7 +111,7 @@ final class ReviewAPITests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: ProjectFile.reviewURL(for: url).path), "nothing left to highlight")
     }
 
-    /// `tandem join --apply` on a take cut through twice: the joined clips
+    /// `substo join --apply` on a take cut through twice: the joined clips
     /// play exactly what the pieces did, so nothing new waits for Mike, and
     /// the edit that was waiting (the music turned up after the second
     /// cut, which stops that cut joining) still does.

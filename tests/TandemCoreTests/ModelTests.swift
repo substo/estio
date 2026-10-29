@@ -118,13 +118,13 @@ final class JSONTests: XCTestCase {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let url = folder.appendingPathComponent("video.tandem")
+        let url = folder.appendingPathComponent("video.substo")
         try ProjectFile.save(fixture.project, revision: 7, to: url)
         try ProjectFile.save(fixture.project, revision: 8, to: url)
         let loaded = try ProjectFile.load(from: url)
         XCTAssertEqual(loaded.project, fixture.project)
         XCTAssertEqual(loaded.revision, 8)
-        let backups = try FileManager.default.contentsOfDirectory(atPath: folder.appendingPathComponent(".tandem/backups").path)
+        let backups = try FileManager.default.contentsOfDirectory(atPath: folder.appendingPathComponent(".substo/backups").path)
         XCTAssertEqual(backups.count, 1)
     }
 }

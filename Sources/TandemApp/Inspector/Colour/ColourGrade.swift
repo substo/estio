@@ -57,7 +57,7 @@ enum ColourSection: String, CaseIterable, Identifiable, Hashable {
 
     /// What a control shows before the section has an effect, and what a
     /// double-click puts back: no change. That's the effect's default,
-    /// except that the vignette and sharpen defaults are Mike's usual
+    /// except that the vignette and sharpen defaults are the creator's usual
     /// amounts, which here start at none.
     func neutral(_ key: String, registry: EffectRegistry = .standard) -> ParamValue {
         switch (self, key) {

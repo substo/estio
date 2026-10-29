@@ -3,7 +3,7 @@ import SwiftUI
 
 /// SwiftUI content that takes files dropped from Finder. The drop lands on
 /// an AppKit view around the content, the way AppKit delivers drags, so it
-/// works whatever the content is (and `tandem://simulate` can drive it).
+/// works whatever the content is (and `substo://simulate` can drive it).
 struct FileDropZone<Content: View>: View {
     let onFiles: ([URL]) -> Void
     @ViewBuilder var content: () -> Content

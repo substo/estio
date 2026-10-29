@@ -26,7 +26,7 @@ import TandemMedia
 /// Consolidating copies them into the project's own folder and points the
 /// project at the copies with one edit through the coordinator (one undo
 /// step, journaled, autosaved). Archiving to a destination copies the whole
-/// folder there as well, less what Tandem rebuilds on its own, and writes
+/// folder there as well, less what Substo Video rebuilds on its own, and writes
 /// the copies of the project files with the new paths; the original folder
 /// is left as it was.
 ///
@@ -105,14 +105,14 @@ public final class ProjectArchiver: @unchecked Sendable {
         plan.manifest = try ArchiveManifest.load(from: root)
         if mode == .archive {
             plan.sourceManifest = try ArchiveManifest.load(from: source.root)
-            // An earlier archive's copy open in Tandem would save over the
+            // An earlier archive's copy open in Substo Video would save over the
             // one this writes.
             for entry in plan.projects {
                 let copy = root.appendingPathComponent(entry.url.lastPathComponent)
                 // Held by this process counts too: the app may have the
                 // copy open in another window.
                 if LockHandle.isHeld(ProjectSession.lockURL(for: copy)) {
-                    throw ServiceError(.locked, "The archive's copy of \(entry.url.lastPathComponent) is open in Tandem. Close it there and archive again.")
+                    throw ServiceError(.locked, "The archive's copy of \(entry.url.lastPathComponent) is open in Substo Video. Close it there and archive again.")
                 }
             }
         }
@@ -277,7 +277,7 @@ public final class ProjectArchiver: @unchecked Sendable {
         return entries.allSatisfy { $0 == ".DS_Store" }
     }
 
-    /// The other `.tandem` files in the folder, with any edits a crash left
+    /// The other `.substo` files in the folder, with any edits a crash left
     /// in their journals.
     private func otherProjects(in folder: ProjectFolder, besides main: URL, warnings: inout [String]) -> [ProjectEntry] {
         let files = (try? FileManager.default.contentsOfDirectory(at: folder.root, includingPropertiesForKeys: nil)) ?? []
@@ -566,7 +566,7 @@ public final class ProjectArchiver: @unchecked Sendable {
 
     // MARK: - The folder copy (archive mode)
 
-    /// Analysis the archive leaves out unless asked: big, and Tandem makes
+    /// Analysis the archive leaves out unless asked: big, and Substo Video makes
     /// it again for what the edit uses. Transcripts, waveforms and loudness
     /// always go; transcripts especially are slow to make again. So do the
     /// converted copies of stickers macOS can't decode: they're small, and
@@ -580,7 +580,7 @@ public final class ProjectArchiver: @unchecked Sendable {
         for entry in plan.projects {
             let name = entry.url.lastPathComponent
             let stem = entry.url.deletingPathExtension().lastPathComponent
-            written.formUnion([name, ".tandem/\(stem).journal.jsonl", ".tandem/\(stem).undo.json", ".tandem/\(stem).review.json"])
+            written.formUnion([name, ".substo/\(stem).journal.jsonl", ".substo/\(stem).undo.json", ".substo/\(stem).review.json"])
         }
         let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .isRegularFileKey]
         var folders: [(URL, String)] = [(plan.source.root, "")]
@@ -611,7 +611,7 @@ public final class ProjectArchiver: @unchecked Sendable {
                     continue
                 }
                 guard values?.isRegularFile == true, !written.contains(relative), !Self.isScratch(relative), name != ".DS_Store",
-                      !(name.hasSuffix(".lock") && (prefix as NSString).lastPathComponent == ".tandem"),
+                      !(name.hasSuffix(".lock") && (prefix as NSString).lastPathComponent == ".substo"),
                       let info = FileCopier.fileInfo(url) else { continue }
                 let real = Self.realPath(url) ?? url.path
                 let job = Job(kind: .folder, source: URL(fileURLWithPath: real), original: url.path, preferred: relative, bytes: info.size, modified: info.modified, isCache: Self.isCache(relative))
@@ -650,7 +650,7 @@ public final class ProjectArchiver: @unchecked Sendable {
     static func whyLeftOut(folder relative: String, name: String, withCache: Bool) -> String? {
         if name == "node_modules" { return "npm packages, which `npm install` puts back" }
         let parts = relative.split(separator: "/").map(String.init)
-        if !withCache, parts.count >= 3, parts[parts.count - 3] == ".tandem", parts[parts.count - 2] == "cache", rebuildableCache.contains(name) {
+        if !withCache, parts.count >= 3, parts[parts.count - 3] == ".substo", parts[parts.count - 2] == "cache", rebuildableCache.contains(name) {
             let what: String
             switch AnalysisKind(rawValue: name) {
             case .proxy: what = "proxies"
@@ -659,7 +659,7 @@ public final class ProjectArchiver: @unchecked Sendable {
             case .isolatedVoice: what = "isolated voice"
             default: what = name
             }
-            return "\(what), which Tandem makes again for what the edit uses when the archive is opened (--with-cache keeps them)"
+            return "\(what), which Substo Video makes again for what the edit uses when the archive is opened (--with-cache keeps them)"
         }
         return nil
     }
@@ -680,10 +680,10 @@ public final class ProjectArchiver: @unchecked Sendable {
         cacheIndex(relative.split(separator: "/").map(String.init)) != nil
     }
 
-    /// Where `.tandem/cache` is in a path's parts, if it's in the cache.
+    /// Where `.substo/cache` is in a path's parts, if it's in the cache.
     private static func cacheIndex(_ parts: [String]) -> Int? {
         guard parts.count >= 2 else { return nil }
-        for index in 1..<parts.count where parts[index] == "cache" && parts[index - 1] == ".tandem" {
+        for index in 1..<parts.count where parts[index] == "cache" && parts[index - 1] == ".substo" {
             return index
         }
         return nil
@@ -1073,8 +1073,8 @@ public final class ProjectArchiver: @unchecked Sendable {
     }
 
     /// Where a file from outside the folder goes: a LUT in `assets/lut/`,
-    /// a shared library file in `media/Tandem Library/` where it was in the
-    /// library (`media/Tandem Library/Stickers/star.mov`), the library's
+    /// a shared library file in `media/Substo Library/` where it was in the
+    /// library (`media/Substo Library/Stickers/star.mov`), the library's
     /// converted copy of one beside where its original would go, named
     /// after it, and any other media in `media/<the folder it was in>/`.
     func destination(for url: URL, real: String, kind: ArchivedKind) -> String {

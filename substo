@@ -2,12 +2,12 @@
 
 set -euo pipefail
 
-# `tandem app [project.tandem]` opens the editor, and `tandem url "..."`
-# sends it a tandem:// link. Anything else goes to the tandem command
-# inside the app bundle (run `tandem help`).
+# `substo app [project.substo]` opens the editor, and `substo url "..."`
+# sends it a substo:// link. Anything else goes to the substo command
+# inside the app bundle (run `substo help`).
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-APP_DIR="${TANDEM_APP_DIR:-$HOME/Applications/Substo Video.app}"
-CLI="$APP_DIR/Contents/MacOS/tandem"
+APP_DIR="${SUBSTO_APP_DIR:-$HOME/Applications/Substo Video.app}"
+CLI="$APP_DIR/Contents/MacOS/substo"
 
 case "${1:-}" in
   app)
@@ -23,29 +23,29 @@ case "${1:-}" in
     exec bash "$SCRIPT_DIR/restart.sh"
     ;;
   url)
-    # `tandem url "screenshot?out=/tmp/shot.png"` sends the app a
-    # tandem:// link with this Mac's key. Any web page can open a
-    # tandem:// link, so the app ignores one without the key. The app
+    # `substo url "screenshot?out=/tmp/shot.png"` sends the app a
+    # substo:// link with this Mac's key. Any web page can open a
+    # substo:// link, so the app ignores one without the key. The app
     # makes the key the first time it starts.
     shift
     if [[ $# -ne 1 || -z "$1" ]]; then
-      echo 'usage: tandem url "command?query"   e.g. tandem url "screenshot?out=/tmp/shot.png"' >&2
+      echo 'usage: substo url "command?query"   e.g. substo url "screenshot?out=/tmp/shot.png"' >&2
       exit 2
     fi
     LINK="$1"
-    # The key only ever goes to Tandem: tandem://, or tandem-something://
+    # The key only ever goes to Substo Video: substo://, or substo-something://
     # for a copy built under another bundle ID. Any other link is refused,
     # and the link is opened with $APP_DIR itself, since Launch Services
     # could hand a scheme claimed by several apps to any of them.
     SCHEME_PATTERN='^([A-Za-z][A-Za-z0-9+.-]*)://'
     if [[ "$LINK" =~ $SCHEME_PATTERN ]]; then
       SCHEME="$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
-      if [[ "$SCHEME" != tandem && "$SCHEME" != tandem-* ]]; then
-        echo "tandem url only sends tandem:// links, not $SCHEME:// ones." >&2
+      if [[ "$SCHEME" != substo && "$SCHEME" != substo-* ]]; then
+        echo "substo url only sends substo:// links, not $SCHEME:// ones." >&2
         exit 2
       fi
     else
-      LINK="tandem://$LINK"
+      LINK="substo://$LINK"
     fi
     # The key goes in the query, so before any #fragment.
     FRAGMENT=""
@@ -53,9 +53,9 @@ case "${1:-}" in
       FRAGMENT="#${LINK#*#}"
       LINK="${LINK%%#*}"
     fi
-    KEY_FILE="$HOME/Library/Application Support/Tandem/url-key"
+    KEY_FILE="$HOME/Library/Application Support/Substo/url-key"
     if [[ ! -r "$KEY_FILE" ]]; then
-      echo "There's no key for tandem:// links yet. Start Tandem once (tandem app), then try again." >&2
+      echo "There's no key for substo:// links yet. Start Substo Video once (substo app), then try again." >&2
       exit 1
     fi
     SEPARATOR="?"

@@ -2,7 +2,7 @@ import CoreImage
 import Foundation
 import Metal
 
-/// Tandem's own Core Image kernels, written in Metal and compiled once at
+/// Substo Video's own Core Image kernels, written in Metal and compiled once at
 /// runtime (`CIKernel.kernels(withMetalString:)`), so the package needs no
 /// Metal build step. They run on the shared Metal-backed context.
 ///
@@ -187,7 +187,7 @@ enum Kernels {
 
 extension CIImage {
     /// Multiplies the layer, alpha included: opacity.
-    func tandemOpacity(_ opacity: Double) -> CIImage {
+    func substoOpacity(_ opacity: Double) -> CIImage {
         if opacity >= 1 { return self }
         if opacity <= 0 { return CIImage.empty() }
         if let kernel = Kernels.premultipliedScale, let out = kernel.apply(extent: extent, arguments: [self, Float(opacity)]) {
@@ -202,7 +202,7 @@ extension CIImage {
     }
 
     /// Scales colour towards black, keeping alpha: dips to black.
-    func tandemDarkened(_ amount: Double) -> CIImage {
+    func substoDarkened(_ amount: Double) -> CIImage {
         if amount >= 1 { return self }
         if let kernel = Kernels.colorScale, let out = kernel.apply(extent: extent, arguments: [self, Float(max(amount, 0))]) {
             return out

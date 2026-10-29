@@ -1,7 +1,7 @@
 import XCTest
 @testable import TandemCore
 
-/// `tandem check`'s judgements, on made-up frame measurements and projects.
+/// `substo check`'s judgements, on made-up frame measurements and projects.
 final class QualityCheckTests: XCTestCase {
     // MARK: - Helpers
 

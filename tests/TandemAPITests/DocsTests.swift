@@ -6,7 +6,7 @@ import XCTest
 /// topic files in docs/agents/. Every edit command is in the command index,
 /// every JSON example decodes, every link between the files resolves, and
 /// the entry point stays small enough to read whole. Each command's
-/// arguments and example live in the schema (`tandem help <command>`),
+/// arguments and example live in the schema (`substo help <command>`),
 /// which SchemaTests checks.
 final class DocsTests: XCTestCase {
     static let docs = URL(fileURLWithPath: #filePath)

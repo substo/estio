@@ -8,11 +8,11 @@ import TandemMedia
 /// A shared library in a temp folder beside a video folder, and a project
 /// that uses it every way a project can:
 ///
-///     <temp>/Tandem Library/Stickers/Star.mov          a sticker, where it is
-///     <temp>/Tandem Library/Sound effects/Whoosh.wav   a sound, where it is
-///     <temp>/Tandem Library/Looks/Warm.cube            a look on a clip
-///     <temp>/Tandem Library/Fonts/TiltWarp.ttf         the caption preset's font
-///     <temp>/Tandem Library/Segments/Intro/sting.wav   a segment's media
+///     <temp>/Substo Library/Stickers/Star.mov          a sticker, where it is
+///     <temp>/Substo Library/Sound effects/Whoosh.wav   a sound, where it is
+///     <temp>/Substo Library/Looks/Warm.cube            a look on a clip
+///     <temp>/Substo Library/Fonts/TiltWarp.ttf         the caption preset's font
+///     <temp>/Substo Library/Segments/Intro/sting.wav   a segment's media
 ///     <temp>/Assets/shared/Stickers_Spin.webm-1a2b/normalised.mov
 ///                                                      the converted copy of Stickers/Spin.webm
 final class SharedFixture {
@@ -22,7 +22,7 @@ final class SharedFixture {
 
     init() throws {
         archive = try ArchiveFixture(write: false)
-        shared = SharedLibrary(root: archive.root.appendingPathComponent("Tandem Library", isDirectory: true))
+        shared = SharedLibrary(root: archive.root.appendingPathComponent("Substo Library", isDirectory: true))
         try shared.create()
         assetsRoot = archive.root.appendingPathComponent("Assets", isDirectory: true)
         try archive.make(library("Stickers/Star.mov"), seed: 11)
@@ -89,10 +89,10 @@ final class SharedFixture {
 
 final class SharedLibraryArchiveTests: XCTestCase {
     static let expected: [String: String] = [
-        "med_star": "media/Tandem Library/Stickers/Star.mov",
-        "med_whoosh": "media/Tandem Library/Sound effects/Whoosh.wav",
-        "med_spin": "media/Tandem Library/Stickers/Spin.mov",
-        "med_sting": "media/Tandem Library/Segments/Intro/sting.wav"
+        "med_star": "media/Substo Library/Stickers/Star.mov",
+        "med_whoosh": "media/Substo Library/Sound effects/Whoosh.wav",
+        "med_spin": "media/Substo Library/Stickers/Spin.mov",
+        "med_sting": "media/Substo Library/Segments/Intro/sting.wav"
     ]
 
     func testConsolidatingCopiesEverySharedFileAndPointsTheProjectAtIt() throws {
@@ -102,7 +102,7 @@ final class SharedLibraryArchiveTests: XCTestCase {
 
         let collected = Dictionary(uniqueKeysWithValues: result.collected.map { ($0.path, $0) })
         XCTAssertEqual(Set(collected.keys), Set(Self.expected.values).union(["assets/lut/Warm.cube", "assets/font/TiltWarp.ttf"]))
-        XCTAssertEqual(collected["media/Tandem Library/Stickers/Spin.mov"]?.original, ProjectArchiver.realPath(f.converted))
+        XCTAssertEqual(collected["media/Substo Library/Stickers/Spin.mov"]?.original, ProjectArchiver.realPath(f.converted))
         for file in result.collected {
             XCTAssertEqual(try Data(contentsOf: f.video.appendingPathComponent(file.path)), try Data(contentsOf: URL(fileURLWithPath: file.original)), file.path)
         }
@@ -126,7 +126,7 @@ final class SharedLibraryArchiveTests: XCTestCase {
         let shelf = f.archive.root.appendingPathComponent("shelf", isDirectory: true)
         try FileManager.default.createDirectory(at: shelf, withIntermediateDirectories: true)
         let planned = try f.archive(to: shelf, dryRun: true)
-        XCTAssertTrue(planned.readableText.contains("media/Tandem Library/Stickers/Star.mov"), planned.readableText)
+        XCTAssertTrue(planned.readableText.contains("media/Substo Library/Stickers/Star.mov"), planned.readableText)
 
         let result = try f.archive(to: shelf)
         XCTAssertEqual(result.mode, .archive)
@@ -134,7 +134,7 @@ final class SharedLibraryArchiveTests: XCTestCase {
         let original = try f.archive.load().project
         XCTAssertEqual(original.media("med_star")?.path, f.library("Stickers/Star.mov").path, "the original still uses the library")
 
-        // Bruce has no Tandem Library.
+        // Bruce has no Substo Library.
         try FileManager.default.moveItem(at: f.shared.root, to: f.archive.root.appendingPathComponent("gone", isDirectory: true))
         try FileManager.default.moveItem(at: f.assetsRoot, to: f.archive.root.appendingPathComponent("gone assets", isDirectory: true))
         let copy = URL(fileURLWithPath: result.projectFile)
@@ -146,7 +146,7 @@ final class SharedLibraryArchiveTests: XCTestCase {
         XCTAssertEqual(MediaRelinker.missing(in: archived, folder: ProjectFolder(projectFile: copy)).map(\.id), [])
         XCTAssertTrue(FileManager.default.fileExists(atPath: copy.deletingLastPathComponent().appendingPathComponent("assets/lut/Warm.cube").path))
         let manifest = try XCTUnwrap(ArchiveManifest.load(from: copy.deletingLastPathComponent()))
-        XCTAssertEqual(manifest.entry(for: "media/Tandem Library/Stickers/Star.mov")?.original, starOriginal)
+        XCTAssertEqual(manifest.entry(for: "media/Substo Library/Stickers/Star.mov")?.original, starOriginal)
     }
 
     /// Links are followed both ways: a library that's itself a link, a
@@ -171,14 +171,14 @@ final class SharedLibraryArchiveTests: XCTestCase {
 
         let result = try f.archive()
         let collected = Dictionary(uniqueKeysWithValues: result.collected.map { ($0.path, $0) })
-        XCTAssertEqual(collected["media/Tandem Library/Stickers/Star.mov"]?.original, ProjectArchiver.realPath(f.library("Stickers/Star.mov")))
-        XCTAssertEqual(collected["media/Tandem Library/Sound effects/Whoosh.wav"]?.original, ProjectArchiver.realPath(f.library("Sound effects/Whoosh.wav")))
-        XCTAssertEqual(collected["media/Tandem Library/Music/Bed.m4a"]?.original, ProjectArchiver.realPath(f.archive.outside("music/bed.m4a")), "the file the link points to")
+        XCTAssertEqual(collected["media/Substo Library/Stickers/Star.mov"]?.original, ProjectArchiver.realPath(f.library("Stickers/Star.mov")))
+        XCTAssertEqual(collected["media/Substo Library/Sound effects/Whoosh.wav"]?.original, ProjectArchiver.realPath(f.library("Sound effects/Whoosh.wav")))
+        XCTAssertEqual(collected["media/Substo Library/Music/Bed.m4a"]?.original, ProjectArchiver.realPath(f.archive.outside("music/bed.m4a")), "the file the link points to")
         let saved = try f.archive.load().project
-        XCTAssertEqual(saved.media("med_star")?.path, "media/Tandem Library/Stickers/Star.mov")
-        XCTAssertEqual(saved.media("med_whoosh")?.path, "media/Tandem Library/Sound effects/Whoosh.wav", "a link in the folder to the library counts as outside")
-        XCTAssertEqual(saved.media("med_bed")?.path, "media/Tandem Library/Music/Bed.m4a")
-        XCTAssertTrue(FileCopier.isPlainFile(f.video.appendingPathComponent("media/Tandem Library/Music/Bed.m4a")), "a real copy, not a link")
+        XCTAssertEqual(saved.media("med_star")?.path, "media/Substo Library/Stickers/Star.mov")
+        XCTAssertEqual(saved.media("med_whoosh")?.path, "media/Substo Library/Sound effects/Whoosh.wav", "a link in the folder to the library counts as outside")
+        XCTAssertEqual(saved.media("med_bed")?.path, "media/Substo Library/Music/Bed.m4a")
+        XCTAssertTrue(FileCopier.isPlainFile(f.video.appendingPathComponent("media/Substo Library/Music/Bed.m4a")), "a real copy, not a link")
 
         // Named by the library the options know, however it's reached.
         let viaLink = try f.archive(dryRun: true, shared: SharedLibrary(root: linkedLibrary))
@@ -201,7 +201,7 @@ final class SharedLibraryArchiveTests: XCTestCase {
             session.close()
         }
         let planned = try await service.archive(ArchiveRequest(dryRun: true), context: CallContext(author: "claude"))
-        XCTAssertTrue(planned.collected.contains { $0.path == "media/Tandem Library/Sound effects/Whoosh.wav" }, planned.readableText)
+        XCTAssertTrue(planned.collected.contains { $0.path == "media/Substo Library/Sound effects/Whoosh.wav" }, planned.readableText)
     }
 }
 
@@ -211,8 +211,8 @@ final class SharedLibraryRelinkTests: XCTestCase {
         var project = Project(id: "prj_moved", name: "From Bruce")
         // Paths from another Mac, where the library was somewhere else.
         project.media = [
-            try f.archive.item("med_star", f.library("Stickers/Star.mov"), stored: "/Users/mike/Movies/Tandem Library/Stickers/Star.mov", role: .sticker),
-            try f.archive.item("med_whoosh", f.library("Sound effects/Whoosh.wav"), stored: "/Users/mike/Movies/Tandem Library/Sound effects/Whoosh.wav", kind: .audio, role: .sfx),
+            try f.archive.item("med_star", f.library("Stickers/Star.mov"), stored: "/Users/mike/Movies/Substo Library/Stickers/Star.mov", role: .sticker),
+            try f.archive.item("med_whoosh", f.library("Sound effects/Whoosh.wav"), stored: "/Users/mike/Movies/Substo Library/Sound effects/Whoosh.wav", kind: .audio, role: .sfx),
             try f.archive.item("med_other", f.archive.outside("x.wav"), stored: "/Users/mike/elsewhere/other.wav", kind: .audio, role: .sfx)
         ]
         try f.write(project)
@@ -321,7 +321,7 @@ final class SegmentTests: XCTestCase {
         func otherProject() throws -> URL {
             let folder = f.archive.root.appendingPathComponent("other video", isDirectory: true)
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let url = folder.appendingPathComponent("Other.tandem")
+            let url = folder.appendingPathComponent("Other.substo")
             try ProjectFile.save(Project.standard(name: "Other"), revision: 1, to: url)
             return url
         }
@@ -392,11 +392,11 @@ final class SegmentTests: XCTestCase {
         let archived = try ProjectArchiver(session: archiveSession, options: ArchiveOptions(author: "claude", fonts: StubFonts(), sharedLibrary: intro.f.shared, assetsRoot: intro.f.assetsRoot)).run()
         archiveSession.close()
         XCTAssertEqual(Set(archived.collected.map(\.path)), [
-            "media/Tandem Library/Segments/Intro/card.mov", "media/Tandem Library/Segments/Intro/whoosh.wav",
-            "media/Tandem Library/Segments/Intro/Star.mov", "assets/lut/warm.cube"
+            "media/Substo Library/Segments/Intro/card.mov", "media/Substo Library/Segments/Intro/whoosh.wav",
+            "media/Substo Library/Segments/Intro/Star.mov", "assets/lut/warm.cube"
         ])
         let standalone = try ProjectFile.load(from: other).project
-        XCTAssertTrue(standalone.media.allSatisfy { $0.path.hasPrefix("media/Tandem Library/Segments/Intro/") }, "\(standalone.media.map(\.path))")
+        XCTAssertTrue(standalone.media.allSatisfy { $0.path.hasPrefix("media/Substo Library/Segments/Intro/") }, "\(standalone.media.map(\.path))")
         XCTAssertEqual(standalone.track(named: "Graphics")?.clips.first?.video?.effects.first?.params["path"], .string("assets/lut/warm.cube"))
     }
 
@@ -419,10 +419,10 @@ final class SegmentTests: XCTestCase {
         XCTAssertEqual(replaced.segment.media.map(\.path), ["card.mov"])
         XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: folder.path)), ["segment.json", "card.mov", "whoosh.wav", "Star.mov", "warm.cube"], "the old files stay for the projects that play them")
         XCTAssertEqual(discarded.urls.count, 1)
-        XCTAssertTrue(discarded.urls.first?.lastPathComponent.hasPrefix(".Intro.tandem-replaced-") == true)
+        XCTAssertTrue(discarded.urls.first?.lastPathComponent.hasPrefix(".Intro.substo-replaced-") == true)
 
         // A replace that stopped after moving the old one aside.
-        let aside = intro.store.folder.appendingPathComponent(".Intro.tandem-replaced-crashed", isDirectory: true)
+        let aside = intro.store.folder.appendingPathComponent(".Intro.substo-replaced-crashed", isDirectory: true)
         try FileManager.default.moveItem(at: folder, to: aside)
         XCTAssertThrowsError(try intro.store.save(cardOnly)) { error in
             XCTAssertTrue((error as? ServiceError)?.message.contains("already a segment") == true, "\(error)")
@@ -600,69 +600,69 @@ final class SegmentTests: XCTestCase {
     }
 }
 
-/// `tandem segments` and archive, run as Mike and agents run them.
+/// `substo segments` and archive, run as Mike and agents run them.
 final class SegmentCLITests: XCTestCase {
     func testSegmentsFromTheCommandLine() throws {
-        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "substo isn't built")
         let cli = CLITests()
         let intro = try Intro()
         try FileManager.default.removeItem(at: intro.f.library("Segments/Intro"))
-        let env = ["TANDEM_LIBRARY": intro.f.shared.root.path, "TANDEM_ASSETS_ROOT": intro.f.assetsRoot.path, "TANDEM_ASSETS_OFFLINE": "1"]
+        let env = ["SUBSTO_LIBRARY": intro.f.shared.root.path, "SUBSTO_ASSETS_ROOT": intro.f.assetsRoot.path, "SUBSTO_ASSETS_OFFLINE": "1"]
 
-        let empty = try cli.tandem("segments", in: intro.f.video, env: env)
+        let empty = try cli.substo("segments", in: intro.f.video, env: env)
         XCTAssertEqual(empty.status, 0, empty.stderr)
         XCTAssertTrue(empty.stdout.hasPrefix("No segments in"), empty.stdout)
 
-        let saved = try cli.tandem("segments", "save", "Intro", "--clips", intro.ids.joined(separator: ","), "--field", "clip_title=Title", in: intro.f.video, env: env)
+        let saved = try cli.substo("segments", "save", "Intro", "--clips", intro.ids.joined(separator: ","), "--field", "clip_title=Title", in: intro.f.video, env: env)
         XCTAssertEqual(saved.status, 0, saved.stderr)
         XCTAssertTrue(saved.stdout.contains("Copied beside it, so it stands on its own:"), saved.stdout)
         XCTAssertTrue(FileManager.default.fileExists(atPath: intro.f.library("Segments/Intro/segment.json").path))
 
-        let listed = try cli.tandem("segments", "list", "--json", in: intro.f.video, env: env)
+        let listed = try cli.substo("segments", "list", "--json", in: intro.f.video, env: env)
         XCTAssertEqual(listed.status, 0, listed.stderr)
         let list = try ServiceJSON.decoder().decode(SegmentListResult.self, from: Data(listed.stdout.utf8))
         XCTAssertEqual(list.segments.map(\.name), ["Intro"])
 
         let other = try intro.otherProject()
-        let inserted = try cli.tandem("segments", "insert", "Intro", "--at", "0:02", "--value", "title=Hello", "--author", "claude", in: other.deletingLastPathComponent(), env: env)
+        let inserted = try cli.substo("segments", "insert", "Intro", "--at", "0:02", "--value", "title=Hello", "--author", "claude", in: other.deletingLastPathComponent(), env: env)
         XCTAssertEqual(inserted.status, 0, inserted.stderr)
         XCTAssertTrue(inserted.stdout.hasPrefix("Put the segment \"Intro\" at 00:02.000 as revision 2"), inserted.stdout)
-        let history = try cli.tandem("history", in: other.deletingLastPathComponent())
+        let history = try cli.substo("history", in: other.deletingLastPathComponent())
         XCTAssertTrue(history.stdout.contains("Add segment Intro  (claude)"), history.stdout)
 
         // The archive knows where the library is from the environment.
-        let dry = try cli.tandem("archive", "--dry-run", in: other.deletingLastPathComponent(), env: env)
+        let dry = try cli.substo("archive", "--dry-run", in: other.deletingLastPathComponent(), env: env)
         XCTAssertEqual(dry.status, 0, dry.stderr)
-        XCTAssertTrue(dry.stdout.contains("media/Tandem Library/Segments/Intro/card.mov"), dry.stdout)
+        XCTAssertTrue(dry.stdout.contains("media/Substo Library/Segments/Intro/card.mov"), dry.stdout)
 
-        let usage = try cli.tandem("segments", "save", "Outro", in: intro.f.video, env: env)
+        let usage = try cli.substo("segments", "save", "Outro", in: intro.f.video, env: env)
         XCTAssertEqual(usage.status, 2)
         XCTAssertTrue(usage.stderr.contains("needs the clips"), usage.stderr)
-        let noAt = try cli.tandem("segments", "insert", "Intro", in: other.deletingLastPathComponent(), env: env)
+        let noAt = try cli.substo("segments", "insert", "Intro", in: other.deletingLastPathComponent(), env: env)
         XCTAssertEqual(noAt.status, 2)
         XCTAssertTrue(noAt.stderr.contains("needs --at"), noAt.stderr)
-        let help = try cli.tandem("help", "segments", in: intro.f.video)
-        XCTAssertTrue(help.stdout.hasPrefix("Usage: tandem segments list | save"), help.stdout)
+        let help = try cli.substo("help", "segments", in: intro.f.video)
+        XCTAssertTrue(help.stdout.hasPrefix("Usage: substo segments list | save"), help.stdout)
     }
 
     /// A sound dropped into the shared library is found, and used where it
     /// is, with the app closed.
     func testSharedAssetsFromTheCommandLine() throws {
-        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "tandem isn't built")
+        try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: CLITests.binary.path), "substo isn't built")
         let cli = CLITests()
         let f = try SharedFixture()
         let pop = f.library("Sound effects/Pop.wav")
         try AssetFixtures.wav(at: pop)
         try ProjectFile.save(Project.standard(name: "Video"), revision: 1, to: f.projectURL)
-        let env = ["TANDEM_LIBRARY": f.shared.root.path, "TANDEM_ASSETS_ROOT": f.assetsRoot.path, "TANDEM_ASSETS_OFFLINE": "1"]
+        let env = ["SUBSTO_LIBRARY": f.shared.root.path, "SUBSTO_ASSETS_ROOT": f.assetsRoot.path, "SUBSTO_ASSETS_OFFLINE": "1"]
 
-        let search = try cli.tandem("assets", "search", "pop", "--provider", "shared", "--json", in: f.video, env: env)
+        let search = try cli.substo("assets", "search", "pop", "--provider", "shared", "--json", in: f.video, env: env)
         XCTAssertEqual(search.status, 0, search.stderr)
         let found = try ServiceJSON.decoder().decode(AssetSearchResult.self, from: Data(search.stdout.utf8))
         XCTAssertEqual(found.local.map(\.id), ["shared:Sound effects/Pop.wav"])
         XCTAssertEqual(found.local.first?.kind, .sfx)
 
-        let use = try cli.tandem("assets", "use", "shared:Sound effects/Pop.wav", "--at", "1", in: f.video, env: env)
+        let use = try cli.substo("assets", "use", "shared:Sound effects/Pop.wav", "--at", "1", in: f.video, env: env)
         XCTAssertEqual(use.status, 0, use.stderr)
         XCTAssertTrue(use.stdout.contains("It's the shared library's file, not a copy"), use.stdout)
         let project = try ProjectFile.load(from: f.projectURL).project
@@ -689,10 +689,10 @@ final class SharedFontTextTests: XCTestCase {
     func testASharedFontSaysItStaysInTheLibrary() {
         let result = AssetUseResult(
             asset: Asset(provider: "shared", providerID: "Fonts/TiltWarp.ttf", kind: .font, name: "Tilt Warp"),
-            mediaID: nil, files: ["/Users/mike/Movies/Tandem Library/Fonts/TiltWarp.ttf"], referencedInPlace: true,
+            mediaID: nil, files: ["/Users/mike/Movies/Substo Library/Fonts/TiltWarp.ttf"], referencedInPlace: true,
             role: .other, trackName: nil, gainDB: nil, at: nil, applied: nil, fonts: ["TiltWarp-Regular"], licence: nil
         )
         XCTAssertTrue(result.readableText.hasPrefix("Installed the font Tilt Warp"), result.readableText)
-        XCTAssertTrue(result.readableText.contains("It stays in the shared library (/Users/mike/Movies/Tandem Library/Fonts/TiltWarp.ttf)"), result.readableText)
+        XCTAssertTrue(result.readableText.contains("It stays in the shared library (/Users/mike/Movies/Substo Library/Fonts/TiltWarp.ttf)"), result.readableText)
     }
 }

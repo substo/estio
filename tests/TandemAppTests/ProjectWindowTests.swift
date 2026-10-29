@@ -9,7 +9,7 @@ final class WindowPlacementTests: XCTestCase {
     private let monitor = NSRect(x: -2_560, y: -269, width: 2_560, height: 1_440)
 
     private func store() -> UserDefaults {
-        let name = "tandem-placement-\(UUID().uuidString)"
+        let name = "substo-placement-\(UUID().uuidString)"
         let store = UserDefaults(suiteName: name)!
         addTeardownBlock { store.removePersistentDomain(forName: name) }
         return store
@@ -43,15 +43,15 @@ final class WindowPlacementTests: XCTestCase {
     /// project with no frame of its own opens where the last window was.
     func testEachProjectKeepsItsOwnFrame() {
         let defaults = store()
-        let decisions = URL(fileURLWithPath: "/videos/decision-models/v14.tandem")
-        let workbench = URL(fileURLWithPath: "/videos/workbench/Workbench.tandem")
+        let decisions = URL(fileURLWithPath: "/videos/decision-models/v14.substo")
+        let workbench = URL(fileURLWithPath: "/videos/workbench/Workbench.substo")
         let left = NSRect(x: -2_560, y: -237, width: 1_280, height: 1_408)
         let right = NSRect(x: -1_280, y: -237, width: 1_280, height: 1_408)
         WindowPlacement.save(left, for: decisions, to: defaults)
         WindowPlacement.save(right, for: workbench, to: defaults)
         XCTAssertEqual(WindowPlacement.restored(screens: [laptop, monitor], occupied: [], for: decisions, store: defaults), left)
         XCTAssertEqual(WindowPlacement.restored(screens: [laptop, monitor], occupied: [], for: workbench, store: defaults), right)
-        let other = URL(fileURLWithPath: "/videos/new/New.tandem")
+        let other = URL(fileURLWithPath: "/videos/new/New.substo")
         XCTAssertEqual(WindowPlacement.restored(screens: [laptop, monitor], occupied: [], for: other, store: defaults), right, "the last window's frame")
     }
 
@@ -73,10 +73,10 @@ final class ProjectWindowFrameTests: XCTestCase {
         guard screen.contains(placed) else { throw XCTSkip("the screen is too small for a 1100 x 700 window") }
         let saved = UserDefaults.standard.string(forKey: WindowPlacement.key)
         defer { UserDefaults.standard.set(saved, forKey: WindowPlacement.key) }
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tandem-frame-\(UUID().uuidString)", isDirectory: true)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("substo-frame-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let url = folder.appendingPathComponent("Frame.tandem")
+        let url = folder.appendingPathComponent("Frame.substo")
 
         func open() throws -> ProjectWindowController {
             let session = FileManager.default.fileExists(atPath: url.path)
@@ -104,7 +104,7 @@ final class ProjectWindowFrameTests: XCTestCase {
 /// and the scroll, so a restart to install a build doesn't lose the place.
 final class TimelinePlacementTests: XCTestCase {
     private func store() -> UserDefaults {
-        let name = "tandem-timeline-\(UUID().uuidString)"
+        let name = "substo-timeline-\(UUID().uuidString)"
         let store = UserDefaults(suiteName: name)!
         addTeardownBlock { store.removePersistentDomain(forName: name) }
         return store
@@ -112,20 +112,20 @@ final class TimelinePlacementTests: XCTestCase {
 
     func testEachProjectKeepsItsPlace() {
         let defaults = store()
-        let talk = URL(fileURLWithPath: "/videos/talk/Talk.tandem")
-        let short = URL(fileURLWithPath: "/videos/short/Short.tandem")
+        let talk = URL(fileURLWithPath: "/videos/talk/Talk.substo")
+        let short = URL(fileURLWithPath: "/videos/short/Short.substo")
         let place = TimelinePlacement.Saved(playhead: 312.4, pixelsPerSecond: 48, scrollSeconds: 290, verticalOffset: 36)
         TimelinePlacement.save(place, for: talk, to: defaults)
         TimelinePlacement.save(TimelinePlacement.Saved(playhead: 5, pixelsPerSecond: 200, scrollSeconds: 0, verticalOffset: 0), for: short, to: defaults)
         XCTAssertEqual(TimelinePlacement.saved(for: talk, in: defaults), place)
         XCTAssertEqual(TimelinePlacement.saved(for: short, in: defaults)?.playhead, 5)
-        XCTAssertEqual(TimelinePlacement.saved(for: URL(fileURLWithPath: "/videos/talk/../talk/Talk.tandem"), in: defaults), place, "the same file however it's spelled")
-        XCTAssertNil(TimelinePlacement.saved(for: URL(fileURLWithPath: "/videos/new/New.tandem"), in: defaults), "a new project fits")
+        XCTAssertEqual(TimelinePlacement.saved(for: URL(fileURLWithPath: "/videos/talk/../talk/Talk.substo"), in: defaults), place, "the same file however it's spelled")
+        XCTAssertNil(TimelinePlacement.saved(for: URL(fileURLWithPath: "/videos/new/New.substo"), in: defaults), "a new project fits")
     }
 
     func testNonsenseIsIgnored() {
         let defaults = store()
-        let talk = URL(fileURLWithPath: "/videos/talk/Talk.tandem")
+        let talk = URL(fileURLWithPath: "/videos/talk/Talk.substo")
         TimelinePlacement.save(TimelinePlacement.Saved(playhead: 10, pixelsPerSecond: 0, scrollSeconds: 0, verticalOffset: 0), for: talk, to: defaults)
         XCTAssertNil(TimelinePlacement.saved(for: talk, in: defaults), "no zoom")
         TimelinePlacement.save(TimelinePlacement.Saved(playhead: -4, pixelsPerSecond: 20, scrollSeconds: -1, verticalOffset: .nan), for: talk, to: defaults)
