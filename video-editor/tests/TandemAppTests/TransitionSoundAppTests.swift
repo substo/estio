@@ -10,7 +10,7 @@ import TandemAssets
 import TandemMedia
 
 /// The sounds transitions get in the app: Mike's picks in Settings over
-/// Substo Video's own, on drops and Cmd-D, and how a sound follows a new type.
+/// Studio's own, on drops and Cmd-D, and how a sound follows a new type.
 @MainActor
 final class TransitionSoundAppTests: XCTestCase {
     typealias Defaults = TransitionSoundDefaults
@@ -34,7 +34,7 @@ final class TransitionSoundAppTests: XCTestCase {
         let store = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { store.removePersistentDomain(forName: suite) }
         let settings = TransitionSoundSettings(store: store)
-        XCTAssertEqual(settings.sound(for: .push, library: nil), Defaults.lightSwoosh, "Substo Video's")
+        XCTAssertEqual(settings.sound(for: .push, library: nil), Defaults.lightSwoosh, "Studio's")
         XCTAssertNil(settings.sound(for: .dissolve, library: nil))
         XCTAssertNil(settings.choice(for: .push))
 
@@ -44,7 +44,7 @@ final class TransitionSoundAppTests: XCTestCase {
         XCTAssertEqual(settings.sound(for: .dissolve, library: nil), Defaults.lightSwoosh)
         XCTAssertEqual(TransitionSoundSettings(store: store).choices, ["push": "", "dissolve": Defaults.lightSwoosh.assetID], "kept")
         settings.set(nil, for: .push)
-        XCTAssertEqual(settings.sound(for: .push, library: nil), Defaults.lightSwoosh, "back to Substo Video's")
+        XCTAssertEqual(settings.sound(for: .push, library: nil), Defaults.lightSwoosh, "back to Studio's")
         settings.set("import:sfx/Boom.wav", for: .zoom)
         XCTAssertNil(settings.sound(for: .zoom, library: nil), "a pick the library can't look up plays nothing")
     }
@@ -76,7 +76,7 @@ final class TransitionSoundAppTests: XCTestCase {
             TransitionSoundActions.settings = saved
             store.removePersistentDomain(forName: suite)
         }
-        XCTAssertEqual(TransitionSoundActions.soundFor()(.push), Defaults.lightSwoosh, "Substo Video's")
+        XCTAssertEqual(TransitionSoundActions.soundFor()(.push), Defaults.lightSwoosh, "Studio's")
         TransitionSoundActions.settings.set("", for: .push)
         XCTAssertNil(TransitionSoundActions.soundFor()(.push), "none, as Settings has it")
 

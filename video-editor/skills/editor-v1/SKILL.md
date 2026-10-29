@@ -12,10 +12,10 @@ description: >-
 This is a Codex skill. Invoke it as `$editor-v1` in a new Codex chat. The kit lives in this skill
 folder; do not look for it under `~/.claude/skills`. For a Substo piece, read its
 content record and attached recording from Substo, then keep the generated build under that
-piece's existing `data/video-projects/<record-id>/editor-v1/` folder. The Substo Video project
-remains `Edit.substo` in the same parent folder. When the approved edit is finished, copy the
+piece's existing `data/video-projects/<record-id>/editor-v1/` folder. The `.substo` project (opened in the
+Studio app) remains `Edit.substo` in the same parent folder. When the approved edit is finished, copy the
 review MP4 into that parent's `exports/` folder so Substo's existing Exports action shows it.
-Do not create another Substo content record or another Substo Video project. The style selector
+Do not create another Substo content record or another `.substo` project. The style selector
 in Pipeline records intent; it does not start a render by itself.
 
 If the recording is outside Substo, use the kit's default `~/editor-v1/videos/` workspace.

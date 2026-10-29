@@ -142,7 +142,7 @@ final class LivePhotoFileTests: XCTestCase {
         let broll = try XCTUnwrap(project.videoTracks.firstIndex { $0.name == "B-roll" })
         project.videoTracks[broll].clips = [Clip(id: "clip_live", content: .media(mediaID: "med_live"), start: t(5), duration: t(3))]
 
-        let store = SegmentStore(library: SharedLibrary(root: f.root.appendingPathComponent("Substo Library", isDirectory: true)))
+        let store = SegmentStore(library: SharedLibrary(root: f.root.appendingPathComponent("Studio Library", isDirectory: true)))
         let draft = try SegmentMaker.draft(name: "Photo", clipIDs: ["clip_live"], in: project, folder: ProjectFolder(root: f.video))
         let saved = try store.save(draft)
         XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: saved.folder.path)), ["segment.json", "IMG_0130.HEIC", "IMG_0130.mov"])

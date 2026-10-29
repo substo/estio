@@ -1,7 +1,7 @@
 import Foundation
 
 /// Who made an edit. the creator's edits in the app are credited to "user",
-/// Substo Video's own (new media found in the folder, a reload) to "system", and
+/// Studio's own (new media found in the folder, a reload) to "system", and
 /// anything else is an agent or a command line tool, whose edits wait in
 /// the review log until he's looked at them.
 public enum EditAuthor {
@@ -162,7 +162,7 @@ public struct ReviewLog: Codable, Equatable, Sendable {
     public var isEmpty: Bool { entries.isEmpty }
 
     /// Records a batch if an agent made it and it changed the timeline.
-    /// the creator's own edits (and Substo Video's) never are. A batch already here (the
+    /// the creator's own edits (and Studio's) never are. A batch already here (the
     /// journal replaying one the log heard before a crash) isn't recorded
     /// twice.
     @discardableResult

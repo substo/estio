@@ -4,7 +4,7 @@ import CoreText
 import Foundation
 import TandemCore
 
-/// Graphic templates Substo Video draws itself rather than from a rendered file.
+/// Graphic templates Studio draws itself rather than from a rendered file.
 enum BuiltInGraphics {
     static func renders(_ template: String) -> Bool {
         template == SectionCard.template

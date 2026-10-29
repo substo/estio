@@ -91,7 +91,7 @@ limiter work on the cleaned voice.
 
 ## Check the sound
 
-Don't run ffmpeg on a review clip to hear how loud something is. Substo Video
+Don't run ffmpeg on a review clip to hear how loud something is. Studio
 measures the mix itself, through the same composition, gain taps and
 time-pitch as export:
 
@@ -154,7 +154,7 @@ substo timeline --json | jq -r '.project.videoTracks[].transitions[] | select(.t
 
 Each goes on SFX (SFX 2 where SFX is taken) starting 0.39 s before the
 cut, so its loudest moment lands where the push moves fastest (the light
-swoosh is loudest 0.39 s in). -23.3 dB is for speech at Substo Video's -20 LUFS:
+swoosh is loudest 0.39 s in). -23.3 dB is for speech at Studio's -20 LUFS:
 its loudest 400 ms then sits 15 LU under the voice, as the section card
 whooshes do. In a project whose speech plays elsewhere (`substo loudness`
 says where), move the gain by the difference: -32 for speech at -28.7. For

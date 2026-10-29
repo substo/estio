@@ -205,7 +205,7 @@ struct AssetBrowser: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.prompt = "Add folder"
-        panel.message = "Choose a folder of assets you've downloaded. Substo Video watches it and keeps its licence with every file."
+        panel.message = "Choose a folder of assets you've downloaded. Studio watches it and keeps its licence with every file."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         host.addImportFolder(url, preset: preset) { message in model.show(.info, message) }
     }
@@ -394,7 +394,7 @@ private struct EmptyAssets: View {
         case .inProject: return "This project doesn't use any of these yet."
         case .all:
             switch section {
-            case .music: return "No music in the library yet. Drop tracks into Music in your shared library (Substo Video > Settings), add a folder of tracks you've licensed (Epidemic, Artlist, Envato), or generate a cue with ElevenLabs."
+            case .music: return "No music in the library yet. Drop tracks into Music in your shared library (Studio > Settings), add a folder of tracks you've licensed (Epidemic, Artlist, Envato), or generate a cue with ElevenLabs."
             case .sfx: return "No sound effects yet. Drop them into Sound effects in your shared library, add a folder of effects you've licensed, search online, or generate one with ElevenLabs."
             case .broll: return "No B-roll yet. Drop graphics into Graphics in your shared library; Pexels and Pixabay need a free API key in the Keychain, or add a folder of clips."
             case .stickers, .icons: return "Nothing here yet. Drop stickers into Stickers in your shared library, or search online to find more."

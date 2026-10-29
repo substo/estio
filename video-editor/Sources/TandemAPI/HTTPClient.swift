@@ -1,7 +1,7 @@
 import Foundation
 import TandemCore
 
-/// Talks to a running Substo Video (the app or `substo serve`) over its local API.
+/// Talks to a running Studio (the app or `substo serve`) over its local API.
 public final class TandemHTTPClient: @unchecked Sendable {
     public let baseURL: URL
     public let token: String
@@ -42,14 +42,14 @@ public final class TandemHTTPClient: @unchecked Sendable {
         request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        if let author { request.setValue(author, forHTTPHeaderField: "X-Substo Video-Author") }
+        if let author { request.setValue(author, forHTTPHeaderField: "X-Substo-Author") }
         let (data, response) = try await send(request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else {
             if let envelope = try? ServiceJSON.decoder().decode(ErrorEnvelope.self, from: data) {
                 throw envelope.error
             }
-            throw ServiceError(.internalError, "The Substo Video API answered \(status).")
+            throw ServiceError(.internalError, "The Studio API answered \(status).")
         }
         return data
     }
@@ -60,7 +60,7 @@ public final class TandemHTTPClient: @unchecked Sendable {
         _ = try await post("release", body: Data("{}".utf8), timeout: 10)
     }
 
-    /// True when a Substo Video API answers on this port.
+    /// True when a Studio API answers on this port.
     public func isAlive() async -> Bool {
         var request = URLRequest(url: baseURL.appendingPathComponent("v1/health"))
         request.timeoutInterval = 2
@@ -75,7 +75,7 @@ public final class TandemHTTPClient: @unchecked Sendable {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         // So the app can show who's watching.
-        if let author { request.setValue(author, forHTTPHeaderField: "X-Substo Video-Author") }
+        if let author { request.setValue(author, forHTTPHeaderField: "X-Substo-Author") }
         if let seq { request.setValue(String(seq), forHTTPHeaderField: "Last-Event-ID") }
         request.timeoutInterval = 24 * 3600
         return AsyncThrowingStream { continuation in
@@ -85,7 +85,7 @@ public final class TandemHTTPClient: @unchecked Sendable {
                 do {
                     let (bytes, response) = try await self.session.bytes(for: request)
                     guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-                        throw ServiceError(.unauthorized, "The Substo Video API refused the event stream.")
+                        throw ServiceError(.unauthorized, "The Studio API refused the event stream.")
                     }
                     var parser = SSEParser()
                     for try await line in bytes.lines {
@@ -116,9 +116,9 @@ public final class TandemHTTPClient: @unchecked Sendable {
         if let error = error as? URLError {
             switch error.code {
             case .cannotConnectToHost, .notConnectedToInternet:
-                return ServiceError(.unavailable, "Couldn't reach the Substo Video API: \(error.localizedDescription)")
+                return ServiceError(.unavailable, "Couldn't reach the Studio API: \(error.localizedDescription)")
             case .networkConnectionLost, .timedOut, .badServerResponse, .cannotParseResponse, .zeroByteResource:
-                return ServiceError(.interrupted, "The Substo Video API stopped answering before it replied (\(error.localizedDescription)). If this was an edit, it may have been applied: check `substo history` before sending it again.")
+                return ServiceError(.interrupted, "The Studio API stopped answering before it replied (\(error.localizedDescription)). If this was an edit, it may have been applied: check `substo history` before sending it again.")
             case .cancelled:
                 return CancellationError()
             default:
@@ -155,7 +155,7 @@ struct SSEParser {
 
     private var event = "message"
 
-    /// Substo Video sends `id`, `event` then one `data` line per message, so a data
+    /// Studio sends `id`, `event` then one `data` line per message, so a data
     /// line completes a message.
     mutating func feed(_ line: String) -> Message? {
         if line.hasPrefix(":") { return nil }

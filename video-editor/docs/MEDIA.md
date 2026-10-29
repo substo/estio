@@ -1,4 +1,4 @@
-# Substo Video media
+# Studio media
 
 How `TandemMedia` finds, describes and analyses the files in a video
 folder. `ARCHITECTURE.md` is the contract; this is the detail behind it.
@@ -82,7 +82,7 @@ with "Cannot Decode".
 - ffmpeg is found through `SUBSTO_FFMPEG`, the PATH, `~/.local/bin`, then
   Homebrew. Without it the conversion fails, saying to install it, and the
   file is left out of renders with that warning.
-- Scans before Substo Video checked this didn't mark such files. A rescan gives
+- Scans before Studio checked this didn't mark such files. A rescan gives
   alpha video without the mark a quick look (its header, under a
   millisecond; HEVC and ProRes are skipped, since asking about HEVC with
   alpha takes 5) and probes it again if macOS can't decode it, and renders
@@ -404,7 +404,7 @@ Notes on each:
   frame at a time with its recurrent state carried from frame to frame,
   frames letterboxed into the model's input and the alpha scaled up to the
   matte box. The RVM repository is GPL-3.0 (the model file's metadata says
-  Apache 2.0; Substo Video goes by the repository), so the 7.5 MB model is never
+  Apache 2.0; Studio goes by the repository), so the 7.5 MB model is never
   committed or bundled: `RVMModelStore` downloads it from the official
   v1.0.0 release on first use into
   `~/Library/Application Support/Substo/Models/rvm/` and checks its

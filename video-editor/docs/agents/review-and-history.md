@@ -15,7 +15,7 @@ their own beside it, and reports, with the clips on screen there:
   clip of a video and the check can tell which picture flashed (the only
   video there, or the screen recording when its own scan flickers too),
   it comes with the `holdFrame` that holds the frame before it over it, as
-  the creator fixed a one-frame jump in a screen recording in the Substo Video video;
+  the creator fixed a one-frame jump in a screen recording in the upstream editor's own video;
   the last line is a `substo apply` that makes them all. One at a cut is
   usually a frame of the wrong shot: trim it instead;
 - green screen that didn't key, and flat white blocks that come and go
@@ -55,7 +55,7 @@ their own beside it, and reports, with the clips on screen there:
     frames a second on the timeline, and under half the project's, for a
     second or more while its picture moves. macOS records the screen as it
     changes, so a recording's rate drops (to 4 to 7 fps while the creator was
-    away from his desk in the Substo Video video). A still page or a blinking
+    away from his desk in the upstream editor's own video). A still page or a blinking
     caret at 4 fps looks the same as at 60, so those don't count. The rate
     is the file's own frame times (read from its sample table, cached per
     file) at the clip's speed, so a slowed-down clip can be low too. Cover
@@ -117,7 +117,7 @@ misses, or a fragment), or in a dip between two sounds, 12 dB under the
 voice either side, as a cut between words in fluent speech is; unless a
 clip's end is in a closure with the "k" or "t" released loudly right after
 it. Otherwise the voice runs through the cut and a word is clipped, a
-problem that fails the check. On the Substo Video video, an edit the creator approved,
+problem that fails the check. On the upstream editor's own video, an edit the creator approved,
 it flags 6 of 758 edges. Each one says which clip's start or end, how much
 of the voice is cut off, and the trim (with ripple) that moves the edge
 into the nearest real pause within 0.3 s, 0.04 s into it and on a frame
@@ -162,7 +162,7 @@ off the start), `slipped`, a cut (`cut at ..., the rest is clip_...`),
 and settings like `scale`, `position`, `opacity`, `crop`, `layout`,
 `gain`, `fade in`, `level`, effects and keyframes. Clips that moved
 together by the same amount, riding a ripple, are one line. Edits that
-changed no clips (Substo Video finding new media) are one line too. Media,
+changed no clips (Studio finding new media) are one line too. Media,
 markers, transitions and settings aren't compared. `--json` has each
 clip as it was and is (`before`, `after`).
 

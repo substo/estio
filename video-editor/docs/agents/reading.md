@@ -71,7 +71,7 @@ clips in the range).
   `transcript <media ID>` gives the whole file in file time; with no ID you
   get everything said on the timeline.
 - Word times are trimmed to the voice. SpeechAnalyzer times its words end
-  to end, so each pause hides inside a word; Substo Video pulls every word in to
+  to end, so each pause hides inside a word; Studio pulls every word in to
   where the take's waveform is over its noise floor (about what ffmpeg's
   silencedetect hears at -32 dB on a phone take) when it reads the
   transcript, including transcripts made before it did.
@@ -93,7 +93,7 @@ clips in the range).
 - `media` shows each file's analysis state. Transcripts, loudness, proxies
   and cutout mattes are made in the background; tools that need a
   transcript say which files don't have one yet. `substo wait` waits for
-  them, and `substo transcribe` makes a transcript of a file Substo Video
+  them, and `substo transcribe` makes a transcript of a file Studio
   wouldn't transcribe by itself (see [setup.md](setup.md#background-work-transcripts-mattes-proxies)).
 
 ## Finding clips

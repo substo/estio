@@ -11,10 +11,10 @@ public struct ImportReport: Codable, Equatable, Sendable {
         /// Worth knowing, nothing lost. For example a mapping decision.
         case note
         /// Carried over, but not exactly: a speed ramp played at its
-        /// average speed, a transition Substo Video doesn't have played as a
+        /// average speed, a transition Studio doesn't have played as a
         /// dissolve.
         case approximated
-        /// Left out because Substo Video has no equivalent yet: stickers, blend
+        /// Left out because Studio has no equivalent yet: stickers, blend
         /// modes, speed curves on audio.
         case unsupported
         /// The file wasn't found where the project says. The clip is kept,

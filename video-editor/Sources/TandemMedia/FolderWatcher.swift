@@ -155,7 +155,7 @@ public final class FolderWatcher: @unchecked Sendable {
             guard let relative = relativePath(path), !MediaScanner.isSkippedPath(relative) else { continue }
             if flag & kFSEventStreamEventFlagItemIsDir != 0 {
                 // A folder moved or vanished: look at everything under it.
-                // Substo Video's own cache and exports churn constantly and hold no
+                // Studio's own cache and exports churn constantly and hold no
                 // media, so they never trigger that.
                 let name = (relative as NSString).lastPathComponent
                 if !MediaScanner.isSkippedFolder(name: name),

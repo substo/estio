@@ -49,7 +49,7 @@ public final class TandemService: @unchecked Sendable {
         onCall?(operation, author)
     }
 
-    /// Finds the shared library (`~/Movies/Substo Library`), which relink
+    /// Finds the shared library (`~/Movies/Studio Library`), which relink
     /// searches for what the given folders don't have and archive names
     /// its files by. Asked each time, so a library moved in Settings is
     /// found where it is now; tests point it at a temp folder.
@@ -307,7 +307,7 @@ public final class TandemService: @unchecked Sendable {
         case .hosted where wanted:
             return "\(item.path) has no transcript yet. It's being made in the background; `substo wait transcript --media \(item.id)` waits for it."
         case .hosted:
-            return "\(item.path) has no transcript: Substo Video only makes them for camera takes, what's on a speech track and files someone asked for. `substo transcribe \(item.id)` makes one and waits for it."
+            return "\(item.path) has no transcript: Studio only makes them for camera takes, what's on a speech track and files someone asked for. `substo transcribe \(item.id)` makes one and waits for it."
         case .headless:
             return "\(item.path) has no transcript yet, and nothing is making one, since the project isn't open in the app. `substo transcribe \(item.id)` makes it now and waits for it."
         }
@@ -679,7 +679,7 @@ public final class TandemService: @unchecked Sendable {
         folder.url(forPath: path).standardizedFileURL
     }
 
-    /// Refuses to write a render over the project's media or a Substo Video
+    /// Refuses to write a render over the project's media or a Studio
     /// project file (see `RenderOutputs`).
     func checkOutput(_ output: URL, what: String) throws {
         if let reason = RenderOutputs.protectedReason(output, project: coordinator.project, folder: folder) {
@@ -812,7 +812,7 @@ public final class TandemService: @unchecked Sendable {
 
     public func screenshot(output: String?) async throws -> ImageResult {
         guard let provider = screenshotProvider else {
-            throw ServiceError(.unavailable, "Screenshots capture the Substo Video app's window, so they need the app open. Use `frame` for a rendered frame.")
+            throw ServiceError(.unavailable, "Screenshots capture the Studio app's window, so they need the app open. Use `frame` for a rendered frame.")
         }
         let output = output.map(outputURL)
         if let output { try checkOutput(output, what: "screenshot") }

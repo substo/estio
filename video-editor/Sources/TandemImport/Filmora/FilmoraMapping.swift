@@ -1,7 +1,7 @@
 import Foundation
 import TandemCore
 
-// How Filmora's settings map onto Substo Video's. Each mapping says when it's
+// How Filmora's settings map onto Studio's. Each mapping says when it's
 // exact and when it's a stand-in, so the importer can report the difference.
 
 // MARK: - Transitions
@@ -10,7 +10,7 @@ enum FilmoraTransitions {
     struct Mapped: Equatable {
         var type: TransitionType
         var direction: Direction?
-        /// False when Substo Video has no real equivalent and plays something close.
+        /// False when Studio has no real equivalent and plays something close.
         var exact: Bool
     }
 
@@ -18,7 +18,7 @@ enum FilmoraTransitions {
 
     /// Maps a Filmora transition by its display name. the creator's six (Cut Slide
     /// Transition 03, Push Down/Up/Left, Dissolve and fade_black) map
-    /// exactly; anything else becomes the nearest Substo Video type.
+    /// exactly; anything else becomes the nearest Studio type.
     static func map(_ name: String, onAudio: Bool, placement: Placement) -> Mapped {
         let lower = name.lowercased()
         if onAudio {
@@ -67,11 +67,11 @@ enum FilmoraColour {
         var effects: [Effect]
         /// Settings that were carried over only roughly.
         var approximated: [String]
-        /// Settings with no Substo Video equivalent.
+        /// Settings with no Studio equivalent.
         var unmapped: [String]
     }
 
-    /// Substo Video colour effects for Filmora's AdjustColor node. Zero values are
+    /// Studio colour effects for Filmora's AdjustColor node. Zero values are
     /// Filmora's defaults and are left out, as are its internal switches.
     static func map(_ params: [String: JSONNode], idKey: String) -> Mapped {
         var colorAdjust: [String: ParamValue] = [:]
@@ -90,7 +90,7 @@ enum FilmoraColour {
             if let name = basic[key] {
                 colorAdjust[name] = .number(value)
             } else if key == "u_exposure" || key == "u_brightness" {
-                // Filmora's -100...100 against Substo Video's stops.
+                // Filmora's -100...100 against Studio's stops.
                 colorAdjust["exposure"] = .number((colorAdjust["exposure"]?.number ?? 0) + value / 50)
                 approximated.append(key)
             } else if key == "amount" {
@@ -137,7 +137,7 @@ enum FilmoraText {
         var notes: [String]
     }
 
-    /// A Substo Video text layer from a Filmora title clip.
+    /// A Studio text layer from a Filmora title clip.
     static func map(_ clip: WfpClip) -> Mapped? {
         let script = clip.node["scriptBuf"].embedded
         guard script.exists else { return nil }
@@ -180,12 +180,12 @@ enum FilmoraText {
         var content = TextContent(text: text, style: style)
         if let (name, duration) = animation(clip.node["inAnimation"]) {
             content.animationIn = animationName(name, entering: true)
-            if content.animationIn == nil { notes.append("Title animation \"\(name)\" has no Substo Video equivalent.") }
+            if content.animationIn == nil { notes.append("Title animation \"\(name)\" has no Studio equivalent.") }
             if let duration { content.animationDuration = duration }
         }
         if let (name, duration) = animation(clip.node["outAnimation"]) {
             content.animationOut = animationName(name, entering: false)
-            if content.animationOut == nil { notes.append("Title animation \"\(name)\" has no Substo Video equivalent.") }
+            if content.animationOut == nil { notes.append("Title animation \"\(name)\" has no Studio equivalent.") }
             if let duration, content.animationIn == nil { content.animationDuration = duration }
         }
         if script["Stt"].exists || clip.node["isSubtitleText"].bool == true {
@@ -231,7 +231,7 @@ enum FilmoraText {
         return (name, duration)
     }
 
-    /// Substo Video's title animations by what Filmora's look like.
+    /// Studio's title animations by what Filmora's look like.
     static func animationName(_ name: String, entering: Bool) -> String? {
         let lower = name.lowercased()
         if lower.contains("typewriter") || lower.contains("verbatim") { return entering ? "typewriter" : nil }
@@ -252,7 +252,7 @@ enum FilmoraKeyframes {
     /// Filmora keys animation to media time, mostly in seconds but in ticks
     /// in some lists (opacity), whatever their version says. No media runs
     /// for 100,000 seconds, so a list with a time past that is in ticks.
-    /// Substo Video keys animation to the clip's start, so times shift by the
+    /// Studio keys animation to the clip's start, so times shift by the
     /// clip's source start and speed.
     static func points(_ parameter: JSONNode, sourceStart: Double, speed: Double) -> [(time: Double, value: Double)] {
         let raw = parameter["keyframeSets"].array.compactMap { frame -> (Double, Double)? in
@@ -278,7 +278,7 @@ enum FilmoraKeyframes {
         return last.value
     }
 
-    /// Substo Video keyframes for a clip of `duration` seconds, keeping only the
+    /// Studio keyframes for a clip of `duration` seconds, keeping only the
     /// nearest keyframe outside each end, or nil when nothing changes.
     static func keyframes(times: [Double], duration: Double, value: (Double) -> ParamValue) -> [Keyframe]? {
         var unique = Array(Set(times.map { ($0 * 1_000_000).rounded() / 1_000_000 })).sorted()

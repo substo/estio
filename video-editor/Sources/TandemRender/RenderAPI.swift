@@ -112,7 +112,7 @@ public struct BuiltComposition: @unchecked Sendable {
     }
 }
 
-/// Turns a project into an AVFoundation composition with Substo Video's compositor.
+/// Turns a project into an AVFoundation composition with Studio's compositor.
 ///
 /// Video clips go on composition tracks from a shared pool, alternating
 /// A/B wherever a centred transition overlaps two clips; cutout mattes get
@@ -359,7 +359,7 @@ public final class Exporter: @unchecked Sendable {
         if cancelled { throw RenderError.cancelled }
         // The app's export queue, the CLI and the API all export through
         // here. It's let go however the export ends.
-        let awake = PowerAssertion(.system, reason: "Substo Video is exporting \(output.lastPathComponent)")
+        let awake = PowerAssertion(.system, reason: "Studio is exporting \(output.lastPathComponent)")
         defer { awake?.release() }
         return try await withTaskCancellationHandler {
             try await job.run()

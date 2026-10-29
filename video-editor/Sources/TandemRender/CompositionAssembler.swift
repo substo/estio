@@ -214,10 +214,10 @@ enum CompositionAssembler {
         for segment in plan.videoSegments.sorted(by: { $0.timeline.start < $1.timeline.start }) {
             guard let u = url(for: segment), let source = sources[u] else { continue }
             guard let assetTrack = source.video else {
-                // Scanned before Substo Video checked, so nothing converted it.
+                // Scanned before Studio checked, so nothing converted it.
                 if let codec = source.undecodableCodec {
                     let path = media[segment.mediaID]?.path ?? u.lastPathComponent
-                    warnings.add("Left out \(path): macOS can't decode its \(MediaItem.codecName(codec)). Rescan the folder (substo media --refresh) and Substo Video converts it.")
+                    warnings.add("Left out \(path): macOS can't decode its \(MediaItem.codecName(codec)). Rescan the folder (substo media --refresh) and Studio converts it.")
                 }
                 continue
             }

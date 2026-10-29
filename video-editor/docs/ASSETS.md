@@ -18,8 +18,8 @@ So music, SFX, stickers and titles come first. LUTs can wait.
 
 - Filmora's asset licence forbids using its assets outside Filmora, and a
   company channel needs Filmora's Business plan, which excludes the asset
-  library. Nothing from Filmora's store moves to Substo Video, and past use on the
-  Convex channel may not have been covered. Substo Video records the licence of
+  library. Nothing from Filmora's store moves to Studio, and past use on the
+  Convex channel may not have been covered. Studio records the licence of
   every asset so this can't happen quietly again.
 - Personal plans (Epidemic Creator, Artlist Social, Storyblocks Individual,
   Musicbed Individual) exclude company or client work.
@@ -37,7 +37,7 @@ So music, SFX, stickers and titles come first. LUTs can wait.
 
 | Source | Kind | Access | Licence | V1 |
 | --- | --- | --- | --- | --- |
-| Shared library | anything, plus saved segments | the creator's own folder, `~/Movies/Substo Library`, watched; used where it is | the nearest `substo-licence.json` above a file | yes |
+| Shared library | anything, plus saved segments | the creator's own folder, `~/Movies/Studio Library`, watched; used where it is | the nearest `substo-licence.json` above a file | yes |
 | Import folders | anything | watched folders, one per library, with a licence note | per folder | yes |
 | ElevenLabs sound effects | SFX, generated | `POST /v1/sound-generation`, key in Keychain service `elevenlabs` (needs the `sound_generation` permission turned on) | commercial on paid plans | yes |
 | ElevenLabs music | music, generated | `POST /v1/music` | commercial on paid plans | yes |
@@ -52,7 +52,7 @@ So music, SFX, stickers and titles come first. LUTs can wait.
 
 ## Catalogue
 
-- SQLite with FTS5 (system `sqlite3`), in `~/Library/Application Support/Substo/Assets/catalog.sqlite`.
+- SQLite with FTS5 (system `sqlite3`), in `~/Library/Application Support/Studio/Assets/catalog.sqlite`.
 - Asset rows: provider, provider ID, kind (music, sfx, sticker, overlay, video,
   image, font, icon, logo, lut, title, transition), name, tags, duration, BPM,
   key, has alpha, size, sha256, state (remote, preview, original, normalised),
@@ -64,9 +64,9 @@ So music, SFX, stickers and titles come first. LUTs can wait.
 ## Disk layout
 
 ```
-~/Library/Application Support/Substo/Assets/<provider>/<id>/
+~/Library/Application Support/Studio/Assets/<provider>/<id>/
   meta.json  thumbnail.jpg  original.<ext>  normalised.<ext>  peaks.bin  loudness.json
-~/Library/Caches/Substo Video/AssetPreviews/     size-capped, least recently used goes first
+~/Library/Caches/Studio/AssetPreviews/     size-capped, least recently used goes first
 ```
 
 Originals are pinned while favourited or used in a project. Using a
@@ -80,17 +80,19 @@ below).
 ## The shared library
 
 One visible folder on this Mac for everything the creator reuses across videos:
-`~/Movies/Substo Library` (Backblaze backs it up with the rest of the Mac).
-Substo Video > Settings… moves it; the choice is `sharedLibrary` in the asset
+`~/Movies/Studio Library` (Backblaze backs it up with the rest of the Mac). It was
+`~/Movies/Substo Library` before the app was renamed; Studio moves it once
+(`FolderRename`, see SUBSTO.md).
+Studio > Settings… moves it; the choice is `sharedLibrary` in the asset
 library's `settings.json`, and `$SUBSTO_LIBRARY` moves it for one process.
 An asset library anywhere other than the standard place (tests,
-`$SUBSTO_ASSETS_ROOT`) keeps its shared library inside itself, `<root>/Substo Video
+`$SUBSTO_ASSETS_ROOT`) keeps its shared library inside itself, `<root>/Studio
 Library`, so nothing but the app touches the real one. The app makes the
 folder the first time it opens after installing; opening the library
 (the CLI, MCP, tests) never does.
 
 ```
-~/Movies/Substo Library/
+~/Movies/Studio Library/
   README.txt                what the folder is for
   Stickers/                 animated stickers: HEVC with alpha, WebM, GIF, WebP, Lottie
   Graphics/                 logos, lower thirds, overlays, stills (PNG, JPEG, SVG, MOV)
@@ -101,7 +103,7 @@ folder the first time it opens after installing; opening the library
   Segments/<name>/          saved segments: segment.json and the media they play
 ```
 
-Each folder has a README. Substo Video never writes over one the creator edited.
+Each folder has a README. Studio never writes over one the creator edited.
 
 **How it's indexed.** `SharedLibraryProvider` (source `shared`, the "Shared
 library" chip) indexes the folder with the import folder machinery and
@@ -130,7 +132,7 @@ copied into `assets/`, so improving a sticker or re-exporting an intro in
 the library improves every project that uses it the next time it plays or
 renders. Files a project can't play as they are (WebM, Lottie, SVG, TIFF,
 FLAC, Ogg, animated GIF, WebP and PNG, QuickTime Animation) play from the
-library's converted copy in `~/Library/Application Support/Substo/Assets/
+library's converted copy in `~/Library/Application Support/Studio/Assets/
 shared/<file>/`, which is made again when the file changes and a project
 uses it (`refreshChangedSharedFiles`, run by every rescan: the app's
 watcher, its scan at launch, a CLI search). The new copy is made beside the
@@ -165,7 +167,7 @@ See AGENTS.md for the commands.
 
 ## Shared files and archived projects
 
-Effects, title styles and transitions are data built into Substo Video (packs
+Effects, title styles and transitions are data built into Studio (packs
 later), so a project never needs their files. A project can still end up
 using files from outside its folder: the shared library's files and the
 converted copies of them, a segment's media, an import's absolute paths, a
@@ -175,10 +177,10 @@ project…, `substo archive`, see ARCHITECTURE.md) copies all of those into
 the project folder and points the project at the copies, so the folder opens
 on another Mac (Bruce) with nothing missing:
 
-- shared library files into `media/Substo Library/<where they were in it>`
-  (`media/Substo Library/Stickers/Star.mov`, `media/Substo Library/Segments/
+- shared library files into `media/Studio Library/<where they were in it>`
+  (`media/Studio Library/Stickers/Star.mov`, `media/Studio Library/Segments/
   Intro/sting.wav`), and the converted copy of one beside where its original
-  would go, named after it (`media/Substo Library/Stickers/Spin.mov` for
+  would go, named after it (`media/Studio Library/Stickers/Spin.mov` for
   `Stickers/Spin.webm`);
 - other media into `media/<the folder it was in>/`;
 - LUTs into `assets/lut/` and fonts into `assets/font/`.
@@ -258,7 +260,7 @@ and the app look in that Mac's shared library after the project folder.
 
 - Decided 2026-09-29: the creator makes the Convex videos as a Convex employee, so
   Convex videos need company-channel licences (Epidemic Sound Business, not
-  Pro; a Remotion company licence for Convex motion graphics). Substo Video itself
+  Pro; a Remotion company licence for Convex motion graphics). Studio itself
   is for any project, so personal projects can use personal licences; the
   catalogue records each asset's licence so the credits and checks follow
   the project.
@@ -270,7 +272,7 @@ and the app look in that Mac's shared library after the project folder.
 
 ## The section card's sounds and fonts
 
-The section card (RENDER.md) is part of Substo Video, like the title presets,
+The section card (RENDER.md) is part of Studio, like the title presets,
 so its typefaces ship with it; its two whooshes are ordinary library
 assets, so their licence and every use are recorded.
 
@@ -304,7 +306,7 @@ assets, so their licence and every use are recorded.
     half its energy is over 4 kHz, so it hisses.
 
   **Level.** The gains put both at -35 LUFS over their loudest 400 ms, 15
-  LU under speech at Substo Video's -20, which is where the creator's own section
+  LU under speech at Studio's -20, which is where the creator's own section
   swipes sit in Decision Models (`swipe.wav`, `in.wav` and `out.wav` at
   -43.2 to -44.4 LUFS against his speech at -28.7). In a project whose
   speech plays elsewhere the gains move with it
@@ -346,7 +348,7 @@ assets, so their licence and every use are recorded.
 ## Transition sounds
 
 Push, slide, cut slide and wipe come with a sound effect in the app; the
-rest are silent. the creator picks others per type in Substo Video > Settings (kept in
+rest are silent. the creator picks others per type in Studio > Settings (kept in
 the app's preferences as asset IDs), and `TransitionSoundDefaults` in
 TandemAPI says what each type plays. Dropping a transition, double-clicking
 one in the Effects tab, Cmd-D and changing a transition's type all copy the

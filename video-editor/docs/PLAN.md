@@ -1,4 +1,4 @@
-# Substo Video V1 plan
+# Studio V1 plan
 
 What V1 has to do: open a video folder, show the takes and media in it, let
 the creator cut a 6 to 15 minute Convex video the way he did in Filmora (camera take,
@@ -95,7 +95,7 @@ Status: `[x]` done, `[~]` in progress, `[ ]` not started. Owner in brackets.
 - [x] ElevenLabs Generate, the big Space preview, looks and fonts dropped onto clips [app]
 - [x] Sources as providers; paid libraries through watched import folders. ElevenLabs sound effects need the key's `sound_generation` permission (music works)
 - [~] Title and template pack (core insertTemplate done): plain label, pop callout, two-line section header, version number, section card (done: one clip with its whooshes, edited in the inspector), Like and Subscribe, Comment Below
-- [x] Shared library: one watched folder on this Mac (`~/Movies/Substo Library`, moved in Settings) for stickers, graphics, sounds, music, looks, fonts and segments; its files are used where they are (its fonts registered by every render), archiving copies them in (Live Photo movies too), relink looks there [assets, api, app]
+- [x] Shared library: one watched folder on this Mac (`~/Movies/Studio Library`, moved in Settings) for stickers, graphics, sounds, music, looks, fonts and segments; its files are used where they are (its fonts registered by every render), archiving copies them in (Live Photo movies too), relink looks there [assets, api, app]
 - [x] Saved segments: Save selection as segment (menu bar and clip menu), the Text tab's Segments, `substo segments list/save/insert` and `segments_*` MCP tools; a segment carries copies of its files [core, api, app]
 - [ ] The app asks for a segment's words when it goes in (agents pass them already); relink finds LUTs too, not just media, and a Live Photo movie that went missing while its still didn't
 - [ ] Stickers: Lottie and HEVC with alpha

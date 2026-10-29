@@ -53,8 +53,8 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
 
     /// A CLI command has the project for a moment, or `substo serve` has
     /// it open: wait, asking the server to hand it over. Agents keep
-    /// working while Substo Video restarts, so a slow command (a media refresh,
-    /// captions) may have it when Substo Video opens again; the wait is long
+    /// working while Studio restarts, so a slow command (a media refresh,
+    /// captions) may have it when Studio opens again; the wait is long
     /// enough for that, and ends the moment the project is free.
     private func openWhenFree(_ url: URL, frame: NSRect?) {
         guard opening.insert(url).inserted else { return }
@@ -74,7 +74,7 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
     private func opened(_ session: ProjectSession, url: URL, frame: NSRect?) -> ProjectWindowController {
         let controller = present(EditorModel(session: session), frame: frame)
         noteRecent(url)
-        // Pick up files added to the folder while Substo Video was closed.
+        // Pick up files added to the folder while Studio was closed.
         controller.model.rescanMedia(ifOlderThan: 0)
         // A project from another Mac, or a tidied folder, may have lost some.
         RelinkPrompt.checkAfterOpening(controller)
@@ -116,7 +116,7 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
         panel.allowedContentTypes = [Self.substoType]
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
-        panel.message = "Choose a Substo Video project"
+        panel.message = "Choose a Studio project"
         guard panel.runModal() == .OK else { return }
         for url in panel.urls { open(url) }
     }
@@ -239,14 +239,14 @@ final class ProjectDocuments: NSObject, NSMenuDelegate {
         }
     }
 
-    /// Rename on the project list: the file and the name Substo Video shows
+    /// Rename on the project list: the file and the name Studio shows
     /// (`ProjectRenamer`), keeping its place in the list and where its
     /// timeline and window were.
     func renameProject(_ url: URL) {
         let current = url.deletingPathExtension().lastPathComponent
         let prompt = NSAlert()
         prompt.messageText = "Rename \(current)"
-        prompt.informativeText = "The project file and the name Substo Video shows both change. Its media and exports stay as they are."
+        prompt.informativeText = "The project file and the name Studio shows both change. Its media and exports stay as they are."
         let field = NSTextField(string: current)
         field.frame = NSRect(x: 0, y: 0, width: 300, height: 24)
         prompt.accessoryView = field

@@ -24,7 +24,7 @@ bash "$SCRIPT_DIR/install.sh" "$BIN" 2>/dev/null
 [[ -d "$HOME/.agents/skills/substo-video" && ! -L "$HOME/.agents/skills/substo-video" ]]
 # SUBSTO_SKILL_DIRS chooses the folders, or skips the skill when empty.
 SUBSTO_SKILL_DIRS="$SCRATCH/elsewhere" bash "$SCRIPT_DIR/install.sh" "$BIN" >/dev/null
-[[ -L "$SCRATCH/elsewhere/substo-video-video" ]]
+[[ -L "$SCRATCH/elsewhere/substo-video" ]]
 rm "$HOME/.claude/skills/substo-video"
 SUBSTO_SKILL_DIRS="" bash "$SCRIPT_DIR/install.sh" "$BIN" >/dev/null
 [[ ! -e "$HOME/.claude/skills/substo-video" ]]
@@ -36,7 +36,7 @@ bash "$SCRIPT_DIR/install.sh" "$BIN"
 
 # Invoke the installed link with a fake app bundle to check path resolution
 # and argument forwarding, without triggering setup or touching the real app.
-APP="$SCRATCH/app with spaces/Substo Video.app"
+APP="$SCRATCH/app with spaces/Studio.app"
 mkdir -p "$APP/Contents/MacOS"
 cat > "$APP/Contents/MacOS/substo" <<'CLI'
 #!/usr/bin/env bash
@@ -44,6 +44,29 @@ printf '%s\n' "$@"
 CLI
 chmod +x "$APP/Contents/MacOS/substo"
 [[ "$(SUBSTO_APP_DIR="$APP" "$BIN/substo" 'two words' --json)" == $'two words\n--json' ]]
+
+# The app was called Substo Video. Without SUBSTO_APP_DIR, the launcher
+# uses ~/Applications/Studio.app, and the old bundle until Studio.app is
+# installed. These checks say what went wrong themselves (bash 3.2's
+# `set -e` ignores a failing bare [[ ]]).
+launches() {
+  local got
+  got="$("$BIN/substo" which)"
+  if [[ "$got" != "$1" ]]; then
+    echo "FAIL: the launcher ran '$got', not '$1'" >&2
+    exit 1
+  fi
+}
+fake_app() {
+  mkdir -p "$1/Contents/MacOS"
+  printf '#!/usr/bin/env bash\necho %s\n' "$2" > "$1/Contents/MacOS/substo"
+  chmod +x "$1/Contents/MacOS/substo"
+}
+fake_app "$HOME/Applications/Substo Video.app" old-app
+launches old-app
+fake_app "$HOME/Applications/Studio.app" studio
+launches studio
+rm -rf "$HOME/Applications"
 
 # `substo url` adds this Mac's key to a substo:// link and opens it in
 # the background. A fake `open` shows what it would have opened.
@@ -78,7 +101,7 @@ opens 'command' "substo://command?key=$KEY"
 opens 'substo-dev://seek?t=3' "substo-dev://seek?t=3&key=$KEY"
 # The key goes before a #fragment, in the query where the app reads it.
 opens 'seek?t=3#here' "substo://seek?t=3&key=$KEY#here"
-# A link that isn't Substo Video's never gets the key.
+# A link that isn't Studio's never gets the key.
 for link in 'https://example.com/?' 'file:///tmp/a' 'substox://seek?t=3'; do
   if OUT="$(PATH="$FAKE_BIN:$PATH" "$BIN/substo" url "$link" 2>/dev/null)" || [[ -n "$OUT" ]]; then
     echo "FAIL: substo url sent the key to $link" >&2
@@ -96,7 +119,7 @@ cat > "$LAUNCHER/setup_mac.sh" <<'SETUP'
 touch "$(dirname "$0")/setup-ran"
 exit 1
 SETUP
-SWAPPING="$SCRATCH/swapping/Substo Video.app"
+SWAPPING="$SCRATCH/swapping/Studio.app"
 ( sleep 1; mkdir -p "$SWAPPING/Contents/MacOS"; cp "$APP/Contents/MacOS/substo" "$SWAPPING/Contents/MacOS/substo" ) &
 [[ "$(SUBSTO_APP_DIR="$SWAPPING" bash "$LAUNCHER/substo" waited)" == "waited" ]]
 wait

@@ -72,7 +72,7 @@ most of it plays, and words that were cut out don't show.
 Each caption stores the preset, its words and only what you passed (`--y`
 is its position), so the preset decides the look and a later change to it
 reaches every caption. Tilt Warp doesn't come with macOS: the first time
-captions are applied, Substo Video installs it from Fontsource into the project's
+captions are applied, Studio installs it from Fontsource into the project's
 `assets/font/` (the output says so), and the app picks it up. If that can't
 happen (offline), the captions still go in and the output says what to run.
 To restyle them, patch the captions' `style` (see

@@ -251,7 +251,7 @@ final class ColourOnScreenTests: XCTestCase {
             NSApp.setActivationPolicy(.accessory)
             NSApp.finishLaunching()
             let window = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 960, height: 270 * rows.count), styleMask: [.titled], backing: .buffered, defer: false)
-            window.title = "Substo Video patch check"
+            window.title = "Studio patch check"
             let view = NSView(frame: window.contentView!.bounds)
             view.wantsLayer = true
             window.contentView = view
@@ -322,7 +322,7 @@ final class ColourOnScreenTests: XCTestCase {
             NSApp.setActivationPolicy(.accessory)
             NSApp.finishLaunching()
             let window = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 960, height: 270), styleMask: [.titled], backing: .buffered, defer: false)
-            window.title = "Substo Video colour check"
+            window.title = "Studio colour check"
             let view = NSView(frame: window.contentView!.bounds)
             view.wantsLayer = true
             window.contentView = view

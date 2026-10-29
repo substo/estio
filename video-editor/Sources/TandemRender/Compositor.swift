@@ -35,7 +35,7 @@ final class TandemInstruction: NSObject, AVVideoCompositionInstructionProtocol, 
     }
 }
 
-/// Substo Video's `AVVideoCompositing`: renders each frame with `FrameComposer`
+/// Studio's `AVVideoCompositing`: renders each frame with `FrameComposer`
 /// on the shared Metal-backed Core Image context. Used by the viewer, frame
 /// grabs and export alike.
 class TandemCompositor: NSObject, AVVideoCompositing {

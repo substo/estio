@@ -16,7 +16,7 @@ enum FontFixtures {
 
     /// A family name no other font uses.
     static func uniqueFamily() -> String {
-        "Substo Video Test " + String((0..<8).map { _ in "abcdefghijklmnopqrstuvwxyz".randomElement()! }).capitalized
+        "Studio Test " + String((0..<8).map { _ in "abcdefghijklmnopqrstuvwxyz".randomElement()! }).capitalized
     }
 
     /// The PostScript name `renamed` gives `family`.

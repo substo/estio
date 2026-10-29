@@ -99,7 +99,7 @@ final class RealMediaTests: XCTestCase {
         return RenderContext(project: project, folder: ProjectFolder(projectFile: v14Project))
     }
 
-    /// Frames from Substo Video and from Filmora's v14 export at the same times,
+    /// Frames from Studio and from Filmora's v14 export at the same times,
     /// saved side by side, with the mean difference per pixel.
     func testDecisionModelsV14AgainstFilmora() async throws {
         let context = try v14()
@@ -201,7 +201,7 @@ final class RealMediaTests: XCTestCase {
             exported.requestedTimeToleranceAfter = .zero
             // The first frame against Filmora; the next ones against our own
             // grabs. Filmora shows the nearest frame of variable frame rate
-            // footage, and Substo Video the last one at or before the time, so
+            // footage, and Studio the last one at or before the time, so
             // mid-scroll they can be a frame apart.
             let first = Bitmap(try await exported.image(at: .zero).image)
             let filmora = blockDifference(first, Bitmap(try await generator.image(at: CMTime(seconds: seconds, preferredTimescale: 600)).image))

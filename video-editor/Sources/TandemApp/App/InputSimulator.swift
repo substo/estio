@@ -278,7 +278,7 @@ enum InputSimulator {
                 }
                 return false
             }
-            if !pick(in: menu) { NSLog("Substo Video: no enabled menu item called %@", title) }
+            if !pick(in: menu) { NSLog("Studio: no enabled menu item called %@", title) }
         case .scroll(let dx, let dy, let steps):
             func send() {
                 guard let cgEvent = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0) else { return }

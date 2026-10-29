@@ -18,7 +18,7 @@ final class WelcomeWindowController: NSWindowController, NSWindowDelegate {
         )
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.title = "Substo Video"
+        window.title = "Studio"
         window.backgroundColor = Theme.panel.ns
         window.appearance = NSAppearance(named: .darkAqua)
         window.isMovableByWindowBackground = true
@@ -85,7 +85,7 @@ struct WelcomeView: View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 Spacer().frame(height: 56)
-                Text("Substo Video")
+                Text("Studio")
                     .font(.ui(28, .bold))
                     .foregroundStyle(Theme.text.color)
                 Text("Edit your videos with your agents.")

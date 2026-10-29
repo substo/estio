@@ -311,11 +311,11 @@ public struct EditBatch: Codable, Equatable, Sendable {
         self.idempotencyKey = idempotencyKey
     }
 
-    /// The label of the edit Substo Video makes when it finds new files in the
+    /// The label of the edit Studio makes when it finds new files in the
     /// project folder.
     public static let mediaScanLabel = "Found new media"
 
-    /// Substo Video adding files it found in the folder, which doesn't make an
+    /// Studio adding files it found in the folder, which doesn't make an
     /// agent's `expectedRevision` stale.
     public var isMediaScan: Bool {
         author == EditAuthor.system && label == Self.mediaScanLabel

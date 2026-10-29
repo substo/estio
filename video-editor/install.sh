@@ -8,7 +8,7 @@ TARGET_DIR="${1:-$HOME/.local/bin}"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "Usage: bash install.sh [target_bin_dir]"
-  echo "Links substo into target_bin_dir (default: ~/.local/bin), and the Substo Video"
+  echo "Links substo into target_bin_dir (default: ~/.local/bin), and the Studio"
   echo "skill into ~/.claude/skills and ~/.agents/skills for Claude Code and Codex."
   echo "Set SUBSTO_SKILL_DIRS to other folders (space separated), or to nothing to skip that."
   echo "Build the app first with bash setup_mac.sh."
@@ -30,7 +30,7 @@ chmod +x "$SCRIPT_DIR/substo"
 ln -sfn "$SCRIPT_DIR/substo" "$DEST"
 echo "Installed $DEST -> $SCRIPT_DIR/substo"
 
-# The skill that teaches agents to edit with Substo Video. Like the launcher, a
+# The skill that teaches agents to edit with Studio. Like the launcher, a
 # skill of the same name that isn't a link is someone's own: left alone.
 if [[ -n "${SUBSTO_SKILL_DIRS+set}" ]]; then
   read -r -a SKILL_DIRS <<< "$SUBSTO_SKILL_DIRS"
@@ -44,7 +44,7 @@ for dir in ${SKILL_DIRS[@]+"${SKILL_DIRS[@]}"}; do
     continue
   fi
   ln -sfn "$SCRIPT_DIR/skills/substo-video" "$dir/substo-video"
-  echo "Linked the Substo Video skill into $dir"
+  echo "Linked the Studio skill into $dir"
 done
 case ":${PATH}:" in
   *":$TARGET_DIR:"*) ;;

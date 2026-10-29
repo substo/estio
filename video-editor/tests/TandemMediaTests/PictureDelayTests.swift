@@ -3,7 +3,7 @@ import TandemCore
 import XCTest
 @testable import TandemMedia
 
-/// A webcam's picture lags its mic: Substo Video's setting for it, and new
+/// A webcam's picture lags its mic: Studio's setting for it, and new
 /// camera takes getting it as they join a project.
 final class PictureDelayTests: TempFolderTestCase {
     var folder: ProjectFolder { ProjectFolder(root: temp) }
@@ -44,7 +44,7 @@ final class PictureDelayTests: TempFolderTestCase {
         XCTAssertNil(corrected.pictureDelay, "in sync as recorded: no second delay")
         let older = try XCTUnwrap(report.items.first { $0.path.contains("2026-09-30") })
         XCTAssertNil(older.pictureDelayCorrected)
-        XCTAssertEqual(older.pictureDelay, Time(seconds: 0.08), "a take from before Record It corrected them still gets Substo Video's")
+        XCTAssertEqual(older.pictureDelay, Time(seconds: 0.08), "a take from before Record It corrected them still gets Studio's")
     }
 
     func testOnlyWebcamTakesGetTheDelay() async throws {

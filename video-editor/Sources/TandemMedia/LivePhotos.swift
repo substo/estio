@@ -6,7 +6,7 @@ import TandemCore
 /// Live Photos: the still an iPhone takes and the short movie it records
 /// around it. Exported from Photos, AirDropped or imported with Image
 /// Capture they arrive as two files with one name, `IMG_0130.HEIC` and
-/// `IMG_0130.mov`. Substo Video keeps the pair as one media item, the still,
+/// `IMG_0130.mov`. Studio keeps the pair as one media item, the still,
 /// with the movie in `MediaItem.livePhotoVideo`, so 35 photos are 35
 /// items rather than 35 photos and 35 two-second videos.
 public enum LivePhotos {

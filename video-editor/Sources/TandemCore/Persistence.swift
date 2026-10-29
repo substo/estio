@@ -143,7 +143,7 @@ public enum ProjectFile {
     /// (an upgrade would drop the explicit values made since).
     public static func migrate(_ project: Project) throws -> Project {
         guard project.schemaVersion <= Project.currentSchemaVersion else {
-            throw EditError.invalid("This project was saved by a newer Substo Video (schema \(project.schemaVersion)).")
+            throw EditError.invalid("This project was saved by a newer Studio (schema \(project.schemaVersion)).")
         }
         var project = project
         if project.schemaVersion < 2 { LegacyTextStyles.upgrade(&project) }
@@ -295,9 +295,9 @@ public final class ProjectJournal: @unchecked Sendable {
                     for command in batch.commands {
                         try Editing.apply(command, to: &working, context: &context)
                     }
-                    // An older Substo Video wrote full styles where it meant
+                    // An older Studio wrote full styles where it meant
                     // "the preset's". Every edit before this one was that
-                    // older Substo Video's too, so the whole project reads its way.
+                    // older Studio's too, so the whole project reads its way.
                     if (entry.schemaVersion ?? 1) < 2 { LegacyTextStyles.upgrade(&working) }
                     replayed?(entry, current, working)
                     current = working

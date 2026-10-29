@@ -67,7 +67,7 @@ enum KeymapStore {
         let template = """
         {
           "name": "Mine",
-          "about": "Bindings here replace Substo Video's Premiere defaults. Use null to remove one. Commands: \(names)",
+          "about": "Bindings here replace Studio's Premiere defaults. Use null to remove one. Commands: \(names)",
           "bindings": {
           }
         }

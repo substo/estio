@@ -21,7 +21,7 @@ public struct ServiceError: Error, Codable, Equatable, CustomStringConvertible, 
         case notImplemented
         /// Something needed isn't there, like the app for a screenshot.
         case unavailable
-        /// The request reached Substo Video but the connection dropped before the
+        /// The request reached Studio but the connection dropped before the
         /// answer (the app quit or crashed), so it may have run. Check
         /// `history` before sending an edit again.
         case interrupted
@@ -75,7 +75,7 @@ public struct ServiceError: Error, Codable, Equatable, CustomStringConvertible, 
             case .invalid: return ServiceError(.invalid, error.description)
             case .staleRevision(_, let actual): return ServiceError(.staleRevision, error.description, revision: actual)
             case .notImplemented(let what):
-                return ServiceError(.notImplemented, "\(what) isn't built yet, so this doesn't work in this version of Substo Video.")
+                return ServiceError(.notImplemented, "\(what) isn't built yet, so this doesn't work in this version of Studio.")
             }
         case let error as DecodingError:
             return ServiceError(.badRequest, DecodingErrorText.describe(error))

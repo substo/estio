@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_CONFIGURATION="${SUBSTO_BUILD_CONFIGURATION:-release}"
-APP_NAME="Substo Video"
+APP_NAME="Studio"
 FINAL_DIR="${SUBSTO_APP_DIR:-$HOME/Applications/$APP_NAME.app}"
 # The bundle is built beside the installed one and swapped in at the end, so
 # a `tandem` command run meanwhile (an agent's, mid-install) never finds the
@@ -19,7 +19,7 @@ cleanup() {
 trap cleanup EXIT
 APP_BIN="$APP_DIR/Contents/MacOS/substo-app"
 CLI_BIN="$APP_DIR/Contents/MacOS/substo"
-ICON_SOURCE="$SCRIPT_DIR/icons/substo.png"
+ICON_SOURCE="$SCRIPT_DIR/icons/studio.png"
 SIGNING_IDENTITY="${SUBSTO_CODESIGN_IDENTITY:-}"
 SIGNING_REQUIREMENTS=()
 
@@ -28,7 +28,7 @@ if ! command -v swift >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Building Substo Video ($BUILD_CONFIGURATION)..."
+echo "Building Studio ($BUILD_CONFIGURATION)..."
 swift build --package-path "$SCRIPT_DIR" -c "$BUILD_CONFIGURATION"
 BIN_DIR="$(swift build --package-path "$SCRIPT_DIR" -c "$BUILD_CONFIGURATION" --show-bin-path)"
 
@@ -56,14 +56,14 @@ done
 chmod +x "$APP_BIN" "$CLI_BIN"
 
 if [[ -f "$ICON_SOURCE" ]]; then
-  ICONSET="$(mktemp -d)/substo.iconset"
+  ICONSET="$(mktemp -d)/studio.iconset"
   mkdir -p "$ICONSET"
   for size in 16 32 128 256 512; do
     sips -z "$size" "$size" "$ICON_SOURCE" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
     double=$((size * 2))
     sips -z "$double" "$double" "$ICON_SOURCE" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
   done
-  iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/substo.icns"
+  iconutil -c icns "$ICONSET" -o "$APP_DIR/Contents/Resources/studio.icns"
   rm -rf "$(dirname "$ICONSET")"
 fi
 
@@ -94,4 +94,16 @@ codesign --force --timestamp=none --sign "$SIGNING_IDENTITY" \
 if [[ -e "$FINAL_DIR" ]]; then mv "$FINAL_DIR" "$OLD_DIR"; fi
 mv "$APP_DIR" "$FINAL_DIR"
 rm -rf "$OLD_DIR"
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+[[ -x "$LSREGISTER" ]] && "$LSREGISTER" -f "$FINAL_DIR" >/dev/null 2>&1 || true
+# The app was called Substo Video. Once Studio.app is in its place, the old
+# bundle goes, so Spotlight and Open With show one app. Only for the default
+# location: a SUBSTO_APP_DIR build is a separate copy. Privacy permissions
+# follow the bundle ID and signing requirement, not the path, so they stay.
+LEGACY_DIR="$HOME/Applications/Substo Video.app"
+if [[ -z "${SUBSTO_APP_DIR:-}" && -d "$LEGACY_DIR" && "$LEGACY_DIR" != "$FINAL_DIR" ]]; then
+  [[ -x "$LSREGISTER" ]] && "$LSREGISTER" -u "$LEGACY_DIR" >/dev/null 2>&1 || true
+  rm -rf "$LEGACY_DIR"
+  echo "Removed the old $LEGACY_DIR"
+fi
 echo "Built $FINAL_DIR"

@@ -4,7 +4,7 @@ import TandemMedia
 
 /// Renames a project: Rename on the project list.
 ///
-/// The file and the name Substo Video shows both change. So do the files beside
+/// The file and the name Studio shows both change. So do the files beside
 /// it in `.substo/` that go by the file's name (the agent edits waiting for
 /// review, the undo history, the journal, the backups and the list's icon),
 /// so the project keeps everything it had. Its media, cache and exports
@@ -18,7 +18,7 @@ public enum ProjectRenamer {
         if let problem = problem(with: name) { throw ServiceError(.badRequest, problem) }
         let old = url.deletingPathExtension().lastPathComponent
         if let lock = ProjectSession.liveLock(for: url) {
-            let owner = lock.owner == .app ? "the Substo Video app" : "another substo command"
+            let owner = lock.owner == .app ? "the Studio app" : "another substo command"
             throw ServiceError(.locked, "\(old) is open in \(owner), so it can't be renamed now. Close it there first.")
         }
         let target = url.deletingLastPathComponent().appendingPathComponent("\(name).\(ProjectFile.fileExtension)")

@@ -1,7 +1,7 @@
 import AppKit
 import TandemCore
 
-/// Every cursor Substo Video shows, named for what a press there would do. Views
+/// Every cursor Studio shows, named for what a press there would do. Views
 /// work out the kind with the functions here, which are tested, and only
 /// set its `nsCursor`.
 ///

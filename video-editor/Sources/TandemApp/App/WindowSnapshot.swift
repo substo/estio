@@ -1,7 +1,7 @@
 import AppKit
 import TandemCore
 
-/// Renders a window to PNG from inside the app, so Substo Video can screenshot
+/// Renders a window to PNG from inside the app, so Studio can screenshot
 /// itself without screen recording permission. SwiftUI draws most of the
 /// window into layers that `cacheDisplay` doesn't see, so the capture
 /// renders the window's layer tree and uses `cacheDisplay` for views that
@@ -57,7 +57,7 @@ enum WindowSnapshot {
 
     /// The view and layer tree as text, for debugging layout from agents.
     static func describe(_ window: NSWindow) -> String {
-        // Whether Substo Video is the active app, to check that background
+        // Whether Studio is the active app, to check that background
         // commands (`open -g`) leave focus alone.
         var lines: [String] = [
             "app active: \(NSApp.isActive ? "yes" : "no"), window key: \(window.isKeyWindow ? "yes" : "no")",
@@ -141,7 +141,7 @@ enum AppURLCommand: Equatable {
     /// Sizes the front window (or the project list), for checking layouts.
     case windowSize(width: Double, height: Double)
     /// Brings the front window in front of other apps' windows, or sends
-    /// it behind them, without activating Substo Video.
+    /// it behind them, without activating Studio.
     case windowOrder(toFront: Bool)
 
     /// `substo`, plus any scheme the app's bundle registers, so a copy of the

@@ -1,7 +1,7 @@
 import Foundation
 import TandemCore
 
-/// Substo Video's own settings, shared by the app and the `substo` command so
+/// Studio's own settings, shared by the app and the `substo` command so
 /// both make projects the same way. Kept as JSON in
 /// `~/Library/Application Support/Substo/settings.json`, or the file
 /// `$SUBSTO_SETTINGS` names (tests use their own).

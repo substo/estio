@@ -238,7 +238,7 @@ extension SegmentListResult: ReadableResult {
     public var readableText: String {
         var lines: [String] = []
         if !exists {
-            lines.append("There's no shared library at \((folder as NSString).deletingLastPathComponent) yet. Substo Video makes it when it opens; `substo segments save` makes it too.")
+            lines.append("There's no shared library at \((folder as NSString).deletingLastPathComponent) yet. Studio makes it when it opens; `substo segments save` makes it too.")
         } else if segments.isEmpty {
             lines.append("No segments in \(ByteText.home(folder)) yet. Save one from the timeline (Timeline > Save selection as segment) or with substo segments save \"Intro\" --clips clip_a,clip_b.")
         } else {

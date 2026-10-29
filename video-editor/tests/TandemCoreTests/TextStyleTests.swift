@@ -148,7 +148,7 @@ final class TextStyleTests: XCTestCase {
         var line = try encoder.encode(ProjectJournal.Entry(revision: 1, date: Date(), batch: old, seed: 1, snapshot: nil, reason: nil, schemaVersion: nil))
         line.append(0x0A)
         try line.write(to: journal.url)
-        // Then this Substo Video's own edit, which means what it says.
+        // Then this Studio's own edit, which means what it says.
         journal.append(batch: EditBatch(label: "Lower case", commands: [
             .insertClip(trackID: textTrack, clip: Clip(id: "clip_new", content: .text(TextContent(text: "url", preset: "label", style: TextStyle(uppercase: false))), start: t(3), duration: t(2)))
         ]), revision: 2, seed: 2)

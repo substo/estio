@@ -24,7 +24,7 @@ public struct SyncRequest: ServiceCall {
     public var delay: Time?
     /// The files to set it on. Default: every camera take.
     public var media: [String]?
-    /// Make it the delay new camera takes get too (Substo Video's settings).
+    /// Make it the delay new camera takes get too (Studio's settings).
     public var makeDefault: Bool?
     /// Files to line up with the camera by their sound: media IDs or paths.
     public var files: [String]?
@@ -75,7 +75,7 @@ public struct SyncResult: Codable, Sendable {
     public var revision: Int
     /// Every file with a moving picture, camera takes first.
     public var files: [SyncFile]
-    /// The delay new camera takes get (Substo Video's settings).
+    /// The delay new camera takes get (Studio's settings).
     public var defaultDelay: Time
     /// The edit, when the delay changed or files were synced by sound.
     public var applied: ApplyResult?
@@ -166,7 +166,7 @@ extension SyncResult: ReadableResult {
         }
         lines.append(defaultDelay == .zero
             ? "New camera takes keep their picture as recorded (substo sync <seconds> --default sets a delay for them)."
-            : "New camera takes get \(Self.milliseconds(defaultDelay)) (Substo Video's settings).")
+            : "New camera takes get \(Self.milliseconds(defaultDelay)) (Studio's settings).")
         return lines.joined(separator: "\n")
     }
 }
@@ -205,7 +205,7 @@ extension TandemService {
                 do {
                     try settings.save()
                 } catch {
-                    throw ServiceError(.unavailable, "Couldn't save Substo Video's settings: \(error.localizedDescription)")
+                    throw ServiceError(.unavailable, "Couldn't save Studio's settings: \(error.localizedDescription)")
                 }
             }
         } else if request.media != nil || request.makeDefault == true {

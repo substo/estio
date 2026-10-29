@@ -109,7 +109,7 @@ extension ProjectSession {
     /// Opens a project the way the app should: when a CLI command has it
     /// for a moment, waits for it to finish; when `substo serve` has it,
     /// asks it to save and let go. Gives up after `timeout` seconds with the
-    /// usual "is open in Substo Video" error.
+    /// usual "is open in Studio" error.
     public static func open(_ url: URL, owner: Owner, waitingUpTo timeout: TimeInterval) async throws -> ProjectSession {
         let deadline = Date().addingTimeInterval(timeout)
         var asked = false
@@ -245,7 +245,7 @@ public final class ProjectClient: @unchecked Sendable {
                     throw ServiceError(.locked, Self.busyMessage(lock, projectURL))
                 } else if lock.owner == .app, !noticed, Date().timeIntervalSince(started) >= noticeAfter {
                     noticed = true
-                    Self.waitNotice?("Substo Video has \(projectURL.lastPathComponent) open but isn't answering yet (it's opening or closing it). Waiting for it…")
+                    Self.waitNotice?("Studio has \(projectURL.lastPathComponent) open but isn't answering yet (it's opening or closing it). Waiting for it…")
                 }
             } else {
                 do {
@@ -349,7 +349,7 @@ public final class ProjectClient: @unchecked Sendable {
     static func busyMessage(_ lock: ProjectSession.Lock, _ url: URL) -> String {
         switch lock.owner {
         case .app:
-            return "\(url.lastPathComponent) is open in the Substo Video app (pid \(lock.pid)), but the app isn't serving its API. Update or restart the app."
+            return "\(url.lastPathComponent) is open in the Studio app (pid \(lock.pid)), but the app isn't serving its API. Update or restart the app."
         case .cli:
             return "\(url.lastPathComponent) is busy in another substo command (pid \(lock.pid)). Try again when it finishes."
         }

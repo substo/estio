@@ -16,7 +16,7 @@ final class ProjectDuplicatorTests: XCTestCase {
         var project = Project(id: "prj_original", name: "ESLint")
         project.media = [
             MediaItem(id: "med_take", path: "source/take.mov", kind: .video, role: .camera, duration: t(60), hasVideo: true, hasAudio: true),
-            MediaItem(id: "med_shared", path: "/Users/shared/Substo Library/Stickers/Comment below.mov", kind: .video, role: .sticker, duration: t(5), hasVideo: true),
+            MediaItem(id: "med_shared", path: "/Users/shared/Studio Library/Stickers/Comment below.mov", kind: .video, role: .sticker, duration: t(5), hasVideo: true),
             MediaItem(id: "med_photo", path: "photos/IMG_1.HEIC", kind: .image, role: .image, hasVideo: true, livePhotoVideo: "photos/IMG_1.MOV")
         ]
         let graded = Clip(id: "clip_take", content: .media(mediaID: "med_take"), start: .zero, duration: t(60), video: VideoProperties(effects: [
@@ -51,7 +51,7 @@ final class ProjectDuplicatorTests: XCTestCase {
         let (project, revision) = try ProjectFile.load(from: copy)
         let folder = original.deletingLastPathComponent().standardizedFileURL.path
         XCTAssertEqual(project.media(of: "med_take"), "\(folder)/source/take.mov", "back at the original's file")
-        XCTAssertEqual(project.media(of: "med_shared"), "/Users/shared/Substo Library/Stickers/Comment below.mov", "already absolute")
+        XCTAssertEqual(project.media(of: "med_shared"), "/Users/shared/Studio Library/Stickers/Comment below.mov", "already absolute")
         XCTAssertEqual(project.media.first { $0.id == "med_photo" }?.livePhotoVideo, "\(folder)/photos/IMG_1.MOV")
         XCTAssertEqual(project.clip("clip_take")?.video?.effects.first?.params["path"], .string("\(folder)/assets/lut/film.cube"))
         XCTAssertEqual(project.name, "ESLint")

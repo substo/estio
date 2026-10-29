@@ -6,12 +6,12 @@ The asset library (music, sound effects, stickers, icons, logos, fonts and stock
 
 Music, sound effects, stickers, icons, logos, fonts and stock footage come
 from the creator's asset library, one per user at
-`~/Library/Application Support/Substo/Assets/`, shared with the app's
+`~/Library/Application Support/Studio/Assets/`, shared with the app's
 browser. Every asset records its licence, and every use in a project is
 recorded, which is what the description credits are built from.
 
 the creator's own reusable things live in his **shared library**, the folder
-`~/Movies/Substo Library` (Stickers, Graphics, Sound effects, Music, Looks,
+`~/Movies/Studio Library` (Stickers, Graphics, Sound effects, Music, Looks,
 Fonts, Segments). Its files are the `shared` source, with IDs that are
 their path in the folder: `shared:Stickers/Star.mov`, `shared:Sound
 effects/Whoosh.wav`. Unlike every other source, a shared asset isn't copied
@@ -73,7 +73,7 @@ changed files are read), so a file dropped in is found straight away.
 keeps it off the network and out of the Keychain (for tests, or a flight).
 `$SUBSTO_LIBRARY` moves the shared library for one command; with
 `$SUBSTO_ASSETS_ROOT` set and no `$SUBSTO_LIBRARY`, the shared library is
-`Substo Library` inside that root, so tests never touch the real one.
+`Studio Library` inside that root, so tests never touch the real one.
 
 ## Credits for the description
 
@@ -144,7 +144,7 @@ in. `--mode` is `place` (the default: fails where a track is taken),
 On disk a segment is plain JSON beside its files:
 
 ```
-Substo Library/Segments/Intro/
+Studio Library/Segments/Intro/
   segment.json      {"version": 1, "name": "Intro", "template": {...}, "media": [...], "savedFrom": "Decision Models", "notes": []}
   card.mov          the files its clips play, named as they were
   whoosh.wav

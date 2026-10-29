@@ -83,13 +83,13 @@ final class ExportPipeline: @unchecked Sendable {
         if let reason = RenderOutputs.protectedReason(output, project: context.project, folder: context.folder) {
             throw RenderError.export("\(reason); export somewhere else")
         }
-        // Re-exporting over an earlier Substo Video export is normal, and those
+        // Re-exporting over an earlier Studio export is normal, and those
         // have their snapshot beside them. Anything else at that path (an
         // old Filmora render, a download) isn't ours to replace.
         let fm = FileManager.default
         let snapshot = output.appendingPathExtension(ProjectFile.fileExtension)
         if fm.fileExists(atPath: output.path) && !fm.fileExists(atPath: snapshot.path) {
-            throw RenderError.export("\(output.lastPathComponent) already exists and isn't a Substo Video export; pick another name or move it first")
+            throw RenderError.export("\(output.lastPathComponent) already exists and isn't a Studio export; pick another name or move it first")
         }
     }
 
@@ -424,7 +424,7 @@ final class ExportPipeline: @unchecked Sendable {
             encoder.finish()
             fed.leave()
         }
-        feeder.name = "Substo Video export encoder feed"
+        feeder.name = "Studio export encoder feed"
         feeder.qualityOfService = .userInitiated
         feeder.start()
         // Every way out stops the feed and waits for it, then (if it didn't
@@ -673,12 +673,12 @@ final class ExportPipeline: @unchecked Sendable {
 /// never write over.
 public enum RenderOutputs {
     /// Why writing `output` would destroy work, or nil when it wouldn't: it
-    /// is a Substo Video project (this one or any other), or a file this project
+    /// is a Studio project (this one or any other), or a file this project
     /// plays. Paths are compared after resolving links, which also brings a
     /// differently cased spelling back to the file's own name.
     public static func protectedReason(_ output: URL, project: Project, folder: ProjectFolder) -> String? {
         if output.pathExtension.lowercased() == ProjectFile.fileExtension {
-            return "\(output.lastPathComponent) is a Substo Video project"
+            return "\(output.lastPathComponent) is a Studio project"
         }
         let target = output.standardizedFileURL.resolvingSymlinksInPath().path
         if project.media.contains(where: { folder.url(for: $0).standardizedFileURL.resolvingSymlinksInPath().path == target }) {

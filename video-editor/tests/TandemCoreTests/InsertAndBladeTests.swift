@@ -159,7 +159,7 @@ final class InsertAtABoundaryTests: XCTestCase {
         ])
     }
 
-    /// What happened in the Substo Video video: the agent took the first take to
+    /// What happened in the upstream editor's own video: the agent took the first take to
     /// be the screen file's 282.1 s, but it was placed at the camera file's
     /// 282.045 s, so 625.1 was 55 ms into the clip after it.
     func testAnInsertJustInsideAClipWarnsWhereItStarts() throws {

@@ -251,7 +251,7 @@ public final class MCPServer: @unchecked Sendable {
 
     static let serverInfo: JSONValue = .object([
         "name": .string("substo-video"),
-        "title": .string("Substo Video editor"),
+        "title": .string("Studio editor"),
         "version": .string(TandemAPI.version)
     ])
 
@@ -727,7 +727,7 @@ enum MCPTools {
             properties: [
                 "delay": time("How late the picture is against the sound, in seconds (0.08 for 80 ms). 0 puts it back."),
                 "media": S.array(S.string("A media ID."), "The files to set the delay on. Default: every camera take."),
-                "makeDefault": S.boolean("Make it the delay new camera takes get, in Substo Video's settings."),
+                "makeDefault": S.boolean("Make it the delay new camera takes get, in Studio's settings."),
                 "files": S.array(S.string("A media ID or path."), "Files to line up with the camera take by sound, instead of a delay."),
                 "to": S.string("With files: the media ID or path of the file to line them up with. Default: the camera take."),
                 "place": S.boolean("With files: place each beside the take. Default true; false only sets their takes."),
@@ -772,7 +772,7 @@ enum MCPTools {
         ),
         Tool(
             name: "screenshot", title: "Screenshot the app",
-            description: "Captures the Substo Video app's window, to see the editor view. Needs the app open.",
+            description: "Captures the Studio app's window, to see the editor view. Needs the app open.",
             operation: .screenshot, properties: ["output": S.string("Save the PNG here instead of returning it.")], readOnly: true
         ),
         Tool(

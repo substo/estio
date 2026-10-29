@@ -1,4 +1,4 @@
-# <img src="icons/substo.png" width="32" alt=""> Substo Video
+# <img src="icons/studio.png" width="32" alt=""> Studio
 
 A video editor for a creator and their AI agents
 
@@ -10,11 +10,11 @@ macOS
 
 ## What it is
 
-Substo Video is a standalone macOS editor for the Substo content workspace, based on the upstream MIT editor. A creator and their agents can work on the same project through the app, CLI, or MCP server. See [Substo setup](docs/SUBSTO.md) for this copy's workflow and integration boundary.
+Studio is a standalone macOS editor for the Substo content workspace, based on the upstream MIT editor. A creator and their agents can work on the same project through the app, CLI, or MCP server. See [Substo setup](docs/SUBSTO.md) for this copy's workflow and integration boundary.
 
-A project is a `.substo` JSON file in the video's folder. Substo Video finds local media, recognises common camera and screen recording names, and runs transcripts, waveforms, and cutout work in the background. Check its media roles after import, since its original recording conventions may differ from yours.
+A project is a `.substo` JSON file in the video's folder. Studio finds local media, recognises common camera and screen recording names, and runs transcripts, waveforms, and cutout work in the background. Check its media roles after import, since its original recording conventions may differ from yours.
 
-![Upstream Substo Video example editing a video](docs/header.jpg)
+![The upstream editor editing a video](docs/header.jpg)
 
 ## Get it running
 
@@ -30,7 +30,7 @@ SUBSTO_SKILL_DIRS="" bash install.sh "$PWD/.local/bin"
 "$PWD/.local/bin/substo" app
 ```
 
-`setup_mac.sh` builds and signs the app at `~/Applications/Substo Video.app`.
+`setup_mac.sh` builds and signs the app at `~/Applications/Studio.app`.
 This checkout defaults to a debug build because Xcode 26.3's Swift optimizer
 currently crashes in the timeline view during a release build. Set
 `SUBSTO_BUILD_CONFIGURATION=release` when that compiler issue is resolved.
@@ -38,14 +38,14 @@ currently crashes in the timeline view during a release build. Set
 (or `~/.local/bin` when no directory is supplied). Add that directory to your PATH if needed.
 Keep the clone in place, and rerun `install.sh` if you move it.
 
-Without `SUBSTO_SKILL_DIRS=""`, `install.sh` also links [the Substo Video skill](skills/substo-video/SKILL.md) into
+Without `SUBSTO_SKILL_DIRS=""`, `install.sh` also links [the Studio editing skill](skills/substo-video/SKILL.md) into
 `~/.claude/skills` and `~/.agents/skills`, so Claude Code and Codex know how
-to edit with Substo Video whenever they're in a folder with a `.substo` project:
+to edit with Studio whenever they're in a folder with a `.substo` project:
 the loop of editing, checking and handing back for review, and the rules.
 Set `SUBSTO_SKILL_DIRS` to other folders, or to nothing to skip it. Agents
 that use MCP instead (`substo mcp`) get the same guidance from the server.
 
-Substo Video doesn't read `.env` files or need API keys to edit local media.
+Studio doesn't read `.env` files or need API keys to edit local media.
 Optional asset providers use macOS Keychain. `substo assets providers` tells
 you what's missing, and [the asset guide](docs/ASSETS.md) covers setup.
 
@@ -65,7 +65,7 @@ substo timeline --summary
 For agents, add the MCP server once:
 
 ```bash
-claude mcp add substo -- "$HOME/Applications/Substo Video.app/Contents/MacOS/substo" mcp
+claude mcp add substo -- "$HOME/Applications/Studio.app/Contents/MacOS/substo" mcp
 ```
 
 Old Filmora projects import with `substo import filmora "Video v3.wfp"`.
@@ -74,12 +74,12 @@ the entry point for agents; its topic files in `docs/agents/` have the
 recipes, import options and troubleshooting.
 
 Stickers, graphics, sounds, music, looks, fonts and saved segments that
-every video reuses live in `~/Movies/Substo Video Library`, which Substo Video makes
+every video reuses live in `~/Movies/Studio Library`, which Studio makes
 the first time it opens. Projects use those files where they are; `substo
 archive` (File > Archive project...) copies the ones a project uses into it
 before it moves to another Mac.
 
-## Working on Substo Video
+## Working on Studio
 
 ```bash
 swift test
@@ -87,7 +87,7 @@ bash restart.sh
 ```
 
 `restart.sh` builds a debug app and opens it. Set `SUBSTO_APP_DIR` to build
-somewhere other than `~/Applications/Substo Video.app`.
+somewhere other than `~/Applications/Studio.app`.
 
 Run `bash tests/install-tests.sh` to check the launcher installation without
 touching your app. The default Swift tests use synthetic media and fixtures.

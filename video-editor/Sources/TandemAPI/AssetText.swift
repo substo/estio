@@ -162,10 +162,10 @@ extension AssetUseResult: ReadableResult {
             if !fonts.isEmpty {
                 lines.append("Installed the font \(asset.name) (\(fonts.joined(separator: ", "))). Use it in a title's style: {\"font\": \"\(fonts[0])\"}.")
                 if referencedInPlace == true {
-                    lines.append("It stays in the shared library (\(files.joined(separator: ", "))), where every Substo Video render finds it; archiving copies it into the project's assets/font/.")
+                    lines.append("It stays in the shared library (\(files.joined(separator: ", "))), where every Studio render finds it; archiving copies it into the project's assets/font/.")
                 }
                 if let owner = fontsReached {
-                    lines.append(owner == "app" ? "The Substo Video app has it now too." : "substo serve has it now too.")
+                    lines.append(owner == "app" ? "The Studio app has it now too." : "substo serve has it now too.")
                 }
                 for warning in fontWarnings ?? [] { lines.append("Warning: \(warning)") }
             } else if referencedInPlace == true {

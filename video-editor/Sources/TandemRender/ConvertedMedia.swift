@@ -9,7 +9,7 @@ import TandemMedia
 /// leaves such a clip out until the background conversion lands.
 enum ConvertedMedia {
     /// The context to build from, and why anything couldn't be converted.
-    /// Media scanned before Substo Video looked for these files isn't marked, so
+    /// Media scanned before Studio looked for these files isn't marked, so
     /// the files the timeline shows are checked here too.
     static func prepare(_ context: RenderContext) async -> (context: RenderContext, warnings: [String]) {
         guard let analysis = context.analysis else { return (context, []) }

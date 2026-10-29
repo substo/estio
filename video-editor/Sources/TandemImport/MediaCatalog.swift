@@ -126,7 +126,7 @@ final class MediaCatalog {
                     report.add(.note, "media", "Found \(name) at \(candidate.path) instead of \(path).")
                 }
                 if probed.animatedImage {
-                    report.add(.approximated, "media", "\(name) is an animated image; Substo Video shows its first frame.", at: time)
+                    report.add(.approximated, "media", "\(name) is an animated image; Studio shows its first frame.", at: time)
                 }
                 return .found(makeItem(path: usable.path, key: path, probed: probed, role: role))
             } catch {
@@ -138,7 +138,7 @@ final class MediaCatalog {
             return .unusable
         }
         if FileSniffer.unplayableExtensions.contains((path as NSString).pathExtension.lowercased()) {
-            report.add(.unsupported, "media", "\(name) wasn't found, and Substo Video couldn't play it anyway (.\((path as NSString).pathExtension)).", at: time)
+            report.add(.unsupported, "media", "\(name) wasn't found, and Studio couldn't play it anyway (.\((path as NSString).pathExtension)).", at: time)
             return .unusable
         }
         if let fallback {

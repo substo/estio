@@ -10,7 +10,7 @@ public struct AssetSettings: Codable, Equatable, Sendable {
     /// Size cap for cached previews, in bytes.
     public var previewCacheLimit: Int64
     /// Where the shared library folder is, when the creator moved it from the
-    /// default (`~/Movies/Substo Library`; see `SharedLibrary`).
+    /// default (`~/Movies/Studio Library`; see `SharedLibrary`).
     public var sharedLibrary: String?
 
     public init(freesoundEnabled: Bool = false, iconColour: String = "#FFFFFF", previewCacheLimit: Int64 = 2 * 1024 * 1024 * 1024, sharedLibrary: String? = nil) {

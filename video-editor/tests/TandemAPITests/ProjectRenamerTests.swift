@@ -2,7 +2,7 @@ import XCTest
 @testable import TandemAPI
 @testable import TandemCore
 
-/// Rename on the project list: the file and the name Substo Video shows, with
+/// Rename on the project list: the file and the name Studio shows, with
 /// everything the project had beside it.
 final class ProjectRenamerTests: XCTestCase {
     private var folder: URL!
@@ -42,7 +42,7 @@ final class ProjectRenamerTests: XCTestCase {
         XCTAssertEqual(renamed.lastPathComponent, "Experimental video.substo")
         XCTAssertFalse(FileManager.default.fileExists(atPath: project.path))
         let (loaded, revision) = try ProjectFile.load(from: renamed)
-        XCTAssertEqual(loaded.name, "Experimental video", "the name Substo Video shows")
+        XCTAssertEqual(loaded.name, "Experimental video", "the name Studio shows")
         XCTAssertEqual(loaded.id, "prj_eslint", "still the same project")
         XCTAssertEqual(revision, 7)
 
@@ -89,7 +89,7 @@ final class ProjectRenamerTests: XCTestCase {
         defer { lock.release() }
         XCTAssertThrowsError(try ProjectRenamer.rename(project, to: "Renamed")) { error in
             XCTAssertEqual((error as? ServiceError)?.code, "locked")
-            XCTAssertTrue((error as? ServiceError)?.message.contains("open in the Substo Video app") == true, "\(error)")
+            XCTAssertTrue((error as? ServiceError)?.message.contains("open in the Studio app") == true, "\(error)")
         }
     }
 }

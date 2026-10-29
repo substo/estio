@@ -17,7 +17,7 @@ enum RenderEngine {
             .workingColorSpace: NSNull(),
             .outputColorSpace: NSNull(),
             .cacheIntermediates: false,
-            .name: "Substo Video"
+            .name: "Studio"
         ]
         if let device { return CIContext(mtlDevice: device, options: options) }
         return CIContext(options: options)

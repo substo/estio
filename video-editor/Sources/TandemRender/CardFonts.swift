@@ -1,7 +1,7 @@
 import CoreText
 import Foundation
 
-/// The section card's typefaces, which ship with Substo Video (SIL Open Font
+/// The section card's typefaces, which ship with Studio (SIL Open Font
 /// Licence, the licences beside them in `Resources/Fonts`): Anton for the
 /// title, Instrument Sans for the subtitle and the kicker, JetBrains Mono
 /// for the number and the count. They're read from the resource bundle

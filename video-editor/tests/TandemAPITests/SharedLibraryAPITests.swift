@@ -8,11 +8,11 @@ import TandemMedia
 /// A shared library in a temp folder beside a video folder, and a project
 /// that uses it every way a project can:
 ///
-///     <temp>/Substo Library/Stickers/Star.mov          a sticker, where it is
-///     <temp>/Substo Library/Sound effects/Whoosh.wav   a sound, where it is
-///     <temp>/Substo Library/Looks/Warm.cube            a look on a clip
-///     <temp>/Substo Library/Fonts/TiltWarp.ttf         the caption preset's font
-///     <temp>/Substo Library/Segments/Intro/sting.wav   a segment's media
+///     <temp>/Studio Library/Stickers/Star.mov          a sticker, where it is
+///     <temp>/Studio Library/Sound effects/Whoosh.wav   a sound, where it is
+///     <temp>/Studio Library/Looks/Warm.cube            a look on a clip
+///     <temp>/Studio Library/Fonts/TiltWarp.ttf         the caption preset's font
+///     <temp>/Studio Library/Segments/Intro/sting.wav   a segment's media
 ///     <temp>/Assets/shared/Stickers_Spin.webm-1a2b/normalised.mov
 ///                                                      the converted copy of Stickers/Spin.webm
 final class SharedFixture {
@@ -22,7 +22,7 @@ final class SharedFixture {
 
     init() throws {
         archive = try ArchiveFixture(write: false)
-        shared = SharedLibrary(root: archive.root.appendingPathComponent("Substo Library", isDirectory: true))
+        shared = SharedLibrary(root: archive.root.appendingPathComponent("Studio Library", isDirectory: true))
         try shared.create()
         assetsRoot = archive.root.appendingPathComponent("Assets", isDirectory: true)
         try archive.make(library("Stickers/Star.mov"), seed: 11)
@@ -89,10 +89,10 @@ final class SharedFixture {
 
 final class SharedLibraryArchiveTests: XCTestCase {
     static let expected: [String: String] = [
-        "med_star": "media/Substo Library/Stickers/Star.mov",
-        "med_whoosh": "media/Substo Library/Sound effects/Whoosh.wav",
-        "med_spin": "media/Substo Library/Stickers/Spin.mov",
-        "med_sting": "media/Substo Library/Segments/Intro/sting.wav"
+        "med_star": "media/Studio Library/Stickers/Star.mov",
+        "med_whoosh": "media/Studio Library/Sound effects/Whoosh.wav",
+        "med_spin": "media/Studio Library/Stickers/Spin.mov",
+        "med_sting": "media/Studio Library/Segments/Intro/sting.wav"
     ]
 
     func testConsolidatingCopiesEverySharedFileAndPointsTheProjectAtIt() throws {
@@ -102,7 +102,7 @@ final class SharedLibraryArchiveTests: XCTestCase {
 
         let collected = Dictionary(uniqueKeysWithValues: result.collected.map { ($0.path, $0) })
         XCTAssertEqual(Set(collected.keys), Set(Self.expected.values).union(["assets/lut/Warm.cube", "assets/font/TiltWarp.ttf"]))
-        XCTAssertEqual(collected["media/Substo Library/Stickers/Spin.mov"]?.original, ProjectArchiver.realPath(f.converted))
+        XCTAssertEqual(collected["media/Studio Library/Stickers/Spin.mov"]?.original, ProjectArchiver.realPath(f.converted))
         for file in result.collected {
             XCTAssertEqual(try Data(contentsOf: f.video.appendingPathComponent(file.path)), try Data(contentsOf: URL(fileURLWithPath: file.original)), file.path)
         }
@@ -126,7 +126,7 @@ final class SharedLibraryArchiveTests: XCTestCase {
         let shelf = f.archive.root.appendingPathComponent("shelf", isDirectory: true)
         try FileManager.default.createDirectory(at: shelf, withIntermediateDirectories: true)
         let planned = try f.archive(to: shelf, dryRun: true)
-        XCTAssertTrue(planned.readableText.contains("media/Substo Library/Stickers/Star.mov"), planned.readableText)
+        XCTAssertTrue(planned.readableText.contains("media/Studio Library/Stickers/Star.mov"), planned.readableText)
 
         let result = try f.archive(to: shelf)
         XCTAssertEqual(result.mode, .archive)
@@ -134,7 +134,7 @@ final class SharedLibraryArchiveTests: XCTestCase {
         let original = try f.archive.load().project
         XCTAssertEqual(original.media("med_star")?.path, f.library("Stickers/Star.mov").path, "the original still uses the library")
 
-        // Bruce has no Substo Library.
+        // Bruce has no Studio Library.
         try FileManager.default.moveItem(at: f.shared.root, to: f.archive.root.appendingPathComponent("gone", isDirectory: true))
         try FileManager.default.moveItem(at: f.assetsRoot, to: f.archive.root.appendingPathComponent("gone assets", isDirectory: true))
         let copy = URL(fileURLWithPath: result.projectFile)
@@ -146,7 +146,7 @@ final class SharedLibraryArchiveTests: XCTestCase {
         XCTAssertEqual(MediaRelinker.missing(in: archived, folder: ProjectFolder(projectFile: copy)).map(\.id), [])
         XCTAssertTrue(FileManager.default.fileExists(atPath: copy.deletingLastPathComponent().appendingPathComponent("assets/lut/Warm.cube").path))
         let manifest = try XCTUnwrap(ArchiveManifest.load(from: copy.deletingLastPathComponent()))
-        XCTAssertEqual(manifest.entry(for: "media/Substo Library/Stickers/Star.mov")?.original, starOriginal)
+        XCTAssertEqual(manifest.entry(for: "media/Studio Library/Stickers/Star.mov")?.original, starOriginal)
     }
 
     /// Links are followed both ways: a library that's itself a link, a
@@ -171,14 +171,14 @@ final class SharedLibraryArchiveTests: XCTestCase {
 
         let result = try f.archive()
         let collected = Dictionary(uniqueKeysWithValues: result.collected.map { ($0.path, $0) })
-        XCTAssertEqual(collected["media/Substo Library/Stickers/Star.mov"]?.original, ProjectArchiver.realPath(f.library("Stickers/Star.mov")))
-        XCTAssertEqual(collected["media/Substo Library/Sound effects/Whoosh.wav"]?.original, ProjectArchiver.realPath(f.library("Sound effects/Whoosh.wav")))
-        XCTAssertEqual(collected["media/Substo Library/Music/Bed.m4a"]?.original, ProjectArchiver.realPath(f.archive.outside("music/bed.m4a")), "the file the link points to")
+        XCTAssertEqual(collected["media/Studio Library/Stickers/Star.mov"]?.original, ProjectArchiver.realPath(f.library("Stickers/Star.mov")))
+        XCTAssertEqual(collected["media/Studio Library/Sound effects/Whoosh.wav"]?.original, ProjectArchiver.realPath(f.library("Sound effects/Whoosh.wav")))
+        XCTAssertEqual(collected["media/Studio Library/Music/Bed.m4a"]?.original, ProjectArchiver.realPath(f.archive.outside("music/bed.m4a")), "the file the link points to")
         let saved = try f.archive.load().project
-        XCTAssertEqual(saved.media("med_star")?.path, "media/Substo Library/Stickers/Star.mov")
-        XCTAssertEqual(saved.media("med_whoosh")?.path, "media/Substo Library/Sound effects/Whoosh.wav", "a link in the folder to the library counts as outside")
-        XCTAssertEqual(saved.media("med_bed")?.path, "media/Substo Library/Music/Bed.m4a")
-        XCTAssertTrue(FileCopier.isPlainFile(f.video.appendingPathComponent("media/Substo Library/Music/Bed.m4a")), "a real copy, not a link")
+        XCTAssertEqual(saved.media("med_star")?.path, "media/Studio Library/Stickers/Star.mov")
+        XCTAssertEqual(saved.media("med_whoosh")?.path, "media/Studio Library/Sound effects/Whoosh.wav", "a link in the folder to the library counts as outside")
+        XCTAssertEqual(saved.media("med_bed")?.path, "media/Studio Library/Music/Bed.m4a")
+        XCTAssertTrue(FileCopier.isPlainFile(f.video.appendingPathComponent("media/Studio Library/Music/Bed.m4a")), "a real copy, not a link")
 
         // Named by the library the options know, however it's reached.
         let viaLink = try f.archive(dryRun: true, shared: SharedLibrary(root: linkedLibrary))
@@ -201,7 +201,7 @@ final class SharedLibraryArchiveTests: XCTestCase {
             session.close()
         }
         let planned = try await service.archive(ArchiveRequest(dryRun: true), context: CallContext(author: "claude"))
-        XCTAssertTrue(planned.collected.contains { $0.path == "media/Substo Library/Sound effects/Whoosh.wav" }, planned.readableText)
+        XCTAssertTrue(planned.collected.contains { $0.path == "media/Studio Library/Sound effects/Whoosh.wav" }, planned.readableText)
     }
 }
 
@@ -211,8 +211,8 @@ final class SharedLibraryRelinkTests: XCTestCase {
         var project = Project(id: "prj_moved", name: "From Bruce")
         // Paths from another Mac, where the library was somewhere else.
         project.media = [
-            try f.archive.item("med_star", f.library("Stickers/Star.mov"), stored: "/Users/mike/Movies/Substo Library/Stickers/Star.mov", role: .sticker),
-            try f.archive.item("med_whoosh", f.library("Sound effects/Whoosh.wav"), stored: "/Users/mike/Movies/Substo Library/Sound effects/Whoosh.wav", kind: .audio, role: .sfx),
+            try f.archive.item("med_star", f.library("Stickers/Star.mov"), stored: "/Users/mike/Movies/Studio Library/Stickers/Star.mov", role: .sticker),
+            try f.archive.item("med_whoosh", f.library("Sound effects/Whoosh.wav"), stored: "/Users/mike/Movies/Studio Library/Sound effects/Whoosh.wav", kind: .audio, role: .sfx),
             try f.archive.item("med_other", f.archive.outside("x.wav"), stored: "/Users/mike/elsewhere/other.wav", kind: .audio, role: .sfx)
         ]
         try f.write(project)
@@ -392,11 +392,11 @@ final class SegmentTests: XCTestCase {
         let archived = try ProjectArchiver(session: archiveSession, options: ArchiveOptions(author: "claude", fonts: StubFonts(), sharedLibrary: intro.f.shared, assetsRoot: intro.f.assetsRoot)).run()
         archiveSession.close()
         XCTAssertEqual(Set(archived.collected.map(\.path)), [
-            "media/Substo Library/Segments/Intro/card.mov", "media/Substo Library/Segments/Intro/whoosh.wav",
-            "media/Substo Library/Segments/Intro/Star.mov", "assets/lut/warm.cube"
+            "media/Studio Library/Segments/Intro/card.mov", "media/Studio Library/Segments/Intro/whoosh.wav",
+            "media/Studio Library/Segments/Intro/Star.mov", "assets/lut/warm.cube"
         ])
         let standalone = try ProjectFile.load(from: other).project
-        XCTAssertTrue(standalone.media.allSatisfy { $0.path.hasPrefix("media/Substo Library/Segments/Intro/") }, "\(standalone.media.map(\.path))")
+        XCTAssertTrue(standalone.media.allSatisfy { $0.path.hasPrefix("media/Studio Library/Segments/Intro/") }, "\(standalone.media.map(\.path))")
         XCTAssertEqual(standalone.track(named: "Graphics")?.clips.first?.video?.effects.first?.params["path"], .string("assets/lut/warm.cube"))
     }
 
@@ -633,7 +633,7 @@ final class SegmentCLITests: XCTestCase {
         // The archive knows where the library is from the environment.
         let dry = try cli.substo("archive", "--dry-run", in: other.deletingLastPathComponent(), env: env)
         XCTAssertEqual(dry.status, 0, dry.stderr)
-        XCTAssertTrue(dry.stdout.contains("media/Substo Library/Segments/Intro/card.mov"), dry.stdout)
+        XCTAssertTrue(dry.stdout.contains("media/Studio Library/Segments/Intro/card.mov"), dry.stdout)
 
         let usage = try cli.substo("segments", "save", "Outro", in: intro.f.video, env: env)
         XCTAssertEqual(usage.status, 2)
@@ -689,10 +689,10 @@ final class SharedFontTextTests: XCTestCase {
     func testASharedFontSaysItStaysInTheLibrary() {
         let result = AssetUseResult(
             asset: Asset(provider: "shared", providerID: "Fonts/TiltWarp.ttf", kind: .font, name: "Tilt Warp"),
-            mediaID: nil, files: ["/Users/mike/Movies/Substo Library/Fonts/TiltWarp.ttf"], referencedInPlace: true,
+            mediaID: nil, files: ["/Users/mike/Movies/Studio Library/Fonts/TiltWarp.ttf"], referencedInPlace: true,
             role: .other, trackName: nil, gainDB: nil, at: nil, applied: nil, fonts: ["TiltWarp-Regular"], licence: nil
         )
         XCTAssertTrue(result.readableText.hasPrefix("Installed the font Tilt Warp"), result.readableText)
-        XCTAssertTrue(result.readableText.contains("It stays in the shared library (/Users/mike/Movies/Substo Library/Fonts/TiltWarp.ttf)"), result.readableText)
+        XCTAssertTrue(result.readableText.contains("It stays in the shared library (/Users/mike/Movies/Studio Library/Fonts/TiltWarp.ttf)"), result.readableText)
     }
 }

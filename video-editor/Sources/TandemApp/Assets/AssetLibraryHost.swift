@@ -59,7 +59,7 @@ final class AssetLibraryHost {
     /// ElevenLabs permissions the key was refused (`sound_generation`,
     /// `music_generation`), remembered by the provider.
     private(set) var refused: Set<String> = []
-    /// The shared library folder (`~/Movies/Substo Library`), once the
+    /// The shared library folder (`~/Movies/Studio Library`), once the
     /// library is open.
     private(set) var sharedRoot: URL?
     /// Its saved segments, by name, and folders that couldn't be read.
@@ -146,7 +146,7 @@ final class AssetLibraryHost {
                     host.reloadSegments()
                 }
                 // Files added to the import folders and the shared library
-                // while Substo Video was closed.
+                // while Studio was closed.
                 _ = try? await library.rescanImportFolders()
                 _ = try? await library.rescanSharedLibrary()
                 await MainActor.run { AssetLibraryHost.shared.revision += 1 }
@@ -209,7 +209,7 @@ final class AssetLibraryHost {
     }
 
     /// Moves the shared library to `folder` (nil for the default,
-    /// ~/Movies/Substo Library), making it there with its folders, and
+    /// ~/Movies/Studio Library), making it there with its folders, and
     /// watches it there.
     func moveSharedLibrary(to folder: URL?, report: @escaping (String) -> Void) {
         guard let library else { return }

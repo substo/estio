@@ -227,7 +227,7 @@ final class ImportRequestTests: XCTestCase {
         let folder = try Fixtures.temporaryFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
         let (url, first) = try await miniImport(into: folder).perform()
-        // Mike edits the import in Substo Video, then runs the import again.
+        // Mike edits the import in Studio, then runs the import again.
         var edited = first.project
         edited.markers.append(Marker(id: "mk_mike", time: t(1), name: "Mike's"))
         try ProjectFile.save(edited, revision: 12, to: url)

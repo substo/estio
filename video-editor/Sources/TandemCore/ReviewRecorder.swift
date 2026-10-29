@@ -34,7 +34,7 @@ public final class ReviewRecorder: @unchecked Sendable {
         }
         token = coordinator.observe { [weak self] event in self?.heard(event) }
         // Clips taken off the timeline since the log was saved (by an older
-        // Substo Video, or by hand) have nothing left to show.
+        // Studio, or by hand) have nothing left to show.
         queue.async { [weak self] in
             guard let self, !self.closed else { return }
             var log = self._log

@@ -48,7 +48,7 @@ final class SegmentUISnapshots: XCTestCase {
 
     /// Three saved segments in a temp library.
     private func segments() throws -> [StoredSegment] {
-        let library = SharedLibrary(root: folder.appendingPathComponent("Substo Library", isDirectory: true))
+        let library = SharedLibrary(root: folder.appendingPathComponent("Studio Library", isDirectory: true))
         let video = folder.appendingPathComponent("video", isDirectory: true)
         try FileManager.default.createDirectory(at: video.appendingPathComponent("sfx"), withIntermediateDirectories: true)
         try Data(repeating: 7, count: 4000).write(to: video.appendingPathComponent("sfx/whoosh.wav"))
@@ -97,7 +97,7 @@ final class SegmentUISnapshots: XCTestCase {
             .insertClip(trackID: text, clip: Clip(id: "clip_a", name: "Title", content: .text(TextContent(text: "Welcome back", preset: "callout")), start: t(0), duration: t(3))),
             .insertClip(trackID: text, clip: Clip(id: "clip_b", content: .text(TextContent(text: "Tip 1", preset: "label")), start: t(3), duration: t(2)))
         ]))
-        let sheetModel = SaveSegmentModel(project: model.project, folder: model.folder, clipIDs: ["clip_a", "clip_b"], library: SharedLibrary(root: folder.appendingPathComponent("Substo Library", isDirectory: true)))
+        let sheetModel = SaveSegmentModel(project: model.project, folder: model.folder, clipIDs: ["clip_a", "clip_b"], library: SharedLibrary(root: folder.appendingPathComponent("Studio Library", isDirectory: true)))
         sheetModel.setup.titles[0].asked = true
         try render(SaveSegmentView(model: sheetModel), "2-save-sheet")
 

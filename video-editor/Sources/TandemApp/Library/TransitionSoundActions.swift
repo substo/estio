@@ -4,8 +4,8 @@ import TandemAPI
 import TandemAssets
 import TandemCore
 
-/// the creator's picks for the sound each type of transition plays, over Substo Video's
-/// own (`TransitionSoundDefaults`), from Substo Video > Settings: asset IDs by
+/// the creator's picks for the sound each type of transition plays, over Studio's
+/// own (`TransitionSoundDefaults`), from Studio > Settings: asset IDs by
 /// type name, "" for none. Kept in the app's preferences, like export
 /// speed.
 struct TransitionSoundSettings {
@@ -16,7 +16,7 @@ struct TransitionSoundSettings {
         store.dictionary(forKey: Self.key) as? [String: String] ?? [:]
     }
 
-    /// What `type` plays: the creator's pick, else Substo Video's. A pick is looked up
+    /// What `type` plays: the creator's pick, else Studio's. A pick is looked up
     /// in `library`, so without it only the sounds measured by hand play.
     func sound(for type: TransitionType, library: AssetLibrary?) -> TransitionSoundDefaults.Sound? {
         TransitionSoundDefaults.sound(
@@ -27,12 +27,12 @@ struct TransitionSoundSettings {
     }
 
     /// the creator's pick for `type`: an asset ID, "" for none, or nil when he
-    /// hasn't picked (Substo Video's then).
+    /// hasn't picked (Studio's then).
     func choice(for type: TransitionType) -> String? {
         choices[type.rawValue]
     }
 
-    /// Picks `assetID` for `type` ("" for none); nil goes back to Substo Video's.
+    /// Picks `assetID` for `type` ("" for none); nil goes back to Studio's.
     func set(_ assetID: String?, for type: TransitionType) {
         var all = choices
         all[type.rawValue] = assetID
@@ -105,7 +105,7 @@ enum TransitionSoundActions {
     /// Copies under way, by project folder and asset.
     private static var copying: [String: Task<TransitionSoundDefaults.Resolved?, Never>] = [:]
 
-    /// What each type plays, the creator's picks over Substo Video's, as far as this
+    /// What each type plays, the creator's picks over Studio's, as far as this
     /// Mac's library knows them: for a drop on a transition, whose sound
     /// follows its type.
     static func soundFor() -> (TransitionType) -> TransitionSoundDefaults.Sound? {
@@ -174,7 +174,7 @@ enum TransitionSoundActions {
             model.selectedTransitionID = id
         }
         if prepared.missing {
-            model.show(.info, "The \(type.displayName.lowercased())'s sound isn't in this Mac's asset library, so it's silent. Pick another in Substo Video > Settings.")
+            model.show(.info, "The \(type.displayName.lowercased())'s sound isn't in this Mac's asset library, so it's silent. Pick another in Studio > Settings.")
         }
     }
 

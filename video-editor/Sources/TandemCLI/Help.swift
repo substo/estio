@@ -12,13 +12,13 @@ struct CommandHelp {
 
 enum Help {
     static let commands: [CommandHelp] = [
-        CommandHelp(name: "new", usage: "substo new <path.substo> [--name <name>] [--portrait | --size <width>x<height>]", summary: "Create a project with Substo Video's default tracks and add the media in its folder.", options: ["name", "portrait", "size"],
+        CommandHelp(name: "new", usage: "substo new <path.substo> [--name <name>] [--portrait | --size <width>x<height>]", summary: "Create a project with Studio's default tracks and add the media in its folder.", options: ["name", "portrait", "size"],
                     details: """
                     The canvas is 3840x2160 unless you say otherwise: --portrait makes a 1080x1920 short, --size any other size.
                     It says which file it took for the camera take and why: a record-it -camera file, or a video from a phone or camera (or in source/) with speech and a face in it. Live Photos stay one item each, the still, with its movie in livePhotoVideo.
                     """),
         CommandHelp(name: "status", usage: "substo status [--revision] [--json]", summary: "Revision, length, unsaved changes, who has it open, undo, background jobs and agent edits waiting for your review.", options: ["revision"],
-                    details: "--revision prints just the revision number, to pass to --expect. Read it when you read the timeline you're about to edit, not right before applying, or --expect protects nothing. Substo Video finding new files in the folder doesn't make it stale."),
+                    details: "--revision prints just the revision number, to pass to --expect. Read it when you read the timeline you're about to edit, not right before applying, or --expect protects nothing. Studio finding new files in the folder doesn't make it stale."),
         CommandHelp(name: "media", usage: "substo media [--refresh]", summary: "Media files, how many clips use each, and analysis status.", options: ["refresh"],
                     details: "--refresh scans the project folder for new files first."),
         CommandHelp(name: "timeline", usage: "substo timeline [--from <time>] [--to <time>] [--words] [--summary] [--json]", summary: "The edit as readable text (or the project JSON).", options: ["from", "to", "words", "summary"],
@@ -27,17 +27,17 @@ enum Help {
                     details: """
                     The JSON can be a batch {"label": ..., "commands": [...]}, a list of commands, or one command like {"blade": {"at": 12.5}}, in a file, on standard input (-) or quoted as the argument itself.
                     --expect refuses the edit unless the project is at that revision. --key makes a retry safe (idempotency key).
-                    `substo help <edit command>` (like addTransition) gives its arguments and an example, and `substo schema` prints the JSON schema. docs/AGENTS.md in the Substo Video repo indexes the guides; docs/agents/edit-commands.md has what help doesn't say.
+                    `substo help <edit command>` (like addTransition) gives its arguments and an example, and `substo schema` prints the JSON schema. docs/AGENTS.md in the Studio repo indexes the guides; docs/agents/edit-commands.md has what help doesn't say.
                     """),
         CommandHelp(name: "undo", usage: "substo undo [--count <n>] [--expect <revision>]", summary: "Undo the last edit, or the last n with --count.", options: ["expect", "count"],
-                    details: "--count undoes several steps in one go, stopping early if the history runs out; use it rather than undoing twice, since each undo makes a new revision. --expect refuses unless the project is at that revision, even if Substo Video only found new media since, because the top undo step would then be that."),
+                    details: "--count undoes several steps in one go, stopping early if the history runs out; use it rather than undoing twice, since each undo makes a new revision. --expect refuses unless the project is at that revision, even if Studio only found new media since, because the top undo step would then be that."),
         CommandHelp(name: "redo", usage: "substo redo [--count <n>] [--expect <revision>]", summary: "Redo the last undone edit, or the last n with --count.", options: ["expect", "count"]),
         CommandHelp(name: "history", usage: "substo history [--limit <n>]", summary: "What undo would undo, and the edit history: each edit's revision, who made it and where it was on the timeline.", options: ["limit"],
-                    details: "The edit history is kept in .substo/<name>.history.jsonl, so it lasts across restarts and from one command to the next, whoever made the edit (the creator in the app, an agent, the CLI). Each line has the times and tracks the edit touched. A run of Substo Video finding new media is one line. `substo diff --since <revision>` shows what each edit did to the clips."),
+                    details: "The edit history is kept in .substo/<name>.history.jsonl, so it lasts across restarts and from one command to the next, whoever made the edit (the creator in the app, an agent, the CLI). Each line has the times and tracks the edit touched. A run of Studio finding new media is one line. `substo diff --since <revision>` shows what each edit did to the clips."),
         CommandHelp(name: "diff", usage: "substo diff --since <revision | file.substo | export.mp4> [--json]", summary: "What changed on the timeline since a revision, a backup or an export, clip by clip, grouped by edit and who made it.", options: ["since"],
                     details: """
                     Each clip that's different: added, removed, moved, trimmed (start +0.500s, end -1.000s), slipped, and changed settings like scale, position, gain, fades, effects and keyframes, with its timeline times and track. Clips that moved together by the same amount (riding a ripple) are one line. Media, markers, transitions and settings aren't compared.
-                    --since a revision walks the edit history back, so the changes come grouped by edit, with who made each one and where it was. The history goes back to when this version of Substo Video first opened the project; past that, a backup with that revision in .substo/backups is used, or it says what to use instead.
+                    --since a revision walks the edit history back, so the changes come grouped by edit, with who made each one and where it was. The history goes back to when this version of Studio first opened the project; past that, a backup with that revision in .substo/backups is used, or it says what to use instead.
                     --since a .substo file compares with it: a backup, another version, or the snapshot every export writes beside itself (exports/v3.mp4.substo). Give the export (exports/v3.mp4) and its snapshot is read.
                     Use it to see what changed since you last looked. --json has each clip before and after.
                     """),
@@ -61,7 +61,7 @@ enum Help {
         CommandHelp(name: "sync", usage: "substo sync [<seconds> [--media <id>]... [--default]] | substo sync <file>... [--to <camera file>] [--no-place] [--dry-run]", summary: "How late each file's picture is against its sound, so lips match the voice; give a delay to set it on the camera takes. Give files instead (another camera angle, an external mic) to line them up with the camera by sound and place them.", options: ["media", "default", "to", "no-place", "dry-run", "label", "expect"],
                     details: """
                     A webcam's picture lags its mic (the creator's by about 0.08 s). With a delay, every camera take (or the --media files) shows its picture that much later in the file, everywhere: the app, frames, review clips, check and exports. The sound, the cuts and the transcript's word times stay where they are, so nothing else moves. 0 puts the picture back as recorded. Don't also slip clips by hand, or the delay doubles.
-                    --default makes it the delay new camera takes get (Substo Video's settings), as Settings in the app does.
+                    --default makes it the delay new camera takes get (Studio's settings), as Settings in the app does.
                     Takes Record It already corrected (its Camera delay, tagged in the file) show "in sync as recorded" and are left alone.
                     Without a delay it lists each file's delay and the default.
 
@@ -73,7 +73,7 @@ enum Help {
                     """),
         CommandHelp(name: "comments", usage: "substo comments [resolve <id>... | resolve --all]", summary: "Comments left on the timeline for the next edit round, with what's said and playing at each; resolve clears the ones you've done.", options: ["all", "label"],
                     details: """
-                    Add comments in Substo Video at the playhead (Add comment, Shift-C) during review: notes like "cut the umm here" for the next round. Each shows its ID, time and words, what's said a few seconds either side (| marks the comment) and the clips playing there.
+                    Add comments in Studio at the playhead (Add comment, Shift-C) during review: notes like "cut the umm here" for the next round. Each shows its ID, time and words, what's said a few seconds either side (| marks the comment) and the clips playing there.
                     Do what each asks and label the edit with what you did. Then remove the comment: in the same apply batch with {"removeMarker": {"markerID": "<id>"}}, or afterwards with substo comments resolve <id>. Comments move with ripple edits, so list them again after one.
                     """),
         CommandHelp(name: "transcript", usage: "substo transcript [<clip or media id>] [--from <time>] [--to <time>] [--make]", summary: "Word timings for a clip (timeline times), a file (file times) or the whole timeline.", options: ["from", "to", "make", "timeout"],
@@ -131,7 +131,7 @@ enum Help {
         CommandHelp(name: "archive", usage: "substo archive [<project>] [--to <folder>] [--with-cache] [--dry-run]", summary: "Make the project standalone: copy what it uses from outside its folder into it, or with --to write a standalone copy of the whole folder somewhere else.", options: ["to", "with-cache", "dry-run", "label"],
                     details: """
                     Without --to, media, LUTs and fonts the project uses from outside its folder are copied into media/<folder they were in>/, assets/lut/ and assets/font/, and the project points at the copies (one undo step). Other .substo files in the folder are pointed at them too.
-                    With --to <folder>, the whole project folder is copied to <folder>/<project folder name>, with those files brought in and every path relative; the original is left as it was. Proxies, mattes, thumbnails and isolated voice are left out (Substo Video makes them again) unless --with-cache; transcripts, waveforms and loudness always go. npm packages are left out.
+                    With --to <folder>, the whole project folder is copied to <folder>/<project folder name>, with those files brought in and every path relative; the original is left as it was. Proxies, mattes, thumbnails and isolated voice are left out (Studio makes them again) unless --with-cache; transcripts, waveforms and loudness always go. npm packages are left out.
                     Copies are APFS clones where they can be, checked by SHA-256 otherwise, and never replace a different file (they go beside it as "name 2"). archive.json records where each file came from. Missing files are listed and left as they are. A run that stops part way can be run again.
                     --dry-run lists what would be copied and the sizes.
                     """),
@@ -145,7 +145,7 @@ enum Help {
                     """),
         CommandHelp(name: "transcribe", usage: "substo transcribe <media id | clip id | path>... [--wait | --no-wait] [--timeout <seconds>]", summary: "Make a transcript of any file with sound, whatever its role or track (a generated clip, a sound effect), and wait for it.", options: ["wait", "no-wait", "timeout", "label"],
                     details: """
-                    Substo Video transcribes camera takes and what's on a speech track by itself. This asks for anything else with sound, with the same on-device SpeechAnalyzer, and marks the file (transcribe: true, one undo step) so the transcript is made wherever the project is open. An empty transcript means no speech.
+                    Studio transcribes camera takes and what's on a speech track by itself. This asks for anything else with sound, with the same on-device SpeechAnalyzer, and marks the file (transcribe: true, one undo step) so the transcript is made wherever the project is open. An empty transcript means no speech.
                     With the app closed it waits by default, making the transcript here and printing progress; with the app open it queues it and returns, unless --wait. --no-wait only queues it. --timeout defaults to 600 seconds.
                     Then `substo transcript <id>` reads it. Exit code 1 if a transcript failed or the wait timed out.
                     """),
@@ -178,20 +178,20 @@ enum Help {
                     credits          the credits block for the video description, and anything to sort out first
                     generate         make a sound effect or music cue with ElevenLabs (paid, one request per take)
                     install-starter  add the starter emoji, icons and logos to the catalogue
-                    The library is per user, at ~/Library/Application Support/Substo/Assets. The shared library folder, ~/Movies/Substo Library, is the "shared" source.
+                    The library is per user, at ~/Library/Application Support/Studio/Assets. The shared library folder, ~/Movies/Studio Library, is the "shared" source.
                     """),
         CommandHelp(name: "segments", usage: "substo segments list | save \"<name>\" (--clips <id,id> | --from <time> --to <time>) [--field <clip id>[=<label>]]... [--replace] | insert \"<name>\" --at <time> [--value <key>=<text>]... [--mode place|overwrite|insert]",
                     summary: "Reusable bits of timeline (intro, outro, like and subscribe) saved in the shared library: list them, save clips as one, put one on the timeline.",
                     options: ["clips", "from", "to", "field", "replace", "at", "value", "mode", "label"],
                     details: """
-                    list     the segments in ~/Movies/Substo Library/Segments, with their fields
+                    list     the segments in ~/Movies/Studio Library/Segments, with their fields
                     save     save clips as a segment, with copies of the files they play beside it. --clips takes exactly those clips (linked ones aren't added); --from and --to take every clip wholly between them. --field clip_x=Title makes a title's words a field asked for on insert. --replace saves over one of the same name (files only the old one had stay, for the projects that play them; the rest goes to the Trash)
                     insert   put a segment on the timeline at --at, one undo step. Its files are used where they are in the library; archiving the project copies them in. --value key=text fills a field; --mode overwrite replaces what's in the way
-                    The shared library's place is in Substo Video's settings; $SUBSTO_LIBRARY moves it for one command.
+                    The shared library's place is in Studio's settings; $SUBSTO_LIBRARY moves it for one command.
                     """),
         CommandHelp(name: "serve", usage: "substo serve [--port <n>]", summary: "Open the project and serve the API until stopped (for agents, with the app closed).", options: ["port"]),
         CommandHelp(name: "mcp", usage: "substo mcp", summary: "Run the MCP server on stdin and stdout.", options: [],
-                    details: "Add it to Claude Code with: claude mcp add substo -- ~/Applications/Substo Video.app/Contents/MacOS/substo mcp"),
+                    details: "Add it to Claude Code with: claude mcp add substo -- ~/Applications/Studio.app/Contents/MacOS/substo mcp"),
         CommandHelp(name: "help", usage: "substo help [<command> | <edit command>]", summary: "Show help, for a command or an edit command like addTransition.", options: [])
     ]
 
@@ -215,7 +215,7 @@ enum Help {
 
     static var overview: String {
         var lines = [
-            "substo \(TandemAPI.version): edit Substo Video projects from the command line.",
+            "substo \(TandemAPI.version): edit Studio projects from the command line.",
             "",
             "Usage: substo <command> [arguments] [options]",
             "",
@@ -233,7 +233,7 @@ enum Help {
             "  --json            Print the result as JSON.",
             "",
             "Times are seconds (83.5) or mm:ss.mmm (01:23.500).",
-            "When the Substo Video app has the project open, commands go through the app; otherwise they open the file.",
+            "When the Studio app has the project open, commands go through the app; otherwise they open the file.",
             "Run `substo help <command>` for more, and `substo help <edit command>` (like addTransition) for an edit command's arguments and example."
         ]
         return lines.joined(separator: "\n")

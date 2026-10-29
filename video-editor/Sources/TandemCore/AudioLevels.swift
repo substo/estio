@@ -13,7 +13,7 @@ public struct MeasuredSound: Codable, Equatable, Sendable {
     }
 }
 
-/// How Substo Video levels sound: which clips are speech, the gain a clip's
+/// How Studio levels sound: which clips are speech, the gain a clip's
 /// normalisation adds, and what new clips start with. Placement, the
 /// render, the loudness report and the app's Audio tab all use these, so
 /// they agree.

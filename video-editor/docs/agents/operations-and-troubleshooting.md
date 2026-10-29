@@ -103,12 +103,12 @@ substo archive --to "/Volumes/CannMedia/Archive"
 
 The copy is `/Volumes/CannMedia/Archive/<project folder name>/`, with every
 path relative, so it opens anywhere. Proxies, mattes, thumbnails and
-isolated voice are left out (Substo Video makes them again; `--with-cache` keeps
+isolated voice are left out (Studio makes them again; `--with-cache` keeps
 them), as are `node_modules` folders; transcripts and the converted copies
 of stickers macOS can't decode always go. Files outside
 the folder land in `media/<the folder they were in>/`, shared library files
-in `media/Substo Library/<where they were in it>` (a segment's in
-`media/Substo Library/Segments/<name>/`), a Live Photo's movie beside its
+in `media/Studio Library/<where they were in it>` (a segment's in
+`media/Studio Library/Segments/<name>/`), a Live Photo's movie beside its
 still, LUTs in `assets/lut/` and fonts in `assets/font/` (the shared
 library's `Fonts/` is looked in too). Other `.substo` files in the folder
 (versions) get the same treatment.
@@ -150,12 +150,12 @@ still when it's beside it. It's one undo step.
 
 ## Troubleshooting
 
-- **"is open in the Substo Video app, but the app isn't serving its API"**: the
+- **"is open in the Studio app, but the app isn't serving its API"**: the
   app has had the project open for 90 seconds without answering. Restart or
   update the app.
 - **"busy in another substo command"**: another command has the project
   open right now. Commands wait up to 15 seconds for it before giving up.
-- **"isn't built yet, so this doesn't work in this version of Substo Video"**:
+- **"isn't built yet, so this doesn't work in this version of Studio"**:
   rendering or media analysis isn't in this build.
 - **"has no 9:16 frame for the short"**: `--preset short` (or `--format
   portrait`) on a project that isn't 9:16 and has no portrait format yet.
@@ -164,7 +164,7 @@ still when it's beside it. It's one undo step.
 - **No pauses or search results**: check `substo media`; transcripts are
   made in the background after files are added. `substo wait transcript`
   waits for them (and makes them, with the app closed).
-- **"has no transcript yet, and nothing is making one"** or **"Substo Video only
+- **"has no transcript yet, and nothing is making one"** or **"Studio only
   makes them for camera takes..."**: run the `substo transcribe <id>` it
   gives.
 - **"Nothing makes a transcript of ..."** from `substo wait`: the file isn't
@@ -175,16 +175,16 @@ still when it's beside it. It's one undo step.
   uses it straight away. For a font Fontsource doesn't have, search with
   `substo assets search "<name>" --kind font --online`, or pick another
   font for those titles.
-- **"This project was saved by a newer Substo Video (schema 2)"**: an older
-  build opened a project a newer one saved. Update Substo Video. Schema 2 is the
+- **"This project was saved by a newer Studio (schema 2)"**: an older
+  build opened a project a newer one saved. Update Studio. Schema 2 is the
   one where a title's own style always wins over its preset.
 - **"... is QuickTime Animation, which macOS can't decode"**: stock stickers
-  often come as QuickTime Animation or PNG video. Substo Video converts them to
+  often come as QuickTime Animation or PNG video. Studio converts them to
   HEVC with ffmpeg (frames and exports wait for it; `substo media` shows
   `converted`). If the warning says ffmpeg is missing, the creator installs it with
   `brew install ffmpeg`.
 - **"Revision N is older than the edit history"**: the history starts
-  when this version of Substo Video first opened the project (or where it was
+  when this version of Studio first opened the project (or where it was
   last edited by something that kept none), and there's no backup saved
   at that revision. Diff against a backup file in `.substo/backups` or an
   export (`--since "exports/<name>.mp4"`) instead.
@@ -198,8 +198,8 @@ still when it's beside it. It's one undo step.
   for provider assets), then use the ID the search gives.
 - **"There's no folder at /Volumes/... to archive into"**: the share isn't
   mounted. the creator connects to it in Finder first.
-- **"archive.json ... isn't a Substo Video archive manifest"**: a file of that name
-  that Substo Video didn't write is in the way; it's never written over. Rename it.
+- **"archive.json ... isn't a Studio archive manifest"**: a file of that name
+  that Studio didn't write is in the way; it's never written over. Rename it.
 - **"The copy of ... didn't match the original"**: a copy failed its
   checksum and was thrown away, and nothing in the project changed. Run it
   again; if it keeps failing, the destination disk is suspect.
@@ -213,5 +213,5 @@ still when it's beside it. It's one undo step.
   file was deleted from the segment's folder. Put it back, or save the
   segment again from a project that has it.
 - **"There's no shared library at ... yet"**: the app makes
-  `~/Movies/Substo Library` the first time it opens after installing, and
+  `~/Movies/Studio Library` the first time it opens after installing, and
   `substo segments save` makes it too.

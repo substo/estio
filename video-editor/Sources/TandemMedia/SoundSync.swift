@@ -235,7 +235,7 @@ public enum SoundSync {
     }
 
     /// Times count from the first sound in the file, which is media time for
-    /// the files Substo Video syncs (cameras and recorders start their sound at 0).
+    /// the files Studio syncs (cameras and recorders start their sound at 0).
     static func readWithFFmpeg(_ ffmpeg: FFmpeg, _ url: URL) throws -> Sound {
         let data = try ffmpeg.output(["-v", "error", "-nostdin", "-i", url.path, "-vn", "-map", "0:a:0", "-ac", "1", "-ar", String(Int(readRate)), "-f", "f32le", "-"])
         let samples = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }

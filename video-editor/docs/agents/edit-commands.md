@@ -136,7 +136,7 @@ last.
 `content` is one of `{"media": {"mediaID": ...}}`, `{"text": {...}}`,
 `{"graphic": {"template": ..., "props": {...}}}`, `{"solid": {"color":
 {...}}}` or `{"adjustment": {}}`. `{"graphic": {"template":
-"sectionCard"}}` is the creator's section card, drawn by Substo Video
+"sectionCard"}}` is the creator's section card, drawn by Studio
 ([Add a section card](broll-and-titles.md#add-a-section-card) has its
 props); other graphic templates aren't rendered yet. Titles are in
 [Add a title](broll-and-titles.md#add-a-title).
@@ -156,7 +156,7 @@ clips by their place in `clips` (`{"from": 0, "to": 1, "type":
 A clip that carries its file:
 
 ```json
-{"insertTemplate": {"template": {"id": "segment:Sting", "name": "Sting", "duration": 1.2, "clips": [{"track": "SFX", "trackKind": "audio", "clip": {"duration": 1.2, "audio": {"gainDB": -15}}, "mediaPath": "/Users/m5-mike/Movies/Substo Library/Segments/Sting/sting.wav", "media": {"path": "sting.wav", "kind": "audio", "role": "sfx", "duration": 1.2, "hasAudio": true}}]}, "at": 42, "mode": "overwrite"}}
+{"insertTemplate": {"template": {"id": "segment:Sting", "name": "Sting", "duration": 1.2, "clips": [{"track": "SFX", "trackKind": "audio", "clip": {"duration": 1.2, "audio": {"gainDB": -15}}, "mediaPath": "/Users/m5-mike/Movies/Studio Library/Segments/Sting/sting.wav", "media": {"path": "sting.wav", "kind": "audio", "role": "sfx", "duration": 1.2, "hasAudio": true}}]}, "at": 42, "mode": "overwrite"}}
 ```
 
 ## addSectionCards
@@ -320,7 +320,7 @@ whole, and a fade at a clip's head carries it as it grows. It goes when the
 transition goes, whether that's a `removeTransition`, a clip it joins
 deleted, the clips moved apart, or an undo. Deleting the sound clip leaves
 the transition silent. In the app, push, slide, cut slide and wipe come
-with a light swoosh unless the creator picks otherwise (Substo Video > Settings);
+with a light swoosh unless the creator picks otherwise (Studio > Settings);
 [Put a swoosh on every push](sound.md#put-a-swoosh-on-every-push) has the
 gains and offsets.
 
@@ -383,7 +383,7 @@ the project's `truePeakCeiling` gets a compressor (3:1 from 6 dB over the
 speech level) and a limiter at the ceiling, at the end of its audio
 effects, and the warning names it. A clip with a limiter already, on or
 off, is left as it is, so removing or turning one off sticks until you
-add it back. Substo Video fills in `measured` (each file's loudness and peak)
+add it back. Studio fills in `measured` (each file's loudness and peak)
 from its analysis, and the journal keeps it, so leave it out.
 
 ## Markers

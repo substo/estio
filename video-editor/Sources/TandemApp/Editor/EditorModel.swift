@@ -248,7 +248,7 @@ final class EditorModel {
             }
         }
         if session.recoveredEdits {
-            show(.warning, "Recovered edits that hadn't been saved when Substo Video last closed.")
+            show(.warning, "Recovered edits that hadn't been saved when Studio last closed.")
         }
     }
 

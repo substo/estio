@@ -1,9 +1,9 @@
 ---
 name: substo-video
-description: Edit local .substo video projects with the Substo command and macOS editor.
+description: Edit local .substo video projects with the substo command and the Studio macOS editor.
 ---
 
-# Substo Video
+# Studio video editor
 
 Use this skill for timeline editing, media review, captions, sound, exports, and checks in a `.substo` project. The installed app and `substo` CLI share one project and one edit history.
 

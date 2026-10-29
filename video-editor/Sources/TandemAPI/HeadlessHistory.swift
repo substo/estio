@@ -53,7 +53,7 @@ final class HeadlessHistory: @unchecked Sendable {
 
     private func load() -> State? {
         guard let data = try? Data(contentsOf: url), var state = try? ServiceJSON.decoder().decode(State.self, from: data) else { return nil }
-        // Snapshots an older Substo Video kept read the way it wrote them, as the
+        // Snapshots an older Studio kept read the way it wrote them, as the
         // project file does.
         func upgraded(_ entry: Entry) -> Entry {
             var entry = entry

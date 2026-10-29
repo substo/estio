@@ -8,7 +8,7 @@ import TandemMedia
 /// in a project, and build the description credits.
 ///
 /// Disk layout under `root` (default
-/// `~/Library/Application Support/Substo/Assets/`):
+/// `~/Library/Application Support/Studio/Assets/`):
 ///
 ///     catalog.sqlite           the index
 ///     settings.json            AssetSettings
@@ -18,9 +18,9 @@ import TandemMedia
 ///     providers/               small provider state (refused permissions)
 ///     staging/                 generations on their way in, emptied after
 ///
-/// Previews live in `~/Library/Caches/Substo Video/AssetPreviews/`, size capped.
+/// Previews live in `~/Library/Caches/Studio/AssetPreviews/`, size capped.
 ///
-/// The shared library (`SharedLibrary`, `~/Movies/Substo Library`) is a
+/// The shared library (`SharedLibrary`, `~/Movies/Studio Library`) is a
 /// source of its own, `shared`: its files are indexed like an import
 /// folder's, and a project that uses one refers to it where it is.
 public final class AssetLibrary: @unchecked Sendable {
@@ -44,17 +44,18 @@ public final class AssetLibrary: @unchecked Sendable {
         return currentSettings
     }
 
-    /// `~/Library/Application Support/Substo/Assets/`.
+    /// `~/Library/Application Support/Studio/Assets/` (`Substo Video` before
+    /// the rename; `FolderRename` moves it).
     public static var defaultRoot: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Substo Video", isDirectory: true)
+            .appendingPathComponent(RenamedFolder.appFolderName, isDirectory: true)
             .appendingPathComponent("Assets", isDirectory: true)
     }
 
-    /// `~/Library/Caches/Substo Video/AssetPreviews/`.
+    /// `~/Library/Caches/Studio/AssetPreviews/`.
     public static var defaultPreviewFolder: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Substo Video", isDirectory: true)
+            .appendingPathComponent(RenamedFolder.appFolderName, isDirectory: true)
             .appendingPathComponent("AssetPreviews", isDirectory: true)
     }
 
@@ -197,7 +198,9 @@ public final class AssetLibrary: @unchecked Sendable {
         let folder = asset.files.folder.map { root.appendingPathComponent($0, isDirectory: true) } ?? self.folder(for: asset)
         func local(_ name: String?) -> URL? {
             guard let name else { return nil }
-            return name.hasPrefix("/") ? URL(fileURLWithPath: name) : folder.appendingPathComponent(name)
+            // An import folder file's absolute path, which may be in the
+            // shared library from before it was renamed (`RenamedFolder`).
+            return name.hasPrefix("/") ? URL(fileURLWithPath: RenamedFolder.resolve(name)) : folder.appendingPathComponent(name)
         }
         switch file {
         case .original: return local(asset.files.original)

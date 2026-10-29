@@ -123,7 +123,7 @@ final class SectionCardsAPITests: XCTestCase {
         for index in standard.audioTracks[0].clips.indices {
             standard.audioTracks[0].clips[index].audio = AudioProperties(normalizeTo: -20)
         }
-        XCTAssertEqual(sounds.levelled(for: standard), sounds, "at Substo Video's speech level they're as set")
+        XCTAssertEqual(sounds.levelled(for: standard), sounds, "at Studio's speech level they're as set")
         XCTAssertEqual(levelled.levelled(for: standard).soundIn.gainDB, -5.4, "and back")
     }
 

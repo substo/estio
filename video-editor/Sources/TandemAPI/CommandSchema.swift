@@ -57,7 +57,7 @@ public enum CommandSchema {
         var root = batch
         if case .object(var fields) = root {
             fields["$schema"] = .string("https://json-schema.org/draft/2020-12/schema")
-            fields["title"] = .string("Substo Video EditBatch")
+            fields["title"] = .string("Studio EditBatch")
             root = .object(fields)
         }
         return root
@@ -389,7 +389,7 @@ extension CommandSchema {
         "takeID": S.string(), "takeOffset": S.time(),
         "duration": S.time(), "frameRate": S.ref("FrameRate"), "width": S.integer(), "height": S.integer(),
         "hasVideo": S.boolean(), "hasAudio": S.boolean(), "hasAlpha": S.boolean(), "variableFrameRate": S.boolean(),
-        "undecodableCodec": S.string("Set by scanning: the codec macOS can't decode (\"rle \" or \"png \"). Substo Video plays a converted copy."),
+        "undecodableCodec": S.string("Set by scanning: the codec macOS can't decode (\"rle \" or \"png \"). Studio plays a converted copy."),
         "fingerprint": S.string(),
         "look": S.array(S.ref("Effect"), "Colour grade for every clip of the file."),
         "livePhotoVideo": S.string("Set by scanning on a Live Photo's still: its motion clip (the short .mov beside it), which isn't media of its own."),
@@ -607,7 +607,7 @@ extension CommandSchema {
         ),
         Entry(
             command: .cutRanges,
-            summary: "Ripple deletes several ranges at once, every one in the timeline's times before this command (as you read them), in any order. Substo Video cuts them latest first so no cut moves another, and cuts overlapping or touching ranges once. Use it instead of sorting rippleDeleteRange commands latest first yourself.",
+            summary: "Ripple deletes several ranges at once, every one in the timeline's times before this command (as you read them), in any order. Studio cuts them latest first so no cut moves another, and cuts overlapping or touching ranges once. Use it instead of sorting rippleDeleteRange commands latest first yourself.",
             arguments: S.object([
                 "ranges": S.array(S.ref("TimeRange"), "The stretches to cut: start plus duration, or start and end."),
                 "trackIDs": S.tracks("Only cut these tracks (and ripple from them). Default: every cut track.")
@@ -867,7 +867,7 @@ extension CommandSchema {
                 "measured": S.map(S.object([
                     "integratedLUFS": S.number(),
                     "truePeakDBTP": S.number()
-                ], required: ["integratedLUFS", "truePeakDBTP"]), "Each file's measured loudness by media ID. Leave it out: Substo Video fills it in from its analysis.")
+                ], required: ["integratedLUFS", "truePeakDBTP"]), "Each file's measured loudness by media ID. Leave it out: Studio fills it in from its analysis.")
             ]),
             example: #"{"normalizeSpeech": {}}"#
         ),

@@ -22,7 +22,7 @@ public final class FreesoundProvider: AssetProvider, @unchecked Sendable {
             "Only CC0 and CC BY sounds; CC BY needs a credit line.",
             "Commercial use of the API needs written permission from UPF's Music Technology Group.",
             "60 requests a minute and 2,000 a day.",
-            "Originals need OAuth2; Substo Video keeps the high-quality MP3 preview."
+            "Originals need OAuth2; Studio keeps the high-quality MP3 preview."
         ]
     )
     public var website: URL? { URL(string: "https://freesound.org") }

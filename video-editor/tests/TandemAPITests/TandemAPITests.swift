@@ -196,7 +196,7 @@ extension MediaRefreshTests {
     func testRefreshesAtTheSameTimeAddAFileOnce() async throws {
         // Opening a project in the app starts two scans at once (the
         // window's and the folder watcher's first look), and a take
-        // recorded while Substo Video was closed is new to both.
+        // recorded while Studio was closed is new to both.
         let folder = TempFolder()
         let session = try ProjectSession.create(at: folder.file("Video.substo"), owner: .cli)
         defer { session.close() }

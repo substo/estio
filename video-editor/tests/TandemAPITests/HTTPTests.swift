@@ -35,7 +35,7 @@ final class HTTPTests: XCTestCase {
         XCTAssertEqual(status.revision, 1)
 
         let applied = try await served.client().call(ApplyRequest(commands: [.blade(at: t(10))]))
-        XCTAssertEqual(applied.author, "claude", "credited to the X-Substo Video-Author header")
+        XCTAssertEqual(applied.author, "claude", "credited to the X-Substo-Author header")
         XCTAssertEqual(served.harness.service.coordinator.revision, 2)
 
         do {
@@ -214,7 +214,7 @@ final class HTTPTests: XCTestCase {
     }
 
     func testRequestParsing() {
-        let raw = Data("POST /v1/apply?x=1 HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\nX-Substo Video-Author: me\r\n\r\n{}".utf8)
+        let raw = Data("POST /v1/apply?x=1 HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\nX-Substo-Author: me\r\n\r\n{}".utf8)
         guard case .complete(let request) = HTTPRequest.parse(raw) else { return XCTFail("should parse") }
         XCTAssertEqual(request.method, "POST")
         XCTAssertEqual(request.path, "/v1/apply")
@@ -382,7 +382,7 @@ final class ProjectClientTests: XCTestCase {
     }
 
     func testStoppingLetsACallAlreadyRunningAnswer() async throws {
-        // Substo Video quits (a new build going in) just as an agent's edit
+        // Studio quits (a new build going in) just as an agent's edit
         // arrives: the edit still gets its reply.
         let served = try await HTTPTests.Served()
         defer { served.harness.close() }

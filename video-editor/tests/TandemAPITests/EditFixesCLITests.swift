@@ -3,7 +3,7 @@ import XCTest
 @testable import TandemCore
 
 extension CLITests {
-    /// The batches agents sent while editing the Substo Video video, through
+    /// The batches agents sent while editing the upstream editor's own video, through
     /// `substo apply`: B-roll placed at a speed (#53), and one clip bladed
     /// twice in a batch, then where it isn't (#51).
     func testApplyPlacesAtASpeedAndBladesOneClipTwice() throws {

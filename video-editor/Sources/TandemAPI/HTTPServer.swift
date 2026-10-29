@@ -9,11 +9,11 @@ import TandemCore
 ///     GET  /v1/<operation>   the same with no parameters (status, history...)
 ///     GET  /v1/watch         server-sent events: change, jobs and export events
 ///     GET  /v1/schema        the EditBatch JSON schema
-///     GET  /v1/health        no token needed; says a Substo Video API is here
+///     GET  /v1/health        no token needed; says a Studio API is here
 ///     POST /v1/release       asks `substo serve` to save and let go of the project
 ///
 /// Errors come back as `{"error": {"code", "message"}}` with a matching
-/// status code. Edits are credited to the `X-Substo Video-Author` header when a
+/// status code. Edits are credited to the `X-Substo-Author` header when a
 /// request doesn't name its own author.
 public final class TandemHTTPServer: @unchecked Sendable {
     public let service: TandemService
@@ -158,7 +158,7 @@ public final class TandemHTTPServer: @unchecked Sendable {
         }
         if name == "release" && request.method == "POST" {
             guard let onRelease else {
-                connection.send(error: ServiceError(.unavailable, "This Substo Video keeps the project open; close it there instead."))
+                connection.send(error: ServiceError(.unavailable, "This Studio keeps the project open; close it there instead."))
                 return
             }
             connection.send(json: .object(["ok": .bool(true)]))

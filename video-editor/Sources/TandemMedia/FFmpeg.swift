@@ -2,7 +2,7 @@ import Foundation
 
 /// The ffmpeg command line tool, for what AVFoundation can't read: WebM,
 /// QuickTime Animation and PNG video (stock alpha stickers), Ogg audio.
-/// Optional: without it those files can't be used, and Substo Video says so.
+/// Optional: without it those files can't be used, and Studio says so.
 public struct FFmpeg: Sendable {
     public let url: URL
 

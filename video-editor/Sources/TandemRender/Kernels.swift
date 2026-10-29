@@ -2,7 +2,7 @@ import CoreImage
 import Foundation
 import Metal
 
-/// Substo Video's own Core Image kernels, written in Metal and compiled once at
+/// Studio's own Core Image kernels, written in Metal and compiled once at
 /// runtime (`CIKernel.kernels(withMetalString:)`), so the package needs no
 /// Metal build step. They run on the shared Metal-backed context.
 ///

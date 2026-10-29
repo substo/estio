@@ -6,7 +6,13 @@ set -euo pipefail
 # sends it a substo:// link. Anything else goes to the substo command
 # inside the app bundle (run `substo help`).
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-APP_DIR="${SUBSTO_APP_DIR:-$HOME/Applications/Substo Video.app}"
+APP_DIR="${SUBSTO_APP_DIR:-$HOME/Applications/Studio.app}"
+# The app was called Substo Video. Until Studio.app is installed (the
+# install removes the old bundle), keep using the old one.
+OLD_APP_DIR="$HOME/Applications/Substo Video.app"
+if [[ -z "${SUBSTO_APP_DIR:-}" && ! -d "$APP_DIR" && -d "$OLD_APP_DIR" ]]; then
+  APP_DIR="$OLD_APP_DIR"
+fi
 CLI="$APP_DIR/Contents/MacOS/substo"
 
 case "${1:-}" in
@@ -33,7 +39,7 @@ case "${1:-}" in
       exit 2
     fi
     LINK="$1"
-    # The key only ever goes to Substo Video: substo://, or substo-something://
+    # The key only ever goes to Studio: substo://, or substo-something://
     # for a copy built under another bundle ID. Any other link is refused,
     # and the link is opened with $APP_DIR itself, since Launch Services
     # could hand a scheme claimed by several apps to any of them.
@@ -55,7 +61,7 @@ case "${1:-}" in
     fi
     KEY_FILE="$HOME/Library/Application Support/Substo/url-key"
     if [[ ! -r "$KEY_FILE" ]]; then
-      echo "There's no key for substo:// links yet. Start Substo Video once (substo app), then try again." >&2
+      echo "There's no key for substo:// links yet. Start Studio once (substo app), then try again." >&2
       exit 1
     fi
     SEPARATOR="?"

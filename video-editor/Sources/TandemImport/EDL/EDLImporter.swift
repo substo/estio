@@ -2,7 +2,7 @@ import Foundation
 import TandemCore
 import TandemMedia
 
-/// Rebuilds a video in Substo Video from a segment EDL and its recipe.
+/// Rebuilds a video in Studio from a segment EDL and its recipe.
 ///
 /// The take is placed segment by segment with `placeMedia`, so each
 /// segment's camera, voice and screen clips are linked and in sync. A

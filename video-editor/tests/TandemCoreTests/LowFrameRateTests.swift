@@ -2,7 +2,7 @@ import XCTest
 @testable import TandemCore
 
 /// Stretches of a screen recording that play at a low frame rate while the
-/// picture moves. In the Substo Video video Mike's screen capture dropped to 4 to
+/// picture moves. In the upstream editor's own video Mike's screen capture dropped to 4 to
 /// 7 fps while he was away from his desk (macOS records the screen when it
 /// changes), and he spotted "a really low frame rate" in review.
 final class LowFrameRateTests: XCTestCase {

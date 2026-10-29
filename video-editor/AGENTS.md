@@ -1,6 +1,6 @@
 # Working on substo
 
-Substo Video is a native macOS video editor with a CLI and MCP server. Work from
+Studio is a native macOS video editor with a CLI and MCP server. Work from
 `video-editor/` in the Estio repository; the web app's rules in the root `AGENTS.md` do not apply here. It requires macOS 15 or newer and Xcode 26 or newer with Swift 6.
 
 ## Changes and checks
@@ -13,7 +13,7 @@ Substo Video is a native macOS video editor with a CLI and MCP server. Work from
   Syntax-check launch and build scripts with `bash -n`.
 - For an app change, run `bash restart.sh` after the tests and verify the
   actual interaction in the staged app. Set `SUBSTO_APP_DIR` to stage an
-  isolated app instead of replacing `~/Applications/Substo Video.app`.
+  isolated app instead of replacing `~/Applications/Studio.app`.
 - When working on the app itself, drive and capture it with `substo url`
   (the substo skill's ban on links is for agents editing videos), as in
   `substo url "simulate?click=600,700"` or
@@ -56,7 +56,7 @@ Substo Video is a native macOS video editor with a CLI and MCP server. Work from
   server (`bun sdk/gen-types.ts <project.substo>`) and run
   `cd sdk && bun run typecheck`.
 - `skills/tandem/SKILL.md` is the short skill that teaches agents to edit
-  with Substo Video; it points at `docs/AGENTS.md`. Keep its rules and the
+  with Studio; it points at `docs/AGENTS.md`. Keep its rules and the
   commands it names current too. On the creator's Mac it's linked into
   `~/.agents/skills` (Codex) and `~/.claude/skills` (Claude Code).
 - The asset library records licences and credits. Preserve that metadata

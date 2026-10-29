@@ -3,7 +3,7 @@ import TandemCore
 
 /// Finds media in a project folder and describes it.
 public enum MediaScanner {
-    /// File extensions Substo Video treats as media.
+    /// File extensions Studio treats as media.
     public static let videoExtensions: Set<String> = ["mov", "mp4", "m4v"]
     public static let audioExtensions: Set<String> = ["m4a", "mp3", "wav", "aif", "aiff", "caf"]
     public static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "heic", "gif", "webp"]
@@ -324,7 +324,7 @@ public enum MediaScanner {
 
     static func examine(_ url: URL, path: String, known: MediaItem?, folder: ProjectFolder) async -> FileOutcome {
         // Unchanged known files keep everything they had. Scans from before
-        // Substo Video checked for codecs macOS can't decode didn't mark them;
+        // Studio checked for codecs macOS can't decode didn't mark them;
         // stock stickers are where they turn up, so unmarked alpha video gets
         // a quick look at its header and a full probe if it needs one.
         if let known, let stamp = known.fingerprint.flatMap(Fingerprint.init), stamp.matchesStat(of: url), known.hasProbeData {

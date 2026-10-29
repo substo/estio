@@ -25,7 +25,7 @@ public protocol FontLocating: Sendable {
 /// registers (the CLI doesn't).
 public struct InstalledFonts: FontLocating {
     public var libraryRoot: URL?
-    /// The shared library (`~/Movies/Substo Library`), whose `Fonts/`
+    /// The shared library (`~/Movies/Studio Library`), whose `Fonts/`
     /// folder is looked in.
     public var sharedLibrary: URL?
 

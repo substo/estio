@@ -146,7 +146,7 @@ extension WaitResult: ReadableResult {
 
 // MARK: - transcribe
 
-/// Asks for transcripts of files Substo Video wouldn't otherwise transcribe
+/// Asks for transcripts of files Studio wouldn't otherwise transcribe
 /// (anything with sound, whatever its role or track), with the same
 /// on-device SpeechAnalyzer as camera takes. The request is saved on the
 /// media (`transcribe: true`), so it's made wherever the project is opened
@@ -353,7 +353,7 @@ extension TandemService {
         case .transcript where !item.hasAudio:
             return "\(item.path) has no sound, so it has no transcript."
         case .transcript:
-            return "Nothing makes a transcript of \(item.path): Substo Video makes them for camera takes, what's on a speech track and files someone asked for. `substo transcribe \(item.id)` asks for one and waits for it."
+            return "Nothing makes a transcript of \(item.path): Studio makes them for camera takes, what's on a speech track and files someone asked for. `substo transcribe \(item.id)` asks for one and waits for it."
         case .matte:
             return "Nothing makes a cutout matte of \(item.path): no clip of it on the timeline has its cutout on. Turn one on (updateClip with video.cutout.enabled) and the matte is made."
         case .proxy:
@@ -374,7 +374,7 @@ extension TandemService {
             result.message = message
         case .unreadable:
             result.state = "failed"
-            result.message = "Substo Video can't read the file. Is it missing? (`substo relink` finds moved files.)"
+            result.message = "Studio can't read the file. Is it missing? (`substo relink` finds moved files.)"
         case .notApplicable:
             result.state = "failed"
             result.message = "\(need.kind.rawValue) doesn't apply to this file."

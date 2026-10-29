@@ -139,7 +139,7 @@ export class Tandem {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.lock.token}`,
-        "X-Tandem-Author": this.author,
+        "X-Substo-Author": this.author,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),

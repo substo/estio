@@ -391,7 +391,7 @@ public enum QualityCheck {
     /// picture flashed: the only video on screen, or with the camera over
     /// the screen recording, the recording when its own scan
     /// (`screenFrames`) flickers there too and the other one when it
-    /// doesn't. In the Substo Video video it was the preview in a screen
+    /// doesn't. In the upstream editor's own video it was the preview in a screen
     /// recording jumping for a frame as the creator clicked.
     static func holdFixes(_ problems: [CheckProblem], in project: Project, screenFrames: [FrameStats]?) -> [CheckProblem] {
         let frame = project.settings.frameRate.frameDuration

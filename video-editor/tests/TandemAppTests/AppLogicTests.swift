@@ -41,7 +41,7 @@ final class ActivityLogTests: XCTestCase {
 
     func testDisplayNames() {
         XCTAssertEqual(ActivityLog.displayName("user"), "You")
-        XCTAssertEqual(ActivityLog.displayName("system"), "Substo Video")
+        XCTAssertEqual(ActivityLog.displayName("system"), "Studio")
         XCTAssertEqual(ActivityLog.displayName("claude"), "Claude")
     }
 }
@@ -198,7 +198,7 @@ final class AppURLCommandTests: XCTestCase {
         XCTAssertNil(AppURLCommand.parse(URL(string: "substo://assets?section=trumpets")!))
     }
 
-    /// With two projects open and Substo Video in the background, the "front"
+    /// With two projects open and Studio in the background, the "front"
     /// window is whichever was last main, so a check meant for one project
     /// landed on the other. `project=` names the one a command is for.
     func testCommandsCanNameTheirProject() throws {
@@ -290,7 +290,7 @@ final class AppURLKeyTests: XCTestCase {
     }
 
     /// The `substo url` launcher reads `$HOME/Library/Application
-    /// Support/Substo Video/url-key`, so the app has to make it there.
+    /// Support/Substo/url-key`, so the app has to make it there.
     func testTheAppKeepsTheKeyWhereTandemURLReadsIt() {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         XCTAssertEqual(AppURLKey.defaultFile.standardizedFileURL.path, home + "/Library/Application Support/Substo/url-key")
@@ -543,7 +543,7 @@ final class AgentPresenceTests: XCTestCase {
         XCTAssertEqual(ActivityLog.displayName("cli"), "CLI")
         XCTAssertEqual(ActivityLog.displayName("mcp"), "MCP")
         XCTAssertEqual(ActivityLog.displayName("user"), "You")
-        XCTAssertEqual(ActivityLog.displayName("system"), "Substo Video")
+        XCTAssertEqual(ActivityLog.displayName("system"), "Studio")
     }
 
     func testChangeRegionNamesTheSection() throws {
@@ -666,7 +666,7 @@ final class ClipSpeedTests: XCTestCase {
         XCTAssertEqual(try ClipSpeed.parse("110%").get(), 1.1)
         XCTAssertEqual(try ClipSpeed.parse(" 87.5 % ").get(), 0.875)
         XCTAssertEqual(try ClipSpeed.parse("0.5").get(), 0.005)
-        XCTAssertEqual(try ClipSpeed.parse("10000%").get(), Editing.maximumSpeed, "as fast as Substo Video plays")
+        XCTAssertEqual(try ClipSpeed.parse("10000%").get(), Editing.maximumSpeed, "as fast as Studio plays")
     }
 
     func testAnythingElseSaysWhy() {

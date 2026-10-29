@@ -138,7 +138,7 @@ public struct AssetNormaliser: Sendable {
             let table = try CubeLUT.read(original)
             return NormalisedAsset(format: format, thumbnail: try? Thumbnailer.lut(table, into: folder))
         case .unknown:
-            throw AssetError.unsupported("Substo Video doesn't know what \(original.lastPathComponent) is")
+            throw AssetError.unsupported("Studio doesn't know what \(original.lastPathComponent) is")
         }
     }
 

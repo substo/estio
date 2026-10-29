@@ -100,7 +100,7 @@ struct StyleProposal {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let batchJSON = validated.flatMap { try? encoder.encode($0) }.flatMap { String(data: $0, encoding: .utf8) } ?? ""
         return StyleProposal(projectFile: projectFile, range: range, instructions: """
-        Edit the existing Substo Video project at \(projectFile) using the general substo-video skill.
+        Edit the existing .substo project at \(projectFile) using the general substo-video skill.
         Style reference: \(style.name) (\(style.id)); source: \(style.source).
         Scope: only selected clip IDs \(ids), within timeline seconds \(start)–\(end).
         Project revision: \(revision). Use expectedRevision: \(revision) for every proposed batch.

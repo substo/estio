@@ -9,7 +9,7 @@ import TandemRender
 /// the pieces that changed.
 ///
 /// `check --changed` took 9 to 13 minutes over about 22 minutes of the
-/// Substo Video video's changed timeline, a long wait between review rounds, and
+/// upstream editor's own video's changed timeline, a long wait between review rounds, and
 /// most of what it read hadn't changed since the round before. A piece is
 /// keyed by everything that draws in it: the project's settings, the video
 /// tracks with the clips and transitions over it (and a margin either side,

@@ -19,7 +19,7 @@ final class CLITests: XCTestCase {
     }
 
     /// A shared library nothing makes, so commands run here never look in
-    /// the real ~/Movies/Substo Library.
+    /// the real ~/Movies/Studio Library.
     static let noSharedLibrary = FileManager.default.temporaryDirectory.appendingPathComponent("substo-tests-no-shared-library-\(UUID().uuidString)").path
     /// Settings nothing writes, so commands run here never use Mike's.
     static let noSettings = FileManager.default.temporaryDirectory.appendingPathComponent("substo-tests-no-settings-\(UUID().uuidString).json").path

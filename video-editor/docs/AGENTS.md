@@ -1,8 +1,8 @@
-# Substo Video for agents
+# Studio for agents
 
 For this Substo checkout, read [SUBSTO.md](SUBSTO.md) first. The examples below include the original author's recording conventions and editorial choices; use the current project's media and the Substo content foundation for new work.
 
-Substo Video is a video editor a creator and agents can share. Anything done in the app can also be done
+Studio is a video editor a creator and agents can share. Anything done in the app can also be done
 through the `substo` command, the local HTTP API or MCP. All three speak
 the same operations and the same edit commands, and every edit lands in the
 app's undo menu and activity feed under the agent's name.
@@ -33,7 +33,7 @@ bash install.sh
 substo --version
 ```
 
-While working on Substo Video itself, `swift build --package-path .` builds it at
+While working on Studio itself, `swift build --package-path .` builds it at
 `.build/debug/substo`.
 
 - Commands find the project from `--project <file.substo or folder>`, then
@@ -47,7 +47,7 @@ While working on Substo Video itself, `swift build --package-path .` builds it a
   mistakes); with `--json` the error is `{"error": {...}}` on standard
   output. When you pipe `--json`, use `set -o pipefail` or check the
   `error` key.
-- When the Substo Video app has the project open, every command goes through the
+- When the Studio app has the project open, every command goes through the
   app, so your edits appear in front of the creator as you make them. When it's
   closed, each command opens the file, edits, saves and lets go. `substo
   status` says which. `substo serve` holds the project headless for a long
@@ -58,7 +58,7 @@ While working on Substo Video itself, `swift build --package-path .` builds it a
   `substo transcribe <id>` makes a transcript of any other file with sound.
   Never start `substo serve` just to get a transcript, and never poll
   `substo media` or `substo status` in a sleep loop.
-- MCP: `claude mcp add substo -- ~/Applications/Substo Video.app/Contents/MacOS/tandem mcp`.
+- MCP: `claude mcp add substo -- ~/Applications/Studio.app/Contents/MacOS/substo mcp`.
   The tools mirror the CLI commands and take the same arguments, plus
   `project` and `json: true`; the `apply` tool's input schema describes
   every edit command.
@@ -89,7 +89,7 @@ apply --expect N`): if the creator (or another agent) changed the timeline in th
 meantime the batch is refused with a `staleRevision` error instead of
 editing something you haven't seen. Re-read and try again. `substo status
 --revision` prints just the number. Take it when you read what you're
-basing the edit on: read right before applying, it protects nothing. Substo Video
+basing the edit on: read right before applying, it protects nothing. Studio
 finding new files in the project folder ("Found new media", by system)
 bumps the revision too, but a batch whose revision is behind only by those
 still goes ahead, unless it adds, changes or removes media itself (the scan
@@ -107,7 +107,7 @@ same key returns the first result instead of applying it twice. An
 the call but before it answered, so an edit may have been applied: check
 `substo history` before sending it again.
 
-**Restarts.** You can keep working while Substo Video restarts (a new build going
+**Restarts.** You can keep working while Studio restarts (a new build going
 in). When it quits, calls it's already running finish and answer first.
 Commands sent while it's closing or opening the project again wait for it,
 up to 90 seconds, and say so on stderr after a couple of seconds. While it's
@@ -118,7 +118,7 @@ so `substo` never runs a half-installed copy.
 **Undo.** `undo` reverts the last batch, whoever made it, so pass
 `expectedRevision` to undo only if nothing happened since your edit. That
 check is strict, new media included, because the last batch would then be
-Substo Video's media scan rather than your edit. Each undo makes a new revision,
+Studio's media scan rather than your edit. Each undo makes a new revision,
 so to back out several edits use `substo undo --count N` (MCP and HTTP
 `count`) rather than undoing twice; it stops early if the history runs out,
 and the result lists each step's `labels` and `authors`. With the app
@@ -128,14 +128,14 @@ dropped as soon as the project is edited somewhere that doesn't keep it
 (the app has its own undo).
 
 **History.** Separately from undo, every change (an edit, an undo, a redo,
-Substo Video finding new media) is appended to `.substo/<name>.history.jsonl` by
+Studio finding new media) is appended to `.substo/<name>.history.jsonl` by
 whoever has the project open: the app, `substo serve` or a CLI command. It
 lasts across restarts, says who made each change and where on the timeline
 it was, and keeps enough to take the clips back to any revision since.
 `substo history` lists it, and `substo diff` and `substo restore` use it
 (see [agents/review-and-history.md](agents/review-and-history.md#what-changed-and-putting-it-back)).
-It starts when this version of Substo Video first opens a project; edits made
-before that, or by an older Substo Video, aren't in it.
+It starts when this version of Studio first opens a project; edits made
+before that, or by an older Studio, aren't in it.
 
 **IDs** are short strings with a prefix: `clip_`, `trk_`, `med_`, `tr_`,
 `fx_`, `mk_`, `lnk_`. They never change. When a clip is split the left part
@@ -153,7 +153,7 @@ Keyframe times are seconds from the clip's start.
 commands before it left it, so a ripple delete moves everything after it
 earlier. To cut many ranges you read (stumbles, retakes, a rough cut), put
 them all in one `cutRanges` command: its ranges are all in the times before
-it, in any order, and Substo Video cuts them latest first.
+it, in any order, and Studio cuts them latest first.
 
 **Overlaps.** Clips on one track can't overlap. An overlap under a
 millisecond counts as touching, so rounding in a batch doesn't fail it: the
@@ -315,7 +315,7 @@ One line each; `substo help <command>` has the options and what they do.
 | `substo segments list\|save\|insert` | reusable bits of timeline in the shared library |
 | `substo serve` | hold the project and serve the API headless |
 | `substo mcp` | the MCP server on stdin and stdout |
-| `substo app`, `substo url` | open the editor; drive it by link (from the launcher, for work on Substo Video itself) |
+| `substo app`, `substo url` | open the editor; drive it by link (from the launcher, for work on Studio itself) |
 
 Edit commands are listed one per line, by group, in
 [agents/edit-commands.md](agents/edit-commands.md#every-command), and

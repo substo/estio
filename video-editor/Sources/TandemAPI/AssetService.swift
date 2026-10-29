@@ -5,7 +5,7 @@ import TandemMedia
 
 /// The asset library for agents: what `substo assets` and the `assets_*`
 /// MCP tools do. The library is the creator's, one per user, at
-/// `~/Library/Application Support/Substo/Assets/`, shared with the app's
+/// `~/Library/Application Support/Studio/Assets/`, shared with the app's
 /// browser; its SQLite catalogue copes with several processes at once.
 ///
 /// Searching, fetching and generating don't touch a project. `use` copies
@@ -24,7 +24,7 @@ public final class AssetService: @unchecked Sendable {
     /// and `$SUBSTO_ASSETS_OFFLINE=1` keeps it off the network and out of
     /// the Keychain: providers fail as if offline and have no keys. The
     /// shared library is where `SharedLibrary.locate` says
-    /// (`$SUBSTO_LIBRARY`, the settings, or `~/Movies/Substo Library`).
+    /// (`$SUBSTO_LIBRARY`, the settings, or `~/Movies/Studio Library`).
     public static func standard(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> AssetService {
         let offline = environment["SUBSTO_ASSETS_OFFLINE"] == "1"
         let transport: HTTPTransport = offline ? OfflineTransport() : URLSessionTransport()

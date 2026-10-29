@@ -18,7 +18,7 @@ import TandemMedia
 public enum SectionCardSounds {
     public struct Sound: Equatable, Sendable {
         public var assetID: String
-        /// Clip gain in dB for speech at -20 LUFS, Substo Video's level: each
+        /// Clip gain in dB for speech at -20 LUFS, Studio's level: each
         /// lands at -35 LUFS over its loudest 400 ms, 15 LU under the voice,
         /// where the creator's own section swipes sit in Decision Models.
         /// `Resolved.levelled(for:)` moves it with a project whose speech
@@ -28,7 +28,7 @@ public enum SectionCardSounds {
         public var offset: Double?
     }
 
-    /// The level the gains are set against: Substo Video's speech level.
+    /// The level the gains are set against: Studio's speech level.
     public static let speechLevel = AudioLevels.defaultSpeechLoudness
 
     /// The gentlest: a smooth swell with almost no low end, loudest 0.46 s
@@ -106,7 +106,7 @@ public enum SectionCardSounds {
 
     /// Copies both sounds into the project's `assets/sfx/` and records the
     /// use (for credits), or explains why they aren't there.
-    /// (Levelled for Substo Video's speech level; `Resolved.levelled(for:)` moves
+    /// (Levelled for Studio's speech level; `Resolved.levelled(for:)` moves
     /// them for the project's.)
     public static func use(in library: AssetLibrary, folder: ProjectFolder, projectID: String, projectFile: URL?) async throws -> Resolved {
         guard available(in: library) else {

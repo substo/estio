@@ -1,7 +1,7 @@
 import Foundation
 import TandemCore
 
-/// Writes an import where Substo Video can open it:
+/// Writes an import where Studio can open it:
 ///
 ///     <folder>/<name>/<name>.substo        the project
 ///     <folder>/<name>/<name>.import.json   the report, for agents
@@ -37,13 +37,13 @@ public enum ImportWriter {
         let advice = "Import it under another name with --name, or move \(url.lastPathComponent) away first."
         struct Header: Decodable { var revision: Int }
         guard let data = try? Data(contentsOf: url), let header = try? JSONDecoder().decode(Header.self, from: data) else {
-            throw ImportError.invalid("\(url.path) already exists and isn't a Substo Video project this import can replace. \(advice)")
+            throw ImportError.invalid("\(url.path) already exists and isn't a Studio project this import can replace. \(advice)")
         }
         if header.revision > 0 {
             throw ImportError.invalid("\(url.path) has changed since it was imported (it is at revision \(header.revision)), so it may hold edits. \(advice)")
         }
         if !ProjectJournal.forProject(at: url).entries(after: header.revision).isEmpty {
-            throw ImportError.invalid("\(url.path) has edits that weren't saved when Substo Video last closed; open it in Substo Video to recover them. \(advice)")
+            throw ImportError.invalid("\(url.path) has edits that weren't saved when Studio last closed; open it in Studio to recover them. \(advice)")
         }
     }
 

@@ -1,6 +1,6 @@
-# Substo Video architecture
+# Studio architecture
 
-Substo Video is a native macOS video editor built for one person (Mike) and the
+Studio is a native macOS video editor built for one person (Mike) and the
 agents he works with. It replaces Filmora for Convex developer videos: a
 camera take and a screen recording cut together, a picture-in-picture camera
 with an AI cutout, B-roll, titles, music, sound effects and a loudness-matched
@@ -55,7 +55,7 @@ until the project is archived (see Archiving).
   broll/ music/ sfx/ graphics/
   assets/                  library assets in use (assets/<kind>/), and LUTs and fonts
   media/                   files an archive brought in from outside the folder
-    Substo Library/        ...from the shared library, where they were in it
+    Studio Library/        ...from the shared library, where they were in it
   archive.json             where those came from, once the project is archived
   exports/                 renders, each with a .substo snapshot beside it
   .substo/
@@ -73,7 +73,7 @@ no forks or branches inside a project.
 ## Shared library
 
 Things every video reuses live once, in one visible folder on this Mac:
-`~/Movies/Substo Library` (Settings moves it; `SharedLibrary` in
+`~/Movies/Studio Library` (Settings moves it; `SharedLibrary` in
 TandemAssets knows where it is), with `Stickers`, `Graphics`, `Sound
 effects`, `Music`, `Looks`, `Fonts` and `Segments` folders. It's the asset
 library's `shared` source, watched live (ASSETS.md has how files are
@@ -149,7 +149,7 @@ the app has copied them in from the asset library.
   clips get to -20 LUFS, and the project sounds the same.
 - Backups live in `.substo/backups/`: one at most every minute of saving,
   everything from the last hour, one per ten minutes for a day, one per day
-  for 30 days (`BackupPolicy`). Exports only replace earlier Substo Video exports
+  for 30 days (`BackupPolicy`). Exports only replace earlier Studio exports
   (the ones with a `.substo` snapshot beside them).
 
 ## Editing
@@ -169,7 +169,7 @@ the creator reviews what agents changed instead of watching the whole video
 again. Every `ProjectSession` (the app, `substo serve` and each headless
 command) has a `ReviewRecorder` that hears the coordinator's change events,
 which carry the project before and after. A committed batch whose author
-isn't the creator (`user`) or Substo Video (`system`) is compared clip by clip
+isn't the creator (`user`) or Studio (`system`) is compared clip by clip
 (`ReviewDiff`) and recorded in the review log by ID: clips added, clips
 changed, transitions added or changed, and removals, which are marks at the
 join pinned to the clip after it. The take (the `cut` tracks) is the
@@ -345,7 +345,7 @@ same stretch again shows its words again.
 ## Rendering
 
 `CompositionBuilder` turns a project into an `AVMutableComposition`, an
-`AVVideoComposition` driven by Substo Video's own `AVVideoCompositing` compositor,
+`AVVideoComposition` driven by Studio's own `AVVideoCompositing` compositor,
 and an `AVAudioMix`. The viewer plays its picture with `AVPlayer` and its
 sound with `ViewerAudio`, which reads the mix ahead of time the way export
 does, into an `AVSampleBufferAudioRenderer` on the clock the players run
@@ -371,7 +371,7 @@ Audio rules:
   effects (-15 dB) keep plain gains set against that voice. RENDER.md has
   why -20.
 - `voiceIsolation` mixes the cached isolated voice with the original.
-- The dynamics effects (compressor, limiter, voice clean-up) are Substo Video's
+- The dynamics effects (compressor, limiter, voice clean-up) are Studio's
   own DSP (`AudioDynamics`, the limiter is the master's
   `TruePeakLimiter`), run ahead of time over the whole file into a cached
   Apple Lossless copy that the composition plays instead
@@ -502,13 +502,13 @@ sidecar stay together, and `music/` or `sfx/` still say what's inside),
 (the app, `substo serve`, a CLI command) registers new files in
 `assets/font/` before it draws (see Rendering). A file keeps the name the
 project used, even when that was a link to a file called something else.
-Shared library files keep their place in the library under `media/Substo Video
-Library/` (`media/Substo Library/Stickers/Star.mov`, `media/Substo Video
+Shared library files keep their place in the library under `media/Studio
+Library/` (`media/Studio Library/Stickers/Star.mov`, `media/Studio
 Library/Segments/Intro/sting.wav`), and the converted copy of one goes where
-its original would, named after it (`media/Substo Library/Stickers/Spin.mov`
+its original would, named after it (`media/Studio Library/Stickers/Spin.mov`
 for `Stickers/Spin.webm`), found through the `meta.json` beside the copy.
 `ArchiveOptions.sharedLibrary` and `assetsRoot` say where those are; the
-service finds them the way the rest of Substo Video does (`SharedLibrary.locate`).
+service finds them the way the rest of Studio does (`SharedLibrary.locate`).
 
 Two modes:
 
@@ -522,7 +522,7 @@ Two modes:
   something else; an earlier archive of the same project is brought up to
   date), with the outside files brought in and the project files written
   with relative paths. The original folder is left as it was. Left out:
-  proxies, mattes, thumbnails and isolated voice, which Substo Video makes again
+  proxies, mattes, thumbnails and isolated voice, which Studio makes again
   for what the edit uses (`--with-cache` keeps them); `node_modules`; lock
   files, cache temporaries, and the archived projects' journals, headless
   undo history (they describe the old paths) and review logs; links to
@@ -564,7 +564,7 @@ per file its path, original location, kind, size, SHA-256, modification date
 and when it was archived. Consolidating lists what it brought in; archiving
 elsewhere lists every file it copied except the analysis cache, and carries
 over the project folder's own manifest. An `archive.json` that isn't
-Substo Video's is never written over. Missing files are listed there and in the
+Studio's is never written over. Missing files are listed there and in the
 result, and left pointing where they did; everything else is archived.
 
 When a project opens in the app with media missing, files moved within its

@@ -19,7 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         // you're still looking.
         UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 500])
         documents.keymap = KeymapStore.load(report: { message in
-            NSLog("Substo Video keymap: %@", message)
+            NSLog("Studio keymap: %@", message)
         })
         NSApp.appearance = NSAppearance(named: .darkAqua)
         NSApp.mainMenu = MainMenu.build(keymap: documents.keymap, recentDelegate: documents)
@@ -33,7 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         do {
             urlKey = try AppURLKey.load()
         } catch {
-            NSLog("Substo Video: no key for substo:// links, so they're ignored: %@", error.localizedDescription)
+            NSLog("Studio: no key for substo:// links, so they're ignored: %@", error.localizedDescription)
         }
         MainThreadMeter.install()
         ShortcutHints.shared.install()
@@ -96,7 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         return .terminateLater
     }
 
-    /// Set when SIGTERM asked Substo Video to quit.
+    /// Set when SIGTERM asked Studio to quit.
     private var quittingOnSignal = false
 
     /// `kill` (and `kill.sh`) quits like Cmd-Q: projects save, the API
@@ -109,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
                 self?.quittingOnSignal = true
                 // From the run loop, not from inside this main queue
                 // block, so work queued on the main actor can still run
-                // while Substo Video quits.
+                // while Studio quits.
                 NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)
             }
         }
@@ -127,7 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
                 // Any app or web page can open a substo:// link, so only
                 // links with this Mac's key act (`substo url` adds it).
                 guard urlKey?.accepts(url) == true else {
-                    NSLog("Substo Video: ignored a substo://%@ link without this Mac's key (send it with `substo url`)", url.host ?? "")
+                    NSLog("Studio: ignored a substo://%@ link without this Mac's key (send it with `substo url`)", url.host ?? "")
                     continue
                 }
                 guard let name = AppURLCommand.project(in: url) else {
@@ -137,14 +137,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
                 // A named project gets the command or nothing does: falling
                 // back to the front window would act on the wrong project.
                 guard let target = documents.window(named: name) else {
-                    NSLog("Substo Video: no open project called %@", name)
+                    NSLog("Studio: no open project called %@", name)
                     continue
                 }
                 run(command, for: target)
             } else {
                 // Not the whole link: a mistyped `substo url` command would
                 // put this Mac's key in the log.
-                NSLog("Substo Video: ignored a %@://%@ link", url.scheme ?? "", url.host ?? "")
+                NSLog("Studio: ignored a %@://%@ link", url.scheme ?? "", url.host ?? "")
             }
         }
     }
@@ -157,11 +157,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 MainActor.assumeIsolated {
                     let window = front?.window ?? NSApp.windows.first { $0.isVisible }
-                    guard let window else { return NSLog("Substo Video: no window to capture") }
+                    guard let window else { return NSLog("Studio: no window to capture") }
                     do {
                         try WindowSnapshot.write(window, to: URL(fileURLWithPath: out))
                     } catch {
-                        NSLog("Substo Video: screenshot failed: %@", error.localizedDescription)
+                        NSLog("Studio: screenshot failed: %@", error.localizedDescription)
                     }
                 }
             }
@@ -215,7 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         case .newProject(let folder):
             var isFolder: ObjCBool = false
             guard FileManager.default.fileExists(atPath: folder, isDirectory: &isFolder), isFolder.boolValue else {
-                return NSLog("Substo Video: no folder at %@", folder)
+                return NSLog("Studio: no folder at %@", folder)
             }
             documents.createProject(inFolder: URL(fileURLWithPath: folder, isDirectory: true))
         case .assets(let section, let search, let scope, let online):
@@ -227,7 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         case .saveVersion(let out):
             // Links never replace a file; Save As in the app asks first.
             guard let front, !FileManager.default.fileExists(atPath: out) else {
-                return NSLog("Substo Video: not saving a version to %@", out)
+                return NSLog("Studio: not saving a version to %@", out)
             }
             documents.saveVersion(of: front.model, to: URL(fileURLWithPath: out))
         }
@@ -269,7 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, EditorCommandHandling 
         return command == .newProject || command == .openProject
     }
 
-    /// Substo Video > Settings…: where the shared library is.
+    /// Studio > Settings…: where the shared library is.
     @objc func showSettings(_ sender: Any?) {
         SettingsWindowController.show()
     }

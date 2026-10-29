@@ -2,6 +2,7 @@ import AVFoundation
 import CoreServices
 import CryptoKit
 import Foundation
+import TandemMedia
 
 /// The licence note an import folder carries, as `substo-licence.json` in
 /// the folder. It covers everything in the folder, so a folder should hold
@@ -234,7 +235,7 @@ public class ImportFolderProvider: AssetProvider, @unchecked Sendable {
     public func search(_ query: ProviderQuery) async throws -> [Asset] { [] }
 
     public func fetchOriginal(_ asset: Asset, into folder: URL) async throws -> FetchedOriginal {
-        guard let path = asset.files.original, FileManager.default.fileExists(atPath: path) else {
+        guard let path = asset.files.original.map({ RenamedFolder.resolve($0) }), FileManager.default.fileExists(atPath: path) else {
             throw AssetError.notFound("\(asset.name): the file has moved or been deleted from its import folder")
         }
         return FetchedOriginal(asset: asset, file: URL(fileURLWithPath: path))

@@ -26,7 +26,7 @@ import TandemMedia
 /// Consolidating copies them into the project's own folder and points the
 /// project at the copies with one edit through the coordinator (one undo
 /// step, journaled, autosaved). Archiving to a destination copies the whole
-/// folder there as well, less what Substo Video rebuilds on its own, and writes
+/// folder there as well, less what Studio rebuilds on its own, and writes
 /// the copies of the project files with the new paths; the original folder
 /// is left as it was.
 ///
@@ -105,14 +105,14 @@ public final class ProjectArchiver: @unchecked Sendable {
         plan.manifest = try ArchiveManifest.load(from: root)
         if mode == .archive {
             plan.sourceManifest = try ArchiveManifest.load(from: source.root)
-            // An earlier archive's copy open in Substo Video would save over the
+            // An earlier archive's copy open in Studio would save over the
             // one this writes.
             for entry in plan.projects {
                 let copy = root.appendingPathComponent(entry.url.lastPathComponent)
                 // Held by this process counts too: the app may have the
                 // copy open in another window.
                 if LockHandle.isHeld(ProjectSession.lockURL(for: copy)) {
-                    throw ServiceError(.locked, "The archive's copy of \(entry.url.lastPathComponent) is open in Substo Video. Close it there and archive again.")
+                    throw ServiceError(.locked, "The archive's copy of \(entry.url.lastPathComponent) is open in Studio. Close it there and archive again.")
                 }
             }
         }
@@ -566,7 +566,7 @@ public final class ProjectArchiver: @unchecked Sendable {
 
     // MARK: - The folder copy (archive mode)
 
-    /// Analysis the archive leaves out unless asked: big, and Substo Video makes
+    /// Analysis the archive leaves out unless asked: big, and Studio makes
     /// it again for what the edit uses. Transcripts, waveforms and loudness
     /// always go; transcripts especially are slow to make again. So do the
     /// converted copies of stickers macOS can't decode: they're small, and
@@ -659,7 +659,7 @@ public final class ProjectArchiver: @unchecked Sendable {
             case .isolatedVoice: what = "isolated voice"
             default: what = name
             }
-            return "\(what), which Substo Video makes again for what the edit uses when the archive is opened (--with-cache keeps them)"
+            return "\(what), which Studio makes again for what the edit uses when the archive is opened (--with-cache keeps them)"
         }
         return nil
     }
@@ -1073,8 +1073,8 @@ public final class ProjectArchiver: @unchecked Sendable {
     }
 
     /// Where a file from outside the folder goes: a LUT in `assets/lut/`,
-    /// a shared library file in `media/Substo Library/` where it was in the
-    /// library (`media/Substo Library/Stickers/star.mov`), the library's
+    /// a shared library file in `media/Studio Library/` where it was in the
+    /// library (`media/Studio Library/Stickers/star.mov`), the library's
     /// converted copy of one beside where its original would go, named
     /// after it, and any other media in `media/<the folder it was in>/`.
     func destination(for url: URL, real: String, kind: ArchivedKind) -> String {

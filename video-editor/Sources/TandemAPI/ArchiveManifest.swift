@@ -81,7 +81,7 @@ public struct ArchiveManifest: Codable, Equatable, Sendable {
     }
 
     /// The manifest in `folder`, nil when there's none. Throws when an
-    /// `archive.json` is there but isn't Substo Video's, so it's never written
+    /// `archive.json` is there but isn't Studio's, so it's never written
     /// over.
     public static func load(from folder: URL) throws -> ArchiveManifest? {
         let url = url(in: folder)
@@ -89,7 +89,7 @@ public struct ArchiveManifest: Codable, Equatable, Sendable {
         do {
             return try decoder.decode(ArchiveManifest.self, from: Data(contentsOf: url))
         } catch {
-            throw ServiceError(.invalid, "\(url.path) isn't a Substo Video archive manifest, so the archive won't write over it. Rename it and try again.")
+            throw ServiceError(.invalid, "\(url.path) isn't a Studio archive manifest, so the archive won't write over it. Rename it and try again.")
         }
     }
 

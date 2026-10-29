@@ -220,7 +220,7 @@ struct ArchiveSheetView: View {
                         Row(label: "Cache") {
                             HStack(spacing: 10) {
                                 GraphiteSwitch(isOn: model.withCache) { if !model.isRunning { model.withCache.toggle() } }
-                                Text("Keep proxies and mattes too. Left out, Substo Video makes them again; transcripts always go.")
+                                Text("Keep proxies and mattes too. Left out, Studio makes them again; transcripts always go.")
                                     .font(.ui(11.5))
                                     .foregroundStyle(Theme.textMuted.color)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -305,7 +305,7 @@ struct ArchiveSheetView: View {
                     Text("\(Self.count(plan.folderFiles, "file")), \(Self.size(plan.folderBytes)), to \(Self.display(plan.folder))")
                     let left = plan.leftOut.reduce(Int64(0)) { $0 + $1.bytes }
                     if left > 0 {
-                        Text("Leaves out \(Self.size(left)) Substo Video can make again (proxies, mattes) or npm can install.")
+                        Text("Leaves out \(Self.size(left)) Studio can make again (proxies, mattes) or npm can install.")
                             .font(.ui(11.5))
                             .foregroundStyle(Theme.textMuted.color)
                     }

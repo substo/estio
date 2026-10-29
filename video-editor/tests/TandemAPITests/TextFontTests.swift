@@ -197,6 +197,6 @@ final class TextFontTests: XCTestCase {
             fonts: ["TiltWarp-Regular"], licence: nil
         )
         result.fontsReached = "app"
-        XCTAssertTrue(result.readableText.contains("The Substo Video app has it now too."), result.readableText)
+        XCTAssertTrue(result.readableText.contains("The Studio app has it now too."), result.readableText)
     }
 }

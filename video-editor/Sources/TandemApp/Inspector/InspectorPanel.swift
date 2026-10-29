@@ -699,7 +699,7 @@ struct ClipInfo: View {
         }
     }
 
-    /// macOS can't decode QuickTime Animation or PNG video, so Substo Video plays
+    /// macOS can't decode QuickTime Animation or PNG video, so Studio plays
     /// a converted copy; says how that's going.
     private func conversionText(_ codec: String, _ item: MediaItem) -> String {
         if model.session.analysis.convertedURL(for: item) != nil { return "\(codec) · plays from an HEVC copy" }

@@ -59,7 +59,7 @@ enum RelinkPrompt {
         var names = missing.prefix(6).map { "  \($0.path)" }
         if missing.count > 6 { names.append("  and \(missing.count - 6) more") }
         alert.informativeText = """
-        Substo Video couldn't find \(missing.count == 1 ? "it" : "these") in the project folder or the shared library:
+        Studio couldn't find \(missing.count == 1 ? "it" : "these") in the project folder or the shared library:
         \(names.joined(separator: "\n"))
 
         If you know where \(missing.count == 1 ? "it is" : "they are"), choose a folder to search. Its subfolders are searched too, and a file is only used when it's the same file. Clips using a missing file show nothing until it's found.

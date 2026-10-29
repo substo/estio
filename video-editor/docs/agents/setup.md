@@ -12,7 +12,7 @@ bash install.sh
 substo --version
 ```
 
-While working on Substo Video itself, `swift build --package-path .` builds it at
+While working on Studio itself, `swift build --package-path .` builds it at
 `.build/debug/substo`. `substo app` (open the editor) and `substo url` come
 from the launcher script `install.sh` links, not the Swift CLI, so `substo
 help` doesn't list them.
@@ -65,7 +65,7 @@ can't be mistaken for the main take. They aren't lined up with the take;
 sync them by sound and place them on a track of their own. Clips from the
 same camera stay camera takes.
 
-New webcam takes get the camera picture delay (Substo Video's setting, 80 ms on
+New webcam takes get the camera picture delay (Studio's setting, 80 ms on
 the creator's Mac) unless Record It already took it out. A take a camera made, with
 a timecode track (cinema cameras, and REDline's renders of their clips) or a
 make and model in its metadata (phones), records in step and gets none.
@@ -115,11 +115,11 @@ sound and the Voice tracks) to the project's speech level with no gain, the
 way placing does, instead of copying Filmora's gains; music and sound
 effects keep their Filmora volume. `--keep-levels` keeps Filmora's own
 levels: its Auto Normalization becomes `normalizeTo: -24` (where Filmora
-levels, on Substo Video's meter) with the clip's gain on top.
+levels, on Studio's meter) with the clip's gain on top.
 
 ## When the app is open
 
-Only one process owns a project at a time. When the Substo Video app has it open,
+Only one process owns a project at a time. When the Studio app has it open,
 the app serves the API and every `substo` command (and MCP tool call) goes
 through the app, so your edits appear in front of the creator as you make them.
 When the app is closed, each command opens the `.substo` file itself, makes
@@ -171,7 +171,7 @@ matte for a clip with no cutout) is an error that says how to get it made,
 not a wait that can only time out. Exit code 1 when anything failed or the
 wait timed out.
 
-Substo Video transcribes camera takes and whatever is on a speech track (Voice)
+Studio transcribes camera takes and whatever is on a speech track (Voice)
 by itself. `substo transcribe <media id, clip id or path>` makes a
 transcript of any other file with sound, with the same on-device
 SpeechAnalyzer: a generated clip you're checking for made-up speech, a
@@ -189,14 +189,14 @@ language it doesn't support, say).
 `substo mcp` is an MCP server on stdin and stdout. Add it to Claude Code:
 
 ```bash
-claude mcp add substo -- ~/Applications/Substo Video.app/Contents/MacOS/tandem mcp
+claude mcp add substo -- ~/Applications/Studio.app/Contents/MacOS/substo mcp
 ```
 
 Started from a video's folder it uses that folder's project. To pin one
 project, or to use it from anywhere:
 
 ```bash
-claude mcp add --scope user substo -- ~/Applications/Substo Video.app/Contents/MacOS/tandem mcp --project "/Users/m5-mike/dev/convex/convex-videos/decision-models/Decision Models.substo"
+claude mcp add --scope user substo -- ~/Applications/Studio.app/Contents/MacOS/substo mcp --project "/Users/m5-mike/dev/convex/convex-videos/decision-models/Decision Models.substo"
 ```
 
 Every tool also takes a `project` argument, so one server can work on any
@@ -207,7 +207,7 @@ For Codex, in `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.substo]
-command = "/Users/m5-mike/Applications/Substo Video.app/Contents/MacOS/tandem"
+command = "/Users/m5-mike/Applications/Studio.app/Contents/MacOS/substo"
 args = ["mcp"]
 ```
 
@@ -237,7 +237,7 @@ and a bearer token are in the project's lock file,
 LOCK="$HOME/dev/convex/convex-videos/decision-models/.substo/Decision Models.lock"
 PORT=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['port'])" "$LOCK")
 TOKEN=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['token'])" "$LOCK")
-curl -s -H "Authorization: Bearer $TOKEN" -H "X-Substo Video-Author: claude" \
+curl -s -H "Authorization: Bearer $TOKEN" -H "X-Studio-Author: claude" \
   -d '{"commands": [{"blade": {"at": 12.5}}]}' "http://127.0.0.1:$PORT/v1/apply"
 curl -s -N -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/v1/watch"
 ```

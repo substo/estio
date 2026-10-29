@@ -2,7 +2,7 @@ import Foundation
 import TandemCore
 
 /// The folder a project lives in. Media paths in the project are relative to
-/// it, and Substo Video keeps its own files in `.substo/` inside it:
+/// it, and Studio keeps its own files in `.substo/` inside it:
 ///
 ///     <video folder>/
 ///       <name>.substo          the project
@@ -32,13 +32,16 @@ public struct ProjectFolder: Sendable, Equatable {
     public var assetsFolder: URL { root.appendingPathComponent("assets", isDirectory: true) }
 
     /// The file behind a media item.
-    public func url(for item: MediaItem) -> URL {
-        url(forPath: item.path)
+    public func url(for item: MediaItem, renamed: [RenamedFolder] = RenamedFolder.standard) -> URL {
+        url(forPath: item.path, renamed: renamed)
     }
 
-    public func url(forPath path: String) -> URL {
-        if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
-        if path.hasPrefix("~/") { return URL(fileURLWithPath: NSString(string: path).expandingTildeInPath) }
+    /// An absolute path in a folder the app renamed (a shared library file
+    /// in `~/Movies/Substo Library`) finds the file where it went; see
+    /// `RenamedFolder`.
+    public func url(forPath path: String, renamed: [RenamedFolder] = RenamedFolder.standard) -> URL {
+        if path.hasPrefix("/") { return URL(fileURLWithPath: RenamedFolder.resolve(path, in: renamed)) }
+        if path.hasPrefix("~/") { return URL(fileURLWithPath: RenamedFolder.resolve(NSString(string: path).expandingTildeInPath, in: renamed)) }
         return root.appendingPathComponent(path)
     }
 

@@ -12,7 +12,7 @@ import TandemCore
 // Times are ticks of 100 ns. Clip and transition ends are inclusive (the
 // last tick), so a clip that ends where the next begins has
 // `tlEnd == next.tlBegin - 1`. Video tracks are listed bottom to top, like
-// Substo Video's. Audio "lanes" that hold a video track's sound name that track
+// Studio's. Audio "lanes" that hold a video track's sound name that track
 // in userData key 20.
 
 struct WfpProject {

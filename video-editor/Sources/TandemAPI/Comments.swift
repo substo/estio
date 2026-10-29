@@ -50,7 +50,7 @@ public struct CommentClip: Codable, Sendable {
 extension CommentsResult: ReadableResult {
     public var readableText: String {
         guard !comments.isEmpty else {
-            return "No comments (revision \(revision)). Add one in Substo Video with Add comment (Shift-C) or a double-click on an empty stretch; comments show in a strip under the ruler."
+            return "No comments (revision \(revision)). Add one in Studio with Add comment (Shift-C) or a double-click on an empty stretch; comments show in a strip under the ruler."
         }
         var lines = ["\(comments.count == 1 ? "1 comment" : "\(comments.count) comments"), earliest first (revision \(revision)):"]
         let trackWidth = comments.flatMap(\.clips).map(\.track.count).max() ?? 0

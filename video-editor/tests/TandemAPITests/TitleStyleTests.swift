@@ -5,7 +5,7 @@ import TandemMedia
 
 /// Titles keep only what was asked for: captions are their preset and their
 /// words, a title's own style is listed for agents, and undo history an
-/// older Substo Video kept comes back looking as it did.
+/// older Studio kept comes back looking as it did.
 final class TitleStyleTests: XCTestCase {
     func captionClips(_ h: ServiceHarness) throws -> [Clip] {
         try XCTUnwrap(h.service.coordinator.project.track(named: "Captions")).clips

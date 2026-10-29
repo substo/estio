@@ -259,7 +259,7 @@ extension TandemService {
                 source.revision = revision
                 return source
             }
-            var message = "Revision \(revision) is older than the edit history, which goes back to revision \(gap.earliest) (Substo Video keeps it in .substo/\(session.fileURL.deletingPathExtension().lastPathComponent).history.jsonl from this version on, and older edits weren't recorded)."
+            var message = "Revision \(revision) is older than the edit history, which goes back to revision \(gap.earliest) (Studio keeps it in .substo/\(session.fileURL.deletingPathExtension().lastPathComponent).history.jsonl from this version on, and older edits weren't recorded)."
             let older = backups.map(\.revision).filter { $0 < gap.earliest }
             if !older.isEmpty {
                 let listed = Array(Set(older)).sorted().suffix(8).map(String.init).joined(separator: ", ")
@@ -277,9 +277,9 @@ extension TandemService {
             let snapshot = URL(fileURLWithPath: url.path + "." + ProjectFile.fileExtension)
             guard fm.fileExists(atPath: snapshot.path) else {
                 let what = fm.fileExists(atPath: url.path)
-                    ? "\(url.lastPathComponent) has no snapshot beside it (\(snapshot.lastPathComponent)), which Substo Video writes with every export."
+                    ? "\(url.lastPathComponent) has no snapshot beside it (\(snapshot.lastPathComponent)), which Studio writes with every export."
                     : "There's no file at \(url.path)."
-                throw ServiceError(.notFound, what + " Give a revision, a .substo file (a backup in .substo/backups) or an export Substo Video made.")
+                throw ServiceError(.notFound, what + " Give a revision, a .substo file (a backup in .substo/backups) or an export Studio made.")
             }
             url = snapshot
         }
@@ -290,7 +290,7 @@ extension TandemService {
         do {
             loaded = try ProjectFile.load(from: url)
         } catch {
-            throw ServiceError(.invalid, "\(url.lastPathComponent) couldn't be read as a Substo Video project: \(ServiceError.wrap(error).message)")
+            throw ServiceError(.invalid, "\(url.lastPathComponent) couldn't be read as a Studio project: \(ServiceError.wrap(error).message)")
         }
         let (project, current) = coordinator.snapshot()
         let clips = TimelineClips(loaded.project)

@@ -1,4 +1,4 @@
-# Substo Video render module
+# Studio render module
 
 How a project becomes pixels and sound: the viewer, frame grabs and export
 all go through the same path, so what the creator sees is what YouTube gets.
@@ -82,7 +82,7 @@ Project ──RenderPlanner──▶ RenderPlan (pure)
   the sticker is in the picture. The viewer doesn't wait: the clip is left
   out, with a warning, until the background conversion lands. A file that
   can't be converted (no ffmpeg) is left out with a warning saying why,
-  and a source that turns out undecodable anyway (scanned before Substo Video
+  and a source that turns out undecodable anyway (scanned before Studio
   checked) is loaded without its video. One undecodable track used to fail
   the whole composition with "Cannot Decode".
 
@@ -268,12 +268,12 @@ export all show the same frame.
   frame) and leave. Its card switched in and out at single moments
   (1.28 s and 3.62 s), which showed as a pop across the right fifth of
   the frame; here the reveal follows the bands. Timings count from the
-  clip. D's lit bars were Substo Video's amber and sat at the top of the row
+  clip. D's lit bars were Studio's amber and sat at the top of the row
   beside the count; here they're the accent and centred on it.
 - **Checked against the mockup.** `title-cards/tandem/reference-b-with-
   progress.html` is the mockup's CSS with those changes (the reveal is a
   clip-path set from where Chrome put the bands). Its frames from headless
-  Chrome and Substo Video's for the same moments of the four sample cards, 1920
+  Chrome and Studio's for the same moments of the four sample cards, 1920
   by 1080, differ by under 1 level on average and in under 1% of pixels by
   more than 24, all on antialiased edges: positions agree to a pixel.
   `SectionCardRenderTests` pins the chip, title, subtitle and bars to
@@ -461,7 +461,7 @@ The speech level is -20 LUFS because:
 
 - It's where the creator's voice played in Filmora. Filmora's Auto Normalization,
   on for the voice in every Filmora project in convex-videos (24 files
-  from five videos), levels a file to about -24 LUFS on Substo Video's meter
+  from five videos), levels a file to about -24 LUFS on Studio's meter
   (Filmora says -23), and his LoudnessGain of +1.9 to +4.1 dB goes on top.
   On the v14 export, 62 voice clips from three takes played at -24.1 LUFS
   plus their LoudnessGain (spread 0.7 dB) and the music at its plain
@@ -709,7 +709,7 @@ why full exports were fine. So:
   no frames ("reading the timeline stalled") rather than hanging, and
   cancel wakes it.
 
-Filmora shows the nearest frame of variable frame rate footage, Substo Video the
+Filmora shows the nearest frame of variable frame rate footage, Studio the
 last one at or before the time, so mid-scroll the two can be a frame apart.
 
 ## Measured (M5 Pro, release build)
@@ -751,7 +751,7 @@ The spike's plain composite managed about 3.5x; the encoder is the limit.
   25 ms, however short the ramp: 1 to 4 takes 75 ms, 1 to 30 takes 724 ms.
   Reading or playing from part way starts each track at about the volume
   it had 0.3 s earlier and moves it from there at the same pace. So
-  Substo Video never ramps volume; `GainTap` applies the gain to the samples.
+  Studio never ramps volume; `GainTap` applies the gain to the samples.
 - `MTAudioProcessingTap` quirks, measured the same way. A pre-effects
   tap's time stamps are exact to the sample in `AVAssetReaderAudioMixOutput`
   and in AVPlayer at rates 0.5, 1 and 2; within a call, a segment at speed

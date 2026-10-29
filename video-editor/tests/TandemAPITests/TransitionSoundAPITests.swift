@@ -55,7 +55,7 @@ final class TransitionSoundAPITests: XCTestCase {
     func testTheGainFollowsTheProjectsSpeech() {
         let media = MediaItem(id: "med_swoosh", path: "assets/sfx/swoosh.wav", kind: .audio, role: .sfx, duration: t(1), hasAudio: true)
         let resolved = Defaults.Resolved(assetID: Defaults.lightSwoosh.assetID, name: "Swoosh", media: media, sound: TransitionSound(mediaID: media.id, gainDB: -23.3, offset: t(-0.39)))
-        // The fixture's voice plays at -14 LUFS, 6 LU over Substo Video's -20.
+        // The fixture's voice plays at -14 LUFS, 6 LU over Studio's -20.
         let project = APIFixture.project()
         XCTAssertEqual(AudioLevels.speechLevel(in: project), -14)
         XCTAssertEqual(resolved.levelled(for: project).sound.gainDB, -17.3)

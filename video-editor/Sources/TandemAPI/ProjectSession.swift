@@ -133,7 +133,7 @@ public final class ProjectSession: @unchecked Sendable {
         }
     }
 
-    /// Reads the project file. When it isn't a project Substo Video can read (cut
+    /// Reads the project file. When it isn't a project Studio can read (cut
     /// short, or broken by a hand edit), says where the previous saves are.
     static func load(_ url: URL) throws -> (project: Project, revision: Int) {
         do {
@@ -449,7 +449,7 @@ public final class ProjectSession: @unchecked Sendable {
                     throw EditError.locked("\(projectURL.lastPathComponent) is already open in this process.")
                 }
                 let who = holder.map { " (\($0.owner.rawValue), pid \($0.pid))" } ?? ""
-                throw EditError.locked("\(projectURL.lastPathComponent) is open in Substo Video\(who). Use its API instead.")
+                throw EditError.locked("\(projectURL.lastPathComponent) is open in Studio\(who). Use its API instead.")
             case .replaced:
                 continue
             }

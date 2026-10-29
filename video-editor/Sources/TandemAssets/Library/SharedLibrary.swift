@@ -1,12 +1,13 @@
 import Darwin
 import Foundation
+import TandemMedia
 
 /// the creator's shared library: one visible folder on this Mac for the stickers,
 /// graphics, sound effects, music, looks, fonts and saved segments every
-/// project can use. It's `~/Movies/Substo Library` unless Settings moves
+/// project can use. It's `~/Movies/Studio Library` unless Settings moves
 /// it; Backblaze backs it up with the rest of the Mac.
 ///
-///     Substo Library/
+///     Studio Library/
 ///       Stickers/          animated stickers
 ///       Graphics/          logos, lower thirds, overlays, stills
 ///       Sound effects/
@@ -29,21 +30,21 @@ public struct SharedLibrary: Sendable, Equatable {
     }
 
     /// The folder's name by default.
-    public static let defaultName = "Substo Library"
+    public static let defaultName = RenamedFolder.libraryName
     /// Moves the library for one process (tests, agents).
     public static let environmentKey = "SUBSTO_LIBRARY"
     /// Where each folder's note to the creator goes.
     public static let readmeName = "README.txt"
 
-    /// `~/Movies/Substo Library`.
+    /// `~/Movies/Studio Library`.
     public static var standardRoot: URL {
         FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(defaultName, isDirectory: true)
     }
 
     /// Where the library is for an asset library at `assetsRoot`: the
-    /// folder its settings name, otherwise `~/Movies/Substo Library` for
-    /// the creator's own asset library, and `Substo Library` inside any other (a
+    /// folder its settings name, otherwise `~/Movies/Studio Library` for
+    /// the creator's own asset library, and `Studio Library` inside any other (a
     /// test's, or `$SUBSTO_ASSETS_ROOT`), so those never touch the real one.
     public static func root(for settings: AssetSettings, assetsRoot: URL) -> URL {
         if let chosen = settings.sharedLibrary {
@@ -65,7 +66,7 @@ public struct SharedLibrary: Sendable, Equatable {
 
     // MARK: - Folders
 
-    /// The folders Substo Video makes, each with a README.
+    /// The folders Studio makes, each with a README.
     public enum Folder: String, CaseIterable, Sendable {
         case stickers = "Stickers"
         case graphics = "Graphics"
@@ -160,7 +161,7 @@ public struct SharedLibrary: Sendable, Equatable {
     }
 
     static let rootReadme = """
-    Substo Library
+    Studio Library
 
     Everything in here is shared by every Tandem project on this Mac. Drop files into these folders and they show up in Tandem's library tabs straight away, searchable, with the Shared library chip:
 
@@ -240,7 +241,7 @@ public struct SharedLibrary: Sendable, Equatable {
         return String(cString: resolved)
     }
 
-    /// True for the notes Substo Video writes into each folder.
+    /// True for the notes Studio writes into each folder.
     static func isReadme(_ name: String) -> Bool {
         name.caseInsensitiveCompare(readmeName) == .orderedSame
     }

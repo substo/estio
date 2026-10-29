@@ -1,6 +1,6 @@
 import Foundation
 
-/// The shared library (`SharedLibrary`, `~/Movies/Substo Library` by
+/// The shared library (`SharedLibrary`, `~/Movies/Studio Library` by
 /// default) as an asset source: its files indexed like an import folder's,
 /// with the `Shared library` chip. What sets it apart:
 ///
@@ -51,7 +51,7 @@ public final class SharedLibraryProvider: ImportFolderProvider, @unchecked Senda
 
     public override func status() async -> ProviderStatus {
         let library = self.library
-        return library.exists ? .ready : ProviderStatus(.ready, "\(library.root.path) isn't there yet; Substo Video makes it when it opens")
+        return library.exists ? .ready : ProviderStatus(.ready, "\(library.root.path) isn't there yet; Studio makes it when it opens")
     }
 
     /// Scans the library, if it's there.

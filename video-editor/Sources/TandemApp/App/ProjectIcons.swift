@@ -198,7 +198,7 @@ final class ProjectIcons {
     }
 
     /// A recent project that isn't open and has no icon gets one, in the
-    /// background and one at a time. Skipped when another Substo Video has it
+    /// background and one at a time. Skipped when another Studio has it
     /// open: that one makes it.
     private func makeLater(_ key: String) {
         guard !tried.contains(key), rendering[key] == nil else { return }

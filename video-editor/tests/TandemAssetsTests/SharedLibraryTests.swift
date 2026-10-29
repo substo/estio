@@ -3,7 +3,7 @@ import TandemCore
 import TandemMedia
 @testable import TandemAssets
 
-/// The shared library folder (`~/Movies/Substo Library` for real; a temp
+/// The shared library folder (`~/Movies/Studio Library` for real; a temp
 /// folder here): made with friendly folders, watched, indexed by folder,
 /// and used where it is.
 final class SharedLibraryTests: XCTestCase {
@@ -42,14 +42,14 @@ final class SharedLibraryTests: XCTestCase {
     func testWhereItIs() throws {
         let temp = tempFolder("where")
         XCTAssertEqual(SharedLibrary.root(for: AssetSettings(), assetsRoot: AssetLibrary.defaultRoot), SharedLibrary.standardRoot)
-        XCTAssertTrue(SharedLibrary.standardRoot.path.hasSuffix("/Movies/Substo Library"))
+        XCTAssertTrue(SharedLibrary.standardRoot.path.hasSuffix("/Movies/Studio Library"))
         // Any other asset library (tests, $SUBSTO_ASSETS_ROOT) keeps its own.
-        XCTAssertEqual(SharedLibrary.root(for: AssetSettings(), assetsRoot: temp).path, temp.appendingPathComponent("Substo Library").path)
+        XCTAssertEqual(SharedLibrary.root(for: AssetSettings(), assetsRoot: temp).path, temp.appendingPathComponent("Studio Library").path)
         XCTAssertEqual(SharedLibrary.root(for: AssetSettings(sharedLibrary: "/Volumes/Work/Library"), assetsRoot: temp).path, "/Volumes/Work/Library")
         XCTAssertEqual(SharedLibrary.root(for: AssetSettings(sharedLibrary: "~/Shared"), assetsRoot: temp).path, NSHomeDirectory() + "/Shared")
 
         XCTAssertEqual(SharedLibrary.locate(environment: ["SUBSTO_LIBRARY": temp.appendingPathComponent("lib").path]).root.path, temp.appendingPathComponent("lib").standardizedFileURL.path)
-        XCTAssertEqual(SharedLibrary.locate(environment: ["SUBSTO_ASSETS_ROOT": temp.path]).root.path, temp.appendingPathComponent("Substo Library").standardizedFileURL.path)
+        XCTAssertEqual(SharedLibrary.locate(environment: ["SUBSTO_ASSETS_ROOT": temp.path]).root.path, temp.appendingPathComponent("Studio Library").standardizedFileURL.path)
         try AssetSettings(sharedLibrary: temp.appendingPathComponent("moved").path).save(to: temp)
         XCTAssertEqual(SharedLibrary.locate(environment: ["SUBSTO_ASSETS_ROOT": temp.path]).root.path, temp.appendingPathComponent("moved").path)
         // The settings file keeps what it had.
@@ -235,7 +235,7 @@ final class SharedLibraryTests: XCTestCase {
 
         // Back to the default.
         try await library.moveSharedLibrary(to: nil)
-        XCTAssertEqual(library.sharedLibrary.root.path, library.root.appendingPathComponent("Substo Library").standardizedFileURL.path)
+        XCTAssertEqual(library.sharedLibrary.root.path, library.root.appendingPathComponent("Studio Library").standardizedFileURL.path)
         XCTAssertNil(AssetSettings.load(from: library.root).sharedLibrary)
     }
 

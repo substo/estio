@@ -9,7 +9,7 @@ import TandemMedia
 // fields) plus copies of the media it uses, so it keeps working whatever
 // happens to the project it came from:
 //
-//     Substo Library/Segments/Intro/
+//     Studio Library/Segments/Intro/
 //       segment.json      the template and the media items, paths relative
 //       intro-card.mov    the files its clips play
 //       sting.wav

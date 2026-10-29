@@ -9,11 +9,11 @@
     <key>CFBundleIdentifier</key>
     <string>com.substo.video</string>
     <key>CFBundleName</key>
-    <string>Substo Video</string>
+    <string>Studio</string>
     <key>CFBundleDisplayName</key>
-    <string>Substo Video</string>
+    <string>Studio</string>
     <key>CFBundleIconFile</key>
-    <string>substo</string>
+    <string>studio</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -27,14 +27,14 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Substo Video transcribes your recordings on this Mac so you can edit by words.</string>
+    <string>Studio transcribes your recordings on this Mac so you can edit by words.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Substo Video records voiceovers from the selected microphone.</string>
+    <string>Studio records voiceovers from the selected microphone.</string>
     <key>CFBundleDocumentTypes</key>
     <array>
         <dict>
             <key>CFBundleTypeName</key>
-            <string>Substo Video Project</string>
+            <string>Studio Project</string>
             <key>CFBundleTypeRole</key>
             <string>Editor</string>
             <key>LSHandlerRank</key>

@@ -11,7 +11,7 @@ import VideoToolbox
 /// RVM (Lin et al. 2021, https://github.com/PeterL1n/RobustVideoMatting) is
 /// a video matting network with a recurrent state: each frame's matte is
 /// made knowing the frames before it, so it holds still where Vision's
-/// per-frame masks flicker, with no smoothing afterwards. Substo Video uses the
+/// per-frame masks flicker, with no smoothing afterwards. Studio uses the
 /// project's own Core ML export of the MobileNetV3 model with 1280x720
 /// input and the downsample ratio 0.375 built in: the network sees 480x270
 /// and its refiner brings the matte back to 1280x720, scaled up to the
@@ -21,7 +21,7 @@ import VideoToolbox
 /// has the scores).
 ///
 /// Licence: the RVM repository is GPL-3.0. The model file's own metadata
-/// says Apache 2.0; Substo Video goes by the repository. So the weights are never
+/// says Apache 2.0; Studio goes by the repository. So the weights are never
 /// committed or bundled: `RVMModelStore` downloads them from the official
 /// v1.0.0 release on first use, into
 /// ~/Library/Application Support/Substo/Models/rvm/, and checks the SHA-256.

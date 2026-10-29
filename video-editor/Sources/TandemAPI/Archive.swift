@@ -167,7 +167,7 @@ public struct ArchiveOptions: Sendable {
     /// own folder standalone instead.
     public var destination: URL?
     /// Archive mode: also copy proxies, mattes, thumbnails and isolated
-    /// voice, which Substo Video otherwise rebuilds when the archive is opened.
+    /// voice, which Studio otherwise rebuilds when the archive is opened.
     public var withCache: Bool
     /// Work out what would happen and change nothing.
     public var dryRun: Bool
@@ -178,7 +178,7 @@ public struct ArchiveOptions: Sendable {
     /// Finds the files of fonts titles use.
     public var fonts: any FontLocating
     /// The shared library. Its files are brought in like any other file
-    /// from outside the folder, into `media/Substo Library/<where they
+    /// from outside the folder, into `media/Studio Library/<where they
     /// were in it>`, and so are the asset library's converted copies of
     /// them (a WebM sticker plays from one), named after the sticker.
     public var sharedLibrary: SharedLibrary?

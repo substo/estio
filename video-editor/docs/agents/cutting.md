@@ -80,7 +80,7 @@ trim if a word got clipped) and listen with `substo clip 2:08 2:20`.
 For several phrases, or a rough cut that drops false starts and retakes,
 list every range as you read it in one `cutRanges` command rather than
 working out the order of ripple deletes. Its ranges are all in the times
-before it, in any order; Substo Video cuts them latest first, cuts overlapping or
+before it, in any order; Studio cuts them latest first, cuts overlapping or
 touching ranges once, and one undo puts them all back. To keep only some
 stretches, cut the gaps between them:
 
@@ -129,14 +129,14 @@ A webcam's picture lags its microphone (the creator's by about 75 ms), so lips
 and voice drift apart. A file's `pictureDelay` makes every clip of it show
 its picture that much later in the file, in the app, frames, review clips,
 `check` and exports. The sound, the cuts and the transcript's word times
-stay where they are, so nothing else moves. New webcam takes get Substo Video's
+stay where they are, so nothing else moves. New webcam takes get Studio's
 default (Settings in the app, or `--default`); a camera's take (a timecode
 track, or a phone's make and model) records in step and gets none. Never slip clips by hand as
 well, or the delay doubles. `substo media` shows it as "picture 80 ms
 late, shown in sync". In MCP: `sync {"delay": 0.08}`.
 
 Record It now takes the lag out as it records (its Settings → Camera
-delay) and tags the file `com.substo.video.camera-delay`. Substo Video
+delay) and tags the file `com.substo.video.camera-delay`. Studio
 reads the tag (`pictureDelayCorrected`, "in sync as recorded" in `substo
 media`), gives those takes no delay of its own, and `substo sync` leaves
 them alone.

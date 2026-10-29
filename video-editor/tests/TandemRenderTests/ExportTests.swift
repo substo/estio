@@ -378,9 +378,9 @@ final class ExportTests: XCTestCase {
         try Data("not ours".utf8).write(to: foreign)
         do {
             _ = try await Exporter(context: context, preset: preset(loudness: nil), output: foreign).run()
-            XCTFail("expected an existing file that isn't a Substo Video export to be refused")
+            XCTFail("expected an existing file that isn't a Studio export to be refused")
         } catch {
-            XCTAssertTrue("\(error)".contains("isn't a Substo Video export"), "\(error)")
+            XCTAssertTrue("\(error)".contains("isn't a Studio export"), "\(error)")
         }
         XCTAssertEqual(try Data(contentsOf: foreign), Data("not ours".utf8))
         // Our own export, snapshot and all, can be replaced.

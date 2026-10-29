@@ -1,6 +1,6 @@
 import Foundation
 
-// The Substo Video project model. A project is one JSON file (`*.substo`) that
+// The Studio project model. A project is one JSON file (`*.substo`) that
 // lives in the video's folder next to its media. Everything here is plain
 // value types so an edit is "copy the project, change it, validate it", and
 // undo is keeping the previous copy.
@@ -179,7 +179,7 @@ public struct MediaItem: Codable, Equatable, Identifiable, Sendable {
     public var variableFrameRate: Bool
     /// The video codec's four-character code ("rle " for QuickTime
     /// Animation, "png " for PNG) when macOS can't decode it, as with many
-    /// stock alpha stickers. Substo Video converts the file to HEVC, keeping the
+    /// stock alpha stickers. Studio converts the file to HEVC, keeping the
     /// alpha, and plays, analyses and renders that copy (docs/MEDIA.md).
     public var undecodableCodec: String?
     /// Cheap identity check: size, modification time and a hash of the first
@@ -201,7 +201,7 @@ public struct MediaItem: Codable, Equatable, Identifiable, Sendable {
     public var pictureDelay: Time?
     /// How much of the picture's lag the recorder already took out, so the
     /// file is in sync as recorded: Record It's Camera delay, read from its
-    /// `com.substo.video.camera-delay` tag. Substo Video doesn't add its
+    /// `com.substo.video.camera-delay` tag. Studio doesn't add its
     /// own default delay to such a file.
     public var pictureDelayCorrected: Time?
     /// Someone asked for this file's transcript (`substo transcribe`), so
@@ -329,7 +329,7 @@ public struct Track: Codable, Equatable, Identifiable, Sendable {
 public enum ClipContent: Equatable, Sendable {
     /// Part of a media file.
     case media(mediaID: String)
-    /// A text layer drawn by Substo Video.
+    /// A text layer drawn by Studio.
     case text(TextContent)
     /// A graphic from a template (a Remotion component or a built-in),
     /// rendered to a cached file in the background.
@@ -927,7 +927,7 @@ public enum MarkerKind: String, Codable, Sendable {
     /// agent that does what it asks removes it.
     case comment
 
-    /// A kind from a newer Substo Video reads as a plain marker rather than
+    /// A kind from a newer Studio reads as a plain marker rather than
     /// stopping the project opening.
     public init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)

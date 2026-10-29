@@ -1,7 +1,7 @@
 import Foundation
 import TandemMedia
 
-/// The local index of every asset Substo Video knows about: SQLite with an FTS5
+/// The local index of every asset Studio knows about: SQLite with an FTS5
 /// full-text index, plus licence snapshots, usage by project, favourites
 /// and the list of import folders.
 ///

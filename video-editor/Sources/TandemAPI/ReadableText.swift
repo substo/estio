@@ -18,7 +18,7 @@ extension StatusResult: ReadableResult {
             lines.append("  open in: nothing else, read from the file for this command")
         } else if let openIn {
             let serving = openIn.port.map { ", serving the API on port \($0)" } ?? ""
-            lines.append("  open in: \(openIn.owner == "app" ? "the Substo Video app" : "substo \(openIn.owner)") (pid \(openIn.pid))\(serving)")
+            lines.append("  open in: \(openIn.owner == "app" ? "the Studio app" : "substo \(openIn.owner)") (pid \(openIn.pid))\(serving)")
         }
         if let undo { lines.append("  undo: \(undo)") }
         if let redo { lines.append("  redo: \(redo)") }
@@ -312,7 +312,7 @@ extension HistoryResult: ReadableResult {
         return "  " + EditPlace(start: start, end: end, tracks: tracks ?? []).description
     }
 
-    /// One line per edit, with a run of Substo Video finding new media (which
+    /// One line per edit, with a run of Studio finding new media (which
     /// can be dozens) on one line.
     static func editLines(_ edits: [HistoryEdit]) -> [String] {
         let time = DateFormatter()
