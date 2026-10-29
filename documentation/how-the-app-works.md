@@ -68,7 +68,7 @@ Decided 2026-10-27. In the database, code and docs, each thing has exactly one n
 
 ## Status (2026-10-28)
 
-**Studio merged and live.** Web, worker, cron and companion APIs use the CRM database's `studio` schema. Database failures block readiness. The old source is frozen for recovery, not a runtime dependency. Signed Estio acceptance remains outstanding. Existing Mac pairing reconnected and completed a no-provider diagnostic; the once-mode companion then shut down cleanly. See `studio-merge-cutover.md` for evidence and `unified-database-recovery.md` for backup scope.
+**Studio merged and live.** Web, worker, cron and companion APIs use the CRM database's `studio` schema. Database failures block readiness. The old source is frozen for recovery, not a runtime dependency. Signed Estio core-page and no-spend onboarding acceptance passed October 29. Existing Mac pairing reconnected and completed a no-provider diagnostic; the once-mode companion then shut down cleanly. See `studio-merge-cutover.md` for evidence and `unified-database-recovery.md` for backup scope.
 
 **Working on both apps:**
 - separate sign-in;
@@ -80,8 +80,8 @@ Decided 2026-10-27. In the database, code and docs, each thing has exactly one n
 - Studio's library, pipeline, knowledge, uploads and transcription.
 
 **Next:**
-1. Finish signed Estio and Mac acceptance; retain the recovery mapping until the fallback window ends.
-2. **First Studio workflow: guided onboarding**, implemented from `onboarding-chat-plan.md`. Fixed questions and bounded public URL look-up are free; drafting uses the existing Studio OpenAI key, cap and durable paid-job ledger after confirmation. Admins review/save a Location profile in existing AI settings; it also renders the shared CRM brandVoice. Members read the saved profile. Existing YouTube connection and social-link paths are reused. Signed Substo no-spend smoke passed; signed Estio, mobile and real paid-provider acceptance remain pending. Free-form chat, web search and additional OAuth connectors remain future work.
+1. Signed Estio core pages and existing-pairing Mac diagnostic passed; retain the recovery mapping until the fallback window ends.
+2. **First Studio workflow: guided onboarding**, implemented from `onboarding-chat-plan.md`. Fixed questions and bounded public URL look-up are free; drafting uses the existing Studio OpenAI key, cap and durable paid-job ledger after confirmation. Admins review/save a Location profile in existing AI settings; it also renders the shared CRM brandVoice. Members read the saved profile. Existing YouTube connection and social-link paths are reused. Signed Estio/Substo no-spend smoke and mobile core-page checks passed; real paid-provider acceptance remains untested under the no-paid-jobs scope. Free-form chat, web search and additional OAuth connectors remain future work.
 3. **Scheduled runs**, once the user has connected YouTube at `/account/connections`. No credentials were imported from the old local app.
 
 **Later, decided:**

@@ -764,3 +764,44 @@ Live build/health/dependencies and empty due/expired/uncertain queue rechecked. 
   its reservation-month ledger semantics; a hold spanning midnight/month-end is
   not treated as spend by the header. Infrastructure/provider invoices were not
   reconciled, and unrecorded historical charges are not reconstructed from guesses.
+
+
+## Finalization recovered and released (2026-10-29)
+
+- Recovered prior durable run and private logs; did not repeat copy or restore. The
+  prior final usage deployment had failed in the Google font loader before upload.
+- Deployed clean runtime source `1e26fd66` (includes `a2c075b8` usage coverage),
+  build `nSSn82C3vQTfih2hDr3HR`, token `deploy-20261029044122-12403`, GREEN:3002.
+  Owned migrate-only deployment exited 0: no pending migrations, dependency/worker
+  readiness passed, queue due/expired/uncertain all zero, 20-second soak passed,
+  no rollback. Web, Studio worker, scrape worker and viewing relay online with zero
+  restarts. Blue retained for normal drain. Estio public health/version passed;
+  Substo /api/health is host-policy 404, signed Studio pages/API return 200.
+- New 31-test no-provider suite passed: usage attribution/periods, profile access/
+  schema/workflow, SSRF/DNS pin/redirect/content limits. Recovered affected compiler
+  evidence: 14 files zero diagnostics; full production build passed. Whole-project
+  typecheck remains an existing baseline failure, not claimed clean.
+- Existing Chrome signed Estio session works: eight onboarding questions, YouTube
+  not-connected state and missing-key/budget disabled paid button pass. Estio
+  Library/Content/Knowledge/Discovery/Schedules show separate Estio data and fit
+  390px. Substo counterparts render; profile API and five core pages return 200.
+- Found Substo populated Library overflow (423px at 390px viewport). Added main
+  width/min-width and card min-width constraints; live final build now measures
+  exactly 390px scroll width at 390px. Other core pages and onboarding fit 390px;
+  shared mobile menu present. Browser product-switch click transport timed out;
+  prior successful switch/media evidence retained, not reclassified as a new pass.
+- Restore evidence remains private unified-restore-drill-direct2-20261028:
+  184 table inventories/digests, 83 migrations at snapshot time, schema 29,
+  zero unvalidated FKs, five authority rows, 471 media and links. Subsequent
+  brand-profile migration tested on disposable PG17 and deployed in prior round.
+- Prior Mac no-provider job d9b5e1da-1195-4b40-92ad-bcc8d27f9a98 succeeded via
+  existing pairing after canonical Location parser correction; once-mode exited
+  cleanly. It is not a permanently running companion acceptance claim.
+- No paid provider calls, synthetic production profile, invitations/messages,
+  source unfreeze, mapping/backups removal, R2 changes, or purchases. Real paid
+  onboarding remains untested by explicit no-paid-jobs scope. Member/realm denial,
+  persistence and full 110-micro-USD ledger settlement use disposable fixtures.
+- Full owned deploy log: /tmp/studio-final-resume-deploy2.log (owner-only).
+  Fresh focused tests: /tmp/studio-resume-verified-tests.log. Both remote release
+  branches synchronized to runtime source; following docs-only evidence commit
+  does not change the deployed application artifact.
