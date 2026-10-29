@@ -17,7 +17,7 @@ export default async function StudioLibraryPage({ params, searchParams }: {
   if (!result) notFound();
   const root = `/studio`;
   return (
-    <main className="mx-auto max-w-6xl space-y-8 p-6 md:p-10">
+    <main className="mx-auto min-w-0 w-full max-w-6xl space-y-8 p-6 md:p-10">
       <header className="space-y-2">
         <nav className="flex flex-wrap gap-4 text-sm"><Link href={root} className="text-muted-foreground hover:underline">{result.access.locationName}</Link><Link href={`${root}/content`} className="text-muted-foreground hover:underline">Content pipeline</Link></nav>
         <h1 className="text-3xl font-semibold tracking-tight">Research library</h1>
@@ -26,7 +26,7 @@ export default async function StudioLibraryPage({ params, searchParams }: {
       <section className="grid gap-4 sm:grid-cols-2" aria-label="Library records">
         {result.records.map((record) => {
           const url = safeStudioSourceUrl(record.source_url);
-          return <article key={record.id} className="space-y-3 rounded-xl border bg-card p-5">
+          return <article key={record.id} className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
             <div className="flex flex-wrap gap-2 text-xs text-muted-foreground"><span>{record.kind === "channel" ? "Channel" : "Source"}</span><span>{record.approved ? "Approved" : "Needs review"}</span>{record.archived ? <span>Archived</span> : null}</div>
             <h2 className="font-medium"><Link href={`${root}/library/${record.id}`} className="hover:underline">{record.title}</Link></h2>
             {record.summary ? <p className="line-clamp-3 whitespace-pre-wrap text-sm text-muted-foreground">{record.summary}</p> : null}
