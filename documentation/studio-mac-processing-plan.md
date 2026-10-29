@@ -61,3 +61,22 @@ Use outbound authenticated HTTPS polling, the existing companion queue adapter, 
 5. **Expand by feature:** text workflows, translation/TTS, embeddings and eventually image/video. Done per feature: adapter, resource/quality/language checks, validated outputs, routing controls and optional explicitly selected hosted execution all work through the existing queue.
 
 The owner's decisions above close the earlier hardware, Business scope and ten-minute-window questions. Language and resource preferences belong to each user's setup; no owner answer blocks this plan. Implementation and live acceptance remain owned by the connection/workflow conversation.
+
+## Studio Mac app (plan 2026-10-29)
+
+One desktop app called **Studio**, built from `video-editor/`, serves both web apps. Owner decisions 2026-10-29:
+
+- **One app, brand follows the connection.** It shows the brand (name + logo) of the connection you pick: Estio for estio.co, Substo for substo.com. The Finder/Spotlight icon is one neutral Studio icon (an app icon is fixed at build time); the menu-bar item, Dock icon while running, welcome window and About show the active brand. The brand comes from the site (`GET /api/studio/device/brand`: app, name, icon URL); the app only falls back to the two built-in app names when offline.
+- **Name "Studio".** User-facing names change; bundle IDs, stable ad-hoc signing, the `.substo` format, the `substo://` scheme, the `substo` command and `SUBSTO_*` variables stay. The app installs to `~/Applications/Studio.app` (the old `Substo Video.app` is removed after a successful install). On-disk folders are renamed with an automatic one-time move: `~/Movies/Substo Library` → `~/Movies/Studio Library`, and `Application Support`/`Caches` `Substo Video` → `Studio` (a folder is moved only when the new one doesn't exist and settings don't name a custom place).
+- **The connector moves into the app, in Swift.** Studio pairs and holds connections itself, using the existing pairing (`/api/studio/device/pair/*`), device operations (`heartbeat`, `claim`, `extend`, `complete`, `fail`, `command`), Keychain service `com.estio.studio-companion.device-token` keyed by origin, and Settings → Connected computer. No new protocol. Existing pairings are adopted from `~/Library/Application Support/Estio/StudioCompanion/config.json`. When Swift does everything the Node companion does, `scripts/studio-companion.ts` and `lib/studio/companion/` are deleted, and Settings stops showing Terminal commands.
+- **Multiple connections.** One Mac may be connected to estio.co and substo.com at once, one account and one Location each; the server keeps each device in one Location. Each connection heartbeats and claims separately. The active connection only sets the brand.
+
+### Slices
+
+1. **Rename to Studio (native).** Display names, Info.plist, menus, About, docs, launcher scripts, install path, folder moves, neutral icon. Done: Spotlight finds "Studio"; `swift test` and `bash tests/install-tests.sh` pass; privacy permissions survive.
+2. **Brand endpoint (web).** Public `GET /api/studio/device/brand`, chosen by host, no tenant data. Done: live on both domains.
+3. **Connections in the app (native).** Menu-bar item that stays when windows close; **Connect to Estio… / Connect to Substo…** (opens the approval page, shows the code); per-connection status (online, paused, offline, revoked) and Location name; choose the active connection; Disconnect (revoke stays in Settings); **Launch at login** (`SMAppService`), opening without windows. Heartbeat with the same capability report. Adopts the existing pairing.
+4. **Parity (native).** Local gate and `studio.diagnostic` jobs, Codex/Claude sign-in commands, config acknowledgements, hardware/runtime discovery. Done: Settings shows the app as online, a Mac check passes, Connect Codex works.
+5. **Retire the Node companion (web).** Delete `scripts/studio-companion.ts`, `lib/studio/companion/` and the npm script; Settings → Connected computer says "Open Studio on your Mac and choose Connect".
+
+Later (plan only): **Open in editor** (Studio asks the connected Mac to create or open the content item's `.substo` project and fetch its media from R2 through job-scoped URLs); **exports back to Studio** (bounded job-scoped upload through the existing storage path); **Editor V1 skill** adapted to Studio projects; **Developer ID signing, notarization and a download link** in Settings, only when someone else installs it.
