@@ -3,7 +3,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { runT3Attempt, t3Branch } from "./t3";
+import { runT3Attempt, t3Branch, talkTurn, type TalkSync } from "./t3";
 import type { Profile } from "./contract";
 
 const profile: Profile = { id: "p", enabled: true, provider: "claudeAgent", account: "default", billing: "subscription", model: "claude-sonnet-5-5", options: {}, quotaBucket: "claude", taskTypes: ["implementation"], tools: ["git-read", "code-write"], dataScope: "estio-repository", quality: 2, concurrency: 1, maxAttempts: 1, fallbacks: [] };
@@ -80,4 +80,16 @@ test("redo refuses a thread that is still running", async () => {
   const { dir, script } = await fake([thread("running")]);
   try { await assert.rejects(runT3Attempt({ command: script, checkout: dir, profile, base: "a".repeat(40), branch: "build/x-12345678", title: "t", prompt: "p", continueThreadId: "mcp:t1", signal: new AbortController().signal, onThread: async () => {} }), /still running/); }
   finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("a conversation turn starts a read-only thread with the playbook, then reports messages until idle", async () => {
+  const { dir, script } = await fake([{ thread: { threadId: "mcp:t1", status: "running", activeRunId: "r1", latestRunId: "r1", pendingRequestCount: 0 } }, { thread: { threadId: "mcp:t1", status: "completed", activeRunId: null, latestRunId: "r1", pendingRequestCount: 0 }, messages: [{ role: "user", text: "PLAYBOOK\n--\nhi", runId: "r1" }, { role: "assistant", text: "What part?", runId: "r1" }] }]);
+  try {
+    const reports: TalkSync[] = []; let sent: string[] = [];
+    await talkTurn({ command: script, checkout: dir, branch: "build/talk-x-12345678", talk: { title: "t", threadId: null, base: "a".repeat(40), profile: { provider: "claudeAgent", model: "m" }, playbook: "PLAYBOOK", delimiter: "\n--\n", unsent: [{ id: "o1", text: "hi" }] },
+      sent: async (_, ids) => { sent = ids; }, report: async r => { reports.push(r); } });
+    const start = JSON.parse(await readFile(path.join(dir, "start.json"), "utf8"));
+    assert.equal(start.stdin, "PLAYBOOK\n--\nhi"); assert(start.a.includes("--worktree")); assert.deepEqual(sent, ["o1"]);
+    assert.equal(reports.at(-1)!.running, false); assert.equal(reports.at(-1)!.messages.at(-1)!.text, "What part?");
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });

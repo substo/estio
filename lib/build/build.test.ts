@@ -3,7 +3,8 @@ import test from "node:test";
 import fs from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
-import { profileSpec, selectProfile, validLease, canRevoke, sameOrigin, type JobSpec } from "./contract";
+import { profileSpec, selectProfile, validLease, canRevoke, sameOrigin, extractPlan, type JobSpec } from "./contract";
+import { withoutPlan } from "./playbook";
 import { reverseAffected } from "./scanner";
 
 test("Build uses the platform gate: location admin, Substo and impersonation cannot acquire operator context", async () => {
@@ -90,4 +91,13 @@ test("screen drafts ride in the review json block and are validated", async () =
   assert.equal(d?.purpose, "Read and answer client messages"); assert.equal(d?.features[0].journey, "");
   assert.equal(extractScreen("```json\n{\"proposals\":[]}\n```"), null);
   assert.equal(extractScreen("```json\n{\"screen\":{\"purpose\":\"x\"}}\n```"), null);
+});
+
+test("a conversation plan is read from the last plan block and hidden from the displayed reply", () => {
+  const item = { title: "Unread badge", outcome: "Counts per channel", reason: "Owner asked", scope: ["components/inbox/channel-list.tsx"], acceptance: ["Badge shows unread count"] };
+  const text = `Here is the plan.\n\`\`\`json\n${JSON.stringify({ plan: [item, { title: "x" }] })}\n\`\`\``;
+  const r = extractPlan(text);
+  assert.equal(r.found, true); assert.equal(r.items.length, 1); assert.equal(r.dropped, 1);
+  assert.equal(withoutPlan(text), "Here is the plan.");
+  assert.equal(extractPlan("No plan yet. What part?").found, false);
 });

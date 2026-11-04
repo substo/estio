@@ -4463,3 +4463,19 @@ model BuildJob {
   updatedAt   DateTime @updatedAt
   @@index([state, createdAt])
 }
+
+// Build conversations: the owner talks on the Build page; the Mac worker relays each turn to one T3 thread.
+model BuildTalk {
+  id        String   @id @default(cuid())
+  title     String
+  state     String   @default("idle")
+  threadId  String?
+  base      String?
+  profile   Json?
+  messages  Json     @default("[]")
+  plan      Json?
+  error     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([state, updatedAt])
+}

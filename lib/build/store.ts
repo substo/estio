@@ -10,10 +10,10 @@ import { screenDraft, screenInstruction, undescribed } from "./contract";
 import { assessDifficulty, autoApprovable, autoApprovePolicy, catalogSpec, proposalDraft, edgeSpec, id, jobSpec, nodeSpec, profilesSpec, selectProfile, validLease, canRevoke } from "./contract";
 
 export class BuildConflict extends Error {}
-function requireCondition(ok: unknown, message: string): asserts ok { if (!ok) throw new BuildConflict(message); }
+export function requireCondition(ok: unknown, message: string): asserts ok { if (!ok) throw new BuildConflict(message); }
 function canonical(v: unknown): string { return JSON.stringify(v && typeof v === "object" ? Array.isArray(v) ? v.map(x => JSON.parse(canonical(x))) : Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b)).map(([k, x]) => [k, JSON.parse(canonical(x))])) : v); }
 const checkpointSpec = z.record(z.unknown()).refine(v => Buffer.byteLength(JSON.stringify(v)) <= 64000, "Checkpoint exceeds 64KB; keep full artifacts on worker");
-const json = (value: unknown) => value as Prisma.InputJsonValue;
+export const json = (value: unknown) => value as Prisma.InputJsonValue;
 // All Build mutations share one DB lock, including pause and approval. No Atlas table is accessed.
 export async function mutate<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>) {
   return db.$transaction(async tx => {
@@ -170,17 +170,21 @@ export async function operator(input: z.infer<typeof operatorCommand>, actor: st
             approval: json({ actor, at: new Date().toISOString(), revision: job.revision + 1, spec, policyRevision: control.revision, profile, redo: true, nodes: nodes.map(n => ({ id: n.id, revision: n.revision })) }) } });
         }
         requireCondition(job.state === "proposed", "Only current proposals can be approved");
-        const spec = jobSpec.parse(job.spec);
-        const profile = selectProfile(profilesSpec.parse(control.profiles), spec, { exhaustedBuckets: Object.keys((control.worker as { quotaBuckets?: object }).quotaBuckets ?? {}) });
-        requireCondition(profile, "No enabled, qualified approved profile");
-        const nodes = await tx.buildNode.findMany({ where: { id: { in: spec.nodeIds } } });
-        return tx.buildJob.update({ where: { id: job.id }, data: {
-          state: "approved", approval: json({ actor, at: new Date().toISOString(), revision: job.revision, spec, policyRevision: control.revision, profile,
-            nodes: nodes.map(n => ({ id: n.id, revision: n.revision })) }),
-        } });
+        return approveJob(tx, control, job, actor);
       }
     }
   });
+}
+/** Owner approval of a proposal's exact scope, bound to the current policy and map revisions. */
+export async function approveJob(tx: Prisma.TransactionClient, control: { revision: number; profiles: unknown; worker: unknown }, job: { id: string; revision: number; spec: unknown }, actor: string) {
+  const spec = jobSpec.parse(job.spec);
+  const profile = selectProfile(profilesSpec.parse(control.profiles), spec, { exhaustedBuckets: Object.keys((control.worker as { quotaBuckets?: object }).quotaBuckets ?? {}) });
+  requireCondition(profile, "No enabled, qualified approved profile");
+  const nodes = await tx.buildNode.findMany({ where: { id: { in: spec.nodeIds } } });
+  return tx.buildJob.update({ where: { id: job.id }, data: {
+    state: "approved", approval: json({ actor, at: new Date().toISOString(), revision: job.revision, spec, policyRevision: control.revision, profile,
+      nodes: nodes.map(n => ({ id: n.id, revision: n.revision })) }),
+  } });
 }
 
 async function contextFor(tx: Prisma.TransactionClient, nodeIds: string[]) {
@@ -223,7 +227,7 @@ async function autoDecide(tx: Prisma.TransactionClient, control: { revision: num
   return tx.buildJob.update({ where: { id: job.id }, data: { checkpoint: json({ ...(job.checkpoint as object ?? {}), auto }) } });
 }
 /** Server-side routing: difficulty and model are decided here, never by the browser. */
-async function routed(tx: Prisma.TransactionClient, control: { profiles: unknown; worker: unknown }, spec: import("./contract").JobSpec) {
+export async function routed(tx: Prisma.TransactionClient, control: { profiles: unknown; worker: unknown }, spec: import("./contract").JobSpec) {
   const dependents = await tx.buildEdge.count({ where: { toId: { in: spec.nodeIds }, kind: { not: "inspires" } } });
   const assessed = { ...spec, ...assessDifficulty(spec, dependents) };
   const profile = selectProfile(profilesSpec.parse(control.profiles), { ...assessed, profileId: "auto" }, { exhaustedBuckets: Object.keys((control.worker as { quotaBuckets?: object }).quotaBuckets ?? {}) });

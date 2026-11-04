@@ -47,7 +47,7 @@ export const profilesSpec = z.array(profileSpec).max(20).superRefine((v, ctx) =>
 });
 export const jobSpec = z.object({
   title: text, outcome: text, reason: text, scope: z.array(text).min(1).max(30),
-  nodeIds: z.array(id).min(1).max(30), acceptance: z.array(text).min(1).max(20),
+  nodeIds: z.array(id).max(30), acceptance: z.array(text).min(1).max(20),
   baseRevision: z.string().regex(/^[a-f0-9]{40}$/), endpoint: z.literal("review"),
   taskType: z.enum(["inspect", "implementation", "review"]), profileId: id,
   quality: z.number().int().min(1).max(3), routing: text.optional(), tools: z.array(z.enum(["git-read", "code-write", "test"])).min(1).max(3),
@@ -98,19 +98,25 @@ export const proposalDraft = z.object({
 }).strip();
 export type ProposalDraft = z.infer<typeof proposalDraft>;
 export const proposalInstruction = 'Finish with a fenced ```json block shaped {"proposals":[{"title","outcome","reason","scope":["repo-relative files to change"],"acceptance":["checkable criteria"]}]} holding 0 to 3 evidence-backed, smallest-change proposals (an empty list if nothing is worth doing). They become unapproved Build cards.';
-/** Last fenced json block with a proposals array; invalid items are dropped and counted. */
-export function extractProposals(text: string): { proposals: ProposalDraft[]; dropped: number } {
+/** Last fenced json block with an array under key; invalid items are dropped and counted. */
+function extractDrafts(text: string, key: "proposals" | "plan", max: number) {
   const blocks = [...text.matchAll(/```json\s*([\s\S]*?)```/g)];
   for (const block of blocks.reverse()) {
     try {
-      const value = JSON.parse(block[1]) as { proposals?: unknown };
-      if (!Array.isArray(value?.proposals)) continue;
-      const valid = value.proposals.slice(0, 20).flatMap(p => { const r = proposalDraft.safeParse(p); return r.success ? [r.data] : []; });
-      return { proposals: valid.slice(0, 3), dropped: value.proposals.length - Math.min(valid.length, 3) };
+      const list = (JSON.parse(block[1]) as Record<string, unknown>)?.[key];
+      if (!Array.isArray(list)) continue;
+      const valid = list.slice(0, 20).flatMap(p => { const r = proposalDraft.safeParse(p); return r.success ? [r.data] : []; });
+      return { items: valid.slice(0, max), dropped: list.length - Math.min(valid.length, max), found: true };
     } catch { /* try an earlier block */ }
   }
-  return { proposals: [], dropped: 0 };
+  return { items: [] as ProposalDraft[], dropped: 0, found: false };
 }
+export function extractProposals(text: string): { proposals: ProposalDraft[]; dropped: number } {
+  const r = extractDrafts(text, "proposals", 3);
+  return { proposals: r.items, dropped: r.dropped };
+}
+/** A conversation's agreed plan: the last {"plan":[...]} block in an agent message. */
+export const extractPlan = (text: string) => extractDrafts(text, "plan", 8);
 
 // Policy auto-approval: deterministic and deliberately narrow. Record-only first ("would approve"), widened by the owner.
 export const autoApprovePolicy = { maxFiles: 3, maxAcceptance: 5, dailyBudget: 3 } as const;

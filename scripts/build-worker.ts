@@ -1,7 +1,7 @@
 /** Outbound Build queue owner. Local configuration enables subscription CLI execution. */
 import { runCliAttempt, type CliOutcome } from "../lib/build/cli";
 import { adoptDelivery, prepareDelivery, verifyDelivery, type DeliveryCheckpoint } from "../lib/build/delivery";
-import { runT3Attempt, t3Branch, t3Catalog } from "../lib/build/t3";
+import { runT3Attempt, t3Branch, t3Catalog, talkTurn } from "../lib/build/t3";
 import { checkGithub } from "../lib/build/watch";
 import { extractProposals, extractScreen, proposalInstruction } from "../lib/build/contract";
 import { scanRepository } from "../lib/build/scanner";
@@ -133,9 +133,29 @@ async function main() {
     await call({ action: "complete", ...lease, checkpoint: { ...checkpoint, localCheckpoint: file }, stopped: true, outcome: controller.signal.aborted ? "stopped" : outcome });
     console.log("Build attempt returned", job.id, outcome);
   };
+  // Conversations run beside the queue: a long task never delays a reply. Each conversation is handled by one turn at a time.
+  const inflight = new Set<string>();
+  const talkLoop = async () => {
+    for (;;) {
+      try {
+        const { talks } = await call({ action: "talk-poll", workerId });
+        for (const talk of talks as { id: string; title: string; threadId: string | null; base: string | null; profile: { provider?: string; model?: string } | null; playbook: string; delimiter: string; unsent: { id: string; text: string }[] }[]) {
+          if (inflight.has(talk.id)) continue;
+          inflight.add(talk.id);
+          void talkTurn({ command: t3Command, checkout, branch: t3Branch(`talk:${talk.id}`, `talk ${talk.title}`), talk,
+            sent: (threadId, messageIds) => call({ action: "talk-sent", workerId, id: talk.id, threadId, messageIds }),
+            report: sync => call({ action: "talk-sync", workerId, id: talk.id, ...sync }) })
+            .catch(error => call({ action: "talk-sync", workerId, id: talk.id, messages: [], running: false, needsAnswer: false, error: (error instanceof Error ? error.message : "Conversation relay failed").slice(0, 500) }).catch(() => undefined))
+            .finally(() => inflight.delete(talk.id));
+        }
+      } catch (error) { console.error("Build talk poll failed", error instanceof Error ? error.message : ""); }
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+  };
+  if (process.argv.includes("--once")) { await cycle(); return; }
+  void talkLoop();
   do {
     await cycle();
-    if (process.argv.includes("--once")) break;
     await new Promise(resolve => setTimeout(resolve, 15000));
   } while (true);
 }

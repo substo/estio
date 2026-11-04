@@ -5,7 +5,7 @@ import type { Profile } from "./contract";
 /** Visible T3 Code thread as the Build executor. Dispatch is a local CLI call, not a model turn. */
 export type T3Thread = { threadId: string; worktreePath: string; branch: string };
 export type T3Outcome = CliOutcome & { thread?: T3Thread; needsAnswer?: boolean };
-type Show = { thread?: { threadId?: string; status?: string; activeRunId?: string | null; latestRunId?: string | null; pendingRequestCount?: number; worktreePath?: string | null; branch?: string | null }; messages?: { role?: string; text?: string }[] };
+type Show = { thread?: { threadId?: string; status?: string; activeRunId?: string | null; latestRunId?: string | null; pendingRequestCount?: number; worktreePath?: string | null; branch?: string | null }; messages?: { role?: string; text?: string; runId?: string }[] };
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 export function t3Branch(jobId: string, title: string) {
@@ -17,7 +17,7 @@ async function t3(command: string, args: string[], cwd: string, stdin?: string) 
   if (r.code !== 0) throw new Error(`t3 ${args.slice(0, 2).join(" ")} failed${r.interruption ? `: ${r.interruption}` : ""}`);
   return JSON.parse(r.stdout) as Record<string, unknown>;
 }
-export const showThread = (command: string, cwd: string, threadId: string) => t3(command, ["thread", "show", threadId, "--json", "--messages", "1"], cwd) as Promise<Show>;
+export const showThread = (command: string, cwd: string, threadId: string, messages = 1) => t3(command, ["thread", "show", threadId, "--json", "--messages", String(messages)], cwd) as Promise<Show>;
 
 /**
  * Starts one thread in a new T3 worktree at the approved base, reports it via onThread before the writer can
@@ -91,4 +91,48 @@ export function t3Catalog(manifest: Manifest, settings: Settings) {
       out.push({ provider, model, name: (known.find(m => m.slug === model)?.name ?? model).slice(0, 120) });
   }
   return out.slice(0, 200);
+}
+
+export type TalkSync = { messages: { role: string; text: string; runId?: string }[]; running: boolean; needsAnswer: boolean };
+/**
+ * One conversation turn: relays the owner's unsent messages to the conversation's T3 thread (starting it, read-only by
+ * instruction, in its own worktree at the latest scanned code), then reports the thread's messages until the run ends.
+ */
+export async function talkTurn(input: { command: string; checkout: string; branch: string;
+  talk: { title: string; threadId: string | null; base: string | null; profile: { provider?: string; model?: string } | null; playbook: string; delimiter: string; unsent: { id: string; text: string }[] };
+  sent: (threadId: string, ids: string[]) => Promise<void>; report: (sync: TalkSync) => Promise<void>; timeoutMs?: number }) {
+  const { talk } = input;
+  let threadId = talk.threadId ?? "";
+  if (talk.unsent.length) {
+    const text = talk.unsent.map(m => m.text).join("\n\n");
+    let before: string | null | undefined;
+    if (!threadId) {
+      if (!talk.profile?.provider || !talk.profile.model || !/^[a-f0-9]{40}$/.test(talk.base ?? "")) throw new Error("Conversation has no approved model or base");
+      const started = await t3(input.command, ["thread", "start", input.checkout, "-", "--title", `Talk: ${talk.title}`.slice(0, 80), "--provider", talk.profile.provider,
+        "--model", talk.profile.model, "--worktree", talk.base!, "--branch", input.branch, "--json"], input.checkout, `${talk.playbook}${talk.delimiter}${text}`);
+      threadId = String(started.threadId ?? "");
+    } else {
+      before = (await showThread(input.command, input.checkout, threadId)).thread?.latestRunId;
+      await t3(input.command, ["thread", "send", threadId, "-", "--json"], input.checkout, text);
+    }
+    if (!/^[a-zA-Z0-9:._-]{1,120}$/.test(threadId)) throw new Error("T3 did not return a thread id");
+    await input.sent(threadId, talk.unsent.map(m => m.id));
+    // Wait for the new run so the previous idle state is not reported as the reply.
+    for (let i = 0; i < 60; i++) {
+      const t = (await showThread(input.command, input.checkout, threadId)).thread;
+      if (t?.activeRunId || (t?.latestRunId && t.latestRunId !== before)) break;
+      await sleep(1000);
+    }
+  }
+  if (!threadId) return;
+  const deadline = Date.now() + (input.timeoutMs ?? 2 * 60 * 60_000);
+  for (;;) {
+    const show = await showThread(input.command, input.checkout, threadId, 60);
+    const t = show.thread ?? {};
+    const running = !!t.activeRunId || t.status === "running", needsAnswer = (t.pendingRequestCount ?? 0) > 0;
+    const messages = (show.messages ?? []).filter(m => m.text).map(m => ({ role: String(m.role ?? "assistant").slice(0, 40), text: String(m.text).slice(0, 20000), runId: m.runId?.slice(0, 200) }));
+    await input.report({ messages, running, needsAnswer });
+    if (!running || needsAnswer || Date.now() > deadline) return;
+    await sleep(4000);
+  }
 }
