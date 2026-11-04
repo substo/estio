@@ -39,9 +39,15 @@ const blockedStates = ["blocked-lease-expired", "waiting-for-capacity", "blocked
 export default function BuildWorkspace() {
   const [data, setData] = useState<Data | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const [settings, setSettings] = useState(false), [seed, setSeed] = useState<{ text: string; n: number } | null>(null);
-  const load = useCallback(async () => { try { const res = await fetch("/api/build", { cache: "no-store" }); const value = await res.json(); if (!res.ok) throw new Error(value.error); setData(value); } catch (e) { setError(String(e)); } }, []);
+  // Background refreshes retry quietly (a phone dropping signal or a deploy restarting the server); only a repeated
+  // failure is shown, in plain words, and it clears itself when the connection returns.
+  const [offline, setOffline] = useState(0);
+  const load = useCallback(async () => {
+    try { const res = await fetch("/api/build", { cache: "no-store" }); const value = await res.json(); if (!res.ok) throw new Error(value.error); setData(value); setOffline(0); }
+    catch { setOffline(n => n + 1); }
+  }, []);
   useEffect(() => { void load(); const timer = setInterval(() => void load(), 15000); return () => clearInterval(timer); }, [load]);
-  const send: Send = async command => { setBusy(true); setError(""); try { const res = await fetch("/api/build", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command) }); const value = await res.json(); if (!res.ok) throw new Error(value.error); await load(); return true; } catch (e) { setError(e instanceof Error ? e.message : String(e)); return false; } finally { setBusy(false); } };
+  const send: Send = async command => { setBusy(true); setError(""); try { const res = await fetch("/api/build", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command) }); const value = await res.json(); if (!res.ok) throw new Error(value.error); await load(); return true; } catch (e) { setError(e instanceof TypeError ? "Couldn't reach the server. Check your connection and try again." : e instanceof Error ? e.message : String(e)); return false; } finally { setBusy(false); } };
   const w = data?.control?.worker, paused = data?.control?.paused ?? true;
   const online = !!w?.lastSeenAt && Date.now() - Date.parse(w.lastSeenAt) < 120_000;
   const models = data?.control?.profiles.filter(p => p.enabled) ?? [];
@@ -58,6 +64,7 @@ export default function BuildWorkspace() {
       {Object.entries(w?.usage ?? {}).map(([bucket, u]) => <UsageGauge key={bucket} name={bucket === "claudeAgent" ? "Claude" : bucket === "codex" ? "Codex" : bucket} usage={u} />)}
       <button className={`${btn} ml-auto`} onClick={() => setSettings(!settings)} aria-expanded={settings}>⚙ Settings</button>
     </header>
+    {offline >= 2 && <p role="status" className="rounded-md border p-3 text-sm text-muted-foreground">Connection lost, retrying… Nothing you started is affected.</p>}
     {error && <p role="alert" className="rounded-md border border-red-400 p-3 text-sm">{error}</p>}
     {!data && <p className="text-sm text-muted-foreground">Loading Build…</p>}
     {data && settings && <Settings data={data} busy={busy} send={send} close={() => setSettings(false)} />}

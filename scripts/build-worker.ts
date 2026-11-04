@@ -13,6 +13,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import path from "node:path";
 import { createHash } from "node:crypto";
 
+/** Only these stop the worker: a writer may still be running, so nothing may be retried until the owner reconciles. */
+class FatalWorkerError extends Error {}
 async function main() {
   const origin = new URL(process.env.BUILD_ORIGIN ?? "http://localhost:3000");
   if (origin.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(origin.hostname)) throw new Error("Use HTTPS except loopback");
@@ -27,8 +29,8 @@ async function main() {
   // T3 threads are the default executor; BUILD_EXECUTOR=cli keeps the headless subscription CLI path.
   const executor = process.env.BUILD_EXECUTOR === "cli" ? "cli" : "t3";
   const t3Command = path.resolve(process.env.BUILD_T3_CLI ?? path.join(process.env.HOME ?? checkout, ".t3", "bin", "t3"));
-  const call = async (data: unknown): Promise<any> => {
-    const res = await fetch(new URL("/api/build/worker", origin), { method: "POST", redirect: "error", headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" }, body: JSON.stringify(data), signal: AbortSignal.timeout(45000) });
+  const call = async (data: unknown, timeoutMs = 45000): Promise<any> => {
+    const res = await fetch(new URL("/api/build/worker", origin), { method: "POST", redirect: "error", headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" }, body: JSON.stringify(data), signal: AbortSignal.timeout(timeoutMs) });
     const result = await res.json(); if (!res.ok) throw new Error(`Build HTTP ${res.status}: ${result.error ?? "request failed"}`); return result;
   };
   // Report T3's current model catalog each poll (local files, no model call). Unreadable files report nothing.
@@ -65,11 +67,12 @@ async function main() {
       nextStep: "Owner reviews local result; no integration or deployment performed" };
     const save = () => writeFileSync(file, JSON.stringify({ jobId: job.id, ...checkpoint }, null, 2), { mode: 0o600 });
     const controller = new AbortController();
-    let heartbeatBusy = false, stopped = true;
+    let heartbeatBusy = false, stopped = true, missed = 0;
+    // A brief outage (a deploy, the network) must not stop running work: stop only when the 60-second lease is at risk.
     const heartbeat = async () => {
       if (heartbeatBusy) return; heartbeatBusy = true;
-      try { const result = await call({ action: "heartbeat", ...lease, checkpoint }); if (result.stop) controller.abort(); }
-      catch { controller.abort(); } finally { heartbeatBusy = false; }
+      try { const result = await call({ action: "heartbeat", ...lease, checkpoint }, 9000); missed = 0; if (result.stop) controller.abort(); }
+      catch { if (++missed >= 4) controller.abort(); } finally { heartbeatBusy = false; }
     };
     save();
     const timer = setInterval(() => void heartbeat(), 10000);
@@ -128,7 +131,7 @@ async function main() {
         // Parsed from the full text before compaction; the server validates again and creates unapproved cards.
         if (!writing && result.status === "completed") { const drafts = extractProposals(result.text); checkpoint.proposals = drafts.proposals; checkpoint.proposalsDropped = drafts.dropped; const screen = extractScreen(result.text); if (screen) checkpoint.screenDraft = screen; }
         stopped = result.stopped; checkpoint.result = compact(result); save();
-        if (!stopped) throw new Error("Writer stop unconfirmed; no takeover permitted");
+        if (!stopped) throw new FatalWorkerError("Writer stop unconfirmed; no takeover permitted");
         outcome = result.status === "completed" ? "review" : result.status === "capacity" ? "waiting-for-capacity" : result.status === "interrupted" ? "stopped" : "failed";
         const worktree = delivery.branch ? { cwd: delivery.cwd, branch: delivery.branch } : undefined;
         checkpoint.evidence = await verifyDelivery({ ...input, worktree, cwd: delivery.cwd }); save();
@@ -140,7 +143,7 @@ async function main() {
       outcome = controller.signal.aborted && stopped ? "stopped" : "failed";
     } finally { clearInterval(timer); save(); }
     // Never clear a lease when a writer's death is ambiguous. Its expiry blocks takeover.
-    if (!stopped) throw new Error("Process stop unconfirmed; reconcile before any retry");
+    if (!stopped) throw new FatalWorkerError("Process stop unconfirmed; reconcile before any retry");
     await heartbeat();
     await call({ action: "complete", ...lease, checkpoint: { ...checkpoint, localCheckpoint: file }, stopped: true, outcome: controller.signal.aborted ? "stopped" : outcome });
     console.log("Build attempt returned", job.id, outcome);
@@ -219,9 +222,16 @@ async function main() {
   };
   if (process.argv.includes("--once")) { await cycle(); return; }
   void talkLoop(); void usageLoop(); void mergeLoop();
+  // A failed cycle (server restarting during a deploy, network) is retried; a held lease simply expires and is
+  // reported as blocked, never retried automatically. Only a possibly-running writer stops the worker.
   do {
-    await cycle();
+    try { await cycle(); }
+    catch (error) {
+      if (error instanceof FatalWorkerError) throw error;
+      console.error("Build cycle failed; retrying", error instanceof Error ? error.message : "");
+    }
     await new Promise(resolve => setTimeout(resolve, 15000));
   } while (true);
 }
-main().catch(() => { console.error("Build worker stopped after an error. Check server readiness/configuration; preserved checkpoints/worktrees are never deleted."); process.exitCode = 1; });
+// Exit for real so launchd restarts the worker; the conversation, merge and usage loops must not keep a dead queue alive.
+main().catch(() => { console.error("Build worker stopped after an error. Check server readiness/configuration; preserved checkpoints/worktrees are never deleted."); process.exit(1); });

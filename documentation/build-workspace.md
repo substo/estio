@@ -125,3 +125,10 @@ The worker and `precheck` in `delivery.ts` required the Mac checkout's HEAD to e
 
 The 10-file (planned tasks) and 30-file (approved tasks) caps were arbitrary and break on code split into many small files. A task's scope still lists everything it may change, and the fence still refuses anything else, but there is no count limit (up to 200 entries), and an entry ending in "/" covers every file beneath that folder, including new ones (`validateScopeEntry`, `inScope` in `delivery.ts`). Folders must be at least two levels deep. Size is handled by routing: more than 4 files or any folder makes an implementation Hard, and autopilot never starts folder-wide tasks. The planning agent is told that tasks in one plan start from the same code and can't see each other's changes, and that schema and data changes ship as a migration file or a dry-run script for the owner to apply at deploy. Tested in `delivery.test.ts`.
 
+## Worker resilience (2026-11-04, found on the first real run)
+
+- The queue loop died when a cycle hit a network error (the server restarting during a deploy), while the conversation, merge and usage loops kept the process alive and "online", so approved tasks were never claimed. Now a failed cycle is logged and retried; only `FatalWorkerError` (a writer that may still be running) stops the worker, and it exits for real (`process.exit(1)`) so launchd restarts it.
+- A single failed heartbeat aborted running work. Heartbeats now time out after 9 seconds and work stops only after 4 consecutive misses, inside the 60-second lease, so a deploy no longer stops a task.
+- The page retries background refreshes quietly and shows "Connection lost, retrying…" only after repeated failures; a failed action says it couldn't reach the server instead of Safari's "TypeError: Load failed".
+- Restarting the worker while a task runs loses track of that task (its lease expires and it shows as stuck), so worker restarts and deploys wait until nothing is running.
+

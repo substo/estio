@@ -24,7 +24,7 @@ export function TalkPanel({ talks, paused, blocker, reload, seed, models }: Prop
       const res = await fetch("/api/build", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command) });
       const value = await res.json(); if (!res.ok) throw new Error(value.error);
       await reload(); return value as { id?: string };
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); return null; } finally { setBusy(false); }
+    } catch (e) { setError(e instanceof TypeError ? "Couldn't reach the server. Check your connection and try again." : e instanceof Error ? e.message : String(e)); return null; } finally { setBusy(false); }
   }
   async function say() {
     const value = text.trim(); if (!value) return;

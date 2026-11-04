@@ -19,7 +19,7 @@ export function Playbook({ memory, edits, docs, busy, send, ask }: { memory: Mem
     if (doc?.path === path) { setDoc(null); return; }
     setError("");
     try { const res = await fetch(`/api/build?doc=${encodeURIComponent(path)}`, { cache: "no-store" }); const value = await res.json(); if (!res.ok) throw new Error(value.error); setDoc(value); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    catch (e) { setError(e instanceof TypeError ? "Couldn't reach the server. Check your connection and try again." : e instanceof Error ? e.message : String(e)); }
   }
   return <section className="space-y-2">
     <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Playbook: how the agents work</h2>
