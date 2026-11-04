@@ -160,3 +160,10 @@ test("user AI preferences schema trims property campaign model", () => {
 
     assert.equal(payload.propertyMatchCampaignModel, "google:gemini-2.5-pro");
 });
+
+test("location.business is registered without changing existing settings contracts", () => {
+    assert.equal(SETTINGS_DOMAINS.LOCATION_BUSINESS, "location.business");
+    assert.deepEqual(validateSettingsPayload(SETTINGS_DOMAINS.LOCATION_BUSINESS, { schemaVersion: 1 }), { schemaVersion: 1 });
+    assert.throws(() => validateSettingsPayload(SETTINGS_DOMAINS.LOCATION_BUSINESS, { schemaVersion: 2 }));
+    assert.throws(() => validateSettingsPayload(SETTINGS_DOMAINS.LOCATION_BUSINESS, { schemaVersion: 1, contact: { email: "bare" } }));
+});

@@ -1,3 +1,4 @@
+import { businessProfileSchema } from "@/lib/business-profile/schema";
 import { brandProfileSchema } from "@/lib/brand-profile/schema";
 import { z } from "zod";
 import { SETTINGS_DOMAINS, type SettingsDomain } from "./constants";
@@ -234,6 +235,7 @@ const userAiPreferencesSchema = z.object({
 }).passthrough();
 
 export const SETTINGS_DOMAIN_SCHEMAS: Record<SettingsDomain, z.ZodTypeAny> = {
+    [SETTINGS_DOMAINS.LOCATION_BUSINESS]: businessProfileSchema,
     [SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE]: publicSiteSchema,
     [SETTINGS_DOMAINS.LOCATION_AI]: aiSchema,
     [SETTINGS_DOMAINS.LOCATION_NAVIGATION]: navigationSchema,
