@@ -25,6 +25,7 @@ const planFormat = `When you propose a plan, end your message with a fenced json
 {"plan":[{"title":"...","outcome":"what the user will notice","reason":"why","scope":["repo-relative files to change"],"acceptance":["checkable criteria"]}]}
 \`\`\`
 At most 10 files and 5 criteria per task. The page shows these as tasks the owner starts with one tap; Build picks the difficulty and model and runs each in its own T3 thread on its own branch.
+All tasks in one plan start from the same code and cannot see each other's changes until the owner merges them. Only put independent tasks in one plan; when a step depends on another, plan it later (after the first is merged) or make it one task. Tasks can't run migrations or touch production data: a schema change ships as a migration file, a data change as a script with a dry run, and the owner applies both at deploy.
 When the owner states a lasting preference or decision, add {"remember":["one short sentence"]} to a json block in that reply (at most three); Build keeps it in the product memory for future conversations and tasks.`;
 
 export const playbookText = (edits: PlaybookEdits | undefined, name: PlaybookName) => edits?.[name]?.text ?? playbookDefaults[name].text;
