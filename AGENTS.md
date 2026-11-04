@@ -13,7 +13,7 @@ Provider-neutral Next.js route exports such as `maxDuration` are execution hints
 
 ## Current project context
 
-Read [architecture and decisions](documentation/how-the-app-works.md) and [current status and tasks](documentation/current-status.md) first. Historical checkpoints are evidence, not current instructions. Studio has no legacy URL compatibility requirement; preserve data/media and recovery safeguards.
+Read [architecture and decisions](documentation/how-the-app-works.md) and [current status and tasks](documentation/current-status.md) first. For the software factory (Build at `/admin/platform/build`), read [software factory](documentation/software-factory.md). Historical checkpoints are evidence, not current instructions. Studio has no legacy URL compatibility requirement; preserve data/media and recovery safeguards.
 
 ## Video editor
 

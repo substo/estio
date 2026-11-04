@@ -83,3 +83,11 @@ Read [current-status.md](current-status.md) for the deployed artifact, acceptanc
 - `shared-website-parity.md`: website reuse audit.
 - `studio-implementation-progress.md`: per-slice log.
 - `studio-audit-continuation-handoff.md`: original Studio audit.
+
+## Private Build workspace (live)
+
+`/admin/platform/build` reuses Estio's PLATFORM_ADMIN gate and denies impersonation. BuildNode/BuildEdge hold one shared source/product map; approved intent stays separate from scanner observations. BuildJob owns only new `estio-build` proposals and scoped review-endpoint approvals; BuildControl holds pause, approved subscription profiles and worker/capacity observations. No Atlas delivery work is claimed or migrated. PostgreSQL claims serialize under one advisory lock, and expired writers require explicit stopped-writer recovery. The Mac connects outbound with separate worker credentials; the hosted app never executes development shell. Setup, adapter boundary and acceptance limits: [Build workspace](build-workspace.md). Production migration and Build deployment completed 2026-11-03. The Mac LaunchAgent is connected; the queue remains paused with empty model profiles and daily grant off. See current status for release evidence.
+
+Full explainer: [Software factory](software-factory.md).
+
+**Direction (owner decision 2026-11-03): remove friction, move toward autonomy.** Build is the ledger and dashboard; T3 Code threads are the executor (like Archon in Cole Medin's ai-software-factory). The system decides whatever it can, such as task difficulty, model choice, routing and fallback, using zero-token deterministic rules. The owner approves which models may run, gives feedback, and keeps the gates for irreversible or outward actions (merge, deploy, spend). No independent second reviewer runs (low-token mode). Before adding any owner-facing control, check whether the system can decide it. The target is an autonomous loop: daily review proposes, policy approves bounded work, T3 threads implement, and the owner reviews the branch and gives feedback.

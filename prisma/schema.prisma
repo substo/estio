@@ -4416,3 +4416,50 @@ model SmsRelayOutbox {
   @@index([locationId, status, scheduledAt])
   @@index([messageId])
 }
+
+// Independent Build-owned records. Never claim/import Atlas delivery assignments.
+model BuildControl {
+  id        String   @id @default("build")
+  paused    Boolean  @default(true)
+  revision  Int      @default(1)
+  profiles  Json     @default("[]")
+  worker    Json     @default("{}")
+  updatedAt DateTime @updatedAt
+}
+
+model BuildNode {
+  id        String   @id
+  revision  Int      @default(1)
+  spec      Json
+  updatedAt DateTime @updatedAt
+  outgoing  BuildEdge[] @relation("BuildFrom")
+  incoming  BuildEdge[] @relation("BuildTo")
+}
+
+model BuildEdge {
+  id       String @id @default(cuid())
+  fromId   String
+  toId     String
+  kind     String
+  evidence Json
+  from     BuildNode @relation("BuildFrom", fields: [fromId], references: [id], onDelete: Restrict)
+  to       BuildNode @relation("BuildTo", fields: [toId], references: [id], onDelete: Restrict)
+  @@unique([fromId, toId, kind])
+}
+
+model BuildJob {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  revision    Int      @default(1)
+  state       String   @default("proposed")
+  spec        Json
+  approval    Json?
+  attempt     Json?
+  checkpoint  Json?
+  leaseToken  String?  @unique
+  leaseUntil  DateTime?
+  workerId    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([state, createdAt])
+}

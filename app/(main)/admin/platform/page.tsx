@@ -87,6 +87,7 @@ export default async function AdminPlatformPage({ searchParams }: { searchParams
       <div>
         <p className="text-sm font-medium text-muted-foreground">Estio</p>
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Platform overview</h1>
+        <Link href="/admin/platform/build" className="inline-block mt-3 underline font-medium">Open Build workspace →</Link>
         <p className="mt-1 text-sm text-muted-foreground">A simple location-level snapshot. More platform metrics can be added here later.</p>
       </div>
 
