@@ -7,6 +7,7 @@ import { experienceFor } from "./experience";
 import { describeUrl, watchId } from "./watch";
 import { validateDeliveryPath } from "./delivery";
 import { screenDraft, screenInstruction, undescribed } from "./contract";
+import { playbookNames, playbookText, type PlaybookEdits } from "./playbook";
 import { assessDifficulty, autoApprovable, autoApprovePolicy, catalogSpec, proposalDraft, edgeSpec, id, jobSpec, nodeSpec, profilesSpec, selectProfile, validLease, canRevoke } from "./contract";
 
 export class BuildConflict extends Error {}
@@ -34,9 +35,19 @@ export async function snapshot() {
     db.buildJob.findMany({ orderBy: { createdAt: "desc" }, take: 200 }),
   ]);
   // Lease tokens are only delivered to authenticated workers, never the browser.
-  return { control, nodes, edges, jobs: jobs.map(({ leaseToken, ...job }) => ({ ...job, checkpoint: summarizeCheckpoint(job.checkpoint) })), execution: "Inspection available. Subscription CLI review and isolated delivery require explicit Mac worker opt-in. No merge or deploy" };
+  // Guidance documents are listed here and fetched one at a time (see guidanceDoc).
+  const { docs, ...worker } = (control?.worker ?? {}) as { docs?: { files?: { path: string; text: string }[]; at?: string } };
+  const listed = control && { ...control, worker: { ...worker, docs: { at: docs?.at, files: (docs?.files ?? []).map(f => ({ path: f.path, size: f.text.length })) } } };
+  return { control: listed, nodes, edges, jobs: jobs.map(({ leaseToken, ...job }) => ({ ...job, checkpoint: summarizeCheckpoint(job.checkpoint) })), execution: "Inspection available. Subscription CLI review and isolated delivery require explicit Mac worker opt-in. No merge or deploy" };
+}
+export async function guidanceDoc(path: string) {
+  const control = await db.buildControl.findUnique({ where: { id: "build" } });
+  const file = ((control?.worker as { docs?: { files?: { path: string; text: string }[] } } | undefined)?.docs?.files ?? []).find(f => f.path === path);
+  if (!file) throw new BuildConflict("Document not reported by the Mac");
+  return file;
 }
 export const operatorCommand = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("playbook"), name: z.enum(playbookNames), text: z.string().trim().min(20).max(8000).optional(), reset: z.literal(true).optional() }).strict(),
   z.object({ action: z.literal("pause"), paused: z.boolean() }).strict(),
   z.object({ action: z.literal("daily"), enabled: z.boolean(), profileId: id }).strict(),
   z.object({ action: z.literal("recheck"), bucket: id, evidence: z.string().min(10).max(2000) }).strict(),
@@ -69,6 +80,15 @@ export async function operator(input: z.infer<typeof operatorCommand>, actor: st
         const meta = control.worker as { quotaBuckets?: Record<string, unknown> };
         const buckets = { ...meta.quotaBuckets }; delete buckets[input.bucket];
         return tx.buildControl.update({ where: { id: "build" }, data: { worker: json({ ...meta, quotaBuckets: buckets, capacityRecheck: { actor, evidence: input.evidence, at: new Date().toISOString() } }) } });
+      }
+      case "playbook": {
+        // One level of undo: the text it replaced is kept as previous.
+        const meta = control.worker as { playbook?: PlaybookEdits };
+        const edits = { ...meta.playbook };
+        requireCondition(input.reset || input.text, "Write the new text or reset to the default");
+        if (input.reset) delete edits[input.name];
+        else edits[input.name] = { text: input.text!, at: new Date().toISOString(), previous: playbookText(meta.playbook, input.name) };
+        return tx.buildControl.update({ where: { id: "build" }, data: { worker: json({ ...meta, playbook: edits }) } });
       }
       case "pause": return tx.buildControl.update({ where: { id: "build" }, data: { paused: input.paused } });
       case "profiles": {
@@ -272,6 +292,7 @@ function standingCurrent(control: { worker: unknown }, approval: unknown) {
 
 export const workerCommand = z.discriminatedUnion("action", [
   z.object({ action: z.literal("poll"), workerId: id, catalog: catalogSpec.optional() }).strict(),
+  z.object({ action: z.literal("docs"), workerId: id, files: z.array(z.object({ path: z.string().regex(/^[a-zA-Z0-9._/-]{1,200}$/), text: z.string().max(60000) }).strict()).max(20) }).strict(),
   z.object({ action: z.literal("watch-report"), workerId: id, results: z.array(z.object({ id, latest: z.string().max(200).optional(), summary: z.string().max(600) }).strict()).max(20) }).strict(),
   z.object({ action: z.literal("claim"), workerId: id, review: z.boolean().optional(), implementation: z.boolean().optional() }).strict(),
   z.object({ action: z.literal("heartbeat"), workerId: id, id, token: z.string().uuid(), checkpoint: checkpointSpec }).strict(),
@@ -285,6 +306,11 @@ export async function worker(input: z.infer<typeof workerCommand>) {
     // Expiry is not evidence the old writer stopped. Never automatically retry these jobs.
     await tx.buildJob.updateMany({ where: { state: { in: ["working", "stopping"] }, leaseUntil: { lte: now } }, data: { state: "blocked-lease-expired" } });
     if (input.action === "poll" && input.catalog) await tx.buildControl.update({ where: { id: "build" }, data: { worker: json({ ...(control.worker as object), id: input.workerId, lastSeenAt: now.toISOString(), execution: "inspection / opt-in T3 threads", quota: "unknown", catalog: input.catalog, catalogAt: now.toISOString() }) } });
+    if (input.action === "docs") {
+      const meta = (await tx.buildControl.findUniqueOrThrow({ where: { id: "build" } })).worker as object;
+      await tx.buildControl.update({ where: { id: "build" }, data: { worker: json({ ...meta, docs: { at: now.toISOString(), files: input.files } }) } });
+      return { ok: true };
+    }
     if (input.action === "watch-report") {
       for (const r of input.results) {
         const node = await tx.buildNode.findUnique({ where: { id: r.id } });
@@ -326,7 +352,8 @@ export async function worker(input: z.infer<typeof workerCommand>) {
           state: "working", workerId: input.workerId, leaseToken: randomUUID(), leaseUntil: new Date(now.getTime() + 60000),
           attempt: json({ profile, policyRevision: control.revision, startedAt: now.toISOString(), routingReason: prior?.nextProfileId ? "approved fallback after confirmed stopped writer" : "approved primary", quota: "unknown", count: (prior?.count ?? 0) + 1, exhaustedBuckets: prior?.exhaustedBuckets ?? [], history: prior?.history ?? [] }),
         } });
-        return { job: { ...claimed, context: await contextFor(tx, spec.nodeIds) } };
+        const edits = (control.worker as { playbook?: PlaybookEdits }).playbook;
+        return { job: { ...claimed, context: await contextFor(tx, spec.nodeIds) }, playbook: { task: playbookText(edits, "task"), review: playbookText(edits, "review") } };
       }
       return { job: null };
     }

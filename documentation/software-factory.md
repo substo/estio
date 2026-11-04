@@ -1,12 +1,12 @@
 # Software factory (Build)
 
-The one place to read before working on Estio's software factory. It explains what it is, how it works, what the system decides, and where it is heading. The same content appears in Build on the **How it works** tab, rendered from `lib/build/factory-guide.ts`; keep the two in step. Operational setup, safety fences and test evidence are in [Build workspace](build-workspace.md). Current release state is in [current status](current-status.md).
+The one place to read before working on Estio's software factory. It explains what it is, how it works, what the system decides, and where it is heading. Build shows a short version under Settings › How Build works, from `lib/build/factory-guide.ts`; keep the two in step. Operational setup, safety fences and test evidence are in [Build workspace](build-workspace.md). Current release state is in [current status](current-status.md).
 
 ## What it is
 
 A way for the owner to move Estio/Substo forward with as little effort and attention as possible. The system notices what could be better, proposes it, does the approved work, and shows the result. The owner gives feedback and keeps a few gates. The long-term goal is an autonomous loop.
 
-- **Build** (`/admin/platform/build`, platform admin only) is the ledger and dashboard: the experience map, proposals, approvals, work, results and approved models.
+- **Build** (`/admin/platform/build`, platform admin only) is one page, top to bottom: **Talk** (a conversation with an agent instead of forms), **Needs you** (only what waits on the owner, with the decision inline), **The app** (five section tiles showing how much is described and in work, with drill-down to screens), **Progress** (Next · Now · Done), and **Playbook** (the agents' instructions, editable, plus the repository's guidance and skills, read-only). Models, autopilot and the daily review sit behind **Settings**.
 - **The Mac worker** (`scripts/build-worker.ts`, LaunchAgent `co.estio.build-worker`) connects outbound to Build, scans the repository and runs approved work.
 - **T3 Code is the executor.** Each assignment becomes a visible T3 thread on its own `build/…` branch worktree, so the owner can watch, steer or answer it. Starting a thread is a local `t3` command, not a model turn. This plays the role Archon plays in Cole Medin's factory.
 - **The fence** (`lib/build/delivery.ts`) checks every result: only the approved files changed, no commits, no symlinks or secrets.
@@ -19,6 +19,16 @@ A way for the owner to move Estio/Substo forward with as little effort and atten
 4. **Gates stay with the owner** for irreversible or outward actions: merge, deploy, spending, and approving a new model. Everything else should become policy over time.
 5. **Honest evidence.** Results are local branches with verified diffs. Failures are reported as failures, and nothing is claimed as released until it is deployed.
 
+## Talk
+
+The owner says what they want on the Build page (or in T3). The Mac worker relays each message to one T3 thread per conversation, titled "Talk: …", in its own worktree at the latest scanned code. The thread is told to plan only, never edit. The worker syncs the thread's messages back every few seconds while it runs, so the conversation can continue in T3 and still show on the page. A reply takes a few seconds longer than in T3 because the Mac relays it.
+
+The agent brainstorms, asks at most three short questions at a time and reads the code. When the owner agrees, it ends a message with a `{"plan":[…]}` block. The page shows it as task cards with one **Start**. Start approves every task (server-decided difficulty and model, tied to mapped files where they exist), and resumes a paused queue. Each task then runs like any other: its own T3 thread and branch, the fence, results under Needs you. "Ask or change something here" on a screen, and "Ask for a change to this file" on a guidance document, open a new conversation with that context. Code: `lib/build/talk.ts` (server), `talkTurn` in `lib/build/t3.ts` (worker), `app/(main)/admin/platform/build/talk.tsx` (page). Conversations are stored in `BuildTalk`.
+
+## Playbook
+
+The instructions Build sends are shown on the page and editable: **Talking with you**, **Doing a task** and **Daily review** (`lib/build/playbook.ts` has the defaults; edits are stored on BuildControl with the previous version kept). New threads use the current text. The formats Build parses (plan and proposal json, screen drafts) are appended separately, so an edit can't break them. Repository guidance (`AGENTS.md`, this page, `build-workspace.md`, `video-editor/AGENTS.md`) and skills (`.agents/skills/*/SKILL.md`) are reported by the Mac when they change and shown read-only; changing them is a task, so it lands on a branch.
+
 ## The loop
 
 ```
@@ -28,31 +38,35 @@ notice ──► propose ──► approve ──► implement ──► review 
  owner)                 policy)     worktree)     the branch)
 ```
 
+- **Talk:** the owner's own ideas start as a conversation (see Talk) and become started tasks.
 - **Notice:** the opt-in daily read-only review checks one stale screen per day (a screen linked to an updated watch-list item goes first). Every review ends with up to three structured proposals, which become **unapproved cards** automatically. A daily review is then marked done, because its cards are the output. The owner can also add ideas.
 - **Propose:** a card with outcome, reason, scope files and acceptance criteria. On creation the server assesses difficulty (`assessDifficulty` in `lib/build/contract.ts`) and picks the model.
-- **Approve:** one click by the owner, or **policy auto-approval** (see Capabilities). The mode is Off / Record only / On, set in How it works › Your setup. Record only marks each new card "Policy would approve" or "needs you (reasons)" without acting.
+- **Approve:** one click by the owner, or **policy auto-approval** (see Capabilities). Autopilot is Off / Watching (record only) / On, set in Settings. Watching marks each new card "Policy would approve" or "needs you (reasons)" without acting.
 - **Implement:** the worker claims the card and starts a T3 thread at the approved commit. When the thread is idle, the fence verifies the result.
-- **Review and feedback:** the card shows the result. The owner either **accepts** (optionally with a note) or writes what should change and presses **Redo with this note**. A redo is a fresh approval of the same scope. The worker sends only the note to the **same T3 thread** in the same worktree, so the model keeps its context, tokens stay low, and the whole conversation is visible in T3. Failed results can be redone the same way. Merge and deploy remain manual (`deploy-local-build.sh`).
+- **Review and feedback:** the card shows the result. The owner either **accepts** or presses **Redo…** and writes what should change. A redo is a fresh approval of the same scope. The worker sends only the note to the **same T3 thread** in the same worktree, so the model keeps its context, tokens stay low, and the whole conversation is visible in T3. Failed results can be redone the same way. Merge and deploy remain manual (`deploy-local-build.sh`).
 
 ## Capabilities
 
-| Capability | Status | What the system decides | What you decide | In Build |
+| Capability | Status | What the system decides | What you decide | On the page |
 |---|---|---|---|---|
-| Experience map | Live | Screens from routes; stale marking on code changes | Optional renames and features | Product map |
-| Daily review | Live (opt-in) | Which screen; up to three proposals | Turn it on | Decisions & work |
-| Findings become proposals | Live | Validation, difficulty, model; closes the daily review | Which cards to approve | Decisions & work |
-| Difficulty and model choice | Live | Everything | Nothing | Each card |
-| Policy auto-approval | Record only by default | Judges each new card: implementation, Routine, 3 files or fewer, no sensitive area, 5 criteria or fewer, an approved model available, 3 a day | Off / Record only / On | How it works › Your setup |
+| Talk | Live | Model for the conversation; difficulty and model per task; resumes the queue on Start | What you want; Start | Talk |
+| Needs you | Live | Collects only what waits on you: results, questions, failures, stuck tasks, suggestions, screen drafts, watch updates, setup gaps | The decision shown inline | Needs you |
+| Experience map | Live | Screens from routes; stale marking on code changes | Nothing; ask in Talk to change a screen | The app |
+| Daily review | Live (opt-in) | Which screen; its model; up to three suggestions | Turn it on | Settings |
+| Findings become suggestions | Live | Validation, difficulty, model; closes the daily review | Start or Not now | Needs you |
+| Difficulty and model choice | Live | Everything | Nothing | Progress cards |
+| Autopilot (policy auto-approval) | Off by default | Judges each new suggestion: implementation, Routine, 3 files or fewer, no sensitive area, 5 criteria or fewer, an allowed model available, 3 a day | Off / Watching / On | Settings |
 | T3 execution | Live | Starts, watches and stops threads | Watch, steer or answer if you like | T3 sidebar |
-| Safety fence | Live | Verifies every result | Nothing | Card evidence |
-| Feedback and redo | Live | Re-approves the same scope and continues the thread | Accept, or write a note | Result cards |
-| Approved models | Live | Keeps the catalog current | Allow models once (Routine or Hard) | Model profiles |
-| Watch list | Live | Daily GitHub update checks that feed the daily review | Paste links; mark adopted or not for us | Watch list |
-| Screen descriptions | Live | Drafts purpose, journey and up to 5 features in the daily review's own run; undescribed screens go first | Confirm (adds features) or discard | Product map |
-| For you (attention queue) | Live | Collects and orders what needs you (blocked, questions, results, proposals, drafts, watch updates, setup gaps); shows one at a time | Act on it, or choose Later | For you (default tab) |
+| Safety fence | Live | Verifies every result | Nothing | Result details |
+| Feedback and redo | Live | Re-approves the same scope and continues the thread | Accept, or Redo with a note | Needs you |
+| Allowed models | Live | Keeps the catalog current | Allow models once (everyday or hard tasks) | Settings |
+| Watching for ideas | Live | Daily GitHub update checks that feed the daily review | Add a link and why; mark adopted or not for us | The app › Watching for ideas |
+| Screen descriptions | Live | Drafts purpose, journey and up to 5 features in the daily review's own run; undescribed screens go first | Yes or No | Needs you |
+| Playbook | Live | Appends the formats it parses | Edit the instructions; read guidance and skills | Playbook |
+| Progress | Live | Next · Now · Done with section, difficulty, model and branch | Nothing | Progress |
 | Merge and deploy | Stays with you | Never merges or deploys | Merge and deploy | Git / `deploy-local-build.sh` |
 
-Auto-approved cards carry `approval.actor = "policy"` and `approval.auto = true`. They bind the same revisions as an owner approval and show "Approved by policy". The policy is `autoApprovable` and `autoApprovePolicy` in `lib/build/contract.ts`. It is evaluated on every new proposal (owner or review) by `autoDecide` in `lib/build/store.ts`. Widen it only after Record only shows good judgement.
+Auto-approved cards carry `approval.actor = "policy"` and `approval.auto = true`. They bind the same revisions as an owner approval and show "Approved by policy". The policy is `autoApprovable` and `autoApprovePolicy` in `lib/build/contract.ts`. It is evaluated on every new proposal (owner or review) by `autoDecide` in `lib/build/store.ts`. Widen it only after Watching shows good judgement.
 
 ## The experience map
 
@@ -61,39 +75,39 @@ The product as users see it, not as files: **section › area › screen › fea
 - **Sections:** CRM (`/admin`), Studio (`/studio`), Public website (`/[domain]`, `/sites`, `/widget`), Platform admin (`/admin/platform`), Account & onboarding (everything else). Both apps (Estio and Substo, chosen by domain) share every screen.
 - **Screens** are derived from every Next.js `page.tsx` route by `lib/build/experience.ts`, with no model call. For example `/admin/conversations/[id]` becomes "CRM › Conversations › Detail". On 2026-11-03 this produced 142 screens in 61 areas.
 - **Features and journeys** sit under screens. The daily review drafts them as it reviews each screen, in the same run with no extra model turn, and screens with no description go first. A draft is kept separately (`draft`) and is never approved intent. **Confirm** makes it the screen's description and approved intent and adds its features as feature records (`contains` links). **Discard** removes it. The owner can still add or edit features by hand.
-- **Code files** stay attached as evidence ("Also show code files"). Import links let a change to shared code mark every screen that uses it stale.
-- The owner can rename a screen and the name is kept (`naming: "owner"`). The worker re-scans whenever the repository changes, even while the queue is paused, because scanning is read-only and costs no tokens.
+- **Code files** stay attached as evidence and are not shown. Import links let a change to shared code mark every screen that uses it stale.
+- On the page each section is a tile; the bar fills as screens get described. Tapping a tile lists its areas and screens; a screen shows its description, features, task history and watched links. Changes go through Talk. Owner renames are kept (`naming: "owner"`). The worker re-scans whenever the repository changes, even while the queue is paused, because scanning is read-only and costs no tokens.
 
 ## Models
 
 - The worker reports T3's current model catalog on every poll, read from T3's own model manifest. New releases and newly enabled providers appear automatically as **Not allowed**.
-- The owner approves models once on the Model profiles tab and sets each to Routine or Hard. Guidance notes in `lib/build/model-guidance.ts` suggest a level. Only approved models ever run.
+- The owner allows models once in Settings, each for everyday (Routine) or hard tasks. Guidance notes in `lib/build/model-guidance.ts` suggest a level. Only approved models ever run.
 - Routing picks an approved model at the task's assessed difficulty, then any other approved model. When a subscription limit is hit, it falls back to the other provider.
 - Effort is T3's default for each model, because the T3 command line cannot set it.
 
 ## How to work on the factory
 
-- **Propose a change** in conversation or as a Build card on the "Platform admin › Build" screen. Say what friction it removes and whether the system could decide it instead of the owner.
+- **Propose a change** in Talk on the Build page, or in conversation. Say what friction it removes and whether the system could decide it instead of the owner.
 - **Agree before building.** The owner approves direction (see the roadmap). Record each decision in the decision log below and, where relevant, in `how-the-app-works.md`.
 - **Keep it small and reusable.** Reuse Build's tables (BuildNode, BuildEdge, BuildJob, BuildControl) before adding new ones. Keep one name per concept.
-- **Update How it works.** Every factory change updates `lib/build/factory-guide.ts` (the in-app tab) and this page: the Capabilities table, the roadmap and the decision log.
+- **Keep the page simple.** No new tabs or forms; anything the owner should understand goes here, and the page stays conversation-first. Every factory change updates this page (Capabilities, roadmap, decision log) and, if the loop changes, `lib/build/factory-guide.ts`.
 - **Verify, then deploy.** Run the focused tests (`npx tsx --test lib/build/*.test.ts`). Deploy with the owned workflow from the isolated release checkout (see current status), and update [Build workspace](build-workspace.md) with the evidence.
 
 ## Roadmap
 
-Done: T3 executor; catalog-driven model approval; system-decided difficulty, model and fallback; experience map from routes; opt-in daily review; watch list; feedback on results; review findings become proposals; policy auto-approval (record-only first); How it works tab; screen descriptions drafted by the daily review; For you attention queue.
+Done: T3 executor; catalog-driven model approval; system-decided difficulty, model and fallback; experience map from routes; opt-in daily review; watch list; feedback on results; review findings become proposals; policy auto-approval (record-only first); screen descriptions drafted by the daily review; conversation-first redesign (Talk, one page, Playbook) replacing the tabs and forms.
 
 The planned roadmap is complete. Candidates for next, none agreed yet:
 
 1. **Learning from feedback** ("prompts over settings", from DeepSeek): recurring redo and accept notes become standing guidance added to future prompts, which the owner can review.
 2. **Widen auto-approval** once Record only has shown good calls, for example to small reviews or a larger daily budget.
 3. **Merge assist:** after Accept, prepare the branch for merge (rebase on the release branch, run focused tests) and leave the final merge and deploy to the owner.
-4. **Notifications:** a single phone notification when something reaches the top of For you, with nothing else sent.
+4. **Notifications:** a single phone notification when something new appears under Needs you, with nothing else sent.
 
 ## Inspiration and watch list
 
-External references and what we take from them. **Live in Build → Watch list** (built 2026-11-03):
-- Paste any link (GitHub, YouTube, any site) with an optional note on what to take, and link it to the screens it could improve. The table's suggested references can be added in one click.
+External references and what we take from them. **Live in Build → The app › Watching for ideas** (built 2026-11-03):
+- Add any link (GitHub, YouTube, any site) with why it's interesting. Each item shows why it's here and which screens it could improve. Suggested references can be added in one click.
 - Each item is a BuildNode with `kind: "reference"` and `inspires` links to screens, with status watching / adopted / not for us.
 - GitHub repos are checked once a day by the Mac worker (`checkGithub` in `lib/build/watch.ts`: plain API calls, no model, no credentials). The first check is the baseline, and later changes show as "Updated" until marked as seen.
 - If the daily review is enabled, a changed reference with a linked screen takes priority. That review gets the change and the owner's note, and says what, if anything, the screen should adopt. Each change is queued once.
@@ -120,3 +134,4 @@ External references and what we take from them. **Live in Build → Watch list**
 - 2026-11-04: Policy auto-approval (Off / Record only / On), narrow deterministic rule, 3 a day; How it works tab mirrors this page.
 - 2026-11-04: Screen descriptions (purpose, journey, features) drafted inside the daily review run; owner confirms or discards.
 - 2026-11-04: For you is Build's default view: only what needs the owner, one at a time, with Later.
+- 2026-11-04: Owner rejected the tabbed, form-based page as over-engineered. Build is conversation-first: Talk replaces forms, one page replaces six tabs (Needs you, The app, Progress, Playbook), settings move behind one button, and explanations live here rather than in the page. The agents' instructions are editable on the page; repository guidance and skills are shown read-only.

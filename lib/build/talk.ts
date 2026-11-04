@@ -5,7 +5,7 @@ import { z } from "zod";
 import { extractPlan, id, jobSpec, profilesSpec, proposalDraft, selectProfile, difficulty, type JobSpec } from "./contract";
 import { validateDeliveryPath } from "./delivery";
 import { approveJob, json, mutate, requireCondition, routed } from "./store";
-import { ownerDelimiter, talkPlaybook } from "./playbook";
+import { ownerDelimiter, talkPrompt, type PlaybookEdits } from "./playbook";
 
 /**
  * Build conversations. The owner writes on the Build page; the Mac worker relays each turn to one T3 thread and syncs the
@@ -93,7 +93,8 @@ export const talkWorkerCommand = z.discriminatedUnion("action", [
 export async function talkWorker(input: z.infer<typeof talkWorkerCommand>) {
   if (input.action === "talk-poll") {
     const open = await db.buildTalk.findMany({ where: { state: { in: ["queued", "thinking"] } }, orderBy: { updatedAt: "asc" }, take: 10 });
-    return { talks: open.map(t => ({ id: t.id, title: t.title, threadId: t.threadId, base: t.base, profile: t.profile, playbook: talkPlaybook, delimiter: ownerDelimiter,
+    const edits = open.length ? ((await db.buildControl.findUnique({ where: { id: "build" } }))?.worker as { playbook?: PlaybookEdits } | undefined)?.playbook : undefined;
+    return { talks: open.map(t => ({ id: t.id, title: t.title, threadId: t.threadId, base: t.base, profile: t.profile, playbook: talkPrompt(edits), delimiter: ownerDelimiter,
       unsent: messagesOf(t.messages).filter(m => m.role === "owner" && m.sent === false).map(m => ({ id: m.id, text: m.text })) })) };
   }
   return db.$transaction(async tx => {

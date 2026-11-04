@@ -1,13 +1,15 @@
 import { getPlatformAdminContext } from "@/lib/auth/platform-access";
 import { sameOrigin } from "@/lib/build/contract";
 import { body, failure, response } from "@/lib/build/http";
-import { operator, operatorCommand, snapshot } from "@/lib/build/store";
+import { guidanceDoc, operator, operatorCommand, snapshot } from "@/lib/build/store";
 import { talkOwner, talkOwnerCommand, talks } from "@/lib/build/talk";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export async function GET() {
+export async function GET(request: Request) {
   if (!await getPlatformAdminContext()) return response({ error: "Forbidden" }, 403);
-  try { const [state, conversations] = await Promise.all([snapshot(), talks()]); return response({ ...state, talks: conversations }); } catch (error) { return failure(error); }
+  try {
+    const doc = new URL(request.url).searchParams.get("doc");
+    if (doc) return response(await guidanceDoc(doc)); const [state, conversations] = await Promise.all([snapshot(), talks()]); return response({ ...state, talks: conversations }); } catch (error) { return failure(error); }
 }
 export async function POST(request: Request) {
   const actor = await getPlatformAdminContext();

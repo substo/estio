@@ -7,10 +7,12 @@ import { modelGuidance, unknownGuidance } from "@/lib/build/model-guidance";
 import { suggestedReferences } from "@/lib/build/watch-suggestions";
 import { loop } from "@/lib/build/factory-guide";
 import { TalkPanel, type Talk } from "./talk";
+import { Playbook } from "./playbook";
+import type { PlaybookEdits } from "@/lib/build/playbook";
 
 type Node = { id: string; revision: number; spec: z.infer<typeof nodeSpec>; updatedAt: string };
 type Job = { id: string; key: string; revision: number; state: string; spec: z.infer<typeof jobSpec>; checkpoint: unknown; attempt: unknown; approval: unknown; createdAt: string; updatedAt: string };
-type Worker = { daily?: { enabled: boolean; profileId: string; lastRunDate?: string }; quotaBuckets?: Record<string, { observedAt: string; reset: string }>; catalog?: CatalogModel[]; catalogAt?: string; autoApprove?: { mode: "off" | "record" | "on" }; head?: string; id?: string; lastSeenAt?: string };
+type Worker = { daily?: { enabled: boolean; profileId: string; lastRunDate?: string }; quotaBuckets?: Record<string, { observedAt: string; reset: string }>; catalog?: CatalogModel[]; catalogAt?: string; autoApprove?: { mode: "off" | "record" | "on" }; head?: string; id?: string; lastSeenAt?: string; playbook?: PlaybookEdits; docs?: { at?: string; files: { path: string; size: number }[] } };
 type Data = { control: { paused: boolean; revision: number; profiles: Profile[]; worker: Worker } | null; nodes: Node[]; edges: { fromId: string; toId: string; kind: string }[]; jobs: Job[]; talks?: Talk[] };
 type Send = (command: unknown) => Promise<boolean>;
 type Checkpoint = { reason?: string; nextStep?: string; result?: { text?: string; needsAnswer?: boolean }; t3?: { threadId?: string; branch?: string }; feedback?: { at: string; decision: string; note: string; sentAt?: string }[]; auto?: { wouldApprove: boolean; reasons: string[] }; proposalsCreated?: number };
@@ -60,6 +62,7 @@ export default function BuildWorkspace() {
     {data && <NeedsYou data={data} busy={busy} send={send} online={online} openSettings={() => setSettings(true)} />}
     {data && <AppMap data={data} busy={busy} send={send} ask={ask} />}
     {data && <Progress data={data} />}
+    {data && <Playbook edits={w?.playbook} docs={w?.docs?.files ?? []} busy={busy} send={send} ask={ask} />}
   </main>;
 }
 
@@ -141,7 +144,7 @@ function AppMap({ data, busy, send, ask }: { data: Data; busy: boolean; send: Se
       className={`rounded-lg border p-3 text-left hover:bg-muted/50 ${open === s.name ? "ring-2 ring-primary" : ""}`}>
       <p className="text-sm font-semibold">{s.name}</p>
       <div className="my-2 flex h-1.5 overflow-hidden rounded-full bg-muted"><span className="bg-primary" style={{ width: `${s.list.length ? (s.described / s.list.length) * 100 : 0}%` }} />{s.working > 0 && <span className="w-2 bg-amber-500" />}</div>
-      <p className="text-xs text-muted-foreground">{s.list.length} screens · {s.described} described{s.working ? ` · ${s.working} in work` : ""}</p>
+      <p className="text-xs text-muted-foreground">{s.list.length} screen{s.list.length === 1 ? "" : "s"} · {s.described} described{s.working ? ` · ${s.working} in work` : ""}</p>
     </button>)}</div>
     <p className="text-xs text-muted-foreground">The bar fills as screens get described; the daily review describes one a day. Tap a section to see its screens.</p>
     {current && <div className="space-y-3 rounded-lg border p-3">
@@ -204,8 +207,8 @@ function Progress({ data }: { data: Data }) {
   const screenName = (j: Job) => { const n = data.nodes.find(n => j.spec.nodeIds.includes(n.id) && n.spec.kind === "page"); return n ? `${n.spec.section} › ${n.spec.name}` : j.spec.scope[0]; };
   const columns: [string, Job[]][] = [
     ["Next", data.jobs.filter(j => ["proposed", "approved"].includes(j.state))],
-    ["Now", data.jobs.filter(j => ["working", "stopping"].includes(j.state) || (j.state === "review" && cp(j).result?.needsAnswer))],
-    ["Done", data.jobs.filter(j => j.state === "done" || (j.state === "review" && !cp(j).result?.needsAnswer)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))],
+    ["Now", data.jobs.filter(j => ["working", "stopping", "review"].includes(j.state))],
+    ["Done", data.jobs.filter(j => j.state === "done").sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))],
   ];
   return <section className="space-y-2">
     <h2 className={label}>Progress</h2>
