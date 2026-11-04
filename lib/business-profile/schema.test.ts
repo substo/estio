@@ -68,3 +68,8 @@ test('business name and timezone remain exclusively on Location', () => {
     assert.equal(schema.safeParse({ schemaVersion: 1, identity: { displayName: known('Business') } }).success, false);
     assert.equal(schema.safeParse({ schemaVersion: 1, contact: { timeZone: known('Europe/Nicosia') } }).success, false);
 });
+
+test('phone numbers accept common written formats and reject junk', () => {
+    for (const number of ['+357 99 123456', '22 123456', '+44 (20) 7946-0958']) assert.ok(schema.safeParse({ schemaVersion: 1, contact: { phones: known([{ number: known(number) }]) } }).success, number);
+    for (const number of ['123', 'call me', '+-']) assert.equal(schema.safeParse({ schemaVersion: 1, contact: { phones: known([{ number: known(number) }]) } }).success, false, number);
+});

@@ -28,7 +28,7 @@ const list = <T extends z.ZodTypeAny>(entry: T) => fact(z.array(entry).max(100))
 const strings = () => list(stringFact);
 const section = <T extends z.ZodRawShape>(shape: T) => z.object(shape).partial().strict();
 const address = section({ formatted: stringFact, line1: stringFact, line2: stringFact, city: stringFact, region: stringFact, postalCode: stringFact, countryCode: fact(z.string().regex(/^[A-Z]{2}$/)) });
-const phone = section({ label: stringFact, number: fact(z.string().regex(/^\+[1-9]\d{6,14}$/, 'Use E.164 format')), extension: fact(z.string().regex(/^\d{1,10}$/)) });
+const phone = section({ label: stringFact, number: fact(z.string().regex(/^\+?[0-9][0-9 ()\-.]{5,24}$/, 'Use a phone number with digits, spaces or + ( ) - .')), extension: fact(z.string().regex(/^\d{1,10}$/)) });
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 const interval = z.object({ opens: fact(time), closes: fact(time), closesNextDay: fact(z.boolean()).optional() }).strict();
 const hours = z.object({ day: fact(z.enum(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'])), closed: fact(z.boolean()), intervals: list(interval) }).strict().superRefine((value, ctx) => {
