@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { experienceFor } from "./experience";
 import { describeUrl, watchId } from "./watch";
-import { validateDeliveryPath } from "./delivery";
+import { validateScopeEntry } from "./delivery";
 import { screenDraft, screenInstruction, undescribed } from "./contract";
 import { playbookNames, playbookText, type PlaybookEdits } from "./playbook";
 import { memoryHeading, memoryText, remember, type MemoryEntry, type MemoryKind } from "./memory";
@@ -475,7 +475,7 @@ export async function worker(input: z.infer<typeof workerCommand>) {
       const created: string[] = []; let rejected = 0;
       for (const [i, raw] of input.checkpoint.proposals.slice(0, 3).entries()) {
         const draft = proposalDraft.safeParse(raw);
-        if (!draft.success || draft.data.scope.some(f => { try { validateDeliveryPath(f); return false; } catch { return true; } })) { rejected++; continue; }
+        if (!draft.success || draft.data.scope.some(f => { try { validateScopeEntry(f); return false; } catch { return true; } })) { rejected++; continue; }
         const key = `from-${job.id}-${i}`;
         const proposal = await routed(tx, control, jobSpec.parse({ ...draft.data, reason: `Suggested by review "${spec.title}": ${draft.data.reason}`.slice(0, 4000), nodeIds: spec.nodeIds,
           baseRevision: /^[a-f0-9]{40}$/.test(head ?? "") ? head : spec.baseRevision, endpoint: "review", taskType: "implementation", profileId: "auto", quality: 2, tools: ["git-read", "code-write"], owner: "estio-build" }));

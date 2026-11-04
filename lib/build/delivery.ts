@@ -32,6 +32,27 @@ export function validateDeliveryPath(file: string) {
   if (!file || !/^[a-zA-Z0-9_./@+()[\] -]+$/.test(file) || path.isAbsolute(file) || parts.some(p => !p || p === "." || p === ".." || /^\.git(?:$|modules$|config$)/i.test(p) || /^\.env/i.test(p) || /secret|credential/i.test(p) || /^(?:id_rsa|id_ed25519)$|\.(?:pem|key|p12|pfx)$/i.test(p)))
     throw new Error(`Unsafe delivery file path: ${file}`);
 }
+/**
+ * A scope entry is an explicit file or a folder ending in "/" that covers every file beneath it (new files included).
+ * Folders need at least two levels, so a whole top-level tree like "app/" is never one entry.
+ */
+export function validateScopeEntry(entry: string) {
+  if (!entry.endsWith("/")) return validateDeliveryPath(entry);
+  const folder = entry.slice(0, -1);
+  validateDeliveryPath(folder);
+  if (folder.split("/").length < 2) throw new Error(`Folder scope is too broad: ${entry}`);
+}
+export const inScope = (file: string, scope: string[]) => scope.some(s => s === file || (s.endsWith("/") && file.startsWith(s)));
+async function safeScope(root: string, entry: string) {
+  if (!entry.endsWith("/")) return safeFile(root, entry);
+  validateScopeEntry(entry);
+  let current = root;
+  for (const part of entry.slice(0, -1).split("/")) {
+    current = path.join(current, part);
+    const info = await exists(current);
+    if (info && (info.isSymbolicLink() || !info.isDirectory())) throw new Error(`Delivery folder is not a regular folder: ${entry}`);
+  }
+}
 async function safeFile(root: string, file: string) {
   validateDeliveryPath(file);
   let current = root;
@@ -51,8 +72,8 @@ async function privateDirectory(dir: string) {
 }
 async function context(input: Input) {
   const { spec } = input;
-  if (!/^[a-f0-9]{40}$/.test(spec.baseRevision) || !input.jobId || !Array.isArray(spec.scope) || !spec.scope.length || spec.scope.length > 30) throw new Error("Invalid delivery specification");
-  spec.scope.forEach(validateDeliveryPath);
+  if (!/^[a-f0-9]{40}$/.test(spec.baseRevision) || !input.jobId || !Array.isArray(spec.scope) || !spec.scope.length || spec.scope.length > 200) throw new Error("Invalid delivery specification");
+  spec.scope.forEach(validateScopeEntry);
   if (new Set(spec.scope).size !== spec.scope.length) throw new Error("Duplicate delivery scope");
   const checkout = await realpath(input.checkout);
   const common = await realpath((await git(checkout, "rev-parse", "--path-format=absolute", "--git-common-dir")).trim());
@@ -92,12 +113,12 @@ async function precheck(input: Input) {
   try { await git(c.checkout, "merge-base", "--is-ancestor", input.spec.baseRevision, "HEAD"); } catch { throw new Error("Approved base is not in the configured checkout's history"); }
   if ((await git(c.checkout, "ls-files", "-v", "-z", "--", ...input.spec.scope)).split("\0").some(entry => /^[a-zS] /.test(entry))) throw new Error("Approved source index conceals working files");
   if (await git(c.checkout, "status", "--porcelain=v1", "--untracked-files=all", "--ignored", "--", ...input.spec.scope)) throw new Error("Approved source files are dirty; reconcile uncommitted intent first");
-  for (const file of input.spec.scope) await safeFile(c.checkout, file);
+  for (const entry of input.spec.scope) await safeScope(c.checkout, entry);
   // A missing source file must not hide a symlink/submodule in the approved base.
   const tree = (await git(c.checkout, "ls-tree", "-r", "-z", input.spec.baseRevision)).split("\0");
   for (const entry of tree) {
     const [meta, file] = entry.split("\t");
-    if (/^(120000|160000) /.test(meta) && input.spec.scope.some(p => p === file || p.startsWith(file + "/"))) throw new Error("Approved base contains a symlink or submodule in scope");
+    if (/^(120000|160000) /.test(meta) && input.spec.scope.some(p => p === file || p.startsWith(file + "/") || (p.endsWith("/") && file.startsWith(p)))) throw new Error("Approved base contains a symlink or submodule in scope");
   }
   return c;
 }
@@ -142,7 +163,7 @@ export async function verifyDelivery(input: Input & { cwd: string }): Promise<De
     evidence.files = [...files].sort();
     let total = 0;
     for (const file of evidence.files) {
-      if (!input.spec.scope.includes(file)) errors.push(`Outside approved scope: ${file}`);
+      if (!inScope(file, input.spec.scope)) errors.push(`Outside approved scope: ${file}`);
       try {
         await safeFile(input.cwd, file);
         const info = await exists(path.join(input.cwd, file));

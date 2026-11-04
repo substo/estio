@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, realpath, rename, rm, stat, symlink, writeFil
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { adoptDelivery, prepareDelivery, validateDeliveryPath, verifyDelivery } from "./delivery";
+import { adoptDelivery, inScope, prepareDelivery, validateDeliveryPath, validateScopeEntry, verifyDelivery } from "./delivery";
 
 test("scope admits explicit relative files and rejects broad, secret and escaping paths", () => {
   for (const file of ["lib/build/delivery.ts", "app/(main)/[id]/page.tsx", "new-file.ts"]) assert.doesNotThrow(() => validateDeliveryPath(file));
@@ -104,5 +104,30 @@ test("a task can start after the checkout moved ahead of its base, but not from 
     assert.equal(git(cp.cwd, "rev-parse", "HEAD"), base);
     git(checkout, "checkout", "-q", "--orphan", "elsewhere"); git(checkout, "rm", "-rqf", "."); await writeFile(path.join(checkout, "x.txt"), "x\n"); git(checkout, "add", "."); git(checkout, "commit", "-qm", "unrelated");
     await assert.rejects(prepareDelivery({ checkout, root, jobId: "job-unrelated", spec: { baseRevision: base, scope: ["file.txt"] } }), /history/);
+  } finally { await rm(temp, { recursive: true, force: true }); }
+});
+
+test("folder scope covers new files beneath it and nothing else; top-level folders are refused", async () => {
+  assert.throws(() => validateScopeEntry("app/"), /broad/);
+  assert.throws(() => validateScopeEntry("lib/.env/"));
+  assert.doesNotThrow(() => validateScopeEntry("lib/business-profile/"));
+  assert.equal(inScope("lib/business-profile/schema.ts", ["lib/business-profile/"]), true);
+  assert.equal(inScope("lib/business-profile-x.ts", ["lib/business-profile/"]), false);
+  const temp = await mkdtemp(path.join(await realpath(os.tmpdir()), "delivery-folder-"));
+  const checkout = path.join(temp, "source"), root = path.join(temp, "private");
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "user.name=F", "-c", "user.email=f@localhost", ...args], { cwd, encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } }).trim();
+  try {
+    await mkdir(checkout); git(checkout, "init", "-q");
+    await writeFile(path.join(checkout, "keep.txt"), "x\n"); git(checkout, "add", "."); git(checkout, "commit", "-qm", "base");
+    const spec = { baseRevision: git(checkout, "rev-parse", "HEAD"), scope: ["lib/profile/"] };
+    const input = { checkout, root, jobId: "job-folder", spec };
+    const cp = await prepareDelivery(input);
+    await mkdir(path.join(cp.cwd, "lib/profile/nested"), { recursive: true });
+    for (const f of ["a.ts", "b.ts", "nested/c.ts"]) await writeFile(path.join(cp.cwd, "lib/profile", f), "export {};\n");
+    const ok = await verifyDelivery({ ...input, cwd: cp.cwd });
+    assert.equal(ok.ok, true, ok.errors.join("; ")); assert.equal(ok.files.length, 3);
+    await writeFile(path.join(cp.cwd, "keep.txt"), "changed\n");
+    const outside = await verifyDelivery({ ...input, cwd: cp.cwd });
+    assert.equal(outside.ok, false); assert.match(outside.errors.join(" "), /Outside approved scope: keep.txt/);
   } finally { await rm(temp, { recursive: true, force: true }); }
 });

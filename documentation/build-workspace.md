@@ -121,3 +121,7 @@ The owner rejected the six-tab, form-based page as over-engineered (see the deci
 
 The worker and `precheck` in `delivery.ts` required the Mac checkout's HEAD to equal a task's approved base, so merging one task (which fast-forwards the checkout) failed every task still queued. Each task runs in its own worktree created from its base, so the checkout now only has to contain the base (`git merge-base --is-ancestor`); merge assist puts the result on the latest release branch. A base outside the checkout's history is still refused. Tested in `delivery.test.ts`.
 
+## Scope by files or folders, no file-count cap (2026-11-04)
+
+The 10-file (planned tasks) and 30-file (approved tasks) caps were arbitrary and break on code split into many small files. A task's scope still lists everything it may change, and the fence still refuses anything else, but there is no count limit (up to 200 entries), and an entry ending in "/" covers every file beneath that folder, including new ones (`validateScopeEntry`, `inScope` in `delivery.ts`). Folders must be at least two levels deep. Size is handled by routing: more than 4 files or any folder makes an implementation Hard, and autopilot never starts folder-wide tasks. The planning agent is told that tasks in one plan start from the same code and can't see each other's changes, and that schema and data changes ship as a migration file or a dry-run script for the owner to apply at deploy. Tested in `delivery.test.ts`.
+

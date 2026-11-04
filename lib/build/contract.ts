@@ -46,7 +46,7 @@ export const profilesSpec = z.array(profileSpec).max(20).superRefine((v, ctx) =>
     ctx.addIssue({ code: "custom", message: "Profiles need unique IDs and existing, distinct fallback IDs" });
 });
 export const jobSpec = z.object({
-  title: text, outcome: text, reason: text, scope: z.array(text).min(1).max(30),
+  title: text, outcome: text, reason: text, scope: z.array(text).min(1).max(200),
   nodeIds: z.array(id).max(30), acceptance: z.array(text).min(1).max(20),
   baseRevision: z.string().regex(/^[a-f0-9]{40}$/), endpoint: z.literal("review"),
   taskType: z.enum(["inspect", "implementation", "review"]), profileId: id,
@@ -65,6 +65,8 @@ export function assessDifficulty(spec: Pick<JobSpec, "taskType" | "scope" | "acc
   if (spec.taskType === "inspect") return { quality: difficulty.routine, routing: "Routine: repository inspection, no model call" };
   const reasons: string[] = [];
   if (spec.scope.length > (spec.taskType === "review" ? 10 : 4)) reasons.push(`${spec.scope.length} files`);
+  const folder = spec.scope.find(f => f.endsWith("/"));
+  if (folder && spec.taskType === "implementation") reasons.push(`whole folder ${folder}`);
   const hit = spec.scope.find(f => sensitive.test(f));
   if (hit && spec.taskType === "implementation") reasons.push(`touches ${hit}`);
   if (dependents > 20 && spec.taskType === "implementation") reasons.push(`${dependents} dependent links`);
@@ -109,10 +111,10 @@ export function sameOrigin(request: Request) {
 // Review → proposals. Reviews end with a fenced json block {"proposals":[...]}; drafts are data, never approval.
 export const proposalDraft = z.object({
   title: z.string().trim().min(3).max(200), outcome: z.string().trim().min(3).max(2000), reason: z.string().trim().min(3).max(2000),
-  scope: z.array(z.string().trim().min(1).max(400)).min(1).max(10), acceptance: z.array(z.string().trim().min(1).max(500)).min(1).max(5),
+  scope: z.array(z.string().trim().min(1).max(400)).min(1).max(200), acceptance: z.array(z.string().trim().min(1).max(500)).min(1).max(20),
 }).strip();
 export type ProposalDraft = z.infer<typeof proposalDraft>;
-export const proposalInstruction = 'Finish with a fenced ```json block shaped {"proposals":[{"title","outcome","reason","scope":["repo-relative files to change"],"acceptance":["checkable criteria"]}]} holding 0 to 3 evidence-backed, smallest-change proposals (an empty list if nothing is worth doing). They become unapproved Build cards.';
+export const proposalInstruction = 'Finish with a fenced ```json block shaped {"proposals":[{"title","outcome","reason","scope":["repo-relative files to change"],"acceptance":["checkable criteria"]}]} holding 0 to 3 evidence-backed, smallest-change proposals (scope: every file the change may touch, or a folder ending in "/") (an empty list if nothing is worth doing). They become unapproved Build cards.';
 /** Last fenced json block with an array under key; invalid items are dropped and counted. */
 function extractDrafts(text: string, key: "proposals" | "plan", max: number) {
   const blocks = [...text.matchAll(/```json\s*([\s\S]*?)```/g)];
@@ -141,6 +143,7 @@ export function autoApprovable(spec: JobSpec): { ok: boolean; reasons: string[] 
   if (spec.taskType !== "implementation") reasons.push("only implementation work is auto-approved");
   if (spec.quality !== difficulty.routine) reasons.push("assessed Hard");
   if (spec.scope.length > autoApprovePolicy.maxFiles) reasons.push(`more than ${autoApprovePolicy.maxFiles} files`);
+  if (spec.scope.some(f => f.endsWith("/"))) reasons.push("covers a whole folder");
   const hit = spec.scope.find(f => sensitive.test(f));
   if (hit) reasons.push(`touches ${hit}`);
   if (spec.acceptance.length > autoApprovePolicy.maxAcceptance) reasons.push(`more than ${autoApprovePolicy.maxAcceptance} acceptance criteria`);

@@ -3,7 +3,7 @@ import db from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { extractPlan, id, jobSpec, profilesSpec, proposalDraft, selectProfile, difficulty, type JobSpec } from "./contract";
-import { validateDeliveryPath } from "./delivery";
+import { validateScopeEntry } from "./delivery";
 import { addMemory, approveJob, json, mutate, requireCondition, routed, routing } from "./store";
 import { extractRemember, memoryHeading, memoryText, type MemoryEntry } from "./memory";
 import { ownerDelimiter, talkPrompt, type PlaybookEdits } from "./playbook";
@@ -67,7 +67,7 @@ export async function talkOwner(input: z.infer<typeof talkOwnerCommand>, actor: 
     for (const [i, item] of plan.items.entries()) {
       const key = `talk-${talk.id}-${createHash("sha256").update(plan.runId).digest("hex").slice(0, 8)}-${i}`;
       if (started.includes(key)) continue;
-      item.scope.forEach(f => validateDeliveryPath(f));
+      item.scope.forEach(f => validateScopeEntry(f));
       // Tie the task to mapped files it changes; new files have no map record yet.
       const fileIds = item.scope.map(p => `file-${createHash("sha256").update(p).digest("hex").slice(0, 24)}`);
       const nodeIds = (await tx.buildNode.findMany({ where: { id: { in: fileIds } }, select: { id: true } })).map(n => n.id);
