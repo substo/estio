@@ -7,7 +7,7 @@ import { experienceFor } from "./experience";
 import { describeUrl, watchId } from "./watch";
 import { validateScopeEntry } from "./delivery";
 import { screenDraft, screenInstruction, undescribed } from "./contract";
-import { playbookNames, playbookText, type PlaybookEdits } from "./playbook";
+import { decisionsOf, playbookNames, playbookText, type PlaybookEdits } from "./playbook";
 import { memoryHeading, memoryText, remember, type MemoryEntry, type MemoryKind } from "./memory";
 import { remainingByBucket, usageFloor, usageLow, usageSpec } from "./contract";
 import { difficulty } from "./contract";
@@ -16,7 +16,7 @@ import { assessDifficulty, autoApprovable, autoApprovePolicy, catalogSpec, propo
 export class BuildConflict extends Error {}
 export function requireCondition(ok: unknown, message: string): asserts ok { if (!ok) throw new BuildConflict(message); }
 function canonical(v: unknown): string { return JSON.stringify(v && typeof v === "object" ? Array.isArray(v) ? v.map(x => JSON.parse(canonical(x))) : Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b)).map(([k, x]) => [k, JSON.parse(canonical(x))])) : v); }
-const checkpointSpec = z.record(z.unknown()).refine(v => Buffer.byteLength(JSON.stringify(v)) <= 64000, "Checkpoint exceeds 64KB; keep full artifacts on worker");
+const checkpointSpec = z.record(z.unknown()).refine(v => Buffer.byteLength(JSON.stringify(v)) <= 256000, "Checkpoint exceeds 256KB; keep full artifacts on worker");
 export const json = (value: unknown) => value as Prisma.InputJsonValue;
 // All Build mutations share one DB lock, including pause and approval. No Atlas table is accessed.
 export async function mutate<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>) {
@@ -29,7 +29,9 @@ export async function mutate<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>
 function summarizeCheckpoint(value: unknown) {
   if (!value || typeof value !== "object") return value;
   const v = value as Record<string, any>;
-  return { reason: v.reason, nextStep: v.nextStep, t3: v.t3, merge: v.merge, talkId: v.talkId, feedback: v.feedback, auto: v.auto, localCheckpoint: v.localCheckpoint, delivery: v.delivery, evidence: v.evidence, reviewedDiffDigest: v.reviewedDiffDigest, result: v.result ? { status: v.result.status, text: String(v.result.text ?? "").slice(0, 2000), usage: v.result.usage, needsAnswer: v.result.needsAnswer === true } : undefined, independentReview: v.independentReview ? { status: v.independentReview.status, text: String(v.independentReview.text ?? "").slice(0, 2000) } : undefined };
+  // Changed files are listed here; their text is fetched one at a time (jobFile) so the page refresh stays small.
+  return { review: Array.isArray(v.review) ? v.review.map((f: { path: string; change: string; text?: string; truncated?: boolean }) => ({ path: f.path, change: f.change, size: f.text?.length ?? 0, truncated: f.truncated })) : undefined,
+    reason: v.reason, nextStep: v.nextStep, t3: v.t3, merge: v.merge, talkId: v.talkId, feedback: v.feedback, auto: v.auto, localCheckpoint: v.localCheckpoint, delivery: v.delivery, evidence: v.evidence, reviewedDiffDigest: v.reviewedDiffDigest, result: v.result ? { status: v.result.status, text: String(v.result.text ?? "").slice(0, 6000), decisions: decisionsOf(String(v.result.text ?? "")), usage: v.result.usage, needsAnswer: v.result.needsAnswer === true } : undefined, independentReview: v.independentReview ? { status: v.independentReview.status, text: String(v.independentReview.text ?? "").slice(0, 2000) } : undefined };
 }
 /** Routing inputs from the worker's reports: subscriptions that hit a limit, and fresh remaining allowance. */
 export function routing(worker: unknown) {
@@ -60,6 +62,12 @@ export async function snapshot() {
   const { docs, ...worker } = (control?.worker ?? {}) as { docs?: { files?: { path: string; text: string }[]; at?: string } };
   const listed = control && { ...control, worker: { ...worker, docs: { at: docs?.at, files: (docs?.files ?? []).map(f => ({ path: f.path, size: f.text.length })) } } };
   return { control: listed, nodes, edges, jobs: jobs.map(({ leaseToken, ...job }) => ({ ...job, checkpoint: summarizeCheckpoint(job.checkpoint) })), execution: "Inspection available. Subscription CLI review and isolated delivery require explicit Mac worker opt-in. No merge or deploy" };
+}
+export async function jobFile(jobId: string, path: string) {
+  const job = await db.buildJob.findUnique({ where: { id: jobId } });
+  const file = ((job?.checkpoint as { review?: { path: string; change: string; text: string; truncated: boolean }[] } | null)?.review ?? []).find(f => f.path === path);
+  if (!file) throw new BuildConflict("File not in this task's result");
+  return file;
 }
 export async function guidanceDoc(path: string) {
   const control = await db.buildControl.findUnique({ where: { id: "build" } });

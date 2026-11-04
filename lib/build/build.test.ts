@@ -126,3 +126,10 @@ test("product memory dedupes, keeps pinned notes first and reads remember notes 
   assert.deepEqual(extractRemember('ok\n```json\n{"remember":["Owner prefers iPad-first layouts","x"]}\n```'), ["Owner prefers iPad-first layouts"]);
   assert.equal(withoutPlan('Noted.\n```json\n{"remember":["a b c d e"]}\n```'), "Noted.");
 });
+
+test("the Decisions section is read from the end of a task report", async () => {
+  const { decisionsOf } = await import("./playbook");
+  assert.equal(decisionsOf("Done.\n\nDecisions:\n- Kept X in Y because Z"), "- Kept X in Y because Z");
+  assert.equal(decisionsOf("Done.\n**Decisions:** none"), "none");
+  assert.equal(decisionsOf("Done, nothing else."), null);
+});

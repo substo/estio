@@ -4,6 +4,7 @@ import { adoptDelivery, prepareDelivery, verifyDelivery, type DeliveryCheckpoint
 import { runT3Attempt, showThread, t3Branch, t3Catalog, talkTurn } from "../lib/build/t3";
 import { mergeTask, pushResolution, resolvePrompt, verifyResolution } from "../lib/build/merge";
 import { readUsage } from "../lib/build/usage";
+import { describeChanges } from "../lib/build/review";
 import { execFileSync } from "node:child_process";
 import { checkGithub } from "../lib/build/watch";
 import { extractProposals, extractScreen, proposalInstruction } from "../lib/build/contract";
@@ -95,7 +96,7 @@ async function main() {
         // Owner feedback not yet delivered: a redo continues the same T3 thread with just the note.
         const feedback = (checkpoint.feedback ?? []) as { decision: string; note: string; sentAt?: string }[];
         const pending = feedback.filter(f => f.decision === "redo" && !f.sentAt);
-        const feedbackText = pending.length ? `Owner feedback on your previous result (address it within the same approved scope; never commit, push or deploy; leave changes uncommitted; finish with actual checks and the next step):\n${pending.map(f => `- ${f.note}`).join("\n")}` : "";
+        const feedbackText = pending.length ? `Owner feedback on your previous result (address it within the same approved scope; never commit, push or deploy; leave changes uncommitted; finish with actual checks, the next step, and a "Decisions:" section listing choices you made that the owner didn't specify):\n${pending.map(f => `- ${f.note}`).join("\n")}` : "";
         let delivery: DeliveryCheckpoint;
         let result: CliOutcome & { needsAnswer?: boolean };
         if (executor === "t3") {
@@ -135,6 +136,8 @@ async function main() {
         outcome = result.status === "completed" ? "review" : result.status === "capacity" ? "waiting-for-capacity" : result.status === "interrupted" ? "stopped" : "failed";
         const worktree = delivery.branch ? { cwd: delivery.cwd, branch: delivery.branch } : undefined;
         checkpoint.evidence = await verifyDelivery({ ...input, worktree, cwd: delivery.cwd }); save();
+        // What changed, readable on the Build page (new files in full, edits as diffs); the branch holds the full change.
+        if (writing && checkpoint.evidence.files.length) { checkpoint.review = await describeChanges(delivery.cwd, checkpoint.evidence.files).catch(() => undefined); save(); }
         if (!checkpoint.evidence.ok) { outcome = "failed"; checkpoint.reason = "Scope/diff verification failed; worktree preserved"; }
         if (!writing && checkpoint.evidence.files.length) { outcome = "failed"; checkpoint.reason = "Read-only review changed worktree"; }
       }

@@ -132,3 +132,10 @@ The 10-file (planned tasks) and 30-file (approved tasks) caps were arbitrary and
 - The page retries background refreshes quietly and shows "Connection lost, retrying…" only after repeated failures; a failed action says it couldn't reach the server instead of Safari's "TypeError: Load failed".
 - Restarting the worker while a task runs loses track of that task (its lease expires and it shows as stuck), so worker restarts and deploys wait until nothing is running.
 
+## Reviewing results on the page (2026-11-04)
+
+The first real task showed the owner couldn't judge a result from the page: the report said what passed, not what the agent decided. Now:
+- The "Doing a task" playbook ends every report with a "Decisions:" section listing choices the task or product memory didn't settle, each with a reason ("Decisions: none" if none). Redo feedback asks for it too. The server extracts it (`decisionsOf` in `playbook.ts`) and the result card shows it in an amber box, "check before merging".
+- The worker attaches what changed (`describeChanges` in `lib/build/review.ts`): new files in full, edited or deleted files as diffs against the base, at most 40 files, 16 KB each and 120 KB in total (the checkpoint limit is now 256 KB). The snapshot lists the files; `GET /api/build?job=<id>&file=<path>` returns one. The card shows "Changed files" with each file readable, diffs coloured.
+- Decisions agreed with the owner are recorded as pinned product-memory notes by whoever prepares the Build prompt, so agents don't have to rediscover them.
+

@@ -18,7 +18,7 @@ type Worker = { daily?: { enabled: boolean; profileId: string; lastRunDate?: str
 type Data = { control: { paused: boolean; revision: number; profiles: Profile[]; worker: Worker } | null; nodes: Node[]; edges: { fromId: string; toId: string; kind: string }[]; jobs: Job[]; talks?: Talk[] };
 type Send = (command: unknown) => Promise<boolean>;
 type Merge = { state: "queued" | "merging" | "resolving" | "merged" | "failed"; at: string; sha?: string; reason?: string; local?: string; branch?: string };
-type Checkpoint = { merge?: Merge; evidence?: { ok?: boolean; files?: string[] }; reason?: string; nextStep?: string; result?: { text?: string; needsAnswer?: boolean }; t3?: { threadId?: string; branch?: string }; feedback?: { at: string; decision: string; note: string; sentAt?: string }[]; auto?: { wouldApprove: boolean; reasons: string[] }; proposalsCreated?: number };
+type Checkpoint = { merge?: Merge; evidence?: { ok?: boolean; files?: string[] }; reason?: string; nextStep?: string; result?: { text?: string; needsAnswer?: boolean; decisions?: string | null }; review?: { path: string; change: "added" | "modified" | "deleted"; size: number; truncated?: boolean }[]; t3?: { threadId?: string; branch?: string }; feedback?: { at: string; decision: string; note: string; sentAt?: string }[]; auto?: { wouldApprove: boolean; reasons: string[] }; proposalsCreated?: number };
 type CatalogModel = { provider: string; model: string; name: string };
 type Tier = "off" | "routine" | "hard";
 
@@ -141,14 +141,39 @@ function Result({ job, busy, send, failed, retry }: { job: Job; busy: boolean; s
   return <Row icon={failed ? "⚠️" : "✅"} title={failed ? `${job.spec.title} didn't finish` : `${job.spec.title} is ready`}
     detail={<div className="space-y-1">
       <p>{failed ? c.reason ?? "The task failed." : job.spec.outcome}{c.t3?.branch ? ` · branch ${c.t3.branch}` : ""}</p>
-      {text && <><button className="underline" onClick={() => setMore(!more)}>{more ? "Hide" : "What it says"}</button>{more && <p className="max-h-64 overflow-auto whitespace-pre-wrap rounded border bg-background p-2 text-foreground">{text}</p>}</>}
-      {redo && <div className="flex flex-wrap gap-2 pt-1"><input autoFocus className={`${field} min-w-60 flex-1`} placeholder="What should change?" value={note} maxLength={2000} onChange={e => setNote(e.target.value)} /><button className={solid} disabled={busy || note.trim().length < 3} onClick={async () => { if (await send({ action: "redo", id: job.id, revision: job.revision, note: note.trim() })) { setNote(""); setRedo(false); } }}>Send</button></div>}
+      {!failed && c.result?.decisions && c.result.decisions !== "none" && <div className="rounded-md border border-amber-400 bg-amber-50 p-2 text-foreground dark:bg-amber-950/30"><p className="font-medium">Decisions it made: check before merging</p><p className="whitespace-pre-wrap">{c.result.decisions}</p></div>}
+      {!failed && c.result?.decisions === "none" && <p>It made no decisions beyond the task.</p>}
+      {c.review?.length ? <ChangedFiles job={job} files={c.review} /> : null}
+      {text && <><button className="underline" onClick={() => setMore(!more)}>{more ? "Hide report" : "Full report"}</button>{more && <p className="max-h-64 overflow-auto whitespace-pre-wrap rounded border bg-background p-2 text-foreground">{text}</p>}</>}
+      {redo && <div className="flex flex-wrap items-end gap-2 pt-1"><textarea autoFocus rows={3} className={`${field} min-w-60 flex-1`} placeholder="What should change?" value={note} maxLength={2000} onChange={e => setNote(e.target.value)} /><button className={solid} disabled={busy || note.trim().length < 3} onClick={async () => { if (await send({ action: "redo", id: job.id, revision: job.revision, note: note.trim() })) { setNote(""); setRedo(false); } }}>Send</button></div>}
     </div>}>
     {!failed && canMerge(job) && <button className={solid} disabled={busy} title="Accept and merge into the release branch" onClick={() => send({ action: "merge", id: job.id, revision: job.revision })}>Merge</button>}
     {!failed && <button className={canMerge(job) ? btn : solid} disabled={busy} onClick={() => send({ action: "accept", id: job.id, revision: job.revision })}>{canMerge(job) ? "Accept, merge later" : "Accept"}</button>}
     {failed && retry && <button className={btn} disabled={busy} onClick={retry}>Try again</button>}
     <button className={btn} disabled={busy} onClick={() => setRedo(!redo)}>Redo…</button>
   </Row>;
+}
+
+/** What the task changed, readable on the page: new files in full, edits as their changes against the task's base. */
+function ChangedFiles({ job, files }: { job: Job; files: NonNullable<Checkpoint["review"]> }) {
+  const [open, setOpen] = useState<string | null>(null), [text, setText] = useState<string | null>(null), [error, setError] = useState("");
+  async function show(path: string) {
+    if (open === path) { setOpen(null); return; }
+    setOpen(path); setText(null); setError("");
+    try { const res = await fetch(`/api/build?job=${encodeURIComponent(job.id)}&file=${encodeURIComponent(path)}`, { cache: "no-store" }); const value = await res.json(); if (!res.ok) throw new Error(value.error); setText(value.text); }
+    catch (e) { setError(e instanceof TypeError ? "Couldn't reach the server." : e instanceof Error ? e.message : String(e)); }
+  }
+  const mark = { added: "New", modified: "Changed", deleted: "Removed" };
+  return <div className="space-y-1">
+    <p className="font-medium text-foreground">Changed files · {files.length}</p>
+    <div className="flex flex-wrap gap-1.5">{files.map(f => <button key={f.path} onClick={() => void show(f.path)} className={`rounded border px-2 py-0.5 text-left ${open === f.path ? "bg-muted" : "hover:bg-muted"}`}><span className="text-muted-foreground">{mark[f.change]}</span> {f.path}</button>)}</div>
+    {open && <div className="max-h-[28rem] overflow-auto rounded border bg-background p-2 font-mono text-[11px] leading-relaxed text-foreground">
+      {error ? <p className="text-red-600">{error}</p> : text === null ? <p>Loading…</p> : files.find(f => f.path === open)?.change === "added"
+        ? <pre className="whitespace-pre-wrap">{text}</pre>
+        : text.split("\n").map((line, i) => <div key={i} className={`whitespace-pre-wrap ${line.startsWith("+") ? "bg-emerald-500/15" : line.startsWith("-") ? "bg-red-500/15" : line.startsWith("@@") ? "text-muted-foreground" : ""}`}>{line || " "}</div>)}
+      {files.find(f => f.path === open)?.truncated && <p className="mt-1 text-muted-foreground">Shortened here; the full file is on the branch.</p>}
+    </div>}
+  </div>;
 }
 
 /** The app by section: how much is described, what is in work, and drill-down to screens. Changes go through Talk. */

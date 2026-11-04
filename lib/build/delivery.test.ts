@@ -131,3 +131,17 @@ test("folder scope covers new files beneath it and nothing else; top-level folde
     assert.equal(outside.ok, false); assert.match(outside.errors.join(" "), /Outside approved scope: keep.txt/);
   } finally { await rm(temp, { recursive: true, force: true }); }
 });
+
+test("a result lists its changes readably: new files in full, edits as diffs", async () => {
+  const { describeChanges } = await import("./review");
+  const temp = await mkdtemp(path.join(await realpath(os.tmpdir()), "review-"));
+  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=F", "-c", "user.email=f@localhost", ...args], { cwd: temp, encoding: "utf8" });
+  try {
+    git("init", "-q"); await writeFile(path.join(temp, "a.txt"), "one\ntwo\n"); await writeFile(path.join(temp, "b.txt"), "gone\n"); git("add", "."); git("commit", "-qm", "base");
+    await writeFile(path.join(temp, "a.txt"), "one\nTWO\n"); await rm(path.join(temp, "b.txt")); await writeFile(path.join(temp, "new.md"), "# New\n");
+    const files = await describeChanges(temp, ["a.txt", "b.txt", "new.md"]);
+    assert.deepEqual(files.map(f => [f.path, f.change]), [["a.txt", "modified"], ["b.txt", "deleted"], ["new.md", "added"]]);
+    assert.match(files[0].text, /^-two$/m); assert.match(files[0].text, /^\+TWO$/m); assert.doesNotMatch(files[0].text, /^diff --git/m);
+    assert.equal(files[2].text, "# New\n");
+  } finally { await rm(temp, { recursive: true, force: true }); }
+});
