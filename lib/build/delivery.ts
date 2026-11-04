@@ -87,7 +87,9 @@ async function ownership(c: Awaited<ReturnType<typeof context>>) {
 /** root and checkout come exclusively from server configuration, never job payloads. No cleanup/reset on failure. */
 async function precheck(input: Input) {
   const c = await context(input);
-  if ((await git(c.checkout, "rev-parse", "HEAD")).trim() !== input.spec.baseRevision) throw new Error("Configured source HEAD differs from approved base");
+  // Work is built from the approved base in its own worktree, so the checkout may have moved on (e.g. an earlier task was
+  // merged); it only has to contain the base. Merge assist brings the result onto the latest release branch.
+  try { await git(c.checkout, "merge-base", "--is-ancestor", input.spec.baseRevision, "HEAD"); } catch { throw new Error("Approved base is not in the configured checkout's history"); }
   if ((await git(c.checkout, "ls-files", "-v", "-z", "--", ...input.spec.scope)).split("\0").some(entry => /^[a-zS] /.test(entry))) throw new Error("Approved source index conceals working files");
   if (await git(c.checkout, "status", "--porcelain=v1", "--untracked-files=all", "--ignored", "--", ...input.spec.scope)) throw new Error("Approved source files are dirty; reconcile uncommitted intent first");
   for (const file of input.spec.scope) await safeFile(c.checkout, file);

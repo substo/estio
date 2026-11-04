@@ -90,3 +90,19 @@ test("adopted T3 branch worktree is fenced: commits, wrong branch and out-of-sco
     assert.equal((await verifyDelivery({ ...input, cwd })).ok, false);
   } finally { await rm(temp, { recursive: true, force: true }); }
 });
+
+test("a task can start after the checkout moved ahead of its base, but not from a commit outside its history", async () => {
+  const temp = await mkdtemp(path.join(await realpath(os.tmpdir()), "delivery-ahead-"));
+  const checkout = path.join(temp, "source"), root = path.join(temp, "private");
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "user.name=F", "-c", "user.email=f@localhost", ...args], { cwd, encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } }).trim();
+  try {
+    await mkdir(checkout); git(checkout, "init", "-q");
+    await writeFile(path.join(checkout, "file.txt"), "one\n"); git(checkout, "add", "."); git(checkout, "commit", "-qm", "base");
+    const base = git(checkout, "rev-parse", "HEAD");
+    await writeFile(path.join(checkout, "other.txt"), "merged task\n"); git(checkout, "add", "."); git(checkout, "commit", "-qm", "an earlier task merged");
+    const cp = await prepareDelivery({ checkout, root, jobId: "job-ahead", spec: { baseRevision: base, scope: ["file.txt"] } });
+    assert.equal(git(cp.cwd, "rev-parse", "HEAD"), base);
+    git(checkout, "checkout", "-q", "--orphan", "elsewhere"); git(checkout, "rm", "-rqf", "."); await writeFile(path.join(checkout, "x.txt"), "x\n"); git(checkout, "add", "."); git(checkout, "commit", "-qm", "unrelated");
+    await assert.rejects(prepareDelivery({ checkout, root, jobId: "job-unrelated", spec: { baseRevision: base, scope: ["file.txt"] } }), /history/);
+  } finally { await rm(temp, { recursive: true, force: true }); }
+});

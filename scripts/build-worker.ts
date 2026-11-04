@@ -76,7 +76,8 @@ async function main() {
     let outcome = "failed";
     const compact = (result: CliOutcome) => ({ ...result, text: result.text.slice(0, 12000), textTruncated: result.text.length > 12000 });
     try {
-      if (scan.head !== job.spec.baseRevision) throw new Error("Configured checkout HEAD differs from approved base");
+      // The checkout may be ahead of the approved base (another task merged); the task still starts from its base.
+      try { execFileSync("git", ["merge-base", "--is-ancestor", job.spec.baseRevision, "HEAD"], { cwd: checkout }); } catch { throw new Error("Approved base is not in the checkout's history"); }
       if (job.spec.taskType === "inspect") {
         checkpoint.checks = ["Tracked source/import reconciliation; no code tests or provider call"];
         outcome = "review";
