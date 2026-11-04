@@ -1,5 +1,6 @@
 import { getLocationContext } from "@/lib/auth/location-context";
 import db from "@/lib/db";
+import { withBusinessDetails } from "@/lib/business-profile/service";
 import { SearchPageForm } from "./search-form";
 
 export default async function AdminSearchPage() {
@@ -7,9 +8,7 @@ export default async function AdminSearchPage() {
 
     if (!orgId) return <div>Organization not found</div>;
 
-    const siteConfig = await db.siteConfig.findUnique({
-        where: { locationId: orgId }
-    });
+    const siteConfig = await withBusinessDetails(await db.siteConfig.findUnique({ where: { locationId: orgId } }), orgId);
 
     if (!siteConfig) return <div>Site Config not found</div>;
 

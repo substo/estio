@@ -1,3 +1,4 @@
+import { getBusinessViewIfAny } from "@/lib/business-profile/service";
 import db from "@/lib/db";
 import { AiSettingsForm } from "./ai-settings-form";
 import { redirect } from "next/navigation";
@@ -54,7 +55,7 @@ function buildAiInitialData({
             openAiTextModel: aiPayload?.openAiTextModel || null,
             defaultReplyLanguage: aiPayload?.defaultReplyLanguage || DEFAULT_REPLY_LANGUAGE,
             precisionRemoveEnabled: aiPayload?.precisionRemoveEnabled === true,
-            brandVoice: aiPayload?.brandVoice || siteConfig?.brandVoice,
+            brandVoice: siteConfig?.brandVoice,
             outreachConfig: aiPayload?.outreachConfig || siteConfig?.outreachConfig,
             whatsappTranscriptOnDemandEnabled: aiPayload?.whatsappTranscriptOnDemandEnabled ?? siteConfig?.whatsappTranscriptOnDemandEnabled,
             whatsappTranscriptRetentionDays: aiPayload?.whatsappTranscriptRetentionDays ?? siteConfig?.whatsappTranscriptRetentionDays,
@@ -155,7 +156,9 @@ export default async function AiSettingsPage() {
         }).catch(() => false) : Promise.resolve(false),
     ]);
 
-    const initialData = buildAiInitialData({ aiDoc, siteConfig });
+    // Brand voice comes from the Business profile (written instructions, or rendered from the brand profile).
+    const business = await getBusinessViewIfAny(locationId);
+    const initialData = buildAiInitialData({ aiDoc, siteConfig: { ...(siteConfig || {}), brandVoice: business ? business.brandVoice ?? "" : (aiDoc?.payload as any)?.brandVoice || siteConfig?.brandVoice } });
 
     const settingsVersion = aiDoc?.version ?? 0;
     const enrichedRuntimeSummary = {

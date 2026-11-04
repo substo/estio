@@ -1,5 +1,3 @@
-import { saveNavigation } from "@/app/(main)/admin/site-settings/navigation/actions";
-import db from "@/lib/db";
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { auth } from '@clerk/nextjs/server';
@@ -29,12 +27,6 @@ export const POST = withStudioRoute(async (request, { params }) => {
             if (command.action === 'lookup') { const page = await fetchPublicPage(command.url); return { page }; }
             if (command.action === 'save') {
                 const profile = await saveBrandProfile(locationId, command.input);
-                const socials = command.input.sources.filter(source => source.platform).map(source => ({ platform: source.platform!, url: source.url }));
-                if (socials.length) {
-                    const existing = await db.siteConfig.findUnique({ where: { locationId }, select: { socialLinks: true } });
-                    const links = Array.isArray(existing?.socialLinks) ? existing.socialLinks.filter((link): link is { platform: string; url: string } => Boolean(link && typeof link === 'object' && 'url' in link && typeof link.url === 'string' && 'platform' in link && typeof link.platform === 'string')) : [];
-                    await saveNavigation(locationId, 'social', [...links.filter(link => !socials.some(source => source.url === link.url)), ...socials]);
-                }
                 return { profile };
             }
             const snapshot = { answers: command.input.answers, sources: command.input.sources, excerpts: command.excerpts, scriptVersion: 'v1' };

@@ -1,5 +1,6 @@
 "use server";
 
+import { getBusinessViewIfAny, saveBusinessDetails } from "@/lib/business-profile/service";
 import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
 import db from "@/lib/db";
@@ -241,8 +242,6 @@ export async function updateAiSettings(
                 batchSize: normalizeContactProfileVerificationBatchSize(formData.get("leadIntelligenceBatchSize"), existingContactProfileVerification.batchSize ?? 50),
                 autoReprocessCampaignBlocks: autoReprocessCampaignCandidates,
             },
-            brandVoice: formData.get("brandVoice") as string,
-            brandProfile: (existingPayload as any)?.brandProfile,
             outreachConfig: {
                 enabled: formData.get("outreachEnabled") === "on",
                 visionIdPrompt: formData.get("visionIdPrompt") as string,
@@ -252,6 +251,9 @@ export async function updateAiSettings(
             automationConfig: (existingPayload as any)?.automationConfig,
         };
 
+        // Brand voice is a business detail: it lives in the Business profile, not in AI settings.
+        delete (payload as Record<string, unknown>).brandVoice;
+        delete (payload as Record<string, unknown>).brandProfile;
         const savedDoc = await settingsService.upsertDocument({
             scopeType: "LOCATION",
             scopeId: locationId,
@@ -283,7 +285,6 @@ export async function updateAiSettings(
                     viewingSessionTranslationModel: payload.viewingSessionTranslationModel,
                     viewingSessionInsightsModel: payload.viewingSessionInsightsModel,
                     viewingSessionSummaryModel: payload.viewingSessionSummaryModel,
-                    brandVoice: payload.brandVoice,
                     outreachConfig: payload.outreachConfig,
                 },
                 update: {
@@ -303,7 +304,6 @@ export async function updateAiSettings(
                     viewingSessionTranslationModel: payload.viewingSessionTranslationModel,
                     viewingSessionInsightsModel: payload.viewingSessionInsightsModel,
                     viewingSessionSummaryModel: payload.viewingSessionSummaryModel,
-                    brandVoice: payload.brandVoice,
                     outreachConfig: payload.outreachConfig,
                 },
             });
@@ -321,6 +321,13 @@ export async function updateAiSettings(
                 ignoreKeys: ["precisionRemoveEnabled"],
                 actorUserId: localUser?.id,
             });
+        }
+
+        const submittedVoice = formData.has("brandVoice") ? String(formData.get("brandVoice") || "").trim() : undefined;
+        if (submittedVoice !== undefined && localUser?.id) {
+            // Unchanged text (including a voice rendered from the brand profile) is not turned into written instructions.
+            const current = await getBusinessViewIfAny(locationId);
+            if (submittedVoice !== (current?.brandVoice ?? "")) await saveBusinessDetails(locationId, { voice: { instructions: submittedVoice || null } }, localUser.id);
         }
 
         revalidatePath("/admin/settings/ai");

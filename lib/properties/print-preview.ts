@@ -1,3 +1,4 @@
+import { overlayBusinessDetails } from "@/lib/business-profile/overlay";
 import db from "@/lib/db";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
@@ -44,8 +45,10 @@ export async function getLocationPrintBranding(locationId: string) {
 
     const payload = settingsDoc?.payload || {};
     const crmPayload = crmSettingsDoc?.payload || {};
-    const theme = (payload.theme || siteConfig?.theme || {}) as Record<string, any>;
-    const contactInfo = (payload.contactInfo || siteConfig?.contactInfo || {}) as Record<string, any>;
+    // Logos, brand colours and contact details come from the Business profile; logo text lines are website layout.
+    const branding = overlayBusinessDetails({ theme: payload.theme || siteConfig?.theme || {}, contactInfo: payload.contactInfo || siteConfig?.contactInfo || {} } as Record<string, any>, await (await import("@/lib/business-profile/service")).getBusinessViewIfAny(locationId));
+    const theme = (branding.theme || {}) as Record<string, any>;
+    const contactInfo = (branding.contactInfo || {}) as Record<string, any>;
     const domain = String(payload.domain || siteConfig?.domain || location?.domain || "").trim() || null;
 
     return {

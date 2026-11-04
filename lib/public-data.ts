@@ -2,6 +2,7 @@ import db from "@/lib/db";
 import { getVisiblePropertyImageMedia, getVisiblePropertyMedia } from "@/lib/properties/property-media-ai";
 import { cache } from "react";
 import { resolvePublicSiteDomain } from "@/lib/public-site-domains/service";
+import { withBusinessDetails } from "@/lib/business-profile/service";
 
 // Use React 'cache' to deduplicate requests in the same render cycle
 export const getSiteConfig = cache(async (domain: string) => {
@@ -21,6 +22,9 @@ export const getSiteConfig = cache(async (domain: string) => {
             });
         }
     }
+
+    // Business details (contact, social links, logos, brand colours, footer text) come from the Business profile.
+    if (config) config = await withBusinessDetails(config, config.locationId);
 
     // SECURITY COMPLIANCE: Strip sensitive keys before sending SiteConfig to the client.
     // Next.js RSC payload will serialize the entire object when passed to a Client Component.

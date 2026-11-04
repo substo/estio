@@ -72,6 +72,8 @@ test("Studio shell loads the same platform location choices as CRM without repla
         "@/lib/ai/usage-summary-scope": { canAccessAiUsageView: (scope: string, isAdmin: boolean) => scope === "user" || isAdmin },
         "@/lib/auth/platform-access": { getPlatformAdminContext: async () => platform ? { internalUserId: "platform-actor" } : null },
         "@/lib/auth/platform-location-options": { listPlatformLocationLoginOptions: async (id: string) => { assert.equal(id, "platform-actor"); optionsCalls++; return choices; } },
+        // Logos come from the Business profile; with no profile the website row is used unchanged.
+        "@/lib/business-profile/service": { withBusinessDetails: async (row: unknown) => row },
       });
       const api = load("app/(main)/studio/_components/studio-shell-data.ts", {
         "server-only": {},

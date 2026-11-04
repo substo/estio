@@ -4,7 +4,9 @@ import { settingsService } from '@/lib/settings/service';
 import { SETTINGS_DOMAINS } from '@/lib/settings/constants';
 import { businessProfileSchema, type BusinessProfile } from './schema';
 import { applyDetailsPatch } from './patch';
-import { businessView, type BusinessDetailsPatch } from './view';
+import { businessView, type BusinessDetailsPatch, type BusinessView } from './view';
+import { overlayBusinessDetails } from './overlay';
+import { profileFromLegacy } from './copy';
 
 /**
  * The Business profile of a Location: the single home for its business details (settings document location.business).
@@ -23,10 +25,40 @@ export async function getBusinessDetails(locationId: string) {
     return businessView(profile, location ?? {});
 }
 
+/** The flat view only when the Location has a profile; null means "no profile yet", so callers keep today's data. */
+export async function getBusinessViewIfAny(locationId: string): Promise<BusinessView | null> {
+    const { profile } = await getBusinessProfile(locationId);
+    if (!profile) return null;
+    const location = await db.location.findUnique({ where: { id: locationId }, select: { name: true, timeZone: true, domain: true } });
+    return businessView(profile, location ?? {});
+}
+/** A website config row (SiteConfig shape) with its business fields taken from the profile. See overlay.ts. */
+export async function withBusinessDetails<T extends Record<string, any> | null | undefined>(row: T, locationId: string | null | undefined): Promise<T> {
+    if (!row || !locationId) return row;
+    return overlayBusinessDetails(row, await getBusinessViewIfAny(locationId));
+}
+
+/**
+ * A Location without a profile gets one built from its existing data first (same mapping as the one-time copy), so a
+ * first save never drops details that only lived in the old copies.
+ */
+async function seedProfile(locationId: string): Promise<BusinessProfile> {
+    const [docs, siteConfig] = await Promise.all([
+        db.settingsDocument.findMany({ where: { scopeType: 'LOCATION', scopeId: locationId, domain: { in: [SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE, SETTINGS_DOMAINS.LOCATION_NAVIGATION, SETTINGS_DOMAINS.LOCATION_AI] } } }),
+        db.siteConfig.findUnique({ where: { locationId } }),
+    ]);
+    const payload = (domain: string) => docs.find(d => d.domain === domain)?.payload as Record<string, any> | undefined;
+    return profileFromLegacy({ publicSite: payload(SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE), navigation: payload(SETTINGS_DOMAINS.LOCATION_NAVIGATION),
+        ai: payload(SETTINGS_DOMAINS.LOCATION_AI), siteConfig: siteConfig as Record<string, any> | null }).profile;
+}
+
 /** Saves owner-entered values as confirmed facts; unchanged values keep their facts. Fails if someone saved in between. */
-export async function saveBusinessDetails(locationId: string, patch: BusinessDetailsPatch, actorUserId: string, options: { expectedVersion?: number } = {}) {
+export async function saveBusinessDetails(locationId: string, patch: BusinessDetailsPatch, actorUserId: string,
+    options: { expectedVersion?: number; capture?: BusinessProfile['brandProfileCapture'] | null } = {}) {
     const { profile, version } = await getBusinessProfile(locationId);
-    const next = applyDetailsPatch(profile, patch, actorUserId);
-    await settingsService.upsertDocument({ ...scope(locationId), payload: next, actorUserId, expectedVersion: options.expectedVersion ?? version });
-    return next;
+    const next = applyDetailsPatch(profile ?? await seedProfile(locationId), patch, actorUserId);
+    if (options.capture !== undefined) { if (options.capture) next.brandProfileCapture = options.capture; else delete next.brandProfileCapture; }
+    const payload = businessProfileSchema.parse(next);
+    await settingsService.upsertDocument({ ...scope(locationId), payload, actorUserId, expectedVersion: options.expectedVersion ?? version });
+    return payload;
 }

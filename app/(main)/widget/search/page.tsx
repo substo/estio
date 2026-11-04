@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import db from "@/lib/db";
+import { withBusinessDetails } from "@/lib/business-profile/service";
 import { getLocationById } from "@/lib/location";
 import { getVisiblePropertyMedia } from "@/lib/properties/property-media-ai";
 import Link from "next/link";
@@ -18,7 +19,7 @@ export default async function WidgetSearchPage({ searchParams: searchParamsPromi
         return <div className="p-4 text-red-500">Location not found</div>;
     }
 
-    const config = await db.siteConfig.findUnique({ where: { locationId } });
+    const config = await withBusinessDetails(await db.siteConfig.findUnique({ where: { locationId } }), locationId);
 
     const where: any = { locationId, status: "ACTIVE" };
     if (searchParams.q) {

@@ -115,3 +115,36 @@ Local result after owner feedback: 22/22 focused tests passed (new business sche
 - `applyDetailsPatch` (pure) turns owner-entered flat values into owner-sourced facts confirmed now; unchanged values keep their existing facts; empty values remove the fact. `saveBusinessDetails` persists through the settings service with the document version as the expected version.
 - The copy (`scripts/business-profile/copy.ts`) never overwrites an existing Business profile and skips Locations with nothing to copy. Dry run by default; `--apply` writes.
 
+
+## Phase 3: readers and writers use the Business profile (2026-11-04)
+
+**How readers switched.** Display code still receives the same website config row shape (SiteConfig). The loaders overlay business fields from the profile (`lib/business-profile/overlay.ts`, `withBusinessDetails` / `getBusinessViewIfAny` in `service.ts`). With a profile, contact info, social links, footer description (= `identity.summary`), brand colours (primary/secondary/accent, theme and scalar), logo URLs, the Substo legacy description/email/accent/logo and brand voice come only from the profile. Unknown values become empty and existing presentation defaults apply, so stale copies never show. Without a profile the row is unchanged. Logo text lines, background/text colours, header/menu style, links, disclaimer, hero and sections are untouched.
+
+| Area | Moved |
+| --- | --- |
+| Estio public site and analytics, live-assist join | `lib/public-data.ts` `getSiteConfig` (overlay before secrets are stripped) |
+| Widgets | `app/(main)/widget/{property/[slug],search,swipe}/page.tsx` |
+| Hosted Substo sites | `lib/substo-sites/service.ts` `getPublishedWebsite` (profile read through the injected db, pure overlay); `lib/website/editor-config.ts` |
+| Print | `lib/properties/print-preview.ts` (branding), `lib/properties/print-ai.ts` (brand voice) |
+| AI | `lib/ai/coordinator.ts`, `lib/ai/orchestrator.ts` (skills get the profile voice), `app/(main)/admin/content/ai-actions.ts` (all six loaders) |
+| Market | `lib/locations/market-context.ts` uses the profile market when any of it is set; otherwise the old website copy, then inference from listings |
+| Studio | `lib/brand-profile/service.ts` `getBrandProfile` is a view of the profile (`lib/business-profile/brand.ts`); no profile falls back to the old copy |
+| App shell logo, content editors | `components/app-shell/app-shell-data.ts`; `app/(main)/admin/content/{favorites,submissions,search}/page.tsx` |
+| Settings screens | Site settings, navigation and AI settings pages show profile values |
+
+**Writers.** Each now saves business fields with `saveBusinessDetails` only. A Location without a profile is seeded from its existing data on first save, so nothing is lost.
+- Estio site settings general save: colours, logo URLs, contact and **market**. This fixes the old save, which tried to write `marketProfile` to a SiteConfig column that doesn't exist.
+- Substo website design and website settings: description, email, accent and logo.
+- Navigation: social links (empty rows are not accounts) and the footer description.
+- Studio brand profile save: summary, audience, offer, tone, words, pillars, capture, and sources tagged with a platform → social links. Written brand-voice instructions are cleared because the structured profile defines the voice.
+- AI settings brand voice editor: written instructions. Unchanged rendered text is not frozen into instructions.
+
+None of these write business fields to SiteConfig or to the `location.public_site` / `location.navigation` / `location.ai` documents any more. Name and time zone are no longer copied into `location.public_site`.
+
+**Equivalence** (`scripts/business-profile/equivalence.ts`, read-only on production 2026-11-04). For Down Town Cyprus - OLD, every business value is the same on the public site, hosted config, print, AI brand voice and market input. The one difference: the footer no longer renders five social icons whose links were empty (Instagram, LinkedIn, X, YouTube, TikTok). A Location without a profile (Estio) is identical everywhere.
+
+**Still in SiteConfig and old documents, for phases 4–6:**
+- Stale business copies, no longer read or written: `contactInfo`, `socialLinks`, `footerBio`, the `primaryColor`/`secondaryColor`/`accentColor` columns, `theme.primaryColor/secondaryColor/accentColor`, `theme.logo.url/lightUrl/iconUrl/faviconUrl`, `brandVoice`, `substoSiteConfig.description/email/accent/logoUrl`, plus the same keys in `location.public_site`, `location.navigation` and `location.ai`. Phase 6 drops them.
+- The plaintext `googleAiApiKey` column and AI model columns (phase 4).
+- Layout, search defaults, feature flags, viewing/transcript settings and Substo slug/publish; their consolidation into one website document is phase 5.
+- Flag-driven dual writes and parity checks (`SETTINGS_*`) also remain until phase 5/6.

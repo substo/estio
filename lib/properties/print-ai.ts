@@ -1,3 +1,4 @@
+import { getBusinessViewIfAny } from "@/lib/business-profile/service";
 import db from "@/lib/db";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
@@ -72,9 +73,9 @@ export async function generatePropertyPrintCopy(params: {
         || await resolveAiModelDefault(params.locationId, "design")
     ).trim();
 
+    const business = await getBusinessViewIfAny(params.locationId);
     const brandVoice = String(
-        aiDoc?.payload?.brandVoice
-        || siteConfig?.brandVoice
+        (business ? business.brandVoice : aiDoc?.payload?.brandVoice || siteConfig?.brandVoice)
         || "Professional, welcoming, premium real estate brochure copy."
     ).trim();
 

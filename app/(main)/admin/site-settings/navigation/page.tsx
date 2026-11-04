@@ -10,6 +10,7 @@ import { PublicListingToggle } from "./_components/public-listing-toggle";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, isSettingsReadFromNewEnabled } from "@/lib/settings/constants";
 import { getLocationContext } from "@/lib/auth/location-context";
+import { getBusinessViewIfAny } from "@/lib/business-profile/service";
 
 export default async function NavigationSettingsPage() {
     const contextLocation = await getLocationContext();
@@ -35,10 +36,11 @@ export default async function NavigationSettingsPage() {
 
     const navLinks = readNew ? (navigationDoc?.payload?.navLinks || []) : ((config?.navLinks as any[]) || []);
     const footerLinks = readNew ? (navigationDoc?.payload?.footerLinks || []) : ((config?.footerLinks as any[]) || []);
-    const socialLinks = readNew ? (navigationDoc?.payload?.socialLinks || []) : ((config?.socialLinks as any[]) || []);
+    const business = await getBusinessViewIfAny(orgId);
+    const socialLinks = business ? business.socialLinks : readNew ? (navigationDoc?.payload?.socialLinks || []) : ((config?.socialLinks as any[]) || []);
     const legalLinks = readNew ? (navigationDoc?.payload?.legalLinks || []) : ((config?.legalLinks as any[]) || []);
     const footerDisclaimer = readNew ? (navigationDoc?.payload?.footerDisclaimer || "") : ((config?.footerDisclaimer as string) || "");
-    const footerBio = readNew ? (navigationDoc?.payload?.footerBio || "") : ((config?.footerBio as string) || "");
+    const footerBio = business ? (business.summary || "") : readNew ? (navigationDoc?.payload?.footerBio || "") : ((config?.footerBio as string) || "");
     const menuStyle = readNew ? (navigationDoc?.payload?.menuStyle || "side") : (theme.menuStyle || "side");
     const publicListingEnabled = readNew
         ? (navigationDoc?.payload?.publicListingEnabled ?? true)

@@ -1,3 +1,4 @@
+import { getBusinessViewIfAny } from "@/lib/business-profile/service";
 import db from "@/lib/db";
 import { classifyIntent } from "./classifier";
 import { analyzeSentiment } from "./sentiment";
@@ -138,6 +139,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
                     : agent.name || "Agent";
             }
 
+            const business = contactData?.locationId ? await getBusinessViewIfAny(contactData.locationId) : null;
             skillResult = await executeSkill(skill, {
                 ...input,
                 locationId: contactData?.locationId,
@@ -148,7 +150,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
                 agentName,
                 businessName: contactData?.location?.name ?? undefined,
                 websiteDomain: contactData?.location?.siteConfig?.domain ?? contactData?.location?.domain ?? undefined,
-                brandVoice: contactData?.location?.siteConfig?.brandVoice ?? undefined,
+                brandVoice: (business ? business.brandVoice : contactData?.location?.siteConfig?.brandVoice) ?? undefined,
                 agentUserId,
                 contactPreferredLanguage: contactData?.preferredLang ?? null,
                 latestInboundText,

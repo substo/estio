@@ -5,6 +5,8 @@ import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import { getSubstoLocationActor } from "@/lib/locations/substo-locations";
 import { saveWebsiteDesign } from "@/lib/substo-sites/service";
+import { saveBusinessDetails } from "@/lib/business-profile/service";
+import type { BusinessDetailsPatch } from "@/lib/business-profile/view";
 import db from "@/lib/db";
 import { auth } from "@clerk/nextjs/server";
 import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
@@ -46,7 +48,7 @@ export async function updateSiteSettings(
     if (await getRequestAuthRealm() === "substo") {
         const actor = await getSubstoLocationActor();
         if (!actor) return { message: "Brand admin access is required." };
-        const result = await saveWebsiteDesign(db, actor, formData);
+        const result = await saveWebsiteDesign(db, actor, formData, saveBusinessDetails);
         revalidatePath("/admin/site-settings");
         revalidatePath("/admin/content/website");
         return result;
@@ -113,40 +115,35 @@ export async function updateSiteSettings(
     if (parsedMarketProfile?.errors) {
         return { errors: parsedMarketProfile.errors };
     }
-    const marketProfile = parsedMarketProfile?.profile
-        || (settingsDoc?.payload as any)?.marketProfile
-        || {};
     const existingConfig = await db.siteConfig.findUnique({ where: { locationId } });
     const existingTheme =
         (settingsDoc?.payload as any)?.theme
         || (existingConfig?.theme as any)
         || {};
 
+    // Website layout only: brand colours, logos and contact details belong to the Business profile (saved below).
     const themeData = {
-        primaryColor,
-        secondaryColor,
-        accentColor,
         backgroundColor,
         textColor,
         logo: {
-            url: logoUrl,
-            lightUrl: formData.get("lightLogoUrl") as string,
-            iconUrl: formData.get("iconUrl") as string,
-            faviconUrl: formData.get("faviconUrl") as string,
             textTop: brandName,
             textBottom: brandTagline
         },
         headerStyle: formData.get("headerStyle") as string || "transparent",
         menuStyle: existingTheme.menuStyle || "side" // Preserve existing or default to side
     };
-
-    const contactData = {
-        address: contactAddress,
-        mapsLink: contactMapsLink,
-        mapsLinkTitle: contactMapsLinkTitle,
-        mobile: contactMobile,
-        landline: contactLandline,
-        email: contactEmail
+    const blank = (v: string | null | undefined) => v?.trim() ? v.trim() : null;
+    const businessPatch: BusinessDetailsPatch = {
+        colours: { primary: blank(primaryColor), secondary: blank(secondaryColor), accent: blank(accentColor) },
+        logos: { primary: blank(logoUrl), light: blank(formData.get("lightLogoUrl") as string), icon: blank(formData.get("iconUrl") as string), favicon: blank(formData.get("faviconUrl") as string) },
+        address: blank(contactAddress), email: blank(contactEmail),
+        phones: ([["Mobile", contactMobile], ["Landline", contactLandline]] as const).flatMap(([label, number]) => blank(number) ? [{ label, number: blank(number)! }] : []),
+        maps: blank(contactMapsLink) ? [{ url: blank(contactMapsLink)!, title: blank(contactMapsLinkTitle) }] : [],
+        ...(parsedMarketProfile?.profile ? { market: {
+            countryCode: parsedMarketProfile.profile.countryCode ?? null, countryName: parsedMarketProfile.profile.countryName ?? null, locale: parsedMarketProfile.profile.locale ?? null,
+            currencyCode: parsedMarketProfile.profile.currencyCode ?? null, supportedLanguages: parsedMarketProfile.profile.supportedLanguages ?? [],
+            serviceAreas: (parsedMarketProfile.profile.serviceAreas ?? []).map((a: any) => ({ id: a.id, label: a.label, aliases: a.aliases ?? [], parentId: a.parentId ?? null, kind: a.kind ?? null })),
+        } } : {}),
     };
 
     // Parse Navigation Links (Only if provided in form, otherwise preserve existing on update)
@@ -193,30 +190,20 @@ export async function updateSiteSettings(
         const updateData: any = {
             domain: domainVal,
             theme: themeData,
-            contactInfo: contactData,
-            marketProfile,
-
-            primaryColor,
-            secondaryColor,
-            accentColor,
         };
 
         if (navLinksForUpdate !== undefined) {
             updateData.navLinks = navLinksForUpdate;
         }
 
+        // Name and time zone live only on Location; business details only in the Business profile.
         const payload = {
             domain: domainVal,
-            locationName,
-            locationTimeZone: validatedLocationTimeZone,
             theme: themeData,
-            contactInfo: contactData,
             navLinks: navLinksForUpdate ?? navLinksForCreate,
             footerLinks: (existingConfig?.footerLinks as any[]) || [],
-            socialLinks: (existingConfig?.socialLinks as any[]) || [],
             legalLinks: (existingConfig?.legalLinks as any[]) || [],
             footerDisclaimer: existingConfig?.footerDisclaimer || null,
-            footerBio: existingConfig?.footerBio || null,
             publicListingEnabled: existingConfig?.publicListingEnabled ?? true,
         };
 
@@ -237,15 +224,14 @@ export async function updateSiteSettings(
                     locationId,
                     domain: domainVal,
                     theme: themeData,
-                    contactInfo: contactData,
                     navLinks: navLinksForCreate,
-                    primaryColor,
-                    secondaryColor,
-                    accentColor,
                 },
                 update: updateData,
             });
         }
+
+        if (!localUser?.id) return { message: "Account unavailable. Sign in again." };
+        await saveBusinessDetails(locationId, businessPatch, localUser.id);
 
         // Also sync the domain to the Location table for consistency
         await db.location.update({

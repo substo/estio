@@ -10,6 +10,8 @@ import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, isSettingsReadFromNewEnabled } from "@/lib/settings/constants";
 import { listPublicSiteDomains } from "@/lib/public-site-domains/service";
 import { PublicSiteDomainManager } from "./public-site-domain-manager";
+import { getBusinessViewIfAny } from "@/lib/business-profile/service";
+import { overlayBusinessDetails } from "@/lib/business-profile/overlay";
 
 export default async function SiteSettingsPage() {
     const contextLocation = await getLocationContext();
@@ -64,9 +66,13 @@ export default async function SiteSettingsPage() {
         : siteConfig
             ? { ...siteConfig, domain: canonicalDomain?.hostname ?? siteConfig.domain }
             : siteConfig;
+    // Contact details, brand colours, logos and market come from the Business profile; layout from website settings.
+    const business = await getBusinessViewIfAny(locationId);
     const initialData = {
-        ...(initialDataBase || {}),
-        marketProfile: settingsDoc?.payload?.marketProfile || {},
+        ...overlayBusinessDetails({ ...(initialDataBase || {}) } as Record<string, any>, business),
+        marketProfile: business ? { countryCode: business.market.countryCode, countryName: business.market.countryName, locale: business.market.locale,
+            currencyCode: business.market.currencyCode, supportedLanguages: business.market.supportedLanguages, serviceAreas: business.market.serviceAreas }
+            : settingsDoc?.payload?.marketProfile || {},
     };
 
     const settingsVersion = settingsDoc?.version ?? 0;

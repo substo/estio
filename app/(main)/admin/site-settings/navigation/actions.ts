@@ -14,14 +14,14 @@ import {
     isSettingsParityCheckEnabled,
 } from "@/lib/settings/constants";
 import { getLocationContext } from "@/lib/auth/location-context";
+import { saveBusinessDetails } from "@/lib/business-profile/service";
 
+/** Website navigation layout. Social links and the footer description are business details (Business profile). */
 type NavigationPayload = {
     navLinks: any[];
     footerLinks: any[];
-    socialLinks: any[];
     legalLinks: any[];
     footerDisclaimer: string | null;
-    footerBio: string | null;
     menuStyle: "side" | "top";
     publicListingEnabled: boolean;
 };
@@ -60,17 +60,17 @@ async function getNavigationPayload(locationId: string): Promise<{ payload: Navi
     const theme = (config?.theme as any) || {};
 
     if (doc) {
-        return { payload: doc.payload, version: doc.version };
+        // Older documents still carry business copies; they are dropped on the next save.
+        const { socialLinks: _social, footerBio: _bio, ...layout } = doc.payload as NavigationPayload & { socialLinks?: unknown; footerBio?: unknown };
+        return { payload: layout, version: doc.version };
     }
 
     return {
         payload: {
             navLinks: (config?.navLinks as any[]) || [],
             footerLinks: (config?.footerLinks as any[]) || [],
-            socialLinks: (config?.socialLinks as any[]) || [],
             legalLinks: (config?.legalLinks as any[]) || [],
             footerDisclaimer: config?.footerDisclaimer || null,
-            footerBio: config?.footerBio || null,
             menuStyle: theme.menuStyle === "top" ? "top" : "side",
             publicListingEnabled: config?.publicListingEnabled ?? true,
         },
@@ -101,10 +101,8 @@ async function saveNavigationPayload(
                 locationId,
                 navLinks: payload.navLinks,
                 footerLinks: payload.footerLinks,
-                socialLinks: payload.socialLinks,
                 legalLinks: payload.legalLinks,
                 footerDisclaimer: payload.footerDisclaimer || null,
-                footerBio: payload.footerBio || null,
                 publicListingEnabled: payload.publicListingEnabled,
                 theme: {
                     ...currentTheme,
@@ -114,10 +112,8 @@ async function saveNavigationPayload(
             update: {
                 navLinks: payload.navLinks,
                 footerLinks: payload.footerLinks,
-                socialLinks: payload.socialLinks,
                 legalLinks: payload.legalLinks,
                 footerDisclaimer: payload.footerDisclaimer || null,
-                footerBio: payload.footerBio || null,
                 publicListingEnabled: payload.publicListingEnabled,
                 theme: {
                     ...currentTheme,
@@ -143,13 +139,21 @@ async function saveNavigationPayload(
 export async function saveNavigation(locationId: string, type: "nav" | "footer" | "social" | "legal", links: any[]) {
     await assertCrmActionAllowed("site-settings/navigation/actions.ts", "saveNavigation");
     const actorUserId = await assertAdmin(locationId);
+    if (type === "social") {
+        // The business's own accounts belong to the Business profile; empty rows from the editor are not accounts.
+        const socialLinks = links.flatMap((link: any) => typeof link?.url === "string" && link.url.trim() && typeof link?.platform === "string" && link.platform.trim()
+            ? [{ platform: link.platform.trim(), url: link.url.trim() }] : []);
+        await saveBusinessDetails(locationId, { socialLinks }, actorUserId);
+        revalidatePath("/admin/site-settings/navigation");
+        revalidatePath("/admin/site-settings");
+        return;
+    }
     const { payload } = await getNavigationPayload(locationId);
 
     const nextPayload: NavigationPayload = {
         ...payload,
         ...(type === "nav" ? { navLinks: links } : {}),
         ...(type === "footer" ? { footerLinks: links } : {}),
-        ...(type === "social" ? { socialLinks: links } : {}),
         ...(type === "legal" ? { legalLinks: links } : {}),
     };
 
@@ -199,11 +203,8 @@ export async function saveFooterDisclaimer(locationId: string, text: string) {
 export async function saveFooterBio(locationId: string, text: string) {
     await assertCrmActionAllowed("site-settings/navigation/actions.ts", "saveFooterBio");
     const actorUserId = await assertAdmin(locationId);
-    const { payload } = await getNavigationPayload(locationId);
-    await saveNavigationPayload(locationId, actorUserId, {
-        ...payload,
-        footerBio: text || null,
-    });
+    // The footer description is the business summary (one text, in the Business profile).
+    await saveBusinessDetails(locationId, { summary: text?.trim() || null }, actorUserId);
     revalidatePath("/admin/site-settings/navigation");
 }
 
