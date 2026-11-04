@@ -4,15 +4,17 @@ import { withoutPlan } from "@/lib/build/playbook";
 import type { TalkMessage, TalkPlan } from "@/lib/build/talk";
 
 export type Talk = { id: string; title: string; state: string; threadId: string | null; messages: TalkMessage[]; plan: TalkPlan | null; error: string | null; updatedAt: string };
-type Props = { talks: Talk[]; paused: boolean; blocker: string | null; reload: () => Promise<void> };
+type Props = { talks: Talk[]; paused: boolean; blocker: string | null; reload: () => Promise<void>; seed?: { text: string; n: number } | null };
 
 /** Talk to Build: the agent asks questions and proposes a plan; Start turns the plan into running tasks. */
-export function TalkPanel({ talks, paused, blocker, reload }: Props) {
+export function TalkPanel({ talks, paused, blocker, reload, seed }: Props) {
   const [activeId, setActiveId] = useState<string | null>(talks[0]?.id ?? null), [text, setText] = useState("");
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const active = activeId === "new" ? null : talks.find(t => t.id === activeId) ?? (activeId ? null : talks[0] ?? null);
   const working = talks.some(t => ["queued", "thinking"].includes(t.state));
-  const end = useRef<HTMLDivElement>(null);
+  const end = useRef<HTMLDivElement>(null), input = useRef<HTMLTextAreaElement>(null);
+  // "Ask about this screen" starts a new conversation with the screen named.
+  useEffect(() => { if (!seed) return; setActiveId("new"); setText(seed.text); input.current?.focus(); }, [seed]);
   // Poll faster while a reply is on its way; the page's normal refresh is slower.
   useEffect(() => { if (!working) return; const timer = setInterval(() => void reload(), 3000); return () => clearInterval(timer); }, [working, reload]);
   useEffect(() => { end.current?.scrollIntoView({ block: "nearest" }); }, [active?.messages.length, active?.state]);
@@ -52,7 +54,7 @@ export function TalkPanel({ talks, paused, blocker, reload }: Props) {
         <div ref={end} />
       </div>}
       <div className="flex items-end gap-2">
-        <textarea aria-label="Message" rows={2} value={text} maxLength={8000} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void say(); } }}
+        <textarea ref={input} aria-label="Message" rows={2} value={text} maxLength={8000} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void say(); } }}
           placeholder={active ? "Reply…" : "What do you want to build or change?"} className="min-h-[2.75rem] flex-1 resize-y rounded-lg border bg-background p-2.5 text-sm" />
         <button disabled={busy || !text.trim()} onClick={() => void say()} className="rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-50">Send</button>
       </div>

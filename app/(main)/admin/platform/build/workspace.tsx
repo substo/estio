@@ -5,195 +5,258 @@ import type { z } from "zod";
 import { difficulty, undescribed, type nodeSpec, type jobSpec, type Profile } from "@/lib/build/contract";
 import { modelGuidance, unknownGuidance } from "@/lib/build/model-guidance";
 import { suggestedReferences } from "@/lib/build/watch-suggestions";
-import { capabilities, factoryIntro, loop, statusLabel, type Status } from "@/lib/build/factory-guide";
+import { loop } from "@/lib/build/factory-guide";
 import { TalkPanel, type Talk } from "./talk";
 
 type Node = { id: string; revision: number; spec: z.infer<typeof nodeSpec>; updatedAt: string };
-type Job = { id: string; revision: number; state: string; spec: z.infer<typeof jobSpec>; checkpoint: unknown; attempt: unknown; approval: unknown };
-type Data = { control: { paused: boolean; revision: number; profiles: Profile[]; worker: { daily?: { enabled: boolean; profileId: string; lastRunDate?: string; policyRevision: number }; quotaBuckets?: Record<string, { observedAt: string; reset: string }>; catalog?: CatalogModel[]; catalogAt?: string; autoApprove?: { mode: "off" | "record" | "on"; at?: string }; head?: string; id?: string; lastSeenAt?: string; execution?: string } } | null; nodes: Node[]; edges: { fromId: string; toId: string; kind: string }[]; jobs: Job[]; execution: string; talks?: Talk[] };
-const field = "w-full rounded border bg-background p-2 text-sm";
-const button = "rounded border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50";
+type Job = { id: string; key: string; revision: number; state: string; spec: z.infer<typeof jobSpec>; checkpoint: unknown; attempt: unknown; approval: unknown; createdAt: string; updatedAt: string };
+type Worker = { daily?: { enabled: boolean; profileId: string; lastRunDate?: string }; quotaBuckets?: Record<string, { observedAt: string; reset: string }>; catalog?: CatalogModel[]; catalogAt?: string; autoApprove?: { mode: "off" | "record" | "on" }; head?: string; id?: string; lastSeenAt?: string };
+type Data = { control: { paused: boolean; revision: number; profiles: Profile[]; worker: Worker } | null; nodes: Node[]; edges: { fromId: string; toId: string; kind: string }[]; jobs: Job[]; talks?: Talk[] };
+type Send = (command: unknown) => Promise<boolean>;
+type Checkpoint = { reason?: string; nextStep?: string; result?: { text?: string; needsAnswer?: boolean }; t3?: { threadId?: string; branch?: string }; feedback?: { at: string; decision: string; note: string; sentAt?: string }[]; auto?: { wouldApprove: boolean; reasons: string[] }; proposalsCreated?: number };
 type CatalogModel = { provider: string; model: string; name: string };
 type Tier = "off" | "routine" | "hard";
-const tierLabel: Record<number, string> = { 2: "Routine", 3: "Hard" };
+
+const btn = "rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50";
+const solid = "rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50";
+const field = "rounded-md border bg-background p-2 text-sm";
+const label = "text-xs font-medium uppercase tracking-wide text-muted-foreground";
+const sections = ["CRM", "Studio", "Public website", "Platform admin", "Account & onboarding"];
+const cp = (j: Job) => (j.checkpoint ?? {}) as Checkpoint;
+const ago = (iso: string) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : new Date(iso).toLocaleDateString(); };
+const level = (j: Job) => j.spec.quality === difficulty.hard ? "Hard" : "Routine";
+const model = (j: Job, data: Data) => (j.attempt as { profile?: Profile } | null)?.profile?.model ?? data.control?.profiles.find(p => p.id === j.spec.profileId)?.model;
 // Profiles are generated from catalog choices, never typed. One quota bucket per provider subscription.
 const makeProfile = (m: CatalogModel, tier: "routine" | "hard", write: boolean): Profile => ({ id: `${m.provider}.${m.model}`, enabled: true, provider: m.provider, account: "default", billing: "subscription", model: m.model, options: {}, quotaBucket: m.provider, taskTypes: write ? ["inspect", "implementation", "review"] : ["inspect", "review"], tools: write ? ["git-read", "code-write"] : ["git-read"], dataScope: "estio-repository", quality: difficulty[tier], concurrency: 1, maxAttempts: 2, fallbacks: [] });
-function stage(job: Job) { return job.state === "proposed" ? "Proposed" : job.state === "approved" ? "Approved" : job.state === "working" || job.state === "stopping" ? "Working" : job.state === "review" ? "Review" : job.state === "done" ? "Done" : "Blocked"; }
+const blockedStates = ["blocked-lease-expired", "waiting-for-capacity", "blocked-configuration", "blocked-stale-approval"];
+
+/** Build: talk, what needs you, the app's progress by section, and the work board. Settings sit behind one button. */
 export default function BuildWorkspace() {
   const [data, setData] = useState<Data | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState(false);
-  const [app, setApp] = useState("all"), [product, setProduct] = useState("all"), [tab, setTab] = useState("foryou"), [stageFilter, setStageFilter] = useState("all");
-  const [choices, setChoices] = useState<Record<string, { tier: Tier; write: boolean }> | null>(null);
-  const [search, setSearch] = useState(""), [resources, setResources] = useState(false);
+  const [settings, setSettings] = useState(false), [seed, setSeed] = useState<{ text: string; n: number } | null>(null);
   const load = useCallback(async () => { try { const res = await fetch("/api/build", { cache: "no-store" }); const value = await res.json(); if (!res.ok) throw new Error(value.error); setData(value); } catch (e) { setError(String(e)); } }, []);
   useEffect(() => { void load(); const timer = setInterval(() => void load(), 15000); return () => clearInterval(timer); }, [load]);
-  async function send(command: unknown) { setBusy(true); setError(""); try { const res = await fetch("/api/build", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command) }); const value = await res.json(); if (!res.ok) throw new Error(value.error); await load(); return true; } catch (e) { setError(String(e)); return false; } finally { setBusy(false); } }
-  const nodes = data?.nodes.filter(n => (app === "all" || n.spec.app === app || n.spec.app === "both") && (product === "all" || n.spec.product === product || n.spec.product === "shared")) ?? [];
-  const visibleIds = new Set(nodes.map(n => n.id));
-  const jobs = data?.jobs.filter(j => j.spec.nodeIds.some(n => visibleIds.has(n)) && (stageFilter === "all" || stage(j) === stageFilter)) ?? [];
-  const paused = data?.control?.paused ?? true;
-  // Experience map grouping: section › area. Source files without a screen sit under "Shared code".
-  const group = (n: Node) => n.spec.section ? `${n.spec.section} › ${n.spec.area ?? "Other"}` : n.spec.kind === "feature" ? "Features" : "Shared code (evidence)";
-  return <main className="mx-auto max-w-7xl space-y-5 p-3 sm:p-6">
+  const send: Send = async command => { setBusy(true); setError(""); try { const res = await fetch("/api/build", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command) }); const value = await res.json(); if (!res.ok) throw new Error(value.error); await load(); return true; } catch (e) { setError(e instanceof Error ? e.message : String(e)); return false; } finally { setBusy(false); } };
+  const w = data?.control?.worker, paused = data?.control?.paused ?? true;
+  const online = !!w?.lastSeenAt && Date.now() - Date.parse(w.lastSeenAt) < 120_000;
+  const models = data?.control?.profiles.filter(p => p.enabled) ?? [];
+  const mode = w?.autoApprove?.mode ?? "off";
+  const ask = (text: string) => { setSeed({ text, n: Date.now() }); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  return <main className="mx-auto max-w-6xl space-y-6 p-3 sm:p-6">
     <Link href="/admin/platform" className="text-sm underline">← Platform</Link>
-    <div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-3xl font-semibold">Build</h1><p className="text-sm text-muted-foreground">Private product map and scoped delivery decisions</p></div><button className={button} disabled={busy || !data} onClick={() => send({ action: "pause", paused: !paused })}>{paused ? "Resume queue" : "Pause queue"}</button></div>
-    <div className="rounded border p-3 text-sm space-y-1"><p><strong>{paused ? "Queue paused" : "Queue enabled"}</strong> · One active assignment · Endpoint: local result review</p><p>{data?.execution ?? "Loading Build…"}</p><p>Worker: {data?.control?.worker.id ?? "Not connected"} · Last seen: {data?.control?.worker.lastSeenAt ? new Date(data.control.worker.lastSeenAt).toLocaleString() : "Never"}. Quota: unknown.</p><p className="text-muted-foreground">Build owns only new estio-build assignments. Existing Atlas work is not imported, registered or dispatched here.</p></div>
-    <details className="rounded border p-3"><summary className="cursor-pointer font-medium">Daily read-only product review · {data?.control?.worker.daily?.enabled ? "Enabled" : "Off"}</summary><p className="mt-2 text-sm">At most one stale page per UTC day while the Mac worker is awake with CLI review enabled. Returns up to three improvements for your decision; never authorizes implementation. Policy changes require a fresh grant.</p><p className="text-xs">Last admitted: {data?.control?.worker.daily?.lastRunDate ?? "Never"}. Next: {data?.control?.worker.daily?.enabled ? data.control.worker.daily.lastRunDate === new Date().toISOString().slice(0,10) ? "Next UTC day, on worker poll" : "Next eligible worker poll" : "Disabled"}</p><form className="mt-3 flex flex-wrap gap-2" onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); void send({ action: "daily", enabled: f.get("enabled") === "on", profileId: f.get("profile") }); }}><select name="profile" aria-label="Daily review profile" className={field + " !w-auto"}>{data?.control?.profiles.filter(p => p.enabled && p.taskTypes.includes("review")).map(p => <option key={p.id} value={p.id}>{p.model}</option>)}</select><label className="text-sm"><input name="enabled" type="checkbox" defaultChecked={data?.control?.worker.daily?.enabled ?? false} /> Enable standing read-only grant</label><button disabled={busy || !data?.control?.profiles.length} className={button}>Save daily review grant</button></form></details>
-    {error && <p role="alert" className="rounded border border-red-400 p-3 text-sm">{error}</p>}
-    {data && <TalkPanel talks={data.talks ?? []} paused={paused} blocker={data.control?.profiles.some(p => p.enabled && p.tools.includes("code-write")) ? null : "Allow a model that may write code first."} reload={load} />}
-    <div className="flex flex-wrap gap-2"><select aria-label="App" className={field + " !w-auto"} value={app} onChange={e => setApp(e.target.value)}><option value="all">Both apps</option><option value="estio">Estio</option><option value="substo">Substo</option></select><select aria-label="Product" className={field + " !w-auto"} value={product} onChange={e => setProduct(e.target.value)}><option value="all">All products</option><option value="crm">CRM</option><option value="studio">Studio</option></select>{["foryou", "guide", "decisions", "product", "watch", "profiles"].map(t => <button key={t} className={button + (tab === t ? " bg-muted" : "")} onClick={() => setTab(t)}>{t === "foryou" ? "For you" : t === "guide" ? "How it works" : t === "decisions" ? "Decisions & work" : t === "product" ? "Product map" : t === "watch" ? "Watch list" : "Model profiles"}</button>)}</div>
-    {tab === "decisions" && <>
-      <details className="rounded border p-3"><summary className="cursor-pointer font-medium">Propose scoped work</summary><form className="mt-3 grid gap-3 sm:grid-cols-2" onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); void send({ action: "propose", key: f.get("key") || crypto.randomUUID(), spec: { title: f.get("title"), outcome: f.get("outcome"), reason: f.get("reason"), scope: String(f.get("scope")).split("\n").filter(Boolean), acceptance: String(f.get("acceptance")).split("\n").filter(Boolean), nodeIds: [f.get("node")], baseRevision: f.get("base") || data?.control?.worker.head, endpoint: "review", taskType: f.get("type"), profileId: "auto", quality: 2 /* server assesses difficulty and picks the model */, tools: f.get("type") === "implementation" ? ["git-read", "code-write"] : ["git-read"], owner: "estio-build" } }); }}>
-        {[ ["title", "Short title"], ["outcome", "Desired outcome"], ["reason", "Why now / benefit / risk"] ].map(([name, label]) => <label key={name} className="text-sm">{label}<input required name={name} className={field} maxLength={name === "key" ? 120 : 4000} /></label>)}
-        <label className="text-sm">Affected row<select name="node" required className={field}>{nodes.map(n => <option key={n.id} value={n.id}>{n.spec.name}</option>)}</select></label>
-        <label className="text-sm">Task<select name="type" className={field}><option value="inspect">Repository inspection (no provider)</option><option value="review">Read-only model review (opt-in worker)</option><option value="implementation">Implementation (isolated worker required)</option></select></label>
-
-        <details className="sm:col-span-2"><summary className="text-sm">Advanced assignment identity</summary><label className="text-sm">Base commit<input name="base" defaultValue={data?.control?.worker.head} pattern="[a-f0-9]{40}" className={field} /></label><label className="text-sm">Deduplication key (generated if empty)<input name="key" className={field} /></label></details>
-        <label className="text-sm">Scope paths (one per line)<textarea name="scope" required className={field} /></label>
-        <label className="text-sm sm:col-span-2">Acceptance criteria (one per line)<textarea name="acceptance" required className={field} /></label>
-        <button disabled={busy || !nodes.length} className={button}>Create proposal</button><p className="text-xs text-muted-foreground">Approval permits this exact scope through local review only. No commit, push, deploy or production changes.</p>
-      </form></details>
-      <select aria-label="Work stage" className={field + " !w-auto"} value={stageFilter} onChange={e => setStageFilter(e.target.value)}>{["all", "Proposed", "Approved", "Working", "Review", "Done", "Blocked"].map(s => <option key={s}>{s}</option>)}</select>
-      <div className="grid gap-3 lg:grid-cols-3">{jobs.map(j => <article key={j.id} className="min-w-0 space-y-3 rounded border p-4"><div className="flex justify-between gap-2"><h2 className="font-semibold break-words">{j.spec.title}</h2><span className="text-xs">{stage(j)}</span></div><p className="text-sm">{j.spec.outcome}</p><p className="text-sm text-muted-foreground">{j.spec.reason}</p><p className="text-sm">{j.checkpoint && typeof j.checkpoint === "object" ? String((j.checkpoint as Record<string, unknown>).reason ?? (j.checkpoint as Record<string, unknown>).nextStep ?? "Evidence recorded; open details") : "Awaiting action"}</p><p className="break-words text-xs">{(() => { const a = (j.checkpoint as { auto?: { wouldApprove: boolean; reasons: string[]; mode: string } } | null)?.auto; const byPolicy = (j.approval as { auto?: boolean } | null)?.auto;
-          return byPolicy ? <span className="mr-1 rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-900">Approved by policy</span> : a && j.state === "proposed" ? <span className="mr-1 rounded border px-1.5 py-0.5">{a.wouldApprove ? "Policy would approve" : `Policy: needs you (${a.reasons.join(", ")})`}</span> : null; })()}{j.state} · {j.spec.taskType} · {j.spec.routing ?? tierLabel[j.spec.quality] ?? "Legacy"} · {(j.attempt as { profile?: Profile } | null)?.profile?.model ?? data?.control?.profiles.find(p => p.id === j.spec.profileId)?.model ?? "no approved model"}</p><details className="text-sm"><summary>Scope, approval & evidence</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify({ scope: j.spec.scope, acceptance: j.spec.acceptance, base: j.spec.baseRevision, endpoint: j.spec.endpoint, approval: j.approval, attempt: j.attempt, checkpoint: j.checkpoint }, null, 2)}</pre></details><div className="flex flex-wrap gap-2">
-
-        {j.state === "proposed" && <button disabled={busy} className={button} onClick={() => send({ action: "approve", id: j.id, revision: j.revision })}>Approve exact scope</button>}
-        {["review", "failed"].includes(j.state) && <Feedback job={j} busy={busy} send={send} />}
-        {!["done", "revoked", "stopping", "blocked-lease-expired"].includes(j.state) && <button disabled={busy} className={button} onClick={() => send({ action: "revoke", id: j.id, revision: j.revision })}>Revoke</button>}
-        {["waiting-for-capacity", "blocked-configuration", "blocked-stale-approval", "blocked-lease-expired", "failed", "revoked"].includes(j.state) && <form className="space-y-2" onSubmit={e => { e.preventDefault(); void send({ action: "resume", id: j.id, revision: j.revision, stoppedEvidence: new FormData(e.currentTarget).get("evidence") }); }}><label className="text-xs">Confirm prior writer stopped; describe checkpoint and stop evidence<input name="evidence" required minLength={10} className={field} /></label><button disabled={busy} className={button}>Recover to proposal</button></form>}
-      </div></article>)}</div>{!jobs.length && <p className="text-sm text-muted-foreground">No work in this view. Connect the worker to scan source, approve a profile, then propose a bounded assignment.</p>}
-    </>}
-    {tab === "product" && <><details className="rounded border p-3"><summary className="cursor-pointer font-medium">Add feature / page</summary><form className="mt-3 grid gap-3 sm:grid-cols-2" onSubmit={async e => {
-      e.preventDefault(); const f = new FormData(e.currentTarget); const key = `feature-${crypto.randomUUID()}`; const parent = data?.nodes.find(n => n.id === f.get("parent")); if (!parent) return;
-      const spec = { ...parent.spec, name: String(f.get("name")), purpose: String(f.get("purpose")), intent: String(f.get("intent")), journey: String(f.get("journey")), kind: "feature", observed: "Not yet inspected", freshness: "unknown", coverage: "unknown", checks: [], evidenceRevision: undefined };
-      if (await send({ action: "node", id: key, revision: 0, spec })) await send({ action: "edge", edge: { fromId: parent.id, toId: key, kind: "contains", evidence: { source: "Operator decision", revision: parent.spec.sourceRevision, coverage: "confirmed" } } });
-    }}>{[["name", "Feature name"], ["purpose", "Purpose"], ["intent", "Approved intent"], ["journey", "User journey"]].map(([name,label]) => <label key={name} className="text-sm">{label}<input className={field} required name={name}/></label>)}<label className="text-sm">Parent page / shared resource<select className={field} name="parent" required>{nodes.map(n => <option key={n.id} value={n.id}>{n.spec.name}</option>)}</select></label><button className={button} disabled={busy || !nodes.length}>Save feature and dependency</button></form></details>
-      <div className="flex flex-wrap items-center gap-3"><input aria-label="Search product map" placeholder="Search screens, areas, features" className={field + " sm:!w-80"} value={search} onChange={e => setSearch(e.target.value)} /><label className="text-sm"><input type="checkbox" checked={resources} onChange={e => setResources(e.target.checked)} /> Also show code files</label></div>{(() => { const d = data?.nodes.filter(n => n.spec.draft).length ?? 0; return d > 0 && <p className="rounded border border-dashed p-2 text-sm">{d} screen description{d === 1 ? "" : "s"} drafted by reviews and waiting for you to confirm.</p>; })()}<p className="text-sm text-muted-foreground">The app as users see it: section › area › screen, from the app&apos;s routes. Code files stay attached as evidence, so a change to shared code marks the screens that use it stale. Rename a screen and the name is kept.</p><div className="overflow-x-auto rounded border"><table className="w-full text-left text-sm"><thead><tr>{["Screen / feature", "Purpose", "Evidence", "Open work", "Dependencies", "Changed"].map(h => <th className="p-3" key={h}>{h}</th>)}</tr></thead><tbody>{nodes.filter(n => (resources || ["page", "feature"].includes(n.spec.kind)) && `${n.spec.section ?? ""} ${n.spec.area ?? ""} ${n.spec.name} ${n.spec.route ?? ""} ${n.spec.purpose}`.toLowerCase().includes(search.toLowerCase()))
-        .sort((a, b) => group(a).localeCompare(group(b)) || (a.spec.route ?? a.spec.name).localeCompare(b.spec.route ?? b.spec.name))
-        .flatMap((n, i, list) => [...(i === 0 || group(list[i - 1]) !== group(n) ? [<tr key={`g-${group(n)}`} className="border-t bg-muted/50"><th colSpan={6} className="p-2 text-left text-sm font-semibold">{group(n)}</th></tr>] : []), <tr className="border-t align-top" key={n.id}><td className="min-w-64 p-3"><details><summary className="cursor-pointer break-words font-medium">{n.spec.name}{n.spec.route && <span className="block text-xs font-normal text-muted-foreground">{n.spec.route}</span>}</summary><NodeEditor node={n} busy={busy} save={spec => send({ action: "node", id: n.id, revision: n.revision, spec })} /></details>{n.spec.draft && <div className="mt-2 space-y-1 rounded border border-dashed p-2 text-xs"><p className="font-medium">Draft from review · please confirm</p><p>{n.spec.draft.purpose}</p><p className="text-muted-foreground">{n.spec.draft.journey}</p>{n.spec.draft.features.length > 0 && <ul className="list-disc pl-4">{n.spec.draft.features.map(f => <li key={f.name}><span className="font-medium">{f.name}</span>: {f.purpose}</li>)}</ul>}<div className="flex gap-2 pt-1"><button disabled={busy} className={button} onClick={() => send({ action: "draft", id: n.id, revision: n.revision, decision: "confirm" })}>Confirm</button><button disabled={busy} className={button} onClick={() => send({ action: "draft", id: n.id, revision: n.revision, decision: "discard" })}>Discard</button></div></div>}</td><td className="min-w-48 p-3">{n.spec.purpose === undescribed ? <span className="text-muted-foreground">Not described yet</span> : n.spec.purpose}</td><td className="p-3">{n.spec.freshness}<span className="block text-xs">{n.spec.coverage}</span></td><td className="p-3">{data?.jobs.filter(j => j.spec.nodeIds.includes(n.id) && !["done", "revoked"].includes(j.state)).length}</td><td className="p-3"><details><summary>{data?.edges.filter(e => e.fromId === n.id).length} links</summary>{data?.edges.filter(e => e.fromId === n.id).map((e, i) => <p className="text-xs break-all" key={i}>{e.kind}: {data.nodes.find(other => other.id === e.toId)?.spec.name ?? e.toId}</p>)}</details></td><td className="p-3 text-xs">{new Date(n.updatedAt).toLocaleString()}</td></tr>])}</tbody></table></div></>}
-    {tab === "foryou" && data && <ForYou data={data} busy={busy} send={send} open={setTab} />}
-    {tab === "guide" && (() => {
-      const w = data?.control?.worker, mode = w?.autoApprove?.mode ?? "off";
-      const online = !!w?.lastSeenAt && Date.now() - Date.parse(w.lastSeenAt) < 120_000;
-      const models = data?.control?.profiles.filter(p => p.enabled).length ?? 0, watched = data?.nodes.filter(n => n.spec.kind === "reference").length ?? 0;
-      const setup: [string, boolean, string, ReactNode?][] = [
-        ["Mac worker", online, online ? "Connected" : "Not seen in the last 2 minutes. Wake the Mac and open T3 Code."],
-        ["Approved models", models > 0, models ? `${models} allowed` : "None yet. Allow at least one on Model profiles.", <button key="m" className={button} onClick={() => setTab("profiles")}>Open</button>],
-        ["Queue", !paused, paused ? "Paused. Nothing runs until you resume it." : "Running"],
-        ["Daily review", !!w?.daily?.enabled, w?.daily?.enabled ? "On" : "Off. Turn it on under Decisions & work."],
-        ["Auto-approval", mode !== "off", mode === "on" ? "On: small Routine work starts without your click (3 a day)" : mode === "record" ? "Record only: cards show what the policy would do" : "Off",
-          <select key="a" aria-label="Auto-approval" className={field + " !w-auto"} value={mode} disabled={busy} onChange={e => send({ action: "auto-approve", mode: e.target.value })}><option value="off">Off</option><option value="record">Record only</option><option value="on">On</option></select>],
-        ["Watch list", watched > 0, watched ? `${watched} watched` : "Nothing yet. Add the suggested references.", <button key="w" className={button} onClick={() => setTab("watch")}>Open</button>],
-      ];
-      const shown = (c: typeof capabilities[number]): Status => c.name === "Policy auto-approval" ? (mode === "on" ? "live" : mode === "record" ? "record-only" : "planned") : c.status;
-      return <div className="space-y-5">
-        <p className="max-w-3xl text-sm">{factoryIntro}</p>
-        <section className="space-y-2"><h2 className="font-semibold">Your setup</h2><div className="divide-y rounded border">{setup.map(([name, ok, text, action]) => <div key={name} className="flex flex-wrap items-center justify-between gap-2 p-3"><div><p className="text-sm font-medium"><span aria-hidden className={ok ? "text-emerald-600" : "text-amber-600"}>{ok ? "●" : "○"}</span> {name}</p><p className="text-xs text-muted-foreground">{text}</p></div>{action}</div>)}</div></section>
-        <section className="space-y-2"><h2 className="font-semibold">The loop</h2><ol className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">{loop.map((l, i) => <li key={l.step} className="rounded border p-3"><p className="text-xs text-muted-foreground">{i + 1} · {l.who}</p><p className="text-sm font-medium">{l.step}</p><p className="text-xs">{l.text}</p></li>)}</ol></section>
-        {(["live", "record-only", "planned", "owner"] as Status[]).map(st => { const items = capabilities.filter(c => shown(c) === st); return items.length > 0 && <section key={st} className="space-y-2"><h2 className="font-semibold">{statusLabel[st]}</h2><div className="grid gap-2 md:grid-cols-2">{items.map(c => <article key={c.name} className="space-y-1 rounded border p-3"><p className="text-sm font-medium">{c.name} <span className="text-xs font-normal text-muted-foreground">· {c.where}</span></p><p className="text-sm">{c.what}</p><p className="text-xs"><span className="font-medium">System:</span> {c.system} <span className="font-medium">You:</span> {c.you}</p></article>)}</div></section>; })}
-      </div>; })()}
-    {tab === "watch" && (() => {
-      const refs = data?.nodes.filter(n => n.spec.kind === "reference") ?? [];
-      const screens = (data?.nodes.filter(n => n.spec.kind === "page") ?? []).sort((a, b) => group(a).localeCompare(group(b)) || a.spec.name.localeCompare(b.spec.name));
-      const screenOptions = screens.map(n => <option key={n.id} value={n.id}>{group(n)} · {n.spec.name}</option>);
-      const linked = (id: string) => (data?.edges ?? []).filter(e => e.fromId === id && e.kind === "inspires").map(e => data?.nodes.find(n => n.id === e.toId)).filter(Boolean) as Node[];
-      const link = (fromId: string, toId: string) => toId && send({ action: "edge", edge: { fromId, toId, kind: "inspires", evidence: { source: "Owner link", revision: "watch", coverage: "confirmed" } } });
-      const suggestions = suggestedReferences.filter(r => !refs.some(n => n.spec.watch?.url === r.url));
-      return <div className="space-y-3 rounded border p-4"><h2 className="font-semibold">Watch list</h2>
-        <p className="text-sm">Apps, repos, videos and features worth learning from, linked to the screens they could improve. GitHub repos are checked daily for new releases and commits by the Mac worker, with no model call. A change is flagged here, and the next daily review looks at a linked screen with that change in mind.</p>
-        <form className="grid gap-2 sm:grid-cols-[2fr_2fr_2fr_auto]" onSubmit={async e => { e.preventDefault(); const form = e.currentTarget, f = new FormData(form); if (await send({ action: "watch", url: String(f.get("url")).trim(), note: String(f.get("note") ?? "").trim() || undefined, screenIds: f.get("screen") ? [f.get("screen")] : [] })) form.reset(); }}>
-          <input name="url" type="url" required placeholder="Paste a link (GitHub, YouTube, any site)" aria-label="Link" className={field} />
-          <input name="note" placeholder="What could we take from it? (optional)" aria-label="Note" className={field} maxLength={1000} />
-          <select name="screen" aria-label="Screen it could improve" className={field}><option value="">Screen it could improve (optional)</option>{screenOptions}</select>
-          <button className={button} disabled={busy}>Add</button></form>
-        {suggestions.length > 0 && <div className="space-y-1"><p className="text-xs text-muted-foreground">From our notes, not added yet:</p>{suggestions.map(r => <div key={r.url} className="flex flex-wrap items-center gap-2 text-sm"><button className={button} disabled={busy} onClick={() => send({ action: "watch", url: r.url, note: r.note, screenIds: [] })}>Add</button><span className="break-all">{r.url}</span></div>)}</div>}
-        {!refs.length && <p className="text-sm text-muted-foreground">Nothing watched yet.</p>}
-        <div className="divide-y rounded border">{refs.map(n => { const w = n.spec.watch, updated = !!w?.latest && w.latest !== w.seen;
-          return <div key={n.id} className="space-y-2 p-3"><div className="flex flex-wrap items-center justify-between gap-2"><a href={w?.url} target="_blank" rel="noreferrer" className="break-all font-medium underline">{n.spec.name}</a>
-              <div className="flex items-center gap-2">{updated && <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900">Updated</span>}<select aria-label="Status" className={field + " !w-auto"} value={w?.status} onChange={e => send({ action: "watch-update", id: n.id, status: e.target.value })}><option value="watching">Watching</option><option value="adopted">Adopted</option><option value="rejected">Not for us</option></select></div></div>
-            <p className="text-sm">{n.spec.intent}</p>
-            <p className="text-xs text-muted-foreground">{n.spec.observed}{w?.checkedAt ? ` · checked ${new Date(w.checkedAt).toLocaleDateString()}` : ""}</p>
-            {updated && <button className={button} disabled={busy} onClick={() => send({ action: "watch-update", id: n.id, seen: true })}>Mark as seen</button>}
-            <div className="flex flex-wrap items-center gap-2 text-xs">{linked(n.id).map(s => <span key={s.id} className="rounded border px-2 py-0.5">{group(s)} · {s.spec.name}</span>)}
-              <select aria-label="Link a screen" className={field + " !w-auto text-xs"} value="" onChange={e => void link(n.id, e.target.value)}><option value="">+ Link a screen</option>{screenOptions}</select></div></div>; })}</div>
-      </div>; })()}
-    {tab === "profiles" && (() => {
-      const catalog = data?.control?.worker.catalog ?? [], approved = data?.control?.profiles ?? [];
-      const current = (m: CatalogModel) => { const p = approved.find(x => x.provider === m.provider && x.model === m.model && x.enabled); return { tier: (p ? (p.quality === 3 ? "hard" : "routine") : "off") as Tier, write: p ? p.tools.includes("code-write") : true }; };
-      const pick = choices ?? Object.fromEntries(catalog.map(m => [`${m.provider}.${m.model}`, current(m)]));
-      const set = (key: string, v: Partial<{ tier: Tier; write: boolean }>) => setChoices({ ...pick, [key]: { ...pick[key], ...v } });
-      const stale = approved.filter(p => p.enabled && !catalog.some(m => m.provider === p.provider && m.model === p.model));
-      return <div className="space-y-3 rounded border p-4"><h2 className="font-semibold">Approved models</h2>
-        <p className="text-sm">Only models you set to Routine or Hard can run. Build decides each task's difficulty itself (files, sensitive areas, dependents, acceptance criteria) and uses an approved model at that level. If none is free, it uses another approved model. The list comes from T3 on the Mac{data?.control?.worker.catalogAt ? ` (updated ${new Date(data.control.worker.catalogAt).toLocaleString()})` : ""}. New models and providers appear as Not allowed. Threads run at T3&apos;s default effort.</p>
-        {!catalog.length && <p className="text-sm text-muted-foreground">No catalog yet. Start the Mac worker; it reports T3&apos;s models on its next poll.</p>}
-        <div className="divide-y rounded border">{catalog.map(m => { const key = `${m.provider}.${m.model}`, g = modelGuidance[m.model], c = pick[key] ?? current(m);
-          return <div key={key} className="grid gap-2 p-3 sm:grid-cols-[1fr_auto] sm:items-center"><div className="min-w-0"><p className="text-sm font-medium">{m.name} <span className="text-xs text-muted-foreground">{m.provider}</span></p><p className="text-xs text-muted-foreground">{g?.use ?? unknownGuidance}{g ? ` Suggested: ${g.suggested === "off" ? "Not allowed" : g.suggested === "hard" ? "Hard" : "Routine"}.` : ""}</p></div>
-            <div className="flex flex-wrap items-center gap-2"><select aria-label={`${m.name} level`} className={field + " !w-auto"} value={c.tier} onChange={e => set(key, { tier: e.target.value as Tier })}><option value="off">Not allowed</option><option value="routine">Routine</option><option value="hard">Hard</option></select>
-              {c.tier !== "off" && <label className="text-xs"><input type="checkbox" checked={c.write} onChange={e => set(key, { write: e.target.checked })} /> May write code</label>}</div></div>; })}</div>
-        {stale.length > 0 && <p className="text-sm">No longer offered by T3: {stale.map(p => p.model).join(", ")}. Saving removes them.</p>}
-        <div className="flex gap-2"><button className={button} disabled={busy || !catalog.length || !choices} onClick={async () => {
-          const profiles = catalog.flatMap(m => { const c = pick[`${m.provider}.${m.model}`]; return c && c.tier !== "off" ? [makeProfile(m, c.tier, c.write)] : []; });
-          if (await send({ action: "profiles", revision: data?.control?.revision ?? 1, profiles })) setChoices(null);
-        }}>Save approved models</button>{choices && <button className={button} onClick={() => setChoices(null)}>Discard changes</button>}</div>
-        {Object.entries(data?.control?.worker.quotaBuckets ?? {}).map(([bucket, observation]) => <form key={bucket} className="space-y-2 rounded border p-3" onSubmit={e => { e.preventDefault(); void send({ action: "recheck", bucket, evidence: new FormData(e.currentTarget).get("evidence") }); }}><p className="text-sm">{bucket}: limit hit at {observation.observedAt}; reset {observation.reset}</p><label className="text-sm">What shows the limit has reset?<input name="evidence" minLength={10} required className={field} /></label><button disabled={busy} className={button}>Clear limit</button></form>)}
-      </div>; })()}
+    <header className="flex flex-wrap items-center gap-2">
+      <h1 className="mr-2 text-3xl font-semibold">Build</h1>
+      <Pill ok={online}>{online ? "Mac connected" : "Mac offline"}</Pill>
+      <button className="contents" disabled={busy || !data} onClick={() => send({ action: "pause", paused: !paused })} title={paused ? "Resume: approved tasks start" : "Pause: nothing new starts"}><Pill ok={!paused}>{paused ? "Paused · resume" : "Running · pause"}</Pill></button>
+      <Pill ok={mode !== "off"}>Autopilot {mode === "on" ? "on" : mode === "record" ? "watching" : "off"}</Pill>
+      <Pill ok={models.length > 0}>{models.length} model{models.length === 1 ? "" : "s"} allowed</Pill>
+      <button className={`${btn} ml-auto`} onClick={() => setSettings(!settings)} aria-expanded={settings}>⚙ Settings</button>
+    </header>
+    {error && <p role="alert" className="rounded-md border border-red-400 p-3 text-sm">{error}</p>}
+    {!data && <p className="text-sm text-muted-foreground">Loading Build…</p>}
+    {data && settings && <Settings data={data} busy={busy} send={send} close={() => setSettings(false)} />}
+    {data && <TalkPanel talks={data.talks ?? []} paused={paused} seed={seed} reload={load}
+      blocker={!online ? "The Mac is offline; it relays the conversation." : models.some(p => p.tools.includes("code-write")) ? null : "Allow a model that may write code first (Settings)."} />}
+    {data && <NeedsYou data={data} busy={busy} send={send} online={online} openSettings={() => setSettings(true)} />}
+    {data && <AppMap data={data} busy={busy} send={send} ask={ask} />}
+    {data && <Progress data={data} />}
   </main>;
 }
-function NodeEditor({ node, busy, save }: { node: Node; busy: boolean; save: (spec: Node["spec"]) => void }) {
-  return <form className="mt-3 space-y-2" onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); save({ ...node.spec, name: String(f.get("name")), purpose: String(f.get("purpose")), intent: String(f.get("intent")), journey: String(f.get("journey")), app: f.get("app") as Node["spec"]["app"], product: f.get("product") as Node["spec"]["product"] }); }}>
-    <p className="text-xs font-normal">Observed: {node.spec.observed}</p><p className="break-all text-xs font-normal">Source: {node.spec.sourceRevision}</p>
-    {(["name", "purpose", "intent", "journey"] as const).map(key => <label className="block text-xs font-normal" key={key}>{key === "intent" ? "Approved intent (owner decision)" : key}<textarea name={key} required defaultValue={node.spec[key]} className={field} /></label>)}
-    <select name="app" defaultValue={node.spec.app} className={field}><option>both</option><option>estio</option><option>substo</option></select><select name="product" defaultValue={node.spec.product} className={field}><option>shared</option><option>crm</option><option>studio</option></select><button disabled={busy} className={button}>Save approved brief</button>
-  </form>;
+
+function Pill({ ok, children }: { ok: boolean; children: ReactNode }) {
+  return <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs"><span aria-hidden className={`h-2 w-2 rounded-full ${ok ? "bg-emerald-500" : "bg-amber-500"}`} />{children}</span>;
+}
+function Row({ icon, title, detail, children }: { icon: string; title: ReactNode; detail?: ReactNode; children?: ReactNode }) {
+  return <div className="flex flex-wrap items-start gap-3 rounded-lg border p-3"><span aria-hidden className="text-lg leading-6">{icon}</span>
+    <div className="min-w-0 flex-1"><p className="text-sm font-medium">{title}</p>{detail && <div className="text-xs text-muted-foreground">{detail}</div>}</div>
+    {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}</div>;
 }
 
-/** Result first, then the owner's one decision: accept, or redo with a note that continues the same T3 thread. */
-function Feedback({ job, busy, send }: { job: Job; busy: boolean; send: (command: unknown) => Promise<boolean> }) {
-  const [note, setNote] = useState("");
-  const cp = (job.checkpoint ?? {}) as { result?: { text?: string }; t3?: { branch?: string; threadId?: string }; feedback?: { at: string; decision: string; note: string; sentAt?: string }[] };
-  return <div className="w-full space-y-2 rounded border p-2">
-    {cp.result?.text && <p className="max-h-48 overflow-auto whitespace-pre-wrap text-sm">{cp.result.text}</p>}
-    {cp.t3?.branch && <p className="text-xs text-muted-foreground">Branch {cp.t3.branch} · open the T3 thread &quot;Build: {job.spec.title}&quot; for the full conversation</p>}
-    {!!cp.feedback?.length && <ul className="space-y-1 text-xs">{cp.feedback.map((f, i) => <li key={i}>{f.decision === "redo" ? "Redo" : "Accepted"} · {new Date(f.at).toLocaleString()}: {f.note}{f.decision === "redo" && !f.sentAt ? " (queued)" : ""}</li>)}</ul>}
-    <textarea aria-label="Feedback" placeholder={job.state === "failed" ? "What should it do differently?" : "What should change? (optional when accepting)"} className="w-full rounded border bg-background p-2 text-sm" value={note} maxLength={2000} onChange={e => setNote(e.target.value)} />
-    <div className="flex flex-wrap gap-2">
-      {job.state === "review" && <button disabled={busy} className="rounded border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50" onClick={async () => { if (await send({ action: "accept", id: job.id, revision: job.revision, note: note.trim() || undefined })) setNote(""); }}>Accept</button>}
-      <button disabled={busy || note.trim().length < 3} className="rounded border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50" onClick={async () => { if (await send({ action: "redo", id: job.id, revision: job.revision, note: note.trim() })) setNote(""); }}>Redo with this note</button>
-    </div>
+/** Only what needs the owner, in plain words, with the one decision inline. Empty means nothing is waiting. */
+function NeedsYou({ data, busy, send, online, openSettings }: { data: Data; busy: boolean; send: Send; online: boolean; openSettings: () => void }) {
+  const rows: ReactNode[] = [];
+  const retry = async (j: Job) => {
+    if (j.state === "blocked-lease-expired" && !window.confirm(`Is the T3 thread "Build: ${j.spec.title}" stopped? Only try again once it is.`)) return;
+    if (await send({ action: "resume", id: j.id, revision: j.revision, stoppedEvidence: "Owner confirmed on the Build page that the previous attempt is not running" }))
+      await send({ action: "approve", id: j.id, revision: j.revision + 1 });
+  };
+  if (!data.control?.profiles.some(p => p.enabled)) rows.push(<Row key="models" icon="⚙️" title="Allow at least one model" detail="Nothing can run until you choose which models Build may use."><button className={solid} onClick={openSettings}>Choose models</button></Row>);
+  if (!online) rows.push(<Row key="mac" icon="💤" title="The Mac is offline" detail="Wake it and keep T3 Code open. Conversations and tasks continue automatically." />);
+  for (const j of data.jobs.filter(j => j.state === "review" && cp(j).result?.needsAnswer))
+    rows.push(<Row key={j.id} icon="❓" title={`${j.spec.title} is asking you something`} detail={`Answer in T3, in the thread "Build: ${j.spec.title}".`} />);
+  for (const j of data.jobs.filter(j => j.state === "review" && !cp(j).result?.needsAnswer)) rows.push(<Result key={j.id} job={j} busy={busy} send={send} />);
+  for (const j of data.jobs.filter(j => j.state === "failed")) rows.push(<Result key={j.id} job={j} busy={busy} send={send} failed retry={() => void retry(j)} />);
+  for (const j of data.jobs.filter(j => blockedStates.includes(j.state)))
+    rows.push(<Row key={j.id} icon="⏸️" title={`${j.spec.title} is stuck`} detail={plainBlock(j)}><button className={btn} disabled={busy} onClick={() => void retry(j)}>Try again</button><button className={btn} disabled={busy} onClick={() => send({ action: "revoke", id: j.id, revision: j.revision })}>Drop it</button></Row>);
+  for (const j of data.jobs.filter(j => j.state === "proposed"))
+    rows.push(<Row key={j.id} icon="💡" title={`Suggested: ${j.spec.title}`} detail={<>{j.spec.outcome}<br />{j.spec.reason}</>}><button className={solid} disabled={busy} onClick={() => send({ action: "approve", id: j.id, revision: j.revision })}>Start</button><button className={btn} disabled={busy} onClick={() => send({ action: "revoke", id: j.id, revision: j.revision })}>Not now</button></Row>);
+  for (const n of data.nodes.filter(n => n.spec.draft))
+    rows.push(<Row key={n.id} icon="📝" title={`Is this right? ${n.spec.section ?? ""} › ${n.spec.name}`} detail={<>{n.spec.draft!.purpose}{n.spec.draft!.features.length ? ` Features: ${n.spec.draft!.features.map(f => f.name).join(", ")}.` : ""}</>}><button className={solid} disabled={busy} onClick={() => send({ action: "draft", id: n.id, revision: n.revision, decision: "confirm" })}>Yes</button><button className={btn} disabled={busy} onClick={() => send({ action: "draft", id: n.id, revision: n.revision, decision: "discard" })}>No</button></Row>);
+  for (const n of data.nodes.filter(n => n.spec.watch?.status === "watching" && n.spec.watch.latest && n.spec.watch.latest !== n.spec.watch.seen))
+    rows.push(<Row key={n.id} icon="👀" title={`${n.spec.name} changed`} detail={n.spec.observed}><a className={btn} href={n.spec.watch!.url} target="_blank" rel="noreferrer">Open</a><button className={btn} disabled={busy} onClick={() => send({ action: "watch-update", id: n.id, seen: true })}>Seen</button></Row>);
+  return <section className="space-y-2">
+    <h2 className={label}>Needs you{rows.length ? ` · ${rows.length}` : ""}</h2>
+    {rows.length ? <div className="space-y-2">{rows}</div> : <p className="rounded-lg border p-3 text-sm text-muted-foreground">Nothing is waiting for you.</p>}
+  </section>;
+}
+function plainBlock(j: Job) {
+  return j.state === "waiting-for-capacity" ? "The allowed models hit their usage limit. It continues when a limit resets, or allow another model."
+    : j.state === "blocked-lease-expired" ? "The Mac stopped hearing from this task. Check its T3 thread is stopped, then try again."
+    : j.state === "blocked-stale-approval" ? "The code or settings changed after you started it, so it needs a fresh start."
+    : cp(j).reason ?? "It can't run as configured.";
+}
+/** A finished task: what it says, where the work is, and accept or redo with a note (same T3 thread). */
+function Result({ job, busy, send, failed, retry }: { job: Job; busy: boolean; send: Send; failed?: boolean; retry?: () => void }) {
+  const [note, setNote] = useState(""), [redo, setRedo] = useState(false), [more, setMore] = useState(false);
+  const c = cp(job), text = c.result?.text ?? c.reason ?? "";
+  return <Row icon={failed ? "⚠️" : "✅"} title={failed ? `${job.spec.title} didn't finish` : `${job.spec.title} is ready`}
+    detail={<div className="space-y-1">
+      <p>{failed ? c.reason ?? "The task failed." : job.spec.outcome}{c.t3?.branch ? ` · branch ${c.t3.branch}` : ""}</p>
+      {text && <><button className="underline" onClick={() => setMore(!more)}>{more ? "Hide" : "What it says"}</button>{more && <p className="max-h-64 overflow-auto whitespace-pre-wrap rounded border bg-background p-2 text-foreground">{text}</p>}</>}
+      {redo && <div className="flex flex-wrap gap-2 pt-1"><input autoFocus className={`${field} min-w-60 flex-1`} placeholder="What should change?" value={note} maxLength={2000} onChange={e => setNote(e.target.value)} /><button className={solid} disabled={busy || note.trim().length < 3} onClick={async () => { if (await send({ action: "redo", id: job.id, revision: job.revision, note: note.trim() })) { setNote(""); setRedo(false); } }}>Send</button></div>}
+    </div>}>
+    {!failed && <button className={solid} disabled={busy} onClick={() => send({ action: "accept", id: job.id, revision: job.revision })}>Accept</button>}
+    {failed && retry && <button className={btn} disabled={busy} onClick={retry}>Try again</button>}
+    <button className={btn} disabled={busy} onClick={() => setRedo(!redo)}>Redo…</button>
+  </Row>;
+}
+
+/** The app by section: how much is described, what is in work, and drill-down to screens. Changes go through Talk. */
+function AppMap({ data, busy, send, ask }: { data: Data; busy: boolean; send: Send; ask: (text: string) => void }) {
+  const [open, setOpen] = useState<string | null>(null), [screen, setScreen] = useState<string | null>(null);
+  const pages = data.nodes.filter(n => n.spec.kind === "page");
+  // A task belongs to a screen when it names the screen or a file the screen imports directly.
+  const importers = new Map<string, string[]>();
+  for (const e of data.edges) if (e.kind === "uses") importers.set(e.toId, [...(importers.get(e.toId) ?? []), e.fromId]);
+  const screensOf = (j: Job) => new Set(j.spec.nodeIds.flatMap(id => [id, ...(importers.get(id) ?? [])]));
+  const active = data.jobs.filter(j => !["done", "revoked"].includes(j.state));
+  const stats = sections.map(name => {
+    const list = pages.filter(p => p.spec.section === name), ids = new Set(list.map(p => p.id));
+    return { name, list, described: list.filter(p => p.spec.purpose !== undescribed).length, working: active.filter(j => [...screensOf(j)].some(id => ids.has(id))).length };
+  });
+  const current = stats.find(s => s.name === open);
+  return <section className="space-y-2">
+    <h2 className={label}>The app</h2>
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">{stats.map(s => <button key={s.name} onClick={() => { setOpen(open === s.name ? null : s.name); setScreen(null); }}
+      className={`rounded-lg border p-3 text-left hover:bg-muted/50 ${open === s.name ? "ring-2 ring-primary" : ""}`}>
+      <p className="text-sm font-semibold">{s.name}</p>
+      <div className="my-2 flex h-1.5 overflow-hidden rounded-full bg-muted"><span className="bg-primary" style={{ width: `${s.list.length ? (s.described / s.list.length) * 100 : 0}%` }} />{s.working > 0 && <span className="w-2 bg-amber-500" />}</div>
+      <p className="text-xs text-muted-foreground">{s.list.length} screens · {s.described} described{s.working ? ` · ${s.working} in work` : ""}</p>
+    </button>)}</div>
+    <p className="text-xs text-muted-foreground">The bar fills as screens get described; the daily review describes one a day. Tap a section to see its screens.</p>
+    {current && <div className="space-y-3 rounded-lg border p-3">
+      {[...new Set(current.list.map(p => p.spec.area ?? "Other"))].sort().map(area => <div key={area} className="space-y-1">
+        <p className="text-sm font-semibold">{area}</p>
+        <div className="grid gap-1 sm:grid-cols-2">{current.list.filter(p => (p.spec.area ?? "Other") === area).sort((a, b) => a.spec.name.localeCompare(b.spec.name)).map(p => {
+          const tasks = data.jobs.filter(j => screensOf(j).has(p.id)), open = tasks.filter(j => !["done", "revoked"].includes(j.state)).length;
+          return <button key={p.id} onClick={() => setScreen(screen === p.id ? null : p.id)} className={`rounded-md border px-2.5 py-1.5 text-left text-sm hover:bg-muted/50 ${screen === p.id ? "bg-muted" : ""}`}>
+            <span className="font-medium">{p.spec.name}</span>{open > 0 && <span className="ml-1 text-xs text-amber-600">· {open} in work</span>}{p.spec.draft && <span className="ml-1 text-xs text-primary">· description to confirm</span>}
+            <span className="block truncate text-xs text-muted-foreground">{p.spec.purpose === undescribed ? p.spec.route : p.spec.purpose}</span>
+          </button>;
+        })}</div>
+        {current.list.some(p => p.id === screen && (p.spec.area ?? "Other") === area) && <Screen node={current.list.find(p => p.id === screen)!} data={data} tasks={data.jobs.filter(j => screensOf(j).has(screen!))} ask={ask} />}
+      </div>)}
+    </div>}
+    <Watching data={data} busy={busy} send={send} />
+  </section>;
+}
+function Screen({ node, data, tasks, ask }: { node: Node; data: Data; tasks: Job[]; ask: (text: string) => void }) {
+  const features = data.edges.filter(e => e.fromId === node.id && e.kind === "contains").map(e => data.nodes.find(n => n.id === e.toId)).filter(Boolean) as Node[];
+  const refs = data.edges.filter(e => e.toId === node.id && e.kind === "inspires").map(e => data.nodes.find(n => n.id === e.fromId)).filter(Boolean) as Node[];
+  const described = node.spec.purpose !== undescribed;
+  return <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-sm">
+    <p className="text-xs text-muted-foreground">{node.spec.route}</p>
+    <p>{described ? node.spec.purpose : "Not described yet. The daily review will describe it, or ask about it below."}</p>
+    {described && node.spec.journey && !/^Not /.test(node.spec.journey) && <p className="text-muted-foreground">{node.spec.journey}</p>}
+    {features.length > 0 && <ul className="list-disc pl-5">{features.map(f => <li key={f.id}><span className="font-medium">{f.spec.name}</span>: {f.spec.purpose}</li>)}</ul>}
+    {tasks.length > 0 && <div><p className="text-xs font-medium">History</p>{tasks.slice(0, 8).map(j => <p key={j.id} className="text-xs">{j.state === "done" ? "✓" : "•"} {j.spec.title} <span className="text-muted-foreground">· {stateWord(j)} · {ago(j.updatedAt)}</span></p>)}</div>}
+    {refs.length > 0 && <p className="text-xs">Watching for ideas: {refs.map(r => r.spec.name).join(", ")}</p>}
+    <button className={btn} onClick={() => ask(`About the ${node.spec.section} screen "${node.spec.name}" (${node.spec.route}): `)}>Ask or change something here</button>
   </div>;
 }
+/** Links worth learning from, each with why it's here and the screens it could improve. */
+function Watching({ data, busy, send }: { data: Data; busy: boolean; send: Send }) {
+  const [adding, setAdding] = useState(false);
+  const refs = data.nodes.filter(n => n.spec.kind === "reference" && n.spec.watch?.status !== "rejected");
+  const linked = (id: string) => data.edges.filter(e => e.fromId === id && e.kind === "inspires").map(e => data.nodes.find(n => n.id === e.toId)?.spec.name).filter(Boolean);
+  const suggestions = suggestedReferences.filter(r => !data.nodes.some(n => n.spec.watch?.url === r.url));
+  return <details className="rounded-lg border p-3">
+    <summary className="cursor-pointer text-sm font-medium">Watching for ideas · {refs.length}</summary>
+    <p className="mt-2 text-xs text-muted-foreground">Repos, apps and videos to learn from. GitHub repos are checked daily without using AI; when one changes, the daily review looks at its linked screen with that in mind.</p>
+    <div className="mt-2 space-y-1.5">{refs.map(n => { const updated = !!n.spec.watch?.latest && n.spec.watch.latest !== n.spec.watch.seen, screens = linked(n.id);
+      return <div key={n.id} className="flex flex-wrap items-start gap-2 rounded-md border p-2 text-sm"><div className="min-w-0 flex-1">
+        <a href={n.spec.watch?.url} target="_blank" rel="noreferrer" className="font-medium underline">{n.spec.name}</a>{updated && <span className="ml-1 text-xs text-amber-600">· updated</span>}
+        <p className="text-xs">Why: {n.spec.intent}</p><p className="text-xs text-muted-foreground">{screens.length ? `For: ${screens.join(", ")}` : "Not linked to a screen yet; ask in Talk which screen it fits"}</p></div>
+        <select aria-label="Status" className={`${field} !p-1 text-xs`} value={n.spec.watch?.status} disabled={busy} onChange={e => send({ action: "watch-update", id: n.id, status: e.target.value })}><option value="watching">Watching</option><option value="adopted">Adopted</option><option value="rejected">Not for us</option></select></div>; })}</div>
+    {adding ? <form className="mt-2 flex flex-wrap gap-2" onSubmit={async e => { e.preventDefault(); const f = new FormData(e.currentTarget); if (await send({ action: "watch", url: String(f.get("url")).trim(), note: String(f.get("note") ?? "").trim() || undefined, screenIds: [] })) setAdding(false); }}>
+      <input name="url" type="url" required placeholder="Link" className={`${field} min-w-52 flex-1`} /><input name="note" placeholder="What could we take from it?" className={`${field} min-w-52 flex-[2]`} maxLength={1000} /><button className={solid} disabled={busy}>Add</button></form>
+      : <button className={`${btn} mt-2`} onClick={() => setAdding(true)}>+ Watch a link</button>}
+    {suggestions.length > 0 && <div className="mt-2 space-y-1"><p className="text-xs text-muted-foreground">Mentioned before, not added:</p>{suggestions.map(r => <div key={r.url} className="flex items-start gap-2 text-xs"><button className={btn} disabled={busy} onClick={() => send({ action: "watch", url: r.url, note: r.note, screenIds: [] })}>Add</button><span><span className="break-all">{r.url}</span><br /><span className="text-muted-foreground">{r.note}</span></span></div>)}</div>}
+  </details>;
+}
 
-type Attention = { key: string; kind: string; title: string; detail: string; action: ReactNode };
-/**
- * Attention queue: only what needs the owner, most urgent first, one at a time. Everything here already exists elsewhere;
- * this view just orders it. "Later" moves an item to the back for this session.
- */
-function ForYou({ data, busy, send, open }: { data: Data; busy: boolean; send: (command: unknown) => Promise<boolean>; open: (tab: string) => void }) {
-  const [later, setLater] = useState<string[]>([]);
-  const w = data.control?.worker, cp = (j: Job) => (j.checkpoint ?? {}) as { reason?: string; result?: { needsAnswer?: boolean; text?: string }; t3?: { threadId?: string; branch?: string }; auto?: { wouldApprove: boolean; reasons: string[] } };
-  const btn = "rounded border px-3 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50";
-  const blocked = ["blocked-lease-expired", "waiting-for-capacity", "blocked-configuration", "blocked-stale-approval"];
-  const items: Attention[] = [
-    ...data.jobs.filter(j => blocked.includes(j.state)).map(j => ({ key: j.id, kind: "Blocked", title: j.spec.title, detail: cp(j).reason ?? j.state.replace(/-/g, " "), action: <button className={btn} onClick={() => open("decisions")}>Open to recover</button> })),
-    ...data.jobs.filter(j => j.state === "review" && cp(j).result?.needsAnswer).map(j => ({ key: j.id, kind: "Question", title: j.spec.title, detail: `The T3 thread "Build: ${j.spec.title}" is waiting for your answer.`, action: <span className="text-sm">Answer it in T3, then review here.</span> })),
-    ...data.jobs.filter(j => ["review", "failed"].includes(j.state) && !cp(j).result?.needsAnswer).map(j => ({ key: j.id, kind: j.state === "failed" ? "Failed" : "Result to review", title: j.spec.title, detail: j.spec.outcome, action: <Feedback job={j} busy={busy} send={send} /> })),
-    ...data.jobs.filter(j => j.state === "proposed").map(j => ({ key: j.id, kind: "Proposal", title: j.spec.title, detail: `${j.spec.outcome} · ${j.spec.routing ?? ""}${cp(j).auto ? ` · ${cp(j).auto!.wouldApprove ? "policy would approve" : `policy: ${cp(j).auto!.reasons.join(", ")}`}` : ""}`,
-      action: <div className="flex gap-2"><button disabled={busy} className={btn} onClick={() => send({ action: "approve", id: j.id, revision: j.revision })}>Approve</button><button disabled={busy} className={btn} onClick={() => send({ action: "revoke", id: j.id, revision: j.revision })}>Not now</button></div> })),
-    ...data.nodes.filter(n => n.spec.draft).map(n => ({ key: n.id, kind: "Screen description", title: `${n.spec.section ?? ""} › ${n.spec.name}`, detail: `${n.spec.draft!.purpose} ${n.spec.draft!.features.length ? `Features: ${n.spec.draft!.features.map(f => f.name).join(", ")}.` : ""}`,
-      action: <div className="flex gap-2"><button disabled={busy} className={btn} onClick={() => send({ action: "draft", id: n.id, revision: n.revision, decision: "confirm" })}>Confirm</button><button disabled={busy} className={btn} onClick={() => send({ action: "draft", id: n.id, revision: n.revision, decision: "discard" })}>Discard</button></div> })),
-    ...data.nodes.filter(n => n.spec.watch?.latest && n.spec.watch.latest !== n.spec.watch.seen && n.spec.watch.status === "watching").map(n => ({ key: n.id, kind: "Watch list update", title: n.spec.name, detail: n.spec.observed,
-      action: <div className="flex gap-2"><a className={btn} href={n.spec.watch!.url} target="_blank" rel="noreferrer">Open</a><button disabled={busy} className={btn} onClick={() => send({ action: "watch-update", id: n.id, seen: true })}>Mark as seen</button></div> })),
-    ...(!data.control?.profiles.some(p => p.enabled) ? [{ key: "setup-models", kind: "Setup", title: "Allow at least one model", detail: "Nothing can run until a model is approved.", action: <button className={btn} onClick={() => open("profiles")}>Open models</button> }] : []),
-    ...(data.control?.paused && data.jobs.some(j => j.state === "approved") ? [{ key: "setup-paused", kind: "Setup", title: "Approved work is waiting", detail: "The queue is paused, so approved cards will not start.", action: <button className={btn} onClick={() => open("decisions")}>Open queue controls</button> }] : []),
-    ...(w?.lastSeenAt && Date.now() - Date.parse(w.lastSeenAt) > 120_000 ? [{ key: "setup-worker", kind: "Setup", title: "Mac worker is offline", detail: "Wake the Mac and keep T3 Code open; work resumes automatically.", action: null }] : []),
+function stateWord(j: Job) {
+  return ({ proposed: "suggested", approved: "queued", working: "running", stopping: "stopping", review: "ready for you", done: "done", failed: "failed", revoked: "dropped" } as Record<string, string>)[j.state] ?? "stuck";
+}
+/** Next · Now · Done. Cards say where in the app, how hard, which model, and where the work is. */
+function Progress({ data }: { data: Data }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const screenName = (j: Job) => { const n = data.nodes.find(n => j.spec.nodeIds.includes(n.id) && n.spec.kind === "page"); return n ? `${n.spec.section} › ${n.spec.name}` : j.spec.scope[0]; };
+  const columns: [string, Job[]][] = [
+    ["Next", data.jobs.filter(j => ["proposed", "approved"].includes(j.state))],
+    ["Now", data.jobs.filter(j => ["working", "stopping"].includes(j.state) || (j.state === "review" && cp(j).result?.needsAnswer))],
+    ["Done", data.jobs.filter(j => j.state === "done" || (j.state === "review" && !cp(j).result?.needsAnswer)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))],
   ];
-  const queue = [...items.filter(i => !later.includes(i.key)), ...items.filter(i => later.includes(i.key))];
-  const [top, ...rest] = queue;
-  const running = data.jobs.filter(j => ["working", "stopping", "approved"].includes(j.state)).length;
-  if (!top) return <div className="rounded border p-6 text-center"><p className="font-medium">Nothing needs you right now.</p><p className="text-sm text-muted-foreground">{running ? `${running} item${running === 1 ? "" : "s"} queued or running.` : "No work is queued."} {w?.daily?.enabled ? "The daily review keeps looking for improvements." : "Turn on the daily review to keep improvements coming."}</p></div>;
-  const counts = Object.entries(rest.reduce<Record<string, number>>((a, i) => ({ ...a, [i.kind]: (a[i.kind] ?? 0) + 1 }), {}));
-  return <div className="space-y-3">
-    <article className="space-y-3 rounded border p-4"><p className="text-xs uppercase tracking-wide text-muted-foreground">{top.kind} · 1 of {queue.length}</p><h2 className="text-lg font-semibold">{top.title}</h2><p className="whitespace-pre-wrap text-sm">{top.detail}</p>{top.action}
-      {rest.length > 0 && <button className="text-sm underline" onClick={() => setLater([...later.filter(k => k !== top.key), top.key])}>Later</button>}</article>
-    {rest.length > 0 && <p className="text-sm text-muted-foreground">Coming up: {counts.map(([k, n]) => `${n} ${k.toLowerCase()}`).join(" · ")}</p>}
-  </div>;
+  return <section className="space-y-2">
+    <h2 className={label}>Progress</h2>
+    <div className="grid gap-2 md:grid-cols-3">{columns.map(([name, jobs]) => <div key={name} className="space-y-1.5 rounded-lg border p-2.5">
+      <p className="text-xs font-semibold text-muted-foreground">{name} · {jobs.length}</p>
+      {!jobs.length && <p className="text-xs text-muted-foreground">{name === "Next" ? "Start something in Talk." : name === "Now" ? "Nothing running." : "Nothing finished yet."}</p>}
+      {jobs.slice(0, name === "Done" ? 12 : 20).map(j => { const c = cp(j), m = model(j, data);
+        return <button key={j.id} onClick={() => setOpen(open === j.id ? null : j.id)} className="block w-full rounded-md bg-muted/60 px-2.5 py-2 text-left text-sm hover:bg-muted">
+          <span className="font-medium">{j.spec.title}</span>
+          <span className="block text-xs text-muted-foreground">{screenName(j)} · {j.spec.taskType === "implementation" ? level(j) : "Review"}{m ? ` · ${m}` : ""} · {stateWord(j)} {ago(j.updatedAt)}</span>
+          {open === j.id && <span className="mt-1.5 block space-y-1 text-xs">
+            <span className="block">{j.spec.outcome}</span>
+            {c.t3?.branch && <span className="block">Work is on branch {c.t3.branch}{j.state === "done" ? ", not merged" : ""} · T3 thread &quot;Build: {j.spec.title}&quot;</span>}
+            {c.nextStep && <span className="block text-muted-foreground">{c.nextStep}</span>}
+            {c.feedback?.map((f, i) => <span key={i} className="block">{f.decision === "redo" ? "You asked" : "You noted"}: {f.note}</span>)}
+          </span>}
+        </button>; })}
+    </div>)}</div>
+  </section>;
+}
+
+/** One-time choices: models, autopilot, daily review, the queue switch, and a short how-it-works. */
+function Settings({ data, busy, send, close }: { data: Data; busy: boolean; send: Send; close: () => void }) {
+  const [choices, setChoices] = useState<Record<string, { tier: Tier; write: boolean }> | null>(null);
+  const w = data.control?.worker, catalog = w?.catalog ?? [], approved = data.control?.profiles ?? [];
+  const current = (m: CatalogModel) => { const p = approved.find(x => x.provider === m.provider && x.model === m.model && x.enabled); return { tier: (p ? (p.quality === difficulty.hard ? "hard" : "routine") : "off") as Tier, write: p ? p.tools.includes("code-write") : true }; };
+  const pick = choices ?? Object.fromEntries(catalog.map(m => [`${m.provider}.${m.model}`, current(m)]));
+  const set = (key: string, v: Partial<{ tier: Tier; write: boolean }>) => setChoices({ ...pick, [key]: { ...pick[key], ...v } });
+  // The daily review uses an allowed read-only-capable model the system picks; the owner only switches it on.
+  const reviewer = approved.find(p => p.enabled && p.taskTypes.includes("review") && p.quality === difficulty.routine) ?? approved.find(p => p.enabled && p.taskTypes.includes("review"));
+  const mode = w?.autoApprove?.mode ?? "off";
+  return <section className="space-y-4 rounded-lg border p-4">
+    <div className="flex items-center justify-between"><h2 className="text-lg font-semibold">Settings</h2><button className={btn} onClick={close}>Done</button></div>
+    <div className="space-y-2"><p className="text-sm font-medium">Models Build may use</p>
+      <p className="text-xs text-muted-foreground">Build decides each task&apos;s difficulty and picks an allowed model at that level, falling back to another allowed one at a limit. The list comes from T3 on the Mac; new models appear as Not allowed.</p>
+      {!catalog.length && <p className="text-sm text-muted-foreground">No list yet. Start the Mac; it reports T3&apos;s models within a minute.</p>}
+      <div className="divide-y rounded-md border">{catalog.map(m => { const key = `${m.provider}.${m.model}`, g = modelGuidance[m.model], c = pick[key] ?? current(m);
+        return <div key={key} className="flex flex-wrap items-center gap-2 p-2.5"><div className="min-w-0 flex-1"><p className="text-sm font-medium">{m.name}</p><p className="text-xs text-muted-foreground">{g?.use ?? unknownGuidance}</p></div>
+          <select aria-label={`${m.name} level`} className={field} value={c.tier} onChange={e => set(key, { tier: e.target.value as Tier })}><option value="off">Not allowed</option><option value="routine">Everyday tasks</option><option value="hard">Hard tasks</option></select>
+          {c.tier !== "off" && <label className="text-xs"><input type="checkbox" checked={c.write} onChange={e => set(key, { write: e.target.checked })} /> May change code</label>}</div>; })}</div>
+      {choices && <div className="flex gap-2"><button className={solid} disabled={busy} onClick={async () => {
+        const profiles = catalog.flatMap(m => { const c = pick[`${m.provider}.${m.model}`]; return c && c.tier !== "off" ? [makeProfile(m, c.tier, c.write)] : []; });
+        if (await send({ action: "profiles", revision: data.control?.revision ?? 1, profiles })) setChoices(null); }}>Save models</button><button className={btn} onClick={() => setChoices(null)}>Cancel</button></div>}
+      {Object.entries(w?.quotaBuckets ?? {}).map(([bucket, o]) => <div key={bucket} className="flex flex-wrap items-center gap-2 text-sm"><span>{bucket} hit its usage limit {ago(o.observedAt)}.</span><button className={btn} disabled={busy} onClick={() => send({ action: "recheck", bucket, evidence: "Owner confirmed on the Build page that the limit has reset" })}>It has reset</button></div>)}
+    </div>
+    <div className="grid gap-3 sm:grid-cols-2">
+      <label className="space-y-1 text-sm"><span className="font-medium">Autopilot</span><select className={`${field} block w-full`} value={mode} disabled={busy} onChange={e => send({ action: "auto-approve", mode: e.target.value })}><option value="off">Off: suggestions wait for you</option><option value="record">Watching: shows what it would start</option><option value="on">On: starts small, safe suggestions (3 a day)</option></select><span className="block text-xs text-muted-foreground">Small means 3 files or fewer, nothing sensitive (database, login, API, deploy).</span></label>
+      <label className="space-y-1 text-sm"><span className="font-medium">Daily review</span><select className={`${field} block w-full`} value={w?.daily?.enabled ? "on" : "off"} disabled={busy || !reviewer} onChange={e => send({ action: "daily", enabled: e.target.value === "on", profileId: reviewer?.id ?? "none" })}><option value="off">Off</option><option value="on">On: looks at one screen a day</option></select><span className="block text-xs text-muted-foreground">Describes the screen and suggests up to three improvements. Read-only.{w?.daily?.lastRunDate ? ` Last ran ${w.daily.lastRunDate}.` : ""}</span></label>
+    </div>
+    <details><summary className="cursor-pointer text-sm font-medium">How Build works</summary>
+      <ol className="mt-2 grid gap-2 sm:grid-cols-3">{loop.map((l, i) => <li key={l.step} className="rounded-md border p-2 text-xs"><span className="text-muted-foreground">{i + 1} · {l.who}</span><span className="block text-sm font-medium">{l.step}</span>{l.text}</li>)}</ol>
+      <p className="mt-2 text-xs text-muted-foreground">Build never merges or deploys. The full explainer is documentation/software-factory.md.</p></details>
+  </section>;
 }
