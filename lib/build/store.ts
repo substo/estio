@@ -8,6 +8,9 @@ import { describeUrl, watchId } from "./watch";
 import { validateDeliveryPath } from "./delivery";
 import { screenDraft, screenInstruction, undescribed } from "./contract";
 import { playbookNames, playbookText, type PlaybookEdits } from "./playbook";
+import { memoryHeading, memoryText, remember, type MemoryEntry, type MemoryKind } from "./memory";
+import { remainingByBucket, usageFloor, usageLow, usageSpec } from "./contract";
+import { difficulty } from "./contract";
 import { assessDifficulty, autoApprovable, autoApprovePolicy, catalogSpec, proposalDraft, edgeSpec, id, jobSpec, nodeSpec, profilesSpec, selectProfile, validLease, canRevoke } from "./contract";
 
 export class BuildConflict extends Error {}
@@ -26,7 +29,25 @@ export async function mutate<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>
 function summarizeCheckpoint(value: unknown) {
   if (!value || typeof value !== "object") return value;
   const v = value as Record<string, any>;
-  return { reason: v.reason, nextStep: v.nextStep, t3: v.t3, feedback: v.feedback, auto: v.auto, localCheckpoint: v.localCheckpoint, delivery: v.delivery, evidence: v.evidence, reviewedDiffDigest: v.reviewedDiffDigest, result: v.result ? { status: v.result.status, text: String(v.result.text ?? "").slice(0, 2000), usage: v.result.usage, needsAnswer: v.result.needsAnswer === true } : undefined, independentReview: v.independentReview ? { status: v.independentReview.status, text: String(v.independentReview.text ?? "").slice(0, 2000) } : undefined };
+  return { reason: v.reason, nextStep: v.nextStep, t3: v.t3, merge: v.merge, talkId: v.talkId, feedback: v.feedback, auto: v.auto, localCheckpoint: v.localCheckpoint, delivery: v.delivery, evidence: v.evidence, reviewedDiffDigest: v.reviewedDiffDigest, result: v.result ? { status: v.result.status, text: String(v.result.text ?? "").slice(0, 2000), usage: v.result.usage, needsAnswer: v.result.needsAnswer === true } : undefined, independentReview: v.independentReview ? { status: v.independentReview.status, text: String(v.independentReview.text ?? "").slice(0, 2000) } : undefined };
+}
+/** Routing inputs from the worker's reports: subscriptions that hit a limit, and fresh remaining allowance. */
+export function routing(worker: unknown) {
+  const w = worker as { quotaBuckets?: object; usage?: unknown };
+  return { exhaustedBuckets: Object.keys(w.quotaBuckets ?? {}), remaining: remainingByBucket(w.usage) };
+}
+/** Adds product-memory entries inside the Build lock, re-reading control so concurrent worker updates are kept. */
+export async function addMemory(tx: Prisma.TransactionClient, entries: { kind: MemoryKind; text: string; pinned?: boolean }[]) {
+  if (!entries.length) return;
+  const meta = (await tx.buildControl.findUniqueOrThrow({ where: { id: "build" } })).worker as { memory?: MemoryEntry[] };
+  await tx.buildControl.update({ where: { id: "build" }, data: { worker: json({ ...meta, memory: remember(meta.memory, entries) }) } });
+}
+type Merge = { state: "queued" | "merging" | "resolving" | "merged" | "failed"; at: string; actor?: string; sha?: string; reason?: string; threadId?: string; branch?: string; local?: string; targetSha?: string; taskSha?: string };
+/** A task can be merged when it changed code, its T3 branch exists and the fence passed. */
+function mergeable(job: { state: string; spec: unknown; checkpoint: unknown }) {
+  const spec = jobSpec.parse(job.spec), c = (job.checkpoint ?? {}) as { t3?: { branch?: string; worktreePath?: string }; evidence?: { ok?: boolean; files?: string[] }; merge?: Merge };
+  return spec.taskType === "implementation" && ["review", "done"].includes(job.state) && !!c.t3?.branch && !!c.t3.worktreePath && c.evidence?.ok === true && !!c.evidence.files?.length
+    && !["queued", "merging", "resolving", "merged"].includes(c.merge?.state ?? "");
 }
 export async function snapshot() {
   const [control, nodes, edges, jobs] = await Promise.all([
@@ -47,6 +68,9 @@ export async function guidanceDoc(path: string) {
   return file;
 }
 export const operatorCommand = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("merge"), id, revision: z.number().int() }).strict(),
+  z.object({ action: z.literal("memory-add"), text: z.string().trim().min(5).max(400), pinned: z.boolean().optional() }).strict(),
+  z.object({ action: z.literal("memory-update"), memoryId: z.string().max(40), pinned: z.boolean().optional(), remove: z.literal(true).optional() }).strict(),
   z.object({ action: z.literal("playbook"), name: z.enum(playbookNames), text: z.string().trim().min(20).max(8000).optional(), reset: z.literal(true).optional() }).strict(),
   z.object({ action: z.literal("pause"), paused: z.boolean() }).strict(),
   z.object({ action: z.literal("daily"), enabled: z.boolean(), profileId: id }).strict(),
@@ -89,6 +113,22 @@ export async function operator(input: z.infer<typeof operatorCommand>, actor: st
         if (input.reset) delete edits[input.name];
         else edits[input.name] = { text: input.text!, at: new Date().toISOString(), previous: playbookText(meta.playbook, input.name) };
         return tx.buildControl.update({ where: { id: "build" }, data: { worker: json({ ...meta, playbook: edits }) } });
+      }
+      case "merge": {
+        // Merge implies accepting the result. The Mac merges into the release branch; an agent steps in only on conflict.
+        const job = await tx.buildJob.findUniqueOrThrow({ where: { id: input.id } });
+        requireCondition(job.revision === input.revision, "Task changed; reload");
+        requireCondition(mergeable(job), "Only a finished, verified code change that isn't already merging can be merged");
+        const spec = jobSpec.parse(job.spec);
+        if (job.state === "review") await addMemory(tx, [{ kind: "done", text: `${spec.title}: ${spec.outcome}` }]);
+        const merge: Merge = { state: "queued", at: new Date().toISOString(), actor };
+        return tx.buildJob.update({ where: { id: job.id }, data: { state: "done", revision: { increment: 1 }, checkpoint: json({ ...(job.checkpoint as object), merge }) } });
+      }
+      case "memory-add": return addMemory(tx, [{ kind: "note", text: input.text, pinned: input.pinned ?? true }]);
+      case "memory-update": {
+        const meta = control.worker as { memory?: MemoryEntry[] };
+        const memory = (meta.memory ?? []).flatMap(m => m.id !== input.memoryId ? [m] : input.remove ? [] : [{ ...m, pinned: input.pinned ?? m.pinned }]);
+        return tx.buildControl.update({ where: { id: "build" }, data: { worker: json({ ...meta, memory }) } });
       }
       case "pause": return tx.buildControl.update({ where: { id: "build" }, data: { paused: input.paused } });
       case "profiles": {
@@ -175,15 +215,18 @@ export async function operator(input: z.infer<typeof operatorCommand>, actor: st
         if (input.action === "accept") {
           requireCondition(job.state === "review", "Only reviewed results may be accepted");
           if (input.note) feedback.push({ at: new Date().toISOString(), actor, decision: "accept", note: input.note });
+          const accepted = jobSpec.parse(job.spec);
+          await addMemory(tx, [{ kind: "done", text: `${accepted.title}: ${accepted.outcome}` }, ...(input.note ? [{ kind: "feedback" as const, text: `On "${accepted.title}": ${input.note}` }] : [])]);
           return tx.buildJob.update({ where: { id: job.id }, data: { state: "done", revision: { increment: 1 }, checkpoint: json({ ...(job.checkpoint as object), feedback }) } });
         }
         if (input.action === "redo") {
           requireCondition(["review", "failed"].includes(job.state), "Only a returned result can be redone");
           const spec = jobSpec.parse(job.spec);
-          const profile = selectProfile(profilesSpec.parse(control.profiles), spec, { exhaustedBuckets: Object.keys((control.worker as { quotaBuckets?: object }).quotaBuckets ?? {}) });
+          const profile = selectProfile(profilesSpec.parse(control.profiles), spec, routing(control.worker));
           requireCondition(profile, "No enabled approved model can take this redo");
           const nodes = await tx.buildNode.findMany({ where: { id: { in: spec.nodeIds } } });
           feedback.push({ at: new Date().toISOString(), actor, decision: "redo", note: input.note });
+          await addMemory(tx, [{ kind: "feedback", text: `On "${spec.title}": ${input.note}` }]);
           // Redo is a fresh owner approval of the same scope and base, bound to current revisions.
           return tx.buildJob.update({ where: { id: job.id }, data: { state: "approved", revision: { increment: 1 },
             checkpoint: json({ ...(job.checkpoint as object), feedback, reason: undefined, nextStep: "Redo queued with owner feedback" }),
@@ -198,7 +241,7 @@ export async function operator(input: z.infer<typeof operatorCommand>, actor: st
 /** Owner approval of a proposal's exact scope, bound to the current policy and map revisions. */
 export async function approveJob(tx: Prisma.TransactionClient, control: { revision: number; profiles: unknown; worker: unknown }, job: { id: string; revision: number; spec: unknown }, actor: string) {
   const spec = jobSpec.parse(job.spec);
-  const profile = selectProfile(profilesSpec.parse(control.profiles), spec, { exhaustedBuckets: Object.keys((control.worker as { quotaBuckets?: object }).quotaBuckets ?? {}) });
+  const profile = selectProfile(profilesSpec.parse(control.profiles), spec, routing(control.worker));
   requireCondition(profile, "No enabled, qualified approved profile");
   const nodes = await tx.buildNode.findMany({ where: { id: { in: spec.nodeIds } } });
   return tx.buildJob.update({ where: { id: job.id }, data: {
@@ -232,8 +275,9 @@ async function autoDecide(tx: Prisma.TransactionClient, control: { revision: num
   if (mode === "off") return job;
   const spec = jobSpec.parse(job.spec), now = new Date();
   const verdict = autoApprovable(spec);
-  const profile = selectProfile(profilesSpec.parse(control.profiles), spec, { exhaustedBuckets: Object.keys((control.worker as { quotaBuckets?: object }).quotaBuckets ?? {}) });
+  const profile = selectProfile(profilesSpec.parse(control.profiles), spec, routing(control.worker));
   if (!profile) verdict.reasons.push("no approved model available");
+  else if ((routing(control.worker).remaining[profile.quotaBucket] ?? 100) < usageLow) verdict.reasons.push(`${profile.quotaBucket} usage is low`);
   const today = await tx.buildJob.count({ where: { AND: [{ approval: { path: ["auto"], equals: true } }, { approval: { path: ["at"], string_starts_with: now.toISOString().slice(0, 10) } }] } });
   const withinBudget = today < autoApprovePolicy.dailyBudget;
   if (verdict.ok && profile && !withinBudget) verdict.reasons.push(`daily budget of ${autoApprovePolicy.dailyBudget} used`);
@@ -250,7 +294,7 @@ async function autoDecide(tx: Prisma.TransactionClient, control: { revision: num
 export async function routed(tx: Prisma.TransactionClient, control: { profiles: unknown; worker: unknown }, spec: import("./contract").JobSpec) {
   const dependents = await tx.buildEdge.count({ where: { toId: { in: spec.nodeIds }, kind: { not: "inspires" } } });
   const assessed = { ...spec, ...assessDifficulty(spec, dependents) };
-  const profile = selectProfile(profilesSpec.parse(control.profiles), { ...assessed, profileId: "auto" }, { exhaustedBuckets: Object.keys((control.worker as { quotaBuckets?: object }).quotaBuckets ?? {}) });
+  const profile = selectProfile(profilesSpec.parse(control.profiles), { ...assessed, profileId: "auto" }, routing(control.worker));
   return { ...assessed, profileId: profile?.id ?? "auto" };
 }
 async function admitDaily(tx: Prisma.TransactionClient, control: { revision: number; profiles: unknown; worker: unknown }, now: Date) {
@@ -258,8 +302,9 @@ async function admitDaily(tx: Prisma.TransactionClient, control: { revision: num
   const grant = meta.daily, day = now.toISOString().slice(0, 10);
   if (!grant?.enabled || grant.policyRevision !== control.revision || grant.lastRunDate === day || !/^[a-f0-9]{40}$/.test(meta.head ?? "")) return;
   const profiles = profilesSpec.parse(control.profiles);
-  const profile = selectProfile(profiles, { profileId: grant.profileId, taskType: "review", tools: ["git-read"], quality: 2 } as import("./contract").JobSpec, { exhaustedBuckets: Object.keys(meta.quotaBuckets ?? {}) });
-  if (!profile) return;
+  const profile = selectProfile(profiles, { profileId: grant.profileId, taskType: "review", tools: ["git-read"], quality: 2 } as import("./contract").JobSpec, routing(meta));
+  // The daily review is background work: it waits while the chosen subscription is low.
+  if (!profile || (routing(meta).remaining[profile.quotaBucket] ?? 100) < usageLow) return;
   const stalePage = { AND: [{ spec: { path: ["kind"], equals: "page" } }, { spec: { path: ["freshness"], not: "verified" } }] };
   const afterCursor = grant.lastNodeId ? await tx.buildNode.findFirst({ where: { ...stalePage, id: { gt: grant.lastNodeId } }, orderBy: { id: "asc" } }) : null;
   // A watched reference that changed since the owner looked takes priority for one of its linked screens.
@@ -292,6 +337,9 @@ function standingCurrent(control: { worker: unknown }, approval: unknown) {
 
 export const workerCommand = z.discriminatedUnion("action", [
   z.object({ action: z.literal("poll"), workerId: id, catalog: catalogSpec.optional() }).strict(),
+  z.object({ action: z.literal("usage"), workerId: id, usage: usageSpec }).strict(),
+  z.object({ action: z.literal("merge-poll"), workerId: id }).strict(),
+  z.object({ action: z.literal("merge-update"), workerId: id, id, merge: z.object({ state: z.enum(["merging", "resolving", "merged", "failed"]), sha: z.string().regex(/^[a-f0-9]{40}$/).optional(), reason: z.string().max(500).optional(), threadId: z.string().max(120).optional(), branch: z.string().max(200).optional(), local: z.string().max(300).optional(), targetSha: z.string().regex(/^[a-f0-9]{40}$/).optional(), taskSha: z.string().regex(/^[a-f0-9]{40}$/).optional() }).strict() }).strict(),
   z.object({ action: z.literal("docs"), workerId: id, files: z.array(z.object({ path: z.string().regex(/^[a-zA-Z0-9._/-]{1,200}$/), text: z.string().max(60000) }).strict()).max(20) }).strict(),
   z.object({ action: z.literal("watch-report"), workerId: id, results: z.array(z.object({ id, latest: z.string().max(200).optional(), summary: z.string().max(600) }).strict()).max(20) }).strict(),
   z.object({ action: z.literal("claim"), workerId: id, review: z.boolean().optional(), implementation: z.boolean().optional() }).strict(),
@@ -306,6 +354,27 @@ export async function worker(input: z.infer<typeof workerCommand>) {
     // Expiry is not evidence the old writer stopped. Never automatically retry these jobs.
     await tx.buildJob.updateMany({ where: { state: { in: ["working", "stopping"] }, leaseUntil: { lte: now } }, data: { state: "blocked-lease-expired" } });
     if (input.action === "poll" && input.catalog) await tx.buildControl.update({ where: { id: "build" }, data: { worker: json({ ...(control.worker as object), id: input.workerId, lastSeenAt: now.toISOString(), execution: "inspection / opt-in T3 threads", quota: "unknown", catalog: input.catalog, catalogAt: now.toISOString() }) } });
+    if (input.action === "merge-poll") {
+      // In-progress merges are returned too, so a restarted worker picks them up again (each step is safe to repeat).
+      const done = await tx.buildJob.findMany({ where: { state: "done", OR: ["queued", "merging", "resolving"].map(state => ({ checkpoint: { path: ["merge", "state"], equals: state } })) }, orderBy: { updatedAt: "asc" }, take: 5 });
+      const resolver = selectProfile(profilesSpec.parse(control.profiles), { taskType: "implementation", tools: ["git-read", "code-write"], quality: difficulty.hard, profileId: "auto" } as import("./contract").JobSpec, routing(control.worker));
+      return { merges: done.map(j => { const c = j.checkpoint as { t3: { branch: string; worktreePath: string }; evidence: { files: string[]; diffDigest: string } };
+        return { id: j.id, spec: j.spec, merge: (j.checkpoint as { merge: Merge }).merge, branch: c.t3.branch, worktree: c.t3.worktreePath, files: c.evidence.files, diffDigest: c.evidence.diffDigest, resolver }; }) };
+    }
+    if (input.action === "merge-update") {
+      const job = await tx.buildJob.findUniqueOrThrow({ where: { id: input.id } });
+      const c = (job.checkpoint ?? {}) as { merge?: Merge };
+      requireCondition(c.merge && c.merge.state !== "merged", "Not waiting for a merge");
+      if (input.merge.state === "merged") await addMemory(tx, [{ kind: "merged", text: `${jobSpec.parse(job.spec).title} (${input.merge.sha?.slice(0, 7) ?? "merged"})` }]);
+      return tx.buildJob.update({ where: { id: job.id }, data: { checkpoint: json({ ...(job.checkpoint as object), merge: { ...c.merge, ...input.merge, at: now.toISOString() } }) } });
+    }
+    if (input.action === "usage") {
+      const meta = (await tx.buildControl.findUniqueOrThrow({ where: { id: "build" } })).worker as { quotaBuckets?: Record<string, { observedAt: string }> };
+      // A fresh reading with allowance left clears a hit limit, so nobody has to confirm the reset by hand.
+      const quotaBuckets = Object.fromEntries(Object.entries(meta.quotaBuckets ?? {}).filter(([bucket, hit]) => { const u = input.usage[bucket]; return !(u && u.remaining > usageFloor && Date.parse(u.at) > Date.parse(hit.observedAt)); }));
+      await tx.buildControl.update({ where: { id: "build" }, data: { worker: json({ ...meta, quotaBuckets, usage: input.usage }) } });
+      return { ok: true };
+    }
     if (input.action === "docs") {
       const meta = (await tx.buildControl.findUniqueOrThrow({ where: { id: "build" } })).worker as object;
       await tx.buildControl.update({ where: { id: "build" }, data: { worker: json({ ...meta, docs: { at: now.toISOString(), files: input.files } }) } });
@@ -344,7 +413,7 @@ export async function worker(input: z.infer<typeof workerCommand>) {
         const profiles = profilesSpec.parse(control.profiles);
         const prior = job.attempt as { nextProfileId?: string; exhaustedBuckets?: string[]; count?: number; history?: unknown[] } | null;
         const exhausted = Object.keys((control.worker as { quotaBuckets?: object }).quotaBuckets ?? {});
-        const profile = prior?.nextProfileId ? profiles.find(p => p.id === prior.nextProfileId && !exhausted.includes(p.quotaBucket)) : selectProfile(profiles, spec, { exhaustedBuckets: exhausted });
+        const profile = prior?.nextProfileId ? profiles.find(p => p.id === prior.nextProfileId && !exhausted.includes(p.quotaBucket)) : selectProfile(profiles, spec, routing(control.worker));
         if (!profile || (spec.taskType !== "inspect" && !((spec.taskType === "review" && input.review && spec.tools.every(t => t === "git-read")) || (spec.taskType === "implementation" && input.implementation && spec.tools.includes("code-write"))))) {
           await tx.buildJob.update({ where: { id: job.id }, data: { state: profile ? "blocked-configuration" : "waiting-for-capacity", checkpoint: { reason: profile ? "Worker lacks this execution capability; implementation writes disabled" : "No eligible approved profile", stopped: true } } }); continue;
         }
@@ -353,7 +422,8 @@ export async function worker(input: z.infer<typeof workerCommand>) {
           attempt: json({ profile, policyRevision: control.revision, startedAt: now.toISOString(), routingReason: prior?.nextProfileId ? "approved fallback after confirmed stopped writer" : "approved primary", quota: "unknown", count: (prior?.count ?? 0) + 1, exhaustedBuckets: prior?.exhaustedBuckets ?? [], history: prior?.history ?? [] }),
         } });
         const edits = (control.worker as { playbook?: PlaybookEdits }).playbook;
-        return { job: { ...claimed, context: await contextFor(tx, spec.nodeIds) }, playbook: { task: playbookText(edits, "task"), review: playbookText(edits, "review") } };
+        const memory = memoryText((control.worker as { memory?: MemoryEntry[] }).memory, 1500);
+        return { job: { ...claimed, context: await contextFor(tx, spec.nodeIds) }, playbook: { task: playbookText(edits, "task"), review: playbookText(edits, "review"), memory: memory ? `${memoryHeading}\n${memory}` : "" } };
       }
       return { job: null };
     }
@@ -381,7 +451,7 @@ export async function worker(input: z.infer<typeof workerCommand>) {
       const meta = control.worker as { quotaBuckets?: Record<string, unknown> };
       const buckets = { ...meta.quotaBuckets, [attempt.profile.quotaBucket]: { observedAt: now.toISOString(), reset: "unknown" } };
       await tx.buildControl.update({ where: { id: "build" }, data: { worker: json({ ...meta, quotaBuckets: buckets }) } });
-      const candidate = selectProfile(profilesSpec.parse(control.profiles), jobSpec.parse(job.spec), { previous: attempt.profile, stopped: input.stopped, exhaustedBuckets: Object.keys(buckets) });
+      const candidate = selectProfile(profilesSpec.parse(control.profiles), jobSpec.parse(job.spec), { ...routing(control.worker), previous: attempt.profile, stopped: input.stopped, exhaustedBuckets: Object.keys(buckets) });
       const eligible = candidate && attempt.count < attempt.profile.maxAttempts && control.revision === (job.approval as { policyRevision: number }).policyRevision;
       return tx.buildJob.update({ where: { id: job.id }, data: {
         state: eligible ? "approved" : "waiting-for-capacity", leaseToken: null, leaseUntil: null,

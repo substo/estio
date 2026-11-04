@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { playbookDefaults, playbookNames, playbookText, type PlaybookEdits, type PlaybookName } from "@/lib/build/playbook";
+import type { MemoryEntry } from "@/lib/build/memory";
 
 const btn = "rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50";
 const solid = "rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50";
@@ -10,7 +11,7 @@ const icons: Record<PlaybookName, string> = { talk: "💬", task: "🛠️", rev
  * How the agents work: the instructions Build sends, editable here (next thread uses them), and the repository's own
  * guidance and skills, read-only. Changing a repository file is a task: ask for it in Talk.
  */
-export function Playbook({ edits, docs, busy, send, ask }: { edits: PlaybookEdits | undefined; docs: { path: string; size: number }[]; busy: boolean;
+export function Playbook({ memory, edits, docs, busy, send, ask }: { memory: MemoryEntry[]; edits: PlaybookEdits | undefined; docs: { path: string; size: number }[]; busy: boolean;
   send: (command: unknown) => Promise<boolean>; ask: (text: string) => void }) {
   const [editing, setEditing] = useState<PlaybookName | null>(null), [text, setText] = useState("");
   const [doc, setDoc] = useState<{ path: string; text: string } | null>(null), [error, setError] = useState("");
@@ -38,6 +39,7 @@ export function Playbook({ edits, docs, busy, send, ask }: { edits: PlaybookEdit
           </div>
         </>}
       </div>; })}</div>
+    <Memory memory={memory} busy={busy} send={send} />
     <div className="rounded-lg border p-3">
       <p className="text-sm font-medium">📚 Repository guidance and skills <span className="text-xs font-normal text-muted-foreground">· read-only, as on the Mac</span></p>
       {!docs.length && <p className="text-xs text-muted-foreground">Not reported yet. The Mac sends them on its next check.</p>}
@@ -47,4 +49,23 @@ export function Playbook({ edits, docs, busy, send, ask }: { edits: PlaybookEdit
         <button className={btn} onClick={() => ask(`Change ${doc.path}: `)}>Ask for a change to this file</button></div>}
     </div>
   </section>;
+}
+
+const kindWord: Record<MemoryEntry["kind"], string> = { note: "Note", decision: "Decided", feedback: "Feedback", done: "Done", merged: "Merged" };
+/** Product memory: kept up to date by Build and conversations; pinned notes always go to agents, then the latest events. */
+function Memory({ memory, busy, send }: { memory: MemoryEntry[]; busy: boolean; send: (command: unknown) => Promise<boolean> }) {
+  const [text, setText] = useState(""), [all, setAll] = useState(false);
+  const ordered = [...memory.filter(m => m.pinned), ...memory.filter(m => !m.pinned).reverse()], shown = all ? ordered : ordered.slice(0, 8);
+  return <details className="rounded-lg border p-3">
+    <summary className="cursor-pointer text-sm font-medium">🧠 Product memory · {memory.length}</summary>
+    <p className="mt-2 text-xs text-muted-foreground">Build adds what you accept, merge and ask to redo, and what you decide in conversations. Every new conversation and task gets it as background, so agents don&apos;t start from zero. Pinned notes are always included; otherwise the most recent come first.</p>
+    <div className="mt-2 space-y-1">{shown.map(m => <div key={m.id} className="flex items-start gap-2 rounded-md border px-2 py-1.5 text-sm">
+      <span className="min-w-0 flex-1"><span className="text-xs text-muted-foreground">{m.pinned ? "📌 Always" : `${kindWord[m.kind]} · ${new Date(m.at).toLocaleDateString()}`}</span><span className="block">{m.text}</span></span>
+      <button className="text-xs underline" disabled={busy} onClick={() => send({ action: "memory-update", memoryId: m.id, pinned: !m.pinned })}>{m.pinned ? "Unpin" : "Pin"}</button>
+      <button className="text-xs underline" disabled={busy} onClick={() => send({ action: "memory-update", memoryId: m.id, remove: true })} aria-label="Remove">Remove</button></div>)}</div>
+    {ordered.length > 8 && <button className="mt-1 text-xs underline" onClick={() => setAll(!all)}>{all ? "Show fewer" : `Show all ${ordered.length}`}</button>}
+    <form className="mt-2 flex gap-2" onSubmit={async e => { e.preventDefault(); if (await send({ action: "memory-add", text })) setText(""); }}>
+      <input value={text} onChange={e => setText(e.target.value)} minLength={5} maxLength={400} placeholder="Something agents should always know" className="min-w-0 flex-1 rounded-md border bg-background p-2 text-sm" />
+      <button className={btn} disabled={busy || text.trim().length < 5}>Add</button></form>
+  </details>;
 }

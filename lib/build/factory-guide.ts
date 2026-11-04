@@ -8,5 +8,5 @@ export const loop: { step: string; who: string; text: string }[] = [
   { step: "Start", who: "You or autopilot", text: "One tap starts a plan or suggestion; autopilot can start small, safe ones." },
   { step: "Implement", who: "System", text: "Each task runs in its own T3 thread and branch, with a model chosen for its difficulty." },
   { step: "Review", who: "You", text: "Accept, or redo with a note that continues the same thread." },
-  { step: "Ship", who: "You", text: "Merge and deploy stay with you." },
+  { step: "Ship", who: "You", text: "Merge from the page (an agent resolves conflicts); deploy stays with you." },
 ];

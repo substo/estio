@@ -24,15 +24,16 @@ const planFormat = `When you propose a plan, end your message with a fenced json
 \`\`\`json
 {"plan":[{"title":"...","outcome":"what the user will notice","reason":"why","scope":["repo-relative files to change"],"acceptance":["checkable criteria"]}]}
 \`\`\`
-At most 10 files and 5 criteria per task. The page shows these as tasks the owner starts with one tap; Build picks the difficulty and model and runs each in its own T3 thread on its own branch.`;
+At most 10 files and 5 criteria per task. The page shows these as tasks the owner starts with one tap; Build picks the difficulty and model and runs each in its own T3 thread on its own branch.
+When the owner states a lasting preference or decision, add {"remember":["one short sentence"]} to a json block in that reply (at most three); Build keeps it in the product memory for future conversations and tasks.`;
 
 export const playbookText = (edits: PlaybookEdits | undefined, name: PlaybookName) => edits?.[name]?.text ?? playbookDefaults[name].text;
 /** The full first message of a conversation thread, before the owner's words. */
-export const talkPrompt = (edits: PlaybookEdits | undefined) => `${playbookText(edits, "talk")}\n\n${planFormat}`;
+export const talkPrompt = (edits: PlaybookEdits | undefined, memory = "") => `${playbookText(edits, "talk")}\n\n${planFormat}${memory ? `\n\n${memory}` : ""}`;
 
 /** Removes plan blocks from an agent message for display; the plan is shown as cards instead. */
 export function withoutPlan(text: string) {
-  return text.replace(/```json\s*\{\s*"plan"[\s\S]*?```/g, "").trim();
+  return text.replace(/```json\s*\{\s*"(?:plan|remember)"[\s\S]*?```/g, "").trim();
 }
 
 /** Repository guidance the Mac worker reports read-only: changes to these go through a task, onto a branch. */

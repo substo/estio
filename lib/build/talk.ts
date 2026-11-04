@@ -4,7 +4,8 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { extractPlan, id, jobSpec, profilesSpec, proposalDraft, selectProfile, difficulty, type JobSpec } from "./contract";
 import { validateDeliveryPath } from "./delivery";
-import { approveJob, json, mutate, requireCondition, routed } from "./store";
+import { addMemory, approveJob, json, mutate, requireCondition, routed, routing } from "./store";
+import { extractRemember, memoryHeading, memoryText, type MemoryEntry } from "./memory";
 import { ownerDelimiter, talkPrompt, type PlaybookEdits } from "./playbook";
 
 /**
@@ -25,12 +26,11 @@ async function lockTalk(tx: Prisma.TransactionClient, talkId: string) {
 const messagesOf = (v: unknown) => (Array.isArray(v) ? v : []) as TalkMessage[];
 /** Conversation planning reads code and writes nothing; prefer a Hard-level approved model. */
 function talkProfile(profiles: unknown, worker: unknown) {
-  return selectProfile(profilesSpec.parse(profiles), { taskType: "review", tools: ["git-read"], quality: difficulty.hard, profileId: "auto" } as JobSpec,
-    { exhaustedBuckets: Object.keys((worker as { quotaBuckets?: object }).quotaBuckets ?? {}) });
+  return selectProfile(profilesSpec.parse(profiles), { taskType: "review", tools: ["git-read"], quality: difficulty.hard, profileId: "auto" } as JobSpec, routing(worker));
 }
 
 export const talkOwnerCommand = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("talk"), talkId: id.optional(), text: z.string().trim().min(1).max(8000) }).strict(),
+  z.object({ action: z.literal("talk"), talkId: id.optional(), text: z.string().trim().min(1).max(8000), profileId: id.optional() }).strict(),
   z.object({ action: z.literal("talk-start"), id, runId: z.string().max(200) }).strict(),
   z.object({ action: z.literal("talk-archive"), id }).strict(),
 ]);
@@ -39,7 +39,10 @@ export async function talkOwner(input: z.infer<typeof talkOwnerCommand>, actor: 
     const message: TalkMessage = { id: `o-${Date.now().toString(36)}`, role: "owner", text: input.text, at: new Date().toISOString(), sent: false };
     if (!input.talkId) {
       const control = await db.buildControl.findUnique({ where: { id: "build" } });
-      const profile = control && talkProfile(control.profiles, control.worker);
+      // The owner may pick an allowed model for a new conversation; otherwise Build chooses (Hard level, most allowance left).
+      const chosen = input.profileId && control ? profilesSpec.parse(control.profiles).find(p => p.id === input.profileId && p.enabled && p.taskTypes.includes("review")) : undefined;
+      requireCondition(!input.profileId || chosen, "That model is no longer allowed");
+      const profile = chosen ?? (control && talkProfile(control.profiles, control.worker));
       requireCondition(profile, "Allow at least one model first (settings)");
       const head = (control.worker as { head?: string }).head;
       requireCondition(/^[a-f0-9]{40}$/.test(head ?? ""), "The Mac worker has not reported the code yet; wake the Mac and try again");
@@ -93,9 +96,16 @@ export const talkWorkerCommand = z.discriminatedUnion("action", [
 export async function talkWorker(input: z.infer<typeof talkWorkerCommand>) {
   if (input.action === "talk-poll") {
     const open = await db.buildTalk.findMany({ where: { state: { in: ["queued", "thinking"] } }, orderBy: { updatedAt: "asc" }, take: 10 });
-    const edits = open.length ? ((await db.buildControl.findUnique({ where: { id: "build" } }))?.worker as { playbook?: PlaybookEdits } | undefined)?.playbook : undefined;
-    return { talks: open.map(t => ({ id: t.id, title: t.title, threadId: t.threadId, base: t.base, profile: t.profile, playbook: talkPrompt(edits), delimiter: ownerDelimiter,
+    const meta = open.length ? (await db.buildControl.findUnique({ where: { id: "build" } }))?.worker as { playbook?: PlaybookEdits; memory?: MemoryEntry[] } | undefined : undefined;
+    const memory = memoryText(meta?.memory, 4000);
+    return { talks: open.map(t => ({ id: t.id, title: t.title, threadId: t.threadId, base: t.base, profile: t.profile, playbook: talkPrompt(meta?.playbook, memory ? `${memoryHeading}\n${memory}` : ""), delimiter: ownerDelimiter,
       unsent: messagesOf(t.messages).filter(m => m.role === "owner" && m.sent === false).map(m => ({ id: m.id, text: m.text })) })) };
+  }
+  // Decisions the agent marked to remember go into product memory once its run has finished.
+  if (input.action === "talk-sync" && !input.running) {
+    const last = [...input.messages].reverse().find(m => m.role === "assistant");
+    const notes = last ? extractRemember(last.text) : [];
+    if (notes.length) await mutate(tx => addMemory(tx, notes.map(text => ({ kind: "decision" as const, text }))));
   }
   return db.$transaction(async tx => {
     const talk = await lockTalk(tx, input.id);

@@ -5,6 +5,9 @@ import vm from "node:vm";
 import ts from "typescript";
 import { profileSpec, selectProfile, validLease, canRevoke, sameOrigin, extractPlan, type JobSpec } from "./contract";
 import { withoutPlan } from "./playbook";
+import { remainingByBucket } from "./contract";
+import { extractRemember, memoryText, remember } from "./memory";
+import { parseUsage } from "./usage";
 import { reverseAffected } from "./scanner";
 
 test("Build uses the platform gate: location admin, Substo and impersonation cannot acquire operator context", async () => {
@@ -100,4 +103,26 @@ test("a conversation plan is read from the last plan block and hidden from the d
   assert.equal(r.found, true); assert.equal(r.items.length, 1); assert.equal(r.dropped, 1);
   assert.equal(withoutPlan(text), "Here is the plan.");
   assert.equal(extractPlan("No plan yet. What part?").found, false);
+});
+
+test("usage readings: lowest window wins, stale readings are ignored, and routing prefers allowance left", () => {
+  const raw = JSON.stringify([{ usage: { primary: { usedPercent: 10, resetsAt: "2026-11-04T18:00:00Z" }, secondary: { usedPercent: 86 }, loginMethod: "Pro", updatedAt: new Date().toISOString() }, rateWindowLabels: { primary: "Session", secondary: "Weekly" } }]);
+  const u = parseUsage(raw)!;
+  assert.equal(u.remaining, 14); assert.equal(u.windows[1].label, "Weekly");
+  assert.deepEqual(remainingByBucket({ claudeAgent: u, codex: { ...u, at: "2020-01-01T00:00:00Z" } }), { claudeAgent: 14 });
+  const base = profileSpec.parse({ id: "a", enabled: true, provider: "codex", account: "default", billing: "subscription", model: "m", options: {}, quotaBucket: "codex", taskTypes: ["implementation"], tools: ["git-read", "code-write"], dataScope: "estio-repository", quality: 3, concurrency: 1, maxAttempts: 1, fallbacks: [] });
+  const claude = { ...base, id: "b", provider: "claudeAgent", quotaBucket: "claudeAgent" };
+  const job = { taskType: "implementation", tools: ["git-read", "code-write"], quality: 3, profileId: "auto" } as JobSpec;
+  assert.equal(selectProfile([base, claude], job, { remaining: { codex: 20, claudeAgent: 90 } })?.id, "b");
+  assert.equal(selectProfile([base, claude], job, { remaining: { codex: 90, claudeAgent: 2 } })?.id, "a");
+  assert.equal(selectProfile([base, claude], job, { remaining: { codex: 1, claudeAgent: 2 } }), null);
+});
+
+test("product memory dedupes, keeps pinned notes first and reads remember notes from replies", () => {
+  let m = remember([], [{ kind: "done", text: "Unread badge: counts per channel" }, { kind: "note", text: "Keep pages simple", pinned: true }]);
+  m = remember(m, [{ kind: "done", text: "Unread badge: counts per channel" }]);
+  assert.equal(m.length, 2);
+  assert.match(memoryText(m).split("\n")[0], /Always: Keep pages simple/);
+  assert.deepEqual(extractRemember('ok\n```json\n{"remember":["Owner prefers iPad-first layouts","x"]}\n```'), ["Owner prefers iPad-first layouts"]);
+  assert.equal(withoutPlan('Noted.\n```json\n{"remember":["a b c d e"]}\n```'), "Noted.");
 });

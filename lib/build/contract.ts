@@ -76,12 +76,27 @@ export function assessDifficulty(spec: Pick<JobSpec, "taskType" | "scope" | "acc
  * runs whenever something approved can do it. Within a level the proposal's profile goes first, then approved-list order.
  * A capacity fallback needs a confirmed-stopped writer and a different quota bucket than the previous attempt.
  */
-export function selectProfile(profiles: Profile[], job: JobSpec, options: { previous?: Profile; stopped?: boolean; exhaustedBuckets?: string[] } = {}) {
+export function selectProfile(profiles: Profile[], job: JobSpec, options: { previous?: Profile; stopped?: boolean; exhaustedBuckets?: string[]; remaining?: Record<string, number> } = {}) {
   if (options.previous && !options.stopped) return null;
-  const ordered = [...profiles.filter(p => p.id === job.profileId), ...profiles.filter(p => p.id !== job.profileId)];
+  // With usage readings, the subscription with the most allowance left goes first (in 10% bands so it doesn't flap).
+  const band = (p: Profile) => Math.floor((options.remaining?.[p.quotaBucket] ?? 50) / 10);
+  const ordered = profiles.map((p, i) => ({ p, i })).sort((a, b) => band(b.p) - band(a.p) || Number(b.p.id === job.profileId) - Number(a.p.id === job.profileId) || a.i - b.i).map(x => x.p);
   const eligible = (p: Profile) => p.enabled && p.taskTypes.includes(job.taskType) && job.tools.every(t => p.tools.includes(t)) &&
-    !options.exhaustedBuckets?.includes(p.quotaBucket) && (!options.previous || (p.id !== options.previous.id && p.quotaBucket !== options.previous.quotaBucket));
+    !options.exhaustedBuckets?.includes(p.quotaBucket) && !((options.remaining?.[p.quotaBucket] ?? 100) <= usageFloor) &&
+    (!options.previous || (p.id !== options.previous.id && p.quotaBucket !== options.previous.quotaBucket));
   return ordered.find(p => eligible(p) && p.quality === job.quality) ?? ordered.find(eligible) ?? null;
+}
+// Subscription usage, read on the Mac by QuotaCell's helper (no model call). Remaining is the lowest across windows.
+export const usageWindow = z.object({ label: z.string().max(40), remaining: z.number().min(0).max(100), resetsAt: z.string().max(40).optional() }).strict();
+export const usageSpec = z.record(id, z.object({ remaining: z.number().min(0).max(100), windows: z.array(usageWindow).max(4), plan: z.string().max(40).optional(), at: z.string().max(40) }).strict());
+export type Usage = z.infer<typeof usageSpec>;
+/** At or below this, a subscription is treated as used up; below usageLow, background work (daily review, autopilot) waits. */
+export const usageFloor = 3, usageLow = 15;
+export function remainingByBucket(usage: unknown, now = Date.now()) {
+  const parsed = usageSpec.safeParse(usage ?? {});
+  if (!parsed.success) return {};
+  // Readings older than 30 minutes are not used for routing.
+  return Object.fromEntries(Object.entries(parsed.data).filter(([, u]) => now - Date.parse(u.at) < 30 * 60_000).map(([k, u]) => [k, u.remaining]));
 }
 export function canRevoke(state: string) { return ["proposed", "approved", "review", "working", "waiting-for-capacity", "blocked-configuration", "blocked-stale-approval", "failed"].includes(state); }
 export function validLease(job: { state: string; leaseToken: string | null; workerId: string | null; leaseUntil: Date | null }, token: string, workerId: string, now: Date) {

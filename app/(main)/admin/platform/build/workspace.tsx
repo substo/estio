@@ -9,13 +9,16 @@ import { loop } from "@/lib/build/factory-guide";
 import { TalkPanel, type Talk } from "./talk";
 import { Playbook } from "./playbook";
 import type { PlaybookEdits } from "@/lib/build/playbook";
+import type { MemoryEntry } from "@/lib/build/memory";
+import type { Usage } from "@/lib/build/contract";
 
 type Node = { id: string; revision: number; spec: z.infer<typeof nodeSpec>; updatedAt: string };
 type Job = { id: string; key: string; revision: number; state: string; spec: z.infer<typeof jobSpec>; checkpoint: unknown; attempt: unknown; approval: unknown; createdAt: string; updatedAt: string };
-type Worker = { daily?: { enabled: boolean; profileId: string; lastRunDate?: string }; quotaBuckets?: Record<string, { observedAt: string; reset: string }>; catalog?: CatalogModel[]; catalogAt?: string; autoApprove?: { mode: "off" | "record" | "on" }; head?: string; id?: string; lastSeenAt?: string; playbook?: PlaybookEdits; docs?: { at?: string; files: { path: string; size: number }[] } };
+type Worker = { daily?: { enabled: boolean; profileId: string; lastRunDate?: string }; quotaBuckets?: Record<string, { observedAt: string; reset: string }>; catalog?: CatalogModel[]; catalogAt?: string; autoApprove?: { mode: "off" | "record" | "on" }; head?: string; id?: string; lastSeenAt?: string; playbook?: PlaybookEdits; usage?: Usage; memory?: MemoryEntry[]; docs?: { at?: string; files: { path: string; size: number }[] } };
 type Data = { control: { paused: boolean; revision: number; profiles: Profile[]; worker: Worker } | null; nodes: Node[]; edges: { fromId: string; toId: string; kind: string }[]; jobs: Job[]; talks?: Talk[] };
 type Send = (command: unknown) => Promise<boolean>;
-type Checkpoint = { reason?: string; nextStep?: string; result?: { text?: string; needsAnswer?: boolean }; t3?: { threadId?: string; branch?: string }; feedback?: { at: string; decision: string; note: string; sentAt?: string }[]; auto?: { wouldApprove: boolean; reasons: string[] }; proposalsCreated?: number };
+type Merge = { state: "queued" | "merging" | "resolving" | "merged" | "failed"; at: string; sha?: string; reason?: string; local?: string; branch?: string };
+type Checkpoint = { merge?: Merge; evidence?: { ok?: boolean; files?: string[] }; reason?: string; nextStep?: string; result?: { text?: string; needsAnswer?: boolean }; t3?: { threadId?: string; branch?: string }; feedback?: { at: string; decision: string; note: string; sentAt?: string }[]; auto?: { wouldApprove: boolean; reasons: string[] }; proposalsCreated?: number };
 type CatalogModel = { provider: string; model: string; name: string };
 type Tier = "off" | "routine" | "hard";
 
@@ -52,20 +55,30 @@ export default function BuildWorkspace() {
       <button className="contents" disabled={busy || !data} onClick={() => send({ action: "pause", paused: !paused })} title={paused ? "Resume: approved tasks start" : "Pause: nothing new starts"}><Pill ok={!paused}>{paused ? "Paused · resume" : "Running · pause"}</Pill></button>
       <Pill ok={mode !== "off"}>Autopilot {mode === "on" ? "on" : mode === "record" ? "watching" : "off"}</Pill>
       <Pill ok={models.length > 0}>{models.length} model{models.length === 1 ? "" : "s"} allowed</Pill>
+      {Object.entries(w?.usage ?? {}).map(([bucket, u]) => <UsageGauge key={bucket} name={bucket === "claudeAgent" ? "Claude" : bucket === "codex" ? "Codex" : bucket} usage={u} />)}
       <button className={`${btn} ml-auto`} onClick={() => setSettings(!settings)} aria-expanded={settings}>⚙ Settings</button>
     </header>
     {error && <p role="alert" className="rounded-md border border-red-400 p-3 text-sm">{error}</p>}
     {!data && <p className="text-sm text-muted-foreground">Loading Build…</p>}
     {data && settings && <Settings data={data} busy={busy} send={send} close={() => setSettings(false)} />}
-    {data && <TalkPanel talks={data.talks ?? []} paused={paused} seed={seed} reload={load}
+    {data && <TalkPanel talks={data.talks ?? []} paused={paused} seed={seed} reload={load} models={models.filter(p => p.taskTypes.includes("review")).map(p => ({ id: p.id, name: w?.catalog?.find(c => c.provider === p.provider && c.model === p.model)?.name ?? p.model }))}
       blocker={!online ? "The Mac is offline; it relays the conversation." : models.some(p => p.tools.includes("code-write")) ? null : "Allow a model that may write code first (Settings)."} />}
     {data && <NeedsYou data={data} busy={busy} send={send} online={online} openSettings={() => setSettings(true)} />}
     {data && <AppMap data={data} busy={busy} send={send} ask={ask} />}
-    {data && <Progress data={data} />}
-    {data && <Playbook edits={w?.playbook} docs={w?.docs?.files ?? []} busy={busy} send={send} ask={ask} />}
+    {data && <Progress data={data} busy={busy} send={send} />}
+    {data && <Playbook memory={w?.memory ?? []} edits={w?.playbook} docs={w?.docs?.files ?? []} busy={busy} send={send} ask={ask} />}
   </main>;
 }
 
+/** Allowance left, as in QuotaCell: the lowest of the session and weekly windows; details on hover/tap. */
+function UsageGauge({ name, usage }: { name: string; usage: Usage[string] }) {
+  const stale = Date.now() - Date.parse(usage.at) > 30 * 60_000, r = Math.round(usage.remaining);
+  const color = stale ? "bg-muted-foreground" : r > 30 ? "bg-emerald-500" : r >= 10 ? "bg-amber-500" : "bg-red-500";
+  const detail = usage.windows.map(w => `${w.label}: ${Math.round(w.remaining)}% left${w.resetsAt ? `, resets ${new Date(w.resetsAt).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}` : ""}`).join("\n");
+  return <details className="relative"><summary className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs">
+    <span className="relative h-2 w-6 overflow-hidden rounded-full bg-background"><span className={`absolute inset-y-0 left-0 ${color}`} style={{ width: `${r}%` }} /></span>{name} {r}%{stale ? " (old)" : ""}</summary>
+    <div className="absolute z-10 mt-1 w-64 space-y-1 rounded-md border bg-background p-2 text-xs shadow">{usage.plan && <p className="font-medium">{name} {usage.plan}</p>}<p className="whitespace-pre-line">{detail}</p><p className="text-muted-foreground">Read {ago(usage.at)} on the Mac. Build sends new work to the subscription with more left.</p></div></details>;
+}
 function Pill({ ok, children }: { ok: boolean; children: ReactNode }) {
   return <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs"><span aria-hidden className={`h-2 w-2 rounded-full ${ok ? "bg-emerald-500" : "bg-amber-500"}`} />{children}</span>;
 }
@@ -93,6 +106,8 @@ function NeedsYou({ data, busy, send, online, openSettings }: { data: Data; busy
     rows.push(<Row key={j.id} icon="⏸️" title={`${j.spec.title} is stuck`} detail={plainBlock(j)}><button className={btn} disabled={busy} onClick={() => void retry(j)}>Try again</button><button className={btn} disabled={busy} onClick={() => send({ action: "revoke", id: j.id, revision: j.revision })}>Drop it</button></Row>);
   for (const j of data.jobs.filter(j => j.state === "proposed"))
     rows.push(<Row key={j.id} icon="💡" title={`Suggested: ${j.spec.title}`} detail={<>{j.spec.outcome}<br />{j.spec.reason}</>}><button className={solid} disabled={busy} onClick={() => send({ action: "approve", id: j.id, revision: j.revision })}>Start</button><button className={btn} disabled={busy} onClick={() => send({ action: "revoke", id: j.id, revision: j.revision })}>Not now</button></Row>);
+  for (const j of data.jobs.filter(j => cp(j).merge?.state === "failed"))
+    rows.push(<Row key={`m-${j.id}`} icon="🔀" title={`${j.spec.title} didn't merge`} detail={cp(j).merge!.reason}><button className={solid} disabled={busy} onClick={() => send({ action: "merge", id: j.id, revision: j.revision })}>Try again</button></Row>);
   for (const n of data.nodes.filter(n => n.spec.draft))
     rows.push(<Row key={n.id} icon="📝" title={`Is this right? ${n.spec.section ?? ""} › ${n.spec.name}`} detail={<>{n.spec.draft!.purpose}{n.spec.draft!.features.length ? ` Features: ${n.spec.draft!.features.map(f => f.name).join(", ")}.` : ""}</>}><button className={solid} disabled={busy} onClick={() => send({ action: "draft", id: n.id, revision: n.revision, decision: "confirm" })}>Yes</button><button className={btn} disabled={busy} onClick={() => send({ action: "draft", id: n.id, revision: n.revision, decision: "discard" })}>No</button></Row>);
   for (const n of data.nodes.filter(n => n.spec.watch?.status === "watching" && n.spec.watch.latest && n.spec.watch.latest !== n.spec.watch.seen))
@@ -101,6 +116,10 @@ function NeedsYou({ data, busy, send, online, openSettings }: { data: Data; busy
     <h2 className={label}>Needs you{rows.length ? ` · ${rows.length}` : ""}</h2>
     {rows.length ? <div className="space-y-2">{rows}</div> : <p className="rounded-lg border p-3 text-sm text-muted-foreground">Nothing is waiting for you.</p>}
   </section>;
+}
+const canMerge = (j: Job) => j.spec.taskType === "implementation" && !!cp(j).t3?.branch && cp(j).evidence?.ok === true && !!cp(j).evidence?.files?.length && !["queued", "merging", "resolving", "merged"].includes(cp(j).merge?.state ?? "");
+function mergeWords(m: Merge) {
+  return m.state === "merged" ? `Merged${m.sha ? ` (${m.sha.slice(0, 7)})` : ""}, not deployed yet` : m.state === "resolving" ? "Merging: an agent is resolving conflicts" : m.state === "failed" ? `Merge failed: ${m.reason ?? "unknown"}` : "Merging…";
 }
 function plainBlock(j: Job) {
   return j.state === "waiting-for-capacity" ? "The allowed models hit their usage limit. It continues when a limit resets, or allow another model."
@@ -118,7 +137,8 @@ function Result({ job, busy, send, failed, retry }: { job: Job; busy: boolean; s
       {text && <><button className="underline" onClick={() => setMore(!more)}>{more ? "Hide" : "What it says"}</button>{more && <p className="max-h-64 overflow-auto whitespace-pre-wrap rounded border bg-background p-2 text-foreground">{text}</p>}</>}
       {redo && <div className="flex flex-wrap gap-2 pt-1"><input autoFocus className={`${field} min-w-60 flex-1`} placeholder="What should change?" value={note} maxLength={2000} onChange={e => setNote(e.target.value)} /><button className={solid} disabled={busy || note.trim().length < 3} onClick={async () => { if (await send({ action: "redo", id: job.id, revision: job.revision, note: note.trim() })) { setNote(""); setRedo(false); } }}>Send</button></div>}
     </div>}>
-    {!failed && <button className={solid} disabled={busy} onClick={() => send({ action: "accept", id: job.id, revision: job.revision })}>Accept</button>}
+    {!failed && canMerge(job) && <button className={solid} disabled={busy} title="Accept and merge into the release branch" onClick={() => send({ action: "merge", id: job.id, revision: job.revision })}>Merge</button>}
+    {!failed && <button className={canMerge(job) ? btn : solid} disabled={busy} onClick={() => send({ action: "accept", id: job.id, revision: job.revision })}>{canMerge(job) ? "Accept, merge later" : "Accept"}</button>}
     {failed && retry && <button className={btn} disabled={busy} onClick={retry}>Try again</button>}
     <button className={btn} disabled={busy} onClick={() => setRedo(!redo)}>Redo…</button>
   </Row>;
@@ -202,13 +222,13 @@ function stateWord(j: Job) {
   return ({ proposed: "suggested", approved: "queued", working: "running", stopping: "stopping", review: "ready for you", done: "done", failed: "failed", revoked: "dropped" } as Record<string, string>)[j.state] ?? "stuck";
 }
 /** Next · Now · Done. Cards say where in the app, how hard, which model, and where the work is. */
-function Progress({ data }: { data: Data }) {
+function Progress({ data, busy, send }: { data: Data; busy: boolean; send: Send }) {
   const [open, setOpen] = useState<string | null>(null);
   const screenName = (j: Job) => { const n = data.nodes.find(n => j.spec.nodeIds.includes(n.id) && n.spec.kind === "page"); return n ? `${n.spec.section} › ${n.spec.name}` : j.spec.scope[0]; };
   const columns: [string, Job[]][] = [
     ["Next", data.jobs.filter(j => ["proposed", "approved"].includes(j.state))],
-    ["Now", data.jobs.filter(j => ["working", "stopping", "review"].includes(j.state))],
-    ["Done", data.jobs.filter(j => j.state === "done").sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))],
+    ["Now", data.jobs.filter(j => ["working", "stopping", "review"].includes(j.state) || ["queued", "merging", "resolving"].includes(cp(j).merge?.state ?? ""))],
+    ["Done", data.jobs.filter(j => j.state === "done" && !["queued", "merging", "resolving"].includes(cp(j).merge?.state ?? "")).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))],
   ];
   return <section className="space-y-2">
     <h2 className={label}>Progress</h2>
@@ -219,9 +239,12 @@ function Progress({ data }: { data: Data }) {
         return <button key={j.id} onClick={() => setOpen(open === j.id ? null : j.id)} className="block w-full rounded-md bg-muted/60 px-2.5 py-2 text-left text-sm hover:bg-muted">
           <span className="font-medium">{j.spec.title}</span>
           <span className="block text-xs text-muted-foreground">{screenName(j)} · {j.spec.taskType === "implementation" ? level(j) : "Review"}{m ? ` · ${m}` : ""} · {stateWord(j)} {ago(j.updatedAt)}</span>
+          {c.merge && <span className={`block text-xs ${c.merge.state === "failed" ? "text-red-600" : c.merge.state === "merged" ? "text-emerald-700 dark:text-emerald-400" : "text-amber-600"}`}>{mergeWords(c.merge)}</span>}
+          {j.state === "done" && canMerge(j) && <span role="button" tabIndex={0} className={`${btn} mt-1 inline-block`} onClick={e => { e.stopPropagation(); if (!busy) void send({ action: "merge", id: j.id, revision: j.revision }); }}>Merge</span>}
           {open === j.id && <span className="mt-1.5 block space-y-1 text-xs">
             <span className="block">{j.spec.outcome}</span>
-            {c.t3?.branch && <span className="block">Work is on branch {c.t3.branch}{j.state === "done" ? ", not merged" : ""} · T3 thread &quot;Build: {j.spec.title}&quot;</span>}
+            {c.t3?.branch && <span className="block">Work is on branch {c.t3.branch}{j.state === "done" && c.merge?.state !== "merged" ? ", not merged" : ""} · T3 thread &quot;Build: {j.spec.title}&quot;</span>}
+            {c.merge?.local && <span className="block text-muted-foreground">{c.merge.local}</span>}
             {c.nextStep && <span className="block text-muted-foreground">{c.nextStep}</span>}
             {c.feedback?.map((f, i) => <span key={i} className="block">{f.decision === "redo" ? "You asked" : "You noted"}: {f.note}</span>)}
           </span>}

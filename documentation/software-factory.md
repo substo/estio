@@ -29,6 +29,13 @@ The agent brainstorms, asks at most three short questions at a time and reads th
 
 The instructions Build sends are shown on the page and editable: **Talking with you**, **Doing a task** and **Daily review** (`lib/build/playbook.ts` has the defaults; edits are stored on BuildControl with the previous version kept). New threads use the current text. The formats Build parses (plan and proposal json, screen drafts) are appended separately, so an edit can't break them. Repository guidance (`AGENTS.md`, this page, `build-workspace.md`, `video-editor/AGENTS.md`) and skills (`.agents/skills/*/SKILL.md`) are reported by the Mac when they change and shown read-only; changing them is a task, so it lands on a branch.
 
+## Usage, merge and memory
+
+- **Usage.** Every 5 minutes the Mac worker reads remaining Codex and Claude allowance through QuotaCell's bundled helper (`CodexBarCLI usage --source cli`, QuotaCell's own environment, no Keychain, no model call; `lib/build/usage.ts`). The header shows one gauge per subscription (the lowest of the session and weekly windows, as in QuotaCell; tap for windows and resets). Routing prefers the subscription with the most allowance left (10% bands), treats 3% or less as used up, holds the daily review and autopilot below 15%, and clears a recorded limit automatically once a fresh reading shows allowance again. Readings older than 30 minutes are ignored. No cost estimates.
+- **Which model talks.** A new conversation uses Auto (an allowed Hard model with the most allowance left) unless the owner picks one from the "Model" chip; the conversation shows "Talking with …". A thread keeps its model; to switch, start a new conversation.
+- **Merge from the page.** A verified result shows **Merge** (accept and merge) or **Accept, merge later** (Merge stays on its Done card). The Mac first checks the files are exactly what was reviewed, commits them on the task branch, and merges into `release/studio-go-live` in a temporary detached worktree, so the owner's checkout is never switched. The merge is pushed as a fast-forward of the release branch (a moved branch is merged again, never overwritten), and the owner's checkout fast-forwards when it is on that branch and clean. A conflict goes to an agent in its own T3 thread ("Merge: …", an allowed Hard model). It merges, resolves keeping both sides and commits; Build pushes only if the result is a merge of exactly the release tip and the task, has no conflict markers, and changes no file the task didn't. Clean merges use no model. Deploy stays with the owner. Code: `lib/build/merge.ts`, merge loop in `scripts/build-worker.ts`.
+- **Product memory.** A living record kept by Build with no model call: what was accepted, merged and redone (with the note), what was decided in conversations (agents add `{"remember":[…]}` when the owner states a lasting preference), and the owner's own notes. New conversations get up to 4,000 characters of it, tasks up to 1,500: pinned notes first, then the latest. Shown under Playbook › Product memory, where the owner can add, pin and remove entries (`lib/build/memory.ts`).
+
 ## The loop
 
 ```
@@ -64,7 +71,10 @@ notice ──► propose ──► approve ──► implement ──► review 
 | Screen descriptions | Live | Drafts purpose, journey and up to 5 features in the daily review's own run; undescribed screens go first | Yes or No | Needs you |
 | Playbook | Live | Appends the formats it parses | Edit the instructions; read guidance and skills | Playbook |
 | Progress | Live | Next · Now · Done with section, difficulty, model and branch | Nothing | Progress |
-| Merge and deploy | Stays with you | Never merges or deploys | Merge and deploy | Git / `deploy-local-build.sh` |
+| Usage gauges and usage-aware routing | Live | Reads allowance every 5 minutes; routes to the subscription with most left; holds background work when low | Nothing | Header |
+| Merge assist | Live | Verifies, commits, merges and pushes; an agent resolves conflicts, checked before push | Press Merge | Needs you, Progress |
+| Product memory | Live | Records accepted, merged, redone and decided work; gives it to new conversations and tasks | Add, pin or remove notes | Playbook |
+| Deploy | Stays with you | Never deploys | Deploy | `deploy-local-build.sh` |
 
 Auto-approved cards carry `approval.actor = "policy"` and `approval.auto = true`. They bind the same revisions as an owner approval and show "Approved by policy". The policy is `autoApprovable` and `autoApprovePolicy` in `lib/build/contract.ts`. It is evaluated on every new proposal (owner or review) by `autoDecide` in `lib/build/store.ts`. Widen it only after Watching shows good judgement.
 
@@ -95,14 +105,14 @@ The product as users see it, not as files: **section › area › screen › fea
 
 ## Roadmap
 
-Done: T3 executor; catalog-driven model approval; system-decided difficulty, model and fallback; experience map from routes; opt-in daily review; watch list; feedback on results; review findings become proposals; policy auto-approval (record-only first); screen descriptions drafted by the daily review; conversation-first redesign (Talk, one page, Playbook) replacing the tabs and forms.
+Done: T3 executor; catalog-driven model approval; system-decided difficulty, model and fallback; experience map from routes; opt-in daily review; watch list; feedback on results; review findings become proposals; policy auto-approval (record-only first); screen descriptions drafted by the daily review; conversation-first redesign (Talk, one page, Playbook) replacing the tabs and forms; usage gauges and usage-aware routing; merge assist with agent conflict resolution; product memory.
 
 The planned roadmap is complete. Candidates for next, none agreed yet:
 
 1. **Learning from feedback** ("prompts over settings", from DeepSeek): recurring redo and accept notes become standing guidance added to future prompts, which the owner can review.
 2. **Widen auto-approval** once Record only has shown good calls, for example to small reviews or a larger daily budget.
-3. **Merge assist:** after Accept, prepare the branch for merge (rebase on the release branch, run focused tests) and leave the final merge and deploy to the owner.
-4. **Notifications:** a single phone notification when something new appears under Needs you, with nothing else sent.
+3. **Screenshots on results:** each task attaches screenshots of the screen it changed, so results can be judged from the iPad.
+4. **Notifications** (deferred by the owner, 2026-11-04): a single phone notification when something new appears under Needs you.
 
 ## Inspiration and watch list
 
@@ -135,3 +145,4 @@ External references and what we take from them. **Live in Build → The app › 
 - 2026-11-04: Screen descriptions (purpose, journey, features) drafted inside the daily review run; owner confirms or discards.
 - 2026-11-04: For you is Build's default view: only what needs the owner, one at a time, with Later.
 - 2026-11-04: Owner rejected the tabbed, form-based page as over-engineered. Build is conversation-first: Talk replaces forms, one page replaces six tabs (Needs you, The app, Progress, Playbook), settings move behind one button, and explanations live here rather than in the page. The agents' instructions are editable on the page; repository guidance and skills are shown read-only.
+- 2026-11-04: Usage from QuotaCell's helper drives routing (no cost estimates). The conversation model is Auto with an optional choice per new conversation. Merge from the page: Build merges and pushes to the release branch; an agent resolves conflicts and Build checks its result before pushing; deploy stays manual. A product memory kept by Build and conversations goes into new threads. Notifications deferred; the worker stays on the local Mac.

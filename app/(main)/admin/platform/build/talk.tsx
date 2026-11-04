@@ -3,13 +3,13 @@ import { useEffect, useRef, useState } from "react";
 import { withoutPlan } from "@/lib/build/playbook";
 import type { TalkMessage, TalkPlan } from "@/lib/build/talk";
 
-export type Talk = { id: string; title: string; state: string; threadId: string | null; messages: TalkMessage[]; plan: TalkPlan | null; error: string | null; updatedAt: string };
-type Props = { talks: Talk[]; paused: boolean; blocker: string | null; reload: () => Promise<void>; seed?: { text: string; n: number } | null };
+export type Talk = { id: string; title: string; state: string; threadId: string | null; profile: { id?: string; model?: string } | null; messages: TalkMessage[]; plan: TalkPlan | null; error: string | null; updatedAt: string };
+type Props = { talks: Talk[]; paused: boolean; blocker: string | null; reload: () => Promise<void>; seed?: { text: string; n: number } | null; models: { id: string; name: string }[] };
 
 /** Talk to Build: the agent asks questions and proposes a plan; Start turns the plan into running tasks. */
-export function TalkPanel({ talks, paused, blocker, reload, seed }: Props) {
+export function TalkPanel({ talks, paused, blocker, reload, seed, models }: Props) {
   const [activeId, setActiveId] = useState<string | null>(talks[0]?.id ?? null), [text, setText] = useState("");
-  const [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [busy, setBusy] = useState(false), [error, setError] = useState(""), [model, setModel] = useState("auto");
   const active = activeId === "new" ? null : talks.find(t => t.id === activeId) ?? (activeId ? null : talks[0] ?? null);
   const working = talks.some(t => ["queued", "thinking"].includes(t.state));
   const end = useRef<HTMLDivElement>(null), input = useRef<HTMLTextAreaElement>(null);
@@ -28,7 +28,7 @@ export function TalkPanel({ talks, paused, blocker, reload, seed }: Props) {
   }
   async function say() {
     const value = text.trim(); if (!value) return;
-    const result = await post({ action: "talk", talkId: active?.id, text: value });
+    const result = await post({ action: "talk", talkId: active?.id, text: value, ...(!active && model !== "auto" ? { profileId: model } : {}) });
     if (result) { setText(""); if (!active && result.id) setActiveId(result.id); }
   }
   const status = active && ({ queued: "Sending to the Mac…", thinking: "Thinking…", waiting: "It's asking you something in T3. Open the thread there to answer.", error: active.error ?? "Something went wrong" } as Record<string, string>)[active.state];
@@ -40,7 +40,8 @@ export function TalkPanel({ talks, paused, blocker, reload, seed }: Props) {
       {talks.slice(0, 6).map(t => <button key={t.id} className={chip(active?.id === t.id)} onClick={() => setActiveId(t.id)} title={t.title}>{t.title.length > 28 ? `${t.title.slice(0, 28)}…` : t.title}</button>)}
     </div>
     <div className="space-y-3 rounded-lg border bg-muted/20 p-3 sm:p-4">
-      {!active && <p className="text-sm text-muted-foreground">Say what you want to build or change. Build asks questions, checks the code, then proposes small tasks you start with one tap.</p>}
+      {!active && <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm text-muted-foreground">Say what you want to build or change. Build asks questions, checks the code, then proposes small tasks you start with one tap.</p>
+        {models.length > 1 && <select aria-label="Model for this conversation" className="rounded-full border bg-background px-2 py-1 text-xs" value={model} onChange={e => setModel(e.target.value)}><option value="auto">Model: Auto</option>{models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>}</div>}
       {active && <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
         {active.messages.map(m => { const shown = m.role === "agent" ? withoutPlan(m.text) : m.text; return shown && <div key={m.id} className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${m.role === "owner" ? "ml-auto bg-primary text-primary-foreground" : "bg-background border"}`}>{shown}</div>; })}
         {plan && <div className="space-y-2 rounded-lg border bg-background p-3">
@@ -59,7 +60,7 @@ export function TalkPanel({ talks, paused, blocker, reload, seed }: Props) {
         <button disabled={busy || !text.trim()} onClick={() => void say()} className="rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-50">Send</button>
       </div>
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-      {active && <div className="flex flex-wrap gap-3 text-xs text-muted-foreground"><span>Also in T3 as &quot;Talk: {active.title.slice(0, 60)}&quot;</span><button className="underline" disabled={busy} onClick={async () => { if (await post({ action: "talk-archive", id: active.id })) setActiveId(null); }}>Archive</button></div>}
+      {active && <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">{active.profile && <span>Talking with {models.find(m => m.id === active.profile!.id)?.name ?? active.profile.model}</span>}<span>Also in T3 as &quot;Talk: {active.title.slice(0, 60)}&quot;</span><button className="underline" disabled={busy} onClick={async () => { if (await post({ action: "talk-archive", id: active.id })) setActiveId(null); }}>Archive</button></div>}
     </div>
   </section>;
 }
