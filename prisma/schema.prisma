@@ -45,7 +45,6 @@ model Location {
   propertyMatchCampaigns        PropertyMatchCampaign[]
   propertyMatchCandidates       PropertyMatchCandidate[]
   projects                      Project[]
-  siteConfig                    SiteConfig?
   swipeSessions                 SwipeSession[]
   users                         User[]                         @relation("LocationToUser")
   userRoles                     UserLocationRole[]
@@ -548,69 +547,6 @@ model PropertyImagePromptProfile {
   @@index([propertyId, updatedAt(sort: Desc)])
 }
 
-model SiteConfig {
-  id         String   @id @default(cuid())
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  locationId String   @unique
-
-  // Substo first-party websites. Separate from Estio domain provisioning.
-  substoSiteSlug      String? @unique @db.VarChar(63)
-  substoSitePublished Boolean @default(false)
-  substoSiteConfig    Json?
-
-  // New Fields
-  domain                     String? @unique
-  theme                      Json?
-  navLinks                   Json?
-  footerLinks                Json? // Footer Menu (New)
-  socialLinks                Json? // Social Media Links (New)
-  legalLinks                 Json? // Legal/Bottom Menu (New)
-  footerDisclaimer           String? // Custom license/disclaimer text (New)
-  footerBio                  String? // Custom biography/description text under logo (New)
-  heroContent                Json?
-  contactInfo                Json? // Address, Phone, Email
-  googleAiApiKey             String? // Google Gemini AI API Key
-  googleAiModel              String? @default("gemini-1.5-pro") // Default / Legacy
-  googleAiModelExtraction    String? @default("gemini-1.5-flash") // Stage 1: Fast Scraper
-  googleAiModelDesign        String? @default("gemini-1.5-pro") // Stage 2: High-End Designer
-  googleAiModelTranscription String? @default("gemini-2.5-flash") // Phase 1: Audio transcription default
-  googleAiModelTranslation   String? @default("gemini-flash-lite-latest") // Conversation translation default
-  brandVoice                 String? // Custom instructions for AI Brand Voice
-  homeSections               Json? // Configuration for Home Page Sections (order, visibility)
-  favoritesConfig            Json? // { title, emptyTitle, emptyBody, headerStyle, heroImage }
-  searchConfig               Json? // { metaTitle, metaDescription, emptyTitle, emptyBody }
-  submissionsConfig          Json? // { title, emptyTitle, emptyBody, headerStyle, heroImage }
-
-  outreachConfig Json? // AI Outreach Assistant Configuration (Prompts, Enabled status)
-
-  publicListingEnabled              Boolean @default(true) // Feature Flag for "List Your Property"
-  whatsappTranscriptOnDemandEnabled Boolean @default(false) // Phase 2A: Manual transcript/backfill controls
-  whatsappTranscriptRetentionDays   Int     @default(90) // Phase 2C: retention policy (30/90/365)
-  whatsappTranscriptVisibility      String  @default("team") // Phase 2C: transcript visibility (team|admin_only)
-  viewingSessionRetentionDays       Int     @default(90) // Viewing transcript retention policy (30/90/365)
-  viewingSessionTranscriptVisibility String @default("team") // Viewing transcript visibility (team|admin_only)
-  viewingSessionAiDisclosureRequired Boolean @default(true) // Require client AI disclosure acknowledgment
-  viewingSessionAiDisclosureVersion String  @default("v1") // Disclosure copy/version identifier captured into session consent audit
-  viewingSessionRawAudioStorageEnabled Boolean @default(false) // V1 default keeps raw audio persistence disabled
-  viewingSessionTranslationModel    String?
-  viewingSessionInsightsModel       String?
-  viewingSessionSummaryModel        String?
-
-  // Existing Fields
-  primaryColor   String?
-  secondaryColor String?
-  accentColor    String?
-  minPrice       Int?
-  maxPrice       Int?
-  defaultCity    String?
-  defaultRegion  String?
-  allowedTypes   String?
-
-  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
-
-  @@map("SearchConfig")
-}
 
 enum PublicSiteDomainRole {
   CANONICAL
