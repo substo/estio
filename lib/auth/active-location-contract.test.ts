@@ -101,5 +101,5 @@ test("platform bootstrap apply is pinned to an explicit Clerk environment and re
   assert.match(platformMasterProvisioner, /isPlatformMaster: true/);
   assert.match(platformMasterProvisioner, /role: "ADMIN"/);
   assert.match(platformMasterProvisioner, /contactAccessScope: "LOCATION_WIDE"/);
-  assert.match(platformMasterProvisioner, /siteConfig\.upsert/);
+  assert.doesNotMatch(platformMasterProvisioner, /siteConfig/);
 });

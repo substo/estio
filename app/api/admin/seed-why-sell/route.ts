@@ -7,14 +7,13 @@ export async function GET() {
         // Ideally we should run this in context of a specific location.
         // For now, I'll fetch the first location to get an ID.
         const location = await db.location.findFirst({
-            include: { siteConfig: true }
         });
 
         if (!location) {
             return NextResponse.json({ error: "No location found" }, { status: 400 });
         }
 
-        const domain = location.siteConfig?.domain || "unknown-domain";
+        const domain = location.domain || "unknown-domain";
 
         const blocks = [
             // Block 1: Hero

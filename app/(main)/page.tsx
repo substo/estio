@@ -4,11 +4,12 @@ import { FeaturesSection } from "@/components/marketing/features-section";
 import { AboutSection } from "@/components/marketing/about-section";
 
 import db from "@/lib/db";
+import { getLocationConfig } from "@/lib/location-config/service";
 
 export default async function Home() {
-    // Fetch the site config to get the logo URLs
-    const siteConfig = await db.siteConfig.findFirst();
-    const logo = (siteConfig?.theme as any)?.logo;
+    // The platform's own Location provides the marketing site's logo (business logos live in the Business profile).
+    const platform = await db.location.findFirst({ where: { isPlatformMaster: true }, select: { id: true } });
+    const logo = platform ? ((await getLocationConfig(platform.id)).theme as any)?.logo : undefined;
 
     return (
         <PageWrapper

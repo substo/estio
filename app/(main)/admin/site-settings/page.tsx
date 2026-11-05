@@ -1,3 +1,4 @@
+import { getLocationConfig } from "@/lib/location-config/service";
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import { getEditorWebsiteConfig } from "@/lib/website/editor-config";
 import { getSubstoLocationActor } from "@/lib/locations/substo-locations";
@@ -31,9 +32,7 @@ export default async function SiteSettingsPage() {
 
     // Fetch existing config + location details + new settings document
     const [siteConfig, location, settingsDoc, publicSiteDomains] = await Promise.all([
-        db.siteConfig.findUnique({
-            where: { locationId },
-        }),
+        getLocationConfig(locationId),
         db.location.findUnique({
             where: { id: locationId },
             select: { name: true, timeZone: true },

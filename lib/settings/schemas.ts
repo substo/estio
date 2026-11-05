@@ -68,6 +68,12 @@ const publicSiteSchema = z.object({
     favoritesConfig: z.unknown().optional(),
     searchConfig: z.unknown().optional(),
     submissionsConfig: z.unknown().optional(),
+    minPrice: z.number().int().nonnegative().nullable().optional(),
+    maxPrice: z.number().int().nonnegative().nullable().optional(),
+    defaultCity: nullableTrimmedString.optional(),
+    defaultRegion: nullableTrimmedString.optional(),
+    allowedTypes: nullableTrimmedString.optional(),
+    siteTitle: nullableTrimmedString.optional(),
 }).passthrough();
 
 const aiSchema = z.object({

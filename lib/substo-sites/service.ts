@@ -1,6 +1,6 @@
 import { homeSectionBlocks } from "@/lib/website/home-sections";
 import { hostedBlocks } from "@/lib/website/hosted-content";
-import { hostedWebsiteConfig, websiteDesignSelect } from "@/lib/website/config";
+import { hostedWebsiteConfig } from "@/lib/website/config";
 import type { PrismaClient } from "@prisma/client";
 import { safeImageUrl, siteSlug, websiteSettings, type WebsiteSettings } from "./policy";
 import { businessProfileSchema } from "@/lib/business-profile/schema";
@@ -8,7 +8,7 @@ import { businessView, type BusinessDetailsPatch } from "@/lib/business-profile/
 import { overlayBusinessDetails } from "@/lib/business-profile/overlay";
 import { overlayWebsiteLayout } from "@/lib/website/settings";
 
-export type SiteDatabase = Pick<PrismaClient, "siteConfig" | "contentPage" | "blogPost" | "location" | "settingsDocument">;
+export type SiteDatabase = Pick<PrismaClient, "contentPage" | "blogPost" | "location" | "settingsDocument">;
 /** Business details (contact, colours, logos, description) are saved to the Business profile by the caller's saver. */
 export type BusinessSaver = (locationId: string, patch: BusinessDetailsPatch, actorUserId: string) => Promise<unknown>;
 /** The Location's Business profile view, read through the same database handle; null when it has no profile yet. */
@@ -27,17 +27,19 @@ async function websitePayload(db: SiteDatabase, locationId: string) {
 export type PublicWebsite = { slug: string; locationId: string; settings: WebsiteSettings; config?: ReturnType<typeof hostedWebsiteConfig>; homeBlocks?: any[] };
 export type WebsiteActor = { userId: string; locationId: string; role: string };
 
-const publicSiteWhere = (slug: string) => ({ authRealm: "substo" as const, siteConfig: { substoSiteSlug: slug, substoSitePublished: true } });
+// The site address and publish switch live on Location (phase 6); layout and the site title in the website document.
+const publicSiteWhere = (slug: string) => ({ authRealm: "substo" as const, websiteSlug: slug, websitePublished: true });
+const emptyDesign = { homeSections: null, heroContent: null, theme: {}, contactInfo: null, navLinks: null, footerLinks: null, socialLinks: null, legalLinks: null, footerBio: null, footerDisclaimer: null };
 
 /** Explicit allowlist projection: never serialize SiteConfig secrets or Location credentials. */
 export async function getPublishedWebsite(db: SiteDatabase, slug: string): Promise<PublicWebsite | null> {
   if (siteSlug(slug) !== slug) return null;
-  const row = await db.siteConfig.findFirst({
-    where: { substoSiteSlug: slug, substoSitePublished: true, location: { authRealm: "substo" } },
-    select: { homeSections: true, heroContent: true, ...websiteDesignSelect, locationId: true, substoSiteSlug: true, substoSiteConfig: true, location: { select: { name: true } } },
-  });
-  if (!row) return null;
-  const site = overlayWebsiteLayout(row, await websitePayload(db, row.locationId));
+  const location = await db.location.findFirst({ where: publicSiteWhere(slug), select: { id: true, name: true } });
+  if (!location) return null;
+  const payload = await websitePayload(db, location.id);
+  const title = typeof payload?.siteTitle === "string" && payload.siteTitle ? payload.siteTitle : null;
+  const row = { ...emptyDesign, locationId: location.id, substoSiteSlug: slug, substoSiteConfig: title ? { title } : null, location: { name: location.name } };
+  const site = overlayWebsiteLayout(row, payload);
   const config = hostedWebsiteConfig(overlayBusinessDetails(site, await profileView(db, row.locationId, row.location.name)), slug, row.location.name || "Our brand");
   const settings = { title: config.name, description: config.footerBio, email: config.contactInfo.email, accent: config.theme.primaryColor, logoUrl: config.theme.logo.url };
   return { slug, locationId: row.locationId, settings, config, homeBlocks: Array.isArray(site.homeSections) ? hostedBlocks(homeSectionBlocks(site, false), slug, config) : undefined };
@@ -60,22 +62,21 @@ export async function listWebsitePosts(db: SiteDatabase, site: PublicWebsite) {
 export async function getWebsitePost(db: SiteDatabase, site: PublicWebsite, slug: string) {
   return db.blogPost.findFirst({ where: { ...publishedPostWhere(site), slug }, select: { title: true, excerpt: true, content: true, coverImage: true, authorName: true, publishedAt: true, updatedAt: true } });
 }
-export async function saveWebsiteSettings(db: SiteDatabase, actor: WebsiteActor, input: { slug: unknown; published: boolean; settings: unknown; confirmAddressChange?: boolean }, saveBusiness?: BusinessSaver) {
+export async function saveWebsiteSettings(db: SiteDatabase, actor: WebsiteActor, input: { slug: unknown; published: boolean; settings: unknown; confirmAddressChange?: boolean }, saveBusiness?: BusinessSaver, saveLayout?: LayoutSaver) {
   if (actor.role !== "ADMIN") return { error: "Only brand admins can manage the website." };
   const slug = siteSlug(input.slug);
   if (!slug) return { error: "Use 3–63 lowercase letters, numbers or single hyphens for the address." };
   const location = await db.location.findFirst({ where: {
     id: actor.locationId, authRealm: "substo", users: { some: { id: actor.userId, authRealm: "substo" } },
     userRoles: { some: { userId: actor.userId, role: "ADMIN" } },
-  }, select: { name: true } });
+  }, select: { name: true, websiteSlug: true } });
   if (!location) return { error: "Brand admin access is required." };
-  const existing = await db.siteConfig.findUnique({ where: { locationId: actor.locationId }, select: { substoSiteSlug: true } });
-  if (existing?.substoSiteSlug && existing.substoSiteSlug !== slug && !input.confirmAddressChange) return { error: "Confirm the address change. Existing links will stop working." };
+  if (location.websiteSlug && location.websiteSlug !== slug && !input.confirmAddressChange) return { error: "Confirm the address change. Existing links will stop working." };
   const settings = websiteSettings(input.settings, location.name || "Our brand");
   try {
     // Only the website title is layout; the description, email, accent colour and logo are business details.
-    const data = { substoSiteSlug: slug, substoSitePublished: input.published, substoSiteConfig: { title: settings.title } };
-    await db.siteConfig.upsert({ where: { locationId: actor.locationId }, create: { locationId: actor.locationId, ...data }, update: data });
+    await db.location.update({ where: { id: actor.locationId }, data: { websiteSlug: slug, websitePublished: input.published } });
+    await saveLayout?.(actor.locationId, { siteTitle: settings.title }, actor.userId);
     await saveBusiness?.(actor.locationId, { summary: settings.description || null, email: settings.email || null, colours: { primary: settings.accent || null }, logos: { primary: settings.logoUrl || null } }, actor.userId);
     return { message: input.published ? "Website published." : "Website saved. Public access is off." };
   } catch (error) {
@@ -94,7 +95,7 @@ export async function saveWebsiteDesign(db: SiteDatabase, actor: WebsiteActor, f
   const text = (key: string, max = 2000) => String(form.get(key) || "").trim().slice(0, max);
   const color = (key: string, fallback: string) => /^#[\da-f]{6}$/i.test(text(key)) ? text(key) : fallback;
   const image = (key: string) => safeImageUrl(text(key)) || "";
-  const existing = overlayWebsiteLayout(await db.siteConfig.findUnique({ where: { locationId: actor.locationId }, select: { theme: true } }) ?? { theme: {} }, await websitePayload(db, actor.locationId));
+  const existing = overlayWebsiteLayout({ theme: {} as Record<string, unknown> }, await websitePayload(db, actor.locationId));
   // Layout goes to the website settings document; brand colours, logos and contact details to the Business profile.
   const data = {
     theme: {

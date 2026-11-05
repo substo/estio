@@ -1,3 +1,4 @@
+import { getLocationConfig } from "@/lib/location-config/service";
 import db from "@/lib/db";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
@@ -180,16 +181,7 @@ async function getConfiguredAiModelFields(locationId?: string): Promise<Configur
     };
 
     const [siteConfig, aiDoc] = await Promise.all([
-        db.siteConfig.findUnique({
-            where: { locationId },
-            select: {
-                googleAiModel: true,
-                googleAiModelExtraction: true,
-                googleAiModelDesign: true,
-                googleAiModelTranscription: true,
-                googleAiModelTranslation: true,
-            } as any
-        }),
+        getLocationConfig(locationId),
         settingsService.getDocument<any>({
             scopeType: "LOCATION",
             scopeId: locationId,

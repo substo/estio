@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { assembleAiConnections, type AiConnectionInputs } from "./connections-model";
-import { planPlaintextKeyMoves } from "./plaintext-key-move";
 
 const none: AiConnectionInputs = { geminiKey: false, openAiKey: false, chatGpt: { enabled: false, health: null, hasCredential: false }, devices: [] };
 const now = Date.parse("2026-11-05T10:00:00Z"), recent = "2026-11-05T09:59:30Z", stale = "2026-11-05T09:00:00Z";
@@ -24,12 +23,4 @@ test("any one ready source makes AI available: a key, a connected ChatGPT subscr
   assert.equal(assembleAiConnections(mac(recent, signedIn, true), now).available, false);
   // An API-key login on the Mac is not the business's subscription.
   assert.equal(assembleAiConnections(mac(recent, { ...signedIn, loginMethod: "console" }), now).available, false);
-});
-
-test("plaintext key retirement copies only when no encrypted key exists, and always clears the column", () => {
-  assert.deepEqual(planPlaintextKeyMoves([
-    { locationId: "a", hasPlaintext: true, hasSecret: false },
-    { locationId: "b", hasPlaintext: true, hasSecret: true },
-    { locationId: "c", hasPlaintext: false, hasSecret: false },
-  ]), [{ locationId: "a", action: "copy-then-clear" }, { locationId: "b", action: "clear-only" }]);
 });

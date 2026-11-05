@@ -1,3 +1,4 @@
+import { getLocationConfig } from "@/lib/location-config/service";
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import db from "@/lib/db";
 import { MenuBuilder } from "./_components/menu-builder";
@@ -20,7 +21,7 @@ export default async function NavigationSettingsPage() {
 
     // Layout from the website document over the stored row (Locations without a document keep the row).
     const [config, website] = await Promise.all([
-        db.siteConfig.findUnique({ where: { locationId: orgId } }),
+        getLocationConfig(orgId),
         getWebsiteSettings(orgId),
     ]);
     const row = overlayWebsiteLayout({ ...(config ?? {}) } as Record<string, any>, website?.payload);

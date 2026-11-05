@@ -1,5 +1,6 @@
 "use server";
 
+import { getLocationConfig } from "@/lib/location-config/service";
 import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
@@ -112,7 +113,7 @@ export async function updateSiteSettings(
     if (parsedMarketProfile?.errors) {
         return { errors: parsedMarketProfile.errors };
     }
-    const existingConfig = await db.siteConfig.findUnique({ where: { locationId } });
+    const existingConfig = await getLocationConfig(locationId);
     const existingTheme =
         (settingsDoc?.payload as any)?.theme
         || (existingConfig?.theme as any)
@@ -192,8 +193,6 @@ export async function updateSiteSettings(
             ...(navLinksForUpdate !== undefined ? { navLinks: navLinksForUpdate } : existingPayload.navLinks === undefined ? { navLinks: navLinksForCreate } : {}),
         }, localUser?.id, expectedVersion);
 
-        // SiteConfig keeps only the domain the public site is looked up by (operational routing, retired in phase 6).
-        await db.siteConfig.upsert({ where: { locationId }, create: { locationId, domain: domainVal }, update: { domain: domainVal } });
 
         if (!localUser?.id) return { message: "Account unavailable. Sign in again." };
         await saveBusinessDetails(locationId, businessPatch, localUser.id);

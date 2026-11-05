@@ -212,50 +212,13 @@ export async function verifyPublicSiteDomain(args: {
     return { binding: updated, dns: result };
 }
 
+/** The canonical domain lives on Location only (phase 6); the website document no longer copies it. */
 async function syncLegacyCanonicalDomain(tx: Prisma.TransactionClient, locationId: string, hostname: string) {
-    await tx.siteConfig.upsert({
-        where: { locationId },
-        create: { locationId, domain: hostname },
-        update: { domain: hostname },
-    });
     await tx.location.update({ where: { id: locationId }, data: { domain: hostname } });
-    const settingsDocument = await tx.settingsDocument.findUnique({
-        where: {
-            scopeType_scopeId_domain: {
-                scopeType: "LOCATION",
-                scopeId: locationId,
-                domain: SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE,
-            },
-        },
-    });
-    if (settingsDocument) {
-        const payload = { ...(settingsDocument.payload as Record<string, unknown>), domain: hostname };
-        await tx.settingsDocument.update({
-            where: { id: settingsDocument.id },
-            data: { payload: payload as Prisma.InputJsonValue, version: { increment: 1 } },
-        });
-    }
 }
 
 async function clearLegacyCanonicalDomain(tx: Prisma.TransactionClient, locationId: string) {
-    await tx.siteConfig.updateMany({ where: { locationId }, data: { domain: null } });
     await tx.location.update({ where: { id: locationId }, data: { domain: null } });
-    const settingsDocument = await tx.settingsDocument.findUnique({
-        where: {
-            scopeType_scopeId_domain: {
-                scopeType: "LOCATION",
-                scopeId: locationId,
-                domain: SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE,
-            },
-        },
-    });
-    if (settingsDocument) {
-        const payload = { ...(settingsDocument.payload as Record<string, unknown>), domain: null };
-        await tx.settingsDocument.update({
-            where: { id: settingsDocument.id },
-            data: { payload: payload as Prisma.InputJsonValue, version: { increment: 1 } },
-        });
-    }
 }
 
 export async function promotePublicSiteDomain(args: { locationId: string; domainId: string }) {

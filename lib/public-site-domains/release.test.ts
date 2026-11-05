@@ -20,9 +20,6 @@ test("releasing the active canonical domain clears legacy fields and creates a c
                 return { ...binding, status: "RELEASED" };
             },
         },
-        siteConfig: {
-            updateMany: async (args: any) => { calls.siteConfig = args; },
-        },
         location: {
             update: async (args: any) => { calls.location = args; },
         },
@@ -44,10 +41,9 @@ test("releasing the active canonical domain clears legacy fields and creates a c
         actorUserId: "user_1",
     });
 
-    assert.equal(calls.siteConfig.data.domain, null);
+    // The canonical domain lives on Location only; the website document no longer copies it.
     assert.equal(calls.location.data.domain, null);
-    assert.equal(calls.settings.data.payload.domain, null);
-    assert.equal(calls.settings.data.payload.name, "Site");
+    assert.equal(calls.settings, undefined);
     assert.equal(calls.domainUpdate.data.status, "RELEASED");
     assert.equal(calls.job.create.operation, "RELEASE");
     assert.equal(result.job.id, "job_1");

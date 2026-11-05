@@ -177,7 +177,7 @@ export function clearLocationMarketContextCache(locationId?: string) {
 
 async function loadLocationMarketContext(locationId: string): Promise<LocationMarketContext> {
   const [location, business, publicSite, aiSettings, inventory] = await Promise.all([
-    db.location.findUnique({ where: { id: locationId }, select: { name: true, siteConfig: { select: { defaultCity: true, defaultRegion: true } } } }),
+    db.location.findUnique({ where: { id: locationId }, select: { name: true } }),
     // Loaded lazily: the profile service is server-only and this module's pure helpers are unit-tested in Node.
     import("@/lib/business-profile/service").then(m => m.getBusinessViewIfAny(locationId)),
     settingsService.getDocument<any>({ scopeType: "LOCATION", scopeId: locationId, domain: SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE }),
@@ -195,8 +195,9 @@ async function loadLocationMarketContext(locationId: string): Promise<LocationMa
     // The owner's market (Business profile) when set; otherwise the old website copy, then inference from listings.
     marketProfile: business && (business.market.countryCode || business.market.currencyCode || business.market.serviceAreas.length || business.market.supportedLanguages.length)
       ? business.market : publicSite?.payload?.marketProfile,
-    defaultCity: location?.siteConfig?.defaultCity,
-    defaultRegion: location?.siteConfig?.defaultRegion,
+    // Search defaults live in the website document (phase 6).
+    defaultCity: publicSite?.payload?.defaultCity,
+    defaultRegion: publicSite?.payload?.defaultRegion,
     defaultReplyLanguage: aiSettings?.payload?.defaultReplyLanguage,
     inventory,
   });

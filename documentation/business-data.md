@@ -196,3 +196,26 @@ None of these write business fields to SiteConfig or to the `location.public_sit
 - The cleared `SiteConfig.googleAiApiKey` column and the unused `studio.studio_location_ai_credentials` table.
 - `lib/substo-sites/service.db.test.ts` (needs its disposable database) still asserts pre-phase-3 storage of colours and email in `SiteConfig`; update it when that database is available.
 
+
+## Phase 6: SiteConfig retired (2026-11-05)
+
+The SiteConfig model (table `"SearchConfig"`) is gone. Every Location setting has one home:
+
+| Setting | Home |
+| --- | --- |
+| Business name, time zone, canonical domain | `Location.name`, `Location.timeZone`, `Location.domain` (managed domains resolve through `PublicSiteDomain`) |
+| Substo hosted site address and publish switch (`/sites/<slug>`) | `Location.websiteSlug` (unique) and `Location.websitePublished`; migration `20261105120000_location_website_address` copied existing values |
+| Substo site display title | website document `siteTitle` |
+| Website layout, search defaults (`minPrice`, `maxPrice`, `defaultCity`, `defaultRegion`, `allowedTypes`), public listing switch | website document (`location.public_site`) |
+| AI models, WhatsApp transcript, viewing-session and outreach settings | AI settings document (`location.ai`) |
+| Business details | Business profile (`location.business`) |
+
+- **One reader:** `getLocationConfig(locationId)` in `lib/location-config/service.ts` assembles the same row shape the old table had (pure parts in `model.ts`), with the website layout and Business profile overlays applied. `getLocationConfigs` serves maintenance jobs; `saveLocationConfig` routes a patch to the right home and refuses business details.
+- **Readers moved:** the public site loader (`lib/public-data.ts`, now finds the Location by `Location.domain` or a managed domain), Substo hosted sites (`lib/substo-sites/service.ts`), the website editor (realm check kept), content and site-settings pages and actions, widgets, AI (coordinator, orchestrator, smart replies, extraction, context builder, model fetch, property translation, audio transcription and viewing notes, transcript retention), viewing sessions and their API routes, CRM import, print, market context, team invites, GHL email, the marketing home page (platform Location's logo), and the seed routes.
+- **Writers moved:** the AI settings save writes only its document; the site-settings save, domain promotion and release write only `Location.domain`; the Substo website settings save writes `Location.websiteSlug/websitePublished` and the title to the website document.
+- **One-time copy:** `scripts/settings/retire-site-config.ts` (dry run by default, `--apply`) copies any value still only in the table, never overwriting a document value. Production dry run: nothing to copy; Down Town Cyprus - OLD keeps the website document's `publicListingEnabled: true` (the table had `false`; the site has shown `true` since phase 5).
+- **Removed:** one-off scripts that read the table (`scripts/business-profile/{copy,equivalence}.ts`, `scripts/ai/move-plaintext-keys.ts` with `lib/ai/plaintext-key-move.ts`, `scripts/read-site-config.ts`, the four logo scripts, `scripts/register-all-domains.ts`). Their work is done.
+- **Schema drop** (separate commit, deployed after the copy): the `"SearchConfig"` table and the unused `studio.studio_location_ai_credentials` table.
+- `lib/substo-sites/service.db.test.ts` now writes through the disposable database with Location-based site addresses and document savers.
+
+**Separate future cleanup (not business data, unchanged):** Location integration columns (`crmUrl`, `crmEditUrlPattern`, `crmLeadUrlPattern`, `legacyCrmLeadEmail*`, `crmSchema`, `crmLeadSchema`, `publicListingUrlMode`, `legacyPublicListingUrlPattern`) and User columns (`crmUsername`, Google/Outlook tokens and sync switches, WhatsApp settings). **Security:** `User.crmPassword` is still stored as plain text and should move to an encrypted secret.

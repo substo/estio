@@ -118,10 +118,9 @@ export async function POST(req: NextRequest) {
             where: { id: locationId },
             select: {
                 domain: true,
-                siteConfig: { select: { domain: true } },
             },
         });
-        const domain = asString(location?.siteConfig?.domain) || asString(location?.domain) || null;
+        const domain = asString(location?.domain) || null;
         const liveBootstrap = await buildViewingLiveAuthPayload({
             locationId,
             mode: (result.session.mode || VIEWING_SESSION_MODES.assistantLiveToolHeavy) as any,

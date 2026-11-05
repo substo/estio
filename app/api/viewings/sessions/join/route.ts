@@ -1,3 +1,4 @@
+import { getLocationConfig } from "@/lib/location-config/service";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { isSystemDomain } from "@/lib/app-config";
@@ -52,13 +53,6 @@ export async function POST(req: NextRequest) {
                 select: {
                     id: true,
                     domain: true,
-                    siteConfig: {
-                        select: {
-                            domain: true,
-                            viewingSessionAiDisclosureRequired: true,
-                            viewingSessionAiDisclosureVersion: true,
-                        },
-                    },
                 },
             },
             primaryProperty: {
@@ -84,7 +78,7 @@ export async function POST(req: NextRequest) {
     }
 
     const host = normalizeHost(req.headers.get("x-forwarded-host") || req.headers.get("host"));
-    const expectedDomain = normalizeHost(session.location.siteConfig?.domain || session.location.domain || null);
+    const expectedDomain = normalizeHost(session.location.domain || null);
     if (expectedDomain && host && !isSystemDomain(host) && host !== expectedDomain) {
         return NextResponse.json(
             { success: false, error: "Session link domain mismatch." },
@@ -207,8 +201,9 @@ export async function POST(req: NextRequest) {
         );
     }
 
-    const disclosureRequired = session.location.siteConfig?.viewingSessionAiDisclosureRequired !== false;
-    const disclosureVersion = String(session.location.siteConfig?.viewingSessionAiDisclosureVersion || "").trim() || "v1";
+    const viewingConfig = await getLocationConfig(session.location.id);
+    const disclosureRequired = viewingConfig.viewingSessionAiDisclosureRequired !== false;
+    const disclosureVersion = String(viewingConfig.viewingSessionAiDisclosureVersion || "").trim() || "v1";
     const consentLocale = parsed.data.preferredLanguage || session.clientLanguage || null;
     if (disclosureRequired && parsed.data.aiDisclosureAccepted !== true) {
         await db.viewingSession.update({

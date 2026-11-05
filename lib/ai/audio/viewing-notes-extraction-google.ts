@@ -1,3 +1,4 @@
+import { getLocationConfig } from "@/lib/location-config/service";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -72,13 +73,7 @@ function normalizeExtractionModel(modelId?: string | null): string {
 }
 
 async function getLocationExtractionConfig(locationId: string): Promise<LocationExtractionConfig> {
-    const siteConfig = await db.siteConfig.findUnique({
-        where: { locationId },
-        select: {
-            googleAiModelExtraction: true,
-            googleAiModelTranscription: true,
-        } as any,
-    });
+    const siteConfig = await getLocationConfig(locationId);
 
     const apiKey = await resolveLocationGoogleAiApiKey(locationId);
     if (!apiKey) {

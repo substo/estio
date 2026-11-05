@@ -13,7 +13,7 @@ function load(image: boolean) {
         '@/lib/properties/filter-constants': {FEATURE_CATEGORIES:[]}, '@/lib/properties/constants': {PROPERTY_TYPES:[],RENTAL_PERIODS:[]},
         '@/lib/ai/pricing': {DEFAULT_MODEL:'gemini-fixture'},
         '@/lib/ai/llm': {callLLMWithMetadata:async()=>{providerCalls++;return {text:'{"title":"Fixture"}',provider:'openai_api',model:'fixture',usage:{promptTokens:100,completionTokens:200,thoughtsTokens:0},fundingScope:'location_openai',executionMode:'interactive'};}},
-        '@/lib/ai/fetch-models': {}, '@/lib/properties/active-location-access': {}, '@/lib/ai/location-google-key': {},
+        '@/lib/ai/fetch-models': {}, '@/lib/properties/active-location-access': {}, '@/lib/ai/location-google-key': {}, '@/lib/location-config/service': {},
     };
     const module={exports:{} as any};
     const source=fs.readFileSync('app/(main)/admin/properties/import/ai-property-extraction.ts','utf8')+'\nexports.testCallAiJSON=callAiJSON;';

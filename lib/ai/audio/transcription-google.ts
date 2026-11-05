@@ -1,3 +1,4 @@
+import { getLocationConfig } from "@/lib/location-config/service";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import db from "@/lib/db";
 import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
@@ -44,13 +45,7 @@ export function normalizeAudioTranscriptionModel(modelId?: string | null): strin
 }
 
 export async function resolveGoogleTranscriptionModelForLocation(locationId: string): Promise<string> {
-    const siteConfig = await db.siteConfig.findUnique({
-        where: { locationId },
-        select: {
-            googleAiModelTranscription: true,
-            googleAiModelExtraction: true,
-        } as any,
-    });
+    const siteConfig = await getLocationConfig(locationId);
     return normalizeAudioTranscriptionModel(
         normalizeModelId((siteConfig as any)?.googleAiModelTranscription)
         || normalizeModelId(siteConfig?.googleAiModelExtraction)

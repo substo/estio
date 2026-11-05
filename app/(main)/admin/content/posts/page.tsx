@@ -1,3 +1,4 @@
+import { getLocationConfig } from "@/lib/location-config/service";
 import { sitePath } from "@/lib/substo-sites/policy";
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import { getLocationContext } from "@/lib/auth/location-context";
@@ -21,10 +22,7 @@ export default async function PostsListPage() {
         orderBy: { updatedAt: 'desc' }
     });
 
-    const siteConfig = await db.siteConfig.findUnique({
-        where: { locationId: orgId },
-        select: { domain: true, substoSiteSlug: true, substoSitePublished: true }
-    });
+    const siteConfig = await getLocationConfig(orgId);
 
     const substoBase = siteConfig?.substoSitePublished && siteConfig.substoSiteSlug ? sitePath(siteConfig.substoSiteSlug) : null;
     const domain = siteConfig?.domain || "your-domain.com";

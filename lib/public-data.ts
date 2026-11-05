@@ -2,34 +2,22 @@ import db from "@/lib/db";
 import { getVisiblePropertyImageMedia, getVisiblePropertyMedia } from "@/lib/properties/property-media-ai";
 import { cache } from "react";
 import { resolvePublicSiteDomain } from "@/lib/public-site-domains/service";
-import { withBusinessDetails } from "@/lib/business-profile/service";
+import { getLocationConfig, type LocationConfig } from "@/lib/location-config/service";
 
 // Use React 'cache' to deduplicate requests in the same render cycle
 export const getSiteConfig = cache(async (domain: string) => {
-    let config = await db.siteConfig.findUnique({
-        where: { domain },
-        include: {
-            location: true, // We might need location details (address, etc) later
-        },
-    });
-
-    if (!config) {
+    // The canonical domain is on Location; managed domains resolve through PublicSiteDomain.
+    let location = await db.location.findFirst({ where: { domain } });
+    if (!location) {
         const resolution = await resolvePublicSiteDomain(domain);
-        if (resolution) {
-            config = await db.siteConfig.findUnique({
-                where: { locationId: resolution.locationId },
-                include: { location: true },
-            });
-        }
+        if (resolution) location = await db.location.findUnique({ where: { id: resolution.locationId } });
     }
-
-    // Business details (contact, social links, logos, brand colours, footer text) come from the Business profile.
-    if (config) config = await withBusinessDetails(config, config.locationId);
+    // Layout, search defaults and AI settings from their documents; business details from the Business profile.
+    const config: (LocationConfig & { location: typeof location }) | null = location ? { ...(await getLocationConfig(location.id)), location } : null;
 
     // SECURITY COMPLIANCE: Strip sensitive keys before sending SiteConfig to the client.
     // Next.js RSC payload will serialize the entire object when passed to a Client Component.
     if (config) {
-        config.googleAiApiKey = null;
         config.brandVoice = null;
         config.outreachConfig = null;
     }

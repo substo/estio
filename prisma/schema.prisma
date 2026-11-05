@@ -35,6 +35,9 @@ model Location {
   // Set only on the brand created automatically at a user's first Substo
   // sign-in, so that creation happens at most once per user.
   autoCreatedForUserId          String?                        @unique
+  // Substo hosted website address (/sites/<websiteSlug>) and publish switch; replaced SiteConfig.substoSite* in phase 6.
+  websiteSlug                   String?                        @unique @db.VarChar(63)
+  websitePublished              Boolean                        @default(false)
   locationInvitations           LocationInvitation[]
   companies                     Company[]
   contacts                      Contact[]

@@ -31,7 +31,7 @@ test("resolvePropertyPublicUrlFromSettings uses Estio URL by default", () => {
     assert.equal(
         resolvePropertyPublicUrlFromSettings({
             property: { slug: "sea-view" },
-            location: { publicListingUrlMode: "ESTIO", siteConfig: { domain: "agency.example" } },
+            location: { publicListingUrlMode: "ESTIO", domain: "agency.example" },
         }),
         "https://agency.example/properties/sea-view"
     );
@@ -46,7 +46,7 @@ test("resolvePropertyPublicUrlFromSettings prefers property external URL in lega
             },
             location: {
                 publicListingUrlMode: "LEGACY_EXTERNAL",
-                siteConfig: { domain: "agency.example" },
+                domain: "agency.example",
             },
         }),
         "https://www.downtowncyprus.com/properties/sea-view-ref-dt5000"
@@ -64,7 +64,7 @@ test("resolvePropertyPublicUrlFromSettings uses legacy pattern when no override 
             location: {
                 publicListingUrlMode: "LEGACY_EXTERNAL",
                 legacyPublicListingUrlPattern: "https://legacy.example/properties/{slug}",
-                siteConfig: { domain: "agency.example" },
+                domain: "agency.example",
             },
         }),
         "https://legacy.example/properties/sea-view-ref-dt5000"

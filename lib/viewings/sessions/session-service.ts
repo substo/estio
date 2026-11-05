@@ -1,3 +1,4 @@
+import { getLocationConfig } from "@/lib/location-config/service";
 import db from "@/lib/db";
 import { publishViewingSessionRealtimeEvent } from "@/lib/realtime/viewing-session-events";
 import { appendViewingSessionEvent } from "@/lib/viewings/sessions/events";
@@ -43,19 +44,7 @@ function uniqIds(values: unknown[]): string[] {
 }
 
 async function resolveSiteSessionDefaults(locationId: string, mode: string) {
-    const siteConfig = await db.siteConfig.findUnique({
-        where: { locationId },
-        select: {
-            domain: true,
-            viewingSessionRetentionDays: true,
-            viewingSessionTranscriptVisibility: true,
-            viewingSessionAiDisclosureRequired: true,
-            viewingSessionAiDisclosureVersion: true,
-            viewingSessionTranslationModel: true,
-            viewingSessionInsightsModel: true,
-            viewingSessionSummaryModel: true,
-        },
-    });
+    const siteConfig = await getLocationConfig(locationId);
 
     const stageModels = resolveViewingSessionStageModelsFromSiteConfig({
         mode: (asString(mode) || "assistant_live_tool_heavy") as any,

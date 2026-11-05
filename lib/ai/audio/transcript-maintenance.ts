@@ -1,3 +1,4 @@
+import { getLocationConfigs } from "@/lib/location-config/service";
 import db from "@/lib/db";
 import { enqueueWhatsAppAudioTranscription } from "@/lib/queue/whatsapp-audio-transcription";
 import { enqueueWhatsAppAudioExtraction } from "@/lib/queue/whatsapp-audio-extraction";
@@ -534,12 +535,7 @@ export async function runAudioTranscriptMaintenanceJob(
 
     // E) retention cleanup
     if (options.applyRetention) {
-        const configs = await db.siteConfig.findMany({
-            select: {
-                locationId: true,
-                whatsappTranscriptRetentionDays: true,
-            } as any,
-        });
+        const configs = await getLocationConfigs();
         stats.retention.locationsEvaluated = configs.length;
 
         for (const config of configs) {

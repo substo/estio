@@ -1,3 +1,4 @@
+import { getLocationConfig } from "@/lib/location-config/service";
 import { getBusinessViewIfAny } from "@/lib/business-profile/service";
 import db from "@/lib/db";
 import { settingsService } from "@/lib/settings/service";
@@ -60,10 +61,7 @@ export async function generatePropertyPrintCopy(params: {
         scopeId: params.locationId,
         domain: SETTINGS_DOMAINS.LOCATION_AI,
     });
-    const siteConfig = await db.siteConfig.findUnique({
-        where: { locationId: params.locationId },
-        select: { googleAiModel: true, googleAiModelDesign: true, brandVoice: true },
-    });
+    const siteConfig = await getLocationConfig(params.locationId);
 
     const model = explicitOverride || String(
         aiDoc?.payload?.googleAiModelDesign

@@ -28,9 +28,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if ((result.kind === "resumed" || result.kind === "active") && result.join) {
         const location = await db.location.findUnique({
             where: { id: context.locationId },
-            select: { domain: true, siteConfig: { select: { domain: true } } },
+            select: { domain: true },
         });
-        const domain = location?.siteConfig?.domain || location?.domain || null;
+        const domain = location?.domain || null;
         return NextResponse.json({
             success: true,
             ...result,

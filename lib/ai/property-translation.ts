@@ -1,3 +1,4 @@
+import { getLocationConfig } from "@/lib/location-config/service";
 import db from "@/lib/db";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
@@ -39,10 +40,7 @@ export async function generatePropertyLanguageTranslation(params: {
         domain: SETTINGS_DOMAINS.LOCATION_AI,
     }).catch(() => null);
 
-    const siteConfig = await db.siteConfig.findUnique({
-        where: { locationId: params.locationId },
-        select: { googleAiModelDesign: true, googleAiModel: true },
-    }).catch(() => null);
+    const siteConfig = await getLocationConfig(params.locationId).catch(() => null);
 
     const model = String(
         aiDoc?.payload?.googleAiModelDesign

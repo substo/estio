@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+import { getLocationConfig } from "@/lib/location-config/service";
 import { randomUUID } from "crypto";
 import { createServer } from "http";
 import { URL } from "url";
@@ -497,13 +498,7 @@ async function executeReadOnlyTool(context: RelayContext, toolName: string, rawA
 
     if (toolName === "fetch_company_playbook") {
         const [siteConfig, playbookEntries] = await Promise.all([
-            db.siteConfig.findUnique({
-                where: { locationId: context.locationId },
-                select: {
-                    brandVoice: true,
-                    outreachConfig: true,
-                },
-            }),
+            getLocationConfig(context.locationId),
             db.playbookEntry.findMany({
                 select: {
                     id: true,

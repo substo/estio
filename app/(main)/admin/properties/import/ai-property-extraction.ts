@@ -1,5 +1,6 @@
 "use server";
 
+import { getLocationConfig } from "@/lib/location-config/service";
 import { recordPropertyImportUsage } from "@/lib/ai/import-usage";
 
 import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
@@ -113,7 +114,7 @@ export async function extractPropertyDataWithAI(
     const { locationId: targetLocationId } = await requireAuthenticatedLocationContext(locationId);
 
     // 1. Get API Key & Config
-    const siteConfig = await db.siteConfig.findUnique({ where: { locationId: targetLocationId } });
+    const siteConfig = await getLocationConfig(targetLocationId);
     const configAny = siteConfig as any;
 
     const apiKey = await resolveLocationGoogleAiApiKey(targetLocationId) || "";

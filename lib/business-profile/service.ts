@@ -49,10 +49,9 @@ export async function withBusinessDetails<T extends Record<string, any> | null |
  * first save never drops details that only lived in the old copies.
  */
 async function seedProfile(locationId: string): Promise<BusinessProfile> {
-    const [docs, siteConfig] = await Promise.all([
-        db.settingsDocument.findMany({ where: { scopeType: 'LOCATION', scopeId: locationId, domain: { in: [SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE, SETTINGS_DOMAINS.LOCATION_AI] } } }),
-        db.siteConfig.findUnique({ where: { locationId } }),
-    ]);
+    // SiteConfig is retired (phase 6); older business copies can only be in the settings documents.
+    const docs = await db.settingsDocument.findMany({ where: { scopeType: 'LOCATION', scopeId: locationId, domain: { in: [SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE, SETTINGS_DOMAINS.LOCATION_AI] } } });
+    const siteConfig = null;
     const payload = (domain: string) => docs.find(d => d.domain === domain)?.payload as Record<string, any> | undefined;
     return profileFromLegacy({ publicSite: payload(SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE), navigation: null,
         ai: payload(SETTINGS_DOMAINS.LOCATION_AI), siteConfig: siteConfig as Record<string, any> | null }).profile;

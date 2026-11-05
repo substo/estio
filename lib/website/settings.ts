@@ -6,6 +6,8 @@
 export const WEBSITE_LAYOUT_KEYS = [
     "theme", "navLinks", "footerLinks", "legalLinks", "footerDisclaimer", "menuStyle", "publicListingEnabled",
     "heroContent", "homeSections", "favoritesConfig", "searchConfig", "submissionsConfig",
+    // Estio public-site search defaults and the Substo site's display title (phase 6, from the retired SiteConfig).
+    "minPrice", "maxPrice", "defaultCity", "defaultRegion", "allowedTypes", "siteTitle",
 ] as const;
 /** Business copies that older saves left in the website document; removed by the phase 5 merge. */
 export const WEBSITE_BUSINESS_KEYS = ["domain", "locationName", "locationTimeZone", "contactInfo", "socialLinks", "footerBio", "marketProfile"] as const;

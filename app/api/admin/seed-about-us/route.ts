@@ -6,14 +6,13 @@ export async function GET() {
     try {
         // 1. Get Location
         const location = await db.location.findFirst({
-            include: { siteConfig: true }
         });
 
         if (!location) {
             return NextResponse.json({ error: "No location found" }, { status: 400 });
         }
 
-        const domain = location.siteConfig?.domain || "unknown-domain";
+        const domain = location.domain || "unknown-domain";
 
         const blocks = [
             // 1. Hero Section

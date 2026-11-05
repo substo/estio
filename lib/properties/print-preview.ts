@@ -28,10 +28,7 @@ export async function getLocationPrintBranding(locationId: string) {
             scopeId: locationId,
             domain: SETTINGS_DOMAINS.LOCATION_CRM,
         }).catch(() => null),
-        db.siteConfig.findUnique({
-            where: { locationId },
-            select: { theme: true, contactInfo: true, domain: true },
-        }),
+        import("@/lib/location-config/service").then(m => m.getLocationConfig(locationId)),
         db.location.findUnique({
             where: { id: locationId },
             select: {

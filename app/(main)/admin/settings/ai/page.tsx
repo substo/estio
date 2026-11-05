@@ -1,3 +1,4 @@
+import { getLocationConfig } from "@/lib/location-config/service";
 import { getBusinessViewIfAny } from "@/lib/business-profile/service";
 import db from "@/lib/db";
 import { AiSettingsForm } from "./ai-settings-form";
@@ -106,9 +107,7 @@ export default async function AiSettingsPage() {
 
     const localUser = await db.user.findUnique({ where: { clerkId: context.userId }, select: { id: true } });
     const [siteConfig, aiDoc, hasGoogleAiApiKey, hasOpenAiApiKey, locationIntegrations, personalChatGpt, hasLocationAccessToken, hasLocationAuthCache, hasPersonalChatGptCredential] = await Promise.all([
-        db.siteConfig.findUnique({
-            where: { locationId },
-        }),
+        getLocationConfig(locationId),
         settingsService.getDocument<any>({
             scopeType: "LOCATION",
             scopeId: locationId,

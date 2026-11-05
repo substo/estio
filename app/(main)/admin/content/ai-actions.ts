@@ -1,6 +1,6 @@
 "use server";
 
-import { withBusinessDetails } from "@/lib/business-profile/service";
+import { getLocationConfig } from "@/lib/location-config/service";
 import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
@@ -75,9 +75,7 @@ export async function generateContentFromUrl(url: string, locationId?: string, b
         }
 
         // 1. Fetch Site Config for brand/theme defaults.
-        const siteConfig = await withBusinessDetails(await db.siteConfig.findUnique({
-            where: { locationId: targetLocationId },
-        }), targetLocationId);
+        const siteConfig = await getLocationConfig(targetLocationId);
 
         // Cast to any for new props
         const configAny = siteConfig as any;
@@ -322,7 +320,7 @@ export async function regeneratePageDesign(currentBlocks: any[], locationId: str
     if ((await getLocationContext())?.id !== locationId) return { success: false, error: "Active location mismatch." };
 
     try {
-        const siteConfig = await withBusinessDetails(await db.siteConfig.findUnique({ where: { locationId } }), locationId);
+        const siteConfig = await getLocationConfig(locationId);
         const configAny = siteConfig as any;
 
         const model = designModelOverride
@@ -516,9 +514,7 @@ export async function generateBrandVoiceFromSite(locationId: string, websiteUrl?
 
     try {
         // 1. Fetch Site Config
-        const siteConfig = await withBusinessDetails(await db.siteConfig.findUnique({
-            where: { locationId },
-        }), locationId);
+        const siteConfig = await getLocationConfig(locationId);
 
         const configAny = siteConfig as any;
 
@@ -599,7 +595,7 @@ export async function refineBlockContent(currentBlock: any, instruction: string,
     if ((await getLocationContext())?.id !== locationId) return { success: false, error: "Active location mismatch." };
 
     try {
-        const siteConfig = await withBusinessDetails(await db.siteConfig.findUnique({ where: { locationId } }), locationId);
+        const siteConfig = await getLocationConfig(locationId);
         const configAny = siteConfig as any;
 
         const model = await resolveAiModelDefault(locationId, "design")
@@ -690,7 +686,7 @@ export async function generateSiteTheme(
     if ((await getLocationContext())?.id !== locationId) return { success: false, error: "Active location mismatch." };
 
     try {
-        const siteConfig = await withBusinessDetails(await db.siteConfig.findUnique({ where: { locationId } }), locationId);
+        const siteConfig = await getLocationConfig(locationId);
         // Cast to any to access new fields if types aren't updated
         const configAny = siteConfig as any;
 
@@ -823,7 +819,7 @@ export async function generateSectionFromPrompt(
     if ((await getLocationContext())?.id !== locationId) return { success: false, error: "Active location mismatch." };
 
     try {
-        const siteConfig = await withBusinessDetails(await db.siteConfig.findUnique({ where: { locationId } }), locationId);
+        const siteConfig = await getLocationConfig(locationId);
         const configAny = siteConfig as any;
 
         const model = modelOverride

@@ -1,5 +1,6 @@
 'use server';
 
+import { getLocationConfig } from "@/lib/location-config/service";
 import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
 import { auth } from "@clerk/nextjs/server";
@@ -176,19 +177,7 @@ export async function createViewingSession(
         expiresInHours: data.expiresInHours,
     });
 
-    const siteConfig = await db.siteConfig.findUnique({
-        where: { locationId: access.viewing.contact.locationId },
-        select: {
-            domain: true,
-            viewingSessionRetentionDays: true,
-            viewingSessionTranscriptVisibility: true,
-            viewingSessionAiDisclosureRequired: true,
-            viewingSessionAiDisclosureVersion: true,
-            viewingSessionTranslationModel: true,
-            viewingSessionInsightsModel: true,
-            viewingSessionSummaryModel: true,
-        },
-    });
+    const siteConfig = await getLocationConfig(access.viewing.contact.locationId);
     const resolvedDomain = asString(siteConfig?.domain) || asString(access.viewing.contact.location?.domain) || null;
     const voicePremiumEnabled = isViewingSessionVoicePremiumEnabled(access.viewing.contact.locationId);
     if (mode === VIEWING_SESSION_MODES.assistantLiveVoicePremium && !voicePremiumEnabled) {

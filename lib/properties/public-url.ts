@@ -22,7 +22,6 @@ type LocationPublicUrlSettings = {
     publicListingUrlMode?: string | null;
     legacyPublicListingUrlPattern?: string | null;
     domain?: string | null;
-    siteConfig?: { domain?: string | null } | null;
 };
 
 function normalizeText(value: unknown): string {
@@ -97,7 +96,7 @@ export function resolvePropertyPublicUrlFromSettings(args: {
     location: LocationPublicUrlSettings;
 }) {
     const mode = normalizeText(args.location.publicListingUrlMode) || PUBLIC_LISTING_URL_MODES.ESTIO;
-    const estioDomain = args.location.siteConfig?.domain || args.location.domain || null;
+    const estioDomain = args.location.domain || null;
     const estioUrl = buildEstioPropertyPublicUrl(estioDomain, args.property.slug);
 
     if (mode !== PUBLIC_LISTING_URL_MODES.LEGACY_EXTERNAL) {
@@ -125,7 +124,6 @@ export async function resolvePropertyPublicUrl(args: {
                 domain: true,
                 publicListingUrlMode: true,
                 legacyPublicListingUrlPattern: true,
-                siteConfig: { select: { domain: true } },
             },
         }),
         settingsService.getDocument<Record<string, unknown>>({

@@ -1,3 +1,4 @@
+import { getLocationConfig } from "@/lib/location-config/service";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 
 import db from "@/lib/db";
@@ -42,7 +43,7 @@ async function getImportContext() {
             where: { clerkId: access.clerkUserId },
             select: { firstName: true, lastName: true, crmUsername: true, crmPassword: true },
         }),
-        db.siteConfig.findUnique({ where: { locationId: access.locationId } }),
+        getLocationConfig(access.locationId),
     ]);
 
     return { access, dbUser, siteConfig };

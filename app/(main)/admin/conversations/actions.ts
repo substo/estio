@@ -1,5 +1,6 @@
 'use server';
 
+import { getLocationConfig } from "@/lib/location-config/service";
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
@@ -812,10 +813,7 @@ async function resolveConversationTranslationModel(locationId: string): Promise<
     const configuredFromDoc = String(aiDoc?.payload?.googleAiModelTranslation || "").trim();
     if (configuredFromDoc) return configuredFromDoc;
 
-    const siteConfig = await db.siteConfig.findUnique({
-        where: { locationId },
-        select: { googleAiModelTranslation: true } as any,
-    }).catch(() => null);
+    const siteConfig = await getLocationConfig(locationId).catch(() => null);
     const configuredFromLegacy = String((siteConfig as any)?.googleAiModelTranslation || "").trim();
     if (configuredFromLegacy) return configuredFromLegacy;
 
@@ -1727,12 +1725,7 @@ function normalizeTranscriptVisibilityPolicy(value: unknown): TranscriptVisibili
 }
 
 async function getTranscriptVisibilityPolicyForLocation(locationId: string): Promise<TranscriptVisibilityPolicy> {
-    const config = await db.siteConfig.findUnique({
-        where: { locationId },
-        select: {
-            whatsappTranscriptVisibility: true,
-        } as any,
-    });
+    const config = await getLocationConfig(locationId);
     return normalizeTranscriptVisibilityPolicy((config as any)?.whatsappTranscriptVisibility);
 }
 
@@ -4443,12 +4436,7 @@ async function isWhatsAppTranscriptOnDemandEnabledForLocation(locationId: string
     const envOverride = parseOptionalBooleanFlag(process.env.WHATSAPP_TRANSCRIPT_ON_DEMAND_ENABLED);
     if (typeof envOverride === "boolean") return envOverride;
 
-    const config = await db.siteConfig.findUnique({
-        where: { locationId },
-        select: {
-            whatsappTranscriptOnDemandEnabled: true,
-        } as any,
-    });
+    const config = await getLocationConfig(locationId);
 
     return !!(config as any)?.whatsappTranscriptOnDemandEnabled;
 }

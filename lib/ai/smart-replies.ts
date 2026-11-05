@@ -1,3 +1,4 @@
+import { getLocationConfig } from "@/lib/location-config/service";
 import { securelyRecordAiUsage } from "./usage-metering";
 import db from "@/lib/db";
 import { assembleTimelineEvents, formatTimelineEventForPrompt } from "@/lib/conversations/timeline-events";
@@ -18,7 +19,7 @@ export async function generateSmartReplies(conversationId: string) {
         const conversation = await db.conversation.findUnique({
             where: { id: conversationId },
             include: {
-                location: { include: { siteConfig: true } },
+                location: true,
                 contact: { select: { preferredLang: true } }
             }
         });
@@ -29,7 +30,7 @@ export async function generateSmartReplies(conversationId: string) {
         }
 
         // 2. Setup AI
-        const siteConfig = conversation.location.siteConfig as any;
+        const siteConfig = await getLocationConfig(conversation.locationId);
         // Match coordinator.ts default (assuming 2.5 exists in 2026)
         const modelName = await resolveAiModelDefault(conversation.locationId, "draft")
             || siteConfig?.googleAiModel

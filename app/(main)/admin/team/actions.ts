@@ -990,11 +990,10 @@ export async function inviteUserToLocation(formData: FormData) {
         // Let's look up the location to get the domain if possible.
 
         const location = await db.location.findUnique({
-            where: { id: locationId },
-            include: { siteConfig: true }
+            where: { id: locationId }
         });
 
-        const domain = location?.siteConfig?.domain || 'estio.co'; // Fallback
+        const domain = location?.domain || 'estio.co'; // Fallback
         const protocol = domain.includes('localhost') ? 'http' : 'https';
         const redirectUrl = `${protocol}://${domain}/sign-up?email_address=${encodeURIComponent(normalizedEmail)}`;
 
@@ -1079,11 +1078,10 @@ export async function resendInvitation(invitationId: string, expectedLocationId?
 
         // Reconstruct redirect URL (same logic as inviteUserToLocation)
         const location = await db.location.findUnique({
-            where: { id: locationId },
-            include: { siteConfig: true }
+            where: { id: locationId }
         });
 
-        const domain = location?.siteConfig?.domain || 'estio.co';
+        const domain = location?.domain || 'estio.co';
         const protocol = domain.includes('localhost') ? 'http' : 'https';
         const redirectUrl = `${protocol}://${domain}/sign-up?email_address=${encodeURIComponent(invitation.emailAddress)}`;
         console.log(`[ResendInvitation] Reconstructed redirectUrl: ${redirectUrl}`);

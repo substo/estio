@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { PrismaClient } from "@prisma/client";
-import { getPublishedWebsite, getWebsitePage, getWebsitePost, listWebsitePages, listWebsitePosts, saveWebsiteSettings, saveWebsiteDesign } from "./service";
+import { getPublishedWebsite, getWebsitePage, getWebsitePost, listWebsitePages, listWebsitePosts, saveWebsiteSettings as saveSettings, saveWebsiteDesign as saveDesign, type WebsiteActor } from "./service";
+import { applyDetailsPatch } from "@/lib/business-profile/patch";
+import { businessProfileSchema } from "@/lib/business-profile/schema";
+import type { BusinessDetailsPatch } from "@/lib/business-profile/view";
+import { websiteLayoutOnly } from "@/lib/website/settings";
 const url = process.env.LOCATIONS_TEST_DATABASE_URL;
 if (!url || !["127.0.0.1", "localhost"].includes(new URL(url).hostname) || new URL(url).pathname !== "/estio_user_auth_realm_test") throw new Error("Use bash scripts/test-user-auth-realm-db.sh with its disposable local database");
 const db = new PrismaClient({ datasourceUrl: url });
@@ -14,29 +18,39 @@ async function brand(realm: "estio" | "substo" = "substo", role: "ADMIN" | "MEMB
   await db.userLocationRole.create({ data: { userId: user.id, locationId: location.id, role } });
   return { userId: user.id, locationId: location.id, role };
 }
+// Savers writing through this disposable database (the app's savers use the shared settings service).
+async function upsertDoc(locationId: string, domain: string, payload: Record<string, unknown>) {
+  const where = { scopeType_scopeId_domain: { scopeType: "LOCATION" as const, scopeId: locationId, domain } };
+  await db.settingsDocument.upsert({ where, create: { scopeType: "LOCATION", scopeId: locationId, domain, payload: payload as any }, update: { payload: payload as any, version: { increment: 1 } } });
+}
+const docPayload = async (locationId: string, domain: string) => ((await db.settingsDocument.findUnique({ where: { scopeType_scopeId_domain: { scopeType: "LOCATION", scopeId: locationId, domain } } }))?.payload ?? null) as Record<string, any> | null;
+const saveLayout = async (locationId: string, patch: Record<string, unknown>) => upsertDoc(locationId, "location.public_site", websiteLayoutOnly({ ...(await docPayload(locationId, "location.public_site")), ...patch }));
+const saveBusiness = async (locationId: string, patch: BusinessDetailsPatch, actorUserId: string) => {
+  const current = await docPayload(locationId, "location.business");
+  await upsertDoc(locationId, "location.business", applyDetailsPatch(current ? businessProfileSchema.parse(current) : null, patch, actorUserId) as Record<string, unknown>);
+};
+const saveWebsiteSettings = (database: typeof db, actor: WebsiteActor, value: Parameters<typeof saveSettings>[2]) => saveSettings(database, actor, value, saveBusiness, saveLayout);
+const saveWebsiteDesign = (database: typeof db, actor: WebsiteActor, form: FormData) => saveDesign(database, actor, form, saveBusiness, saveLayout);
 const input = (slug: string) => ({ slug, published: true, settings: { title: "Public brand", description: "Public description", googleAiApiKey: "NOT-PUBLIC", logoUrl: "javascript:alert(1)" } });
 
-test("website expand is opt-in and old-release writes omit the additive columns safely", async () => {
+test("a new brand has no website address and is unpublished", async () => {
   const actor = await brand("estio");
-  const id = unique("old-config");
-  await db.$executeRaw`INSERT INTO "SearchConfig" (id, "locationId", "updatedAt") VALUES (${id}, ${actor.locationId}, now())`;
-  const config = await db.siteConfig.findUniqueOrThrow({ where: { id } });
-  assert.equal(config.substoSitePublished, false);
-  assert.equal(config.substoSiteSlug, null);
-  assert.equal(config.substoSiteConfig, null);
+  const location = await db.location.findUniqueOrThrow({ where: { id: actor.locationId } });
+  assert.equal(location.websitePublished, false);
+  assert.equal(location.websiteSlug, null);
 });
 
 test("public reader rejects Estio and unpublished brands and projects only explicit public fields", async () => {
   const estio = await brand("estio");
   const estioSlug = unique("estio");
-  await db.siteConfig.create({ data: { locationId: estio.locationId, substoSiteSlug: estioSlug, substoSitePublished: true } });
+  await db.location.update({ where: { id: estio.locationId }, data: { websiteSlug: estioSlug, websitePublished: true } });
   assert.equal(await getPublishedWebsite(db, estioSlug), null);
   const actor = await brand();
   const slug = unique("public");
   await saveWebsiteSettings(db, actor, { ...input(slug), published: false });
   assert.equal(await getPublishedWebsite(db, slug), null);
   await saveWebsiteSettings(db, actor, input(slug));
-  await db.siteConfig.update({ where: { locationId: actor.locationId }, data: { googleAiApiKey: "SECRET-API", brandVoice: "SECRET-VOICE", contactInfo: { phone: "PRIVATE-PHONE" } } });
+  await upsertDoc(actor.locationId, "location.ai", { brandVoice: "SECRET-VOICE", outreachConfig: { visionIdPrompt: "SECRET-PROMPT" } });
   const site = await getPublishedWebsite(db, slug);
   assert.equal(site?.settings.title, "Public brand");
   assert.equal(site?.settings.logoUrl, "");
@@ -83,14 +97,14 @@ test("website writes require current connected Substo admin authority", async ()
   assert.ok("error" in await saveWebsiteSettings(db, { ...actor, locationId: foreign.locationId }, input(unique("denied"))));
   await db.userLocationRole.deleteMany({ where: { userId: actor.userId } });
   assert.ok("error" in await saveWebsiteSettings(db, actor, input(unique("revoked"))));
-  assert.equal(await db.siteConfig.count({ where: { locationId: { in: [member.locationId, estio.locationId, actor.locationId, foreign.locationId] } } }), 0);
+  assert.equal(await db.location.count({ where: { id: { in: [member.locationId, estio.locationId, actor.locationId, foreign.locationId] }, websiteSlug: { not: null } } }), 0);
 });
 
 test("website address races have one winner and address changes require explicit confirmation", async () => {
   const a = await brand(); const b = await brand(); const slug = unique("race");
   const results = await Promise.all([saveWebsiteSettings(db, a, input(slug)), saveWebsiteSettings(db, b, input(slug))]);
   assert.equal(results.filter((row) => "message" in row).length, 1);
-  assert.equal(await db.siteConfig.count({ where: { substoSiteSlug: slug } }), 1);
+  assert.equal(await db.location.count({ where: { websiteSlug: slug } }), 1);
   const winner = (await getPublishedWebsite(db, slug))!.locationId === a.locationId ? a : b;
   const next = unique("renamed");
   assert.ok("error" in await saveWebsiteSettings(db, winner, input(next)));
@@ -106,8 +120,8 @@ test("shared website design saves only public fields inside the actor's current 
   const form = new FormData(); form.set("locationId", actor.locationId); form.set("brandName", "Shared design");
   form.set("primaryColor", "#123456"); form.set("contactEmail", "public@example.com"); form.set("googleAiApiKey", "FORGED");
   await saveWebsiteDesign(db, actor, form);
-  const row = await db.siteConfig.findUniqueOrThrow({ where: { locationId: actor.locationId } });
-  assert.equal((row.theme as any).primaryColor, "#123456"); assert.equal(row.googleAiApiKey, null);
+  const layout = await docPayload(actor.locationId, "location.public_site");
+  assert.doesNotMatch(JSON.stringify(layout), /FORGED|#123456/);
   const slug = unique("shared-design");
   await saveWebsiteSettings(db, actor, input(slug));
   const published = await getPublishedWebsite(db, slug);
@@ -116,7 +130,7 @@ test("shared website design saves only public fields inside the actor's current 
   assert.equal(published?.settings.accent, "#123456");
   form.set("locationId", other.locationId);
   assert.match((await saveWebsiteDesign(db, actor, form)).message, /access is required/);
-  assert.equal(await db.siteConfig.findUnique({ where: { locationId: other.locationId } }), null);
+  assert.equal(await docPayload(other.locationId, "location.public_site"), null);
   form.set("locationId", estio.locationId);
   assert.match((await saveWebsiteDesign(db, { ...actor, locationId: estio.locationId }, form)).message, /access is required/);
   form.set("locationId", actor.locationId);
@@ -128,7 +142,7 @@ test("shared website design saves only public fields inside the actor's current 
 test("published homepage uses shared section storage and sanitizes it without repeating its URL base", async () => {
   const actor = await brand(); const slug = unique("home-shared");
   await saveWebsiteSettings(db, actor, input(slug));
-  await db.siteConfig.update({ where: { locationId: actor.locationId }, data: { heroContent: { headline: "Shared homepage", ctaLink: "/about" }, homeSections: [{ type: "text", enabled: true, order: 1, htmlContent: '<p onclick="bad()">Welcome</p>' }, { type: "hero", enabled: true, order: 0 }, { type: "featured-properties", enabled: true, order: 2 }] } });
+  await saveLayout(actor.locationId, { heroContent: { headline: "Shared homepage", ctaLink: "/about" }, homeSections: [{ type: "text", enabled: true, order: 1, htmlContent: '<p onclick="bad()">Welcome</p>' }, { type: "hero", enabled: true, order: 0 }, { type: "featured-properties", enabled: true, order: 2 }] });
   const site = (await getPublishedWebsite(db, slug))!;
   assert.deepEqual(site.homeBlocks?.map(block => block.type), ["hero", "text"]);
   assert.equal(site.homeBlocks?.[0].ctaLink, `/sites/${slug}/about`);

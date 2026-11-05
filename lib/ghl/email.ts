@@ -128,12 +128,11 @@ export async function sendGHLEmail(params: SendEmailParams): Promise<{ success: 
         console.log(`[sendGHLEmail] Resolved Contact ID: ${contactId}`);
 
         // 2. Determine Sender Domain
-        // We need to look up the location's siteConfig to get the custom domain
+        // We need to look up the location to get its custom domain
         const locationDetails = await db.location.findUnique({
             where: { ghlLocationId: ghlLocationId }, // mapping is already done
-            include: { siteConfig: true }
         });
-        const domain = locationDetails?.siteConfig?.domain || 'estio.co';
+        const domain = locationDetails?.domain || 'estio.co';
         const emailFrom = `info@${domain}`;
         console.log(`[sendGHLEmail] Sending from: ${emailFrom}`);
 

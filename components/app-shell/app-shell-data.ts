@@ -1,5 +1,5 @@
 import "server-only";
-import { withBusinessDetails } from "@/lib/business-profile/service";
+import { getLocationConfig } from "@/lib/location-config/service";
 import db from "@/lib/db";
 import { canAccessAiUsageView } from "@/lib/ai/usage-summary-scope";
 import { getPlatformAdminContext } from "@/lib/auth/platform-access";
@@ -20,7 +20,7 @@ export async function getAppShellData({ app, resolution, studioLocationId, imper
   const location = resolution.location;
   const platformAdmin = await getPlatformAdminContext();
   const [siteConfig, platformLoginLocations] = await Promise.all([
-    location ? db.siteConfig.findUnique({ where: { locationId: location.id }, select: { theme: true } }).then(row => withBusinessDetails(row, location.id)) : null,
+    location ? getLocationConfig(location.id) : null,
     platformAdmin ? listPlatformLocationLoginOptions(platformAdmin.internalUserId) : null,
   ]);
   const theme = siteConfig?.theme as { logo?: { url?: string; lightUrl?: string } } | null | undefined;

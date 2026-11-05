@@ -91,11 +91,6 @@ async function main() {
       },
       update: { role: "ADMIN", contactAccessScope: "LOCATION_WIDE" },
     }),
-    db.siteConfig.upsert({
-      where: { locationId: masterLocation.id },
-      create: { locationId: masterLocation.id },
-      update: {},
-    }),
   ]);
   console.log(JSON.stringify({ provisioned: true, masterLocationId: masterLocation.id, masterLocationName: masterLocation.name }));
 }

@@ -5,6 +5,7 @@ import db from "@/lib/db";
 import { getSubstoLocationActor } from "@/lib/locations/substo-locations";
 import { saveWebsiteSettings } from "@/lib/substo-sites/service";
 import { saveBusinessDetails } from "@/lib/business-profile/service";
+import { saveWebsiteLayout } from "@/lib/website/settings-service";
 export type WebsiteFormState = { error?: string; message?: string };
 export async function saveSubstoWebsiteAction(_previous: WebsiteFormState, formData: FormData): Promise<WebsiteFormState> {
   await assertCrmActionAllowed("content/website/actions.ts", "saveSubstoWebsiteAction");
@@ -13,7 +14,7 @@ export async function saveSubstoWebsiteAction(_previous: WebsiteFormState, formD
   const result = await saveWebsiteSettings(db, actor, {
     slug: formData.get("slug"), published: formData.get("published") === "on", confirmAddressChange: formData.get("confirmAddressChange") === "on",
     settings: Object.fromEntries(["title", "description", "email", "accent", "logoUrl"].map((key) => [key, String(formData.get(key) || "")])),
-  }, saveBusinessDetails);
+  }, saveBusinessDetails, saveWebsiteLayout);
   revalidatePath("/admin/content/website");
   revalidatePath("/admin/content/pages");
   revalidatePath("/admin/content/posts");

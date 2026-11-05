@@ -1,4 +1,4 @@
-import { withBusinessDetails } from "@/lib/business-profile/service";
+import { getLocationConfig } from "@/lib/location-config/service";
 import db from "@/lib/db";
 import { getMessages, getConversation } from "@/lib/ghl/conversations";
 import {
@@ -760,9 +760,7 @@ export async function generateDraft(context: CoordinationContext) {
         const contextAssemblyStartedAt = Date.now();
 
         // 0. Fetch Config
-        const siteConfig = await withBusinessDetails(await db.siteConfig.findUnique({
-            where: { locationId: context.locationId }
-        }), context.locationId);
+        const siteConfig = await getLocationConfig(context.locationId);
         const configAny = siteConfig as any;
         const apiKey = await resolveLocationGoogleAiApiKey(context.locationId);
         const brandVoice = typeof configAny?.brandVoice === "string" ? configAny.brandVoice.trim() : "";

@@ -1,5 +1,6 @@
 "use server";
 
+import { getLocationConfig } from "@/lib/location-config/service";
 import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
 import { auth } from "@clerk/nextjs/server";
@@ -45,7 +46,7 @@ async function assertAdmin(locationId: string): Promise<string> {
 
 async function getNavigationPayload(locationId: string): Promise<{ payload: NavigationPayload; version: number }> {
     // Layout comes from the website document, over the stored row for Locations that don't have one yet.
-    const [website, config] = await Promise.all([getWebsiteSettings(locationId), db.siteConfig.findUnique({ where: { locationId } })]);
+    const [website, config] = await Promise.all([getWebsiteSettings(locationId), getLocationConfig(locationId)]);
     const row = overlayWebsiteLayout({ ...(config ?? {}) } as Record<string, any>, website?.payload);
     const theme = (row.theme as any) || {};
     return {

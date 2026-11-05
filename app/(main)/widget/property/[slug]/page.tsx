@@ -1,5 +1,5 @@
 import db from "@/lib/db";
-import { withBusinessDetails } from "@/lib/business-profile/service";
+import { getLocationConfig } from "@/lib/location-config/service";
 import { getLocationById } from "@/lib/location";
 import { getVisiblePropertyMedia } from "@/lib/properties/property-media-ai";
 import Link from "next/link";
@@ -29,7 +29,7 @@ export default async function PropertyDetailPage({ params, searchParams }: { par
 
     const visibleMedia = getVisiblePropertyMedia(property.media as any);
 
-    const config = await withBusinessDetails(await db.siteConfig.findUnique({ where: { locationId } }), locationId);
+    const config = await getLocationConfig(locationId);
     const primaryColor = config?.primaryColor || "#000000";
 
     return (

@@ -64,7 +64,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
         where: {
             OR: [{ id: input.contactId }, { ghlContactId: input.contactId }]
         },
-        include: { location: { include: { siteConfig: true } } }
+        include: { location: true }
     });
     const locationId = contactData?.locationId;
 
@@ -150,8 +150,8 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
                 apiKey: (contactData?.locationId ? await resolveLocationGoogleAiApiKey(contactData.locationId) : null) ?? undefined,
                 agentName,
                 businessName: contactData?.location?.name ?? undefined,
-                websiteDomain: contactData?.location?.siteConfig?.domain ?? contactData?.location?.domain ?? undefined,
-                brandVoice: (business ? business.brandVoice : contactData?.location?.siteConfig?.brandVoice) ?? undefined,
+                websiteDomain: contactData?.location?.domain ?? undefined,
+                brandVoice: business?.brandVoice ?? undefined,
                 agentUserId,
                 contactPreferredLanguage: contactData?.preferredLang ?? null,
                 latestInboundText,

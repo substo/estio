@@ -1,4 +1,5 @@
 
+import { getLocationConfig } from "@/lib/location-config/service";
 import db from "@/lib/db";
 import { DEFAULT_MODEL } from "@/lib/ai/pricing";
 import { callLLMWithMetadata } from "@/lib/ai/llm";
@@ -34,9 +35,7 @@ export async function analyzeContactRequirements(
 ): Promise<ExtractionResult | null> {
     try {
         // 1. Fetch Config
-        const siteConfig = await db.siteConfig.findUnique({
-            where: { locationId }
-        });
+        const siteConfig = await getLocationConfig(locationId);
 
         const outreachConfig = (siteConfig?.outreachConfig as any) || {};
 

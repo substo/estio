@@ -90,10 +90,9 @@ export async function POST(
                 where: { id: context.locationId },
                 select: {
                     domain: true,
-                    siteConfig: { select: { domain: true } },
                 },
             });
-            const domain = String(location?.siteConfig?.domain || location?.domain || "").trim() || null;
+            const domain = String(location?.domain || "").trim() || null;
             join = {
                 ...join,
                 url: domain ? `https://${domain}/live-assist/join/${join.token}` : null,

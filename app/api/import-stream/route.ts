@@ -1,4 +1,5 @@
 
+import { getLocationConfig } from "@/lib/location-config/service";
 import { NextRequest } from "next/server";
 import { runImportWorkflow, runPasteImportWorkflow } from "@/lib/crm/import-workflow";
 import { currentUser } from "@clerk/nextjs/server";
@@ -16,7 +17,7 @@ const handlers = createImportStreamHandlers({
     },
     getActiveLocationId: async () => (await requireAuthenticatedLocationContext()).locationId,
     getDefaultModel: async (locationId) => {
-        const config = await db.siteConfig.findUnique({ where: { locationId } }) as any;
+        const config = await getLocationConfig(locationId) as any;
         return config?.googleAiModel || "gemini-2.0-flash";
     },
     runUrlImport: ({ notionUrl, model, clerkUserId, hints, maxImages }) => (

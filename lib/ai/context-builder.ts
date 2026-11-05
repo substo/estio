@@ -1,4 +1,5 @@
 
+import { getLocationConfig } from "@/lib/location-config/service";
 import db from "@/lib/db";
 import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-language";
 import { getMessages, getConversation } from "@/lib/ghl/conversations";
@@ -41,7 +42,7 @@ export async function generateMultiContextDraft(params: MultiContextParams) {
         }
 
         // 2. Setup AI
-        const configAny = await db.siteConfig.findUnique({ where: { locationId: dealContext.location.id } }) as any;
+        const configAny = await getLocationConfig(dealContext.location.id) as any;
         const modelName = await resolveAiModelDefault(dealContext.location.id, "draft")
             || configAny?.googleAiModel
             || DEFAULT_MODEL;

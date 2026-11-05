@@ -1,3 +1,4 @@
+import { getLocationConfig } from "@/lib/location-config/service";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import db from "@/lib/db";
@@ -288,10 +289,7 @@ export async function POST(
             || !sessionUpdate.consentSource
         )
     ) {
-        const siteConfig = await db.siteConfig.findUnique({
-            where: { locationId: sessionUpdate.locationId },
-            select: { viewingSessionAiDisclosureVersion: true },
-        });
+        const siteConfig = await getLocationConfig(sessionUpdate.locationId);
         const acceptLanguage = String(req.headers.get("accept-language") || "").split(",")[0]?.trim() || null;
         sessionUpdate = await db.viewingSession.update({
             where: { id: sessionUpdate.id },

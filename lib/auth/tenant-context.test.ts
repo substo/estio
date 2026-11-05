@@ -68,12 +68,12 @@ test("Studio shell loads the same platform location choices as CRM without repla
       const choices = [{ id: "master", name: "Master" }, { id: "support-target", name: "Support" }];
       const shellData = load("components/app-shell/app-shell-data.ts", {
         "server-only": {},
-        "@/lib/db": { default: { siteConfig: { findUnique: async (args: any) => { assert.equal(args.where.locationId, "tenant-b"); return { theme: { logo: { url: "/logo.png", lightUrl: "/logo-light.png" } } }; } } } },
+        "@/lib/db": { default: {} },
+        // The Location's config row (layout from the website document, logos from the Business profile).
+        "@/lib/location-config/service": { getLocationConfig: async (locationId: string) => { assert.equal(locationId, "tenant-b"); return { theme: { logo: { url: "/logo.png", lightUrl: "/logo-light.png" } } }; } },
         "@/lib/ai/usage-summary-scope": { canAccessAiUsageView: (scope: string, isAdmin: boolean) => scope === "user" || isAdmin },
         "@/lib/auth/platform-access": { getPlatformAdminContext: async () => platform ? { internalUserId: "platform-actor" } : null },
         "@/lib/auth/platform-location-options": { listPlatformLocationLoginOptions: async (id: string) => { assert.equal(id, "platform-actor"); optionsCalls++; return choices; } },
-        // Logos come from the Business profile; with no profile the website row is used unchanged.
-        "@/lib/business-profile/service": { withBusinessDetails: async (row: unknown) => row },
       });
       const api = load("app/(main)/studio/_components/studio-shell-data.ts", {
         "server-only": {},

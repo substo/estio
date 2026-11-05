@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
+import { getLocationConfig } from "@/lib/location-config/service";
 import db from "@/lib/db";
-import { withBusinessDetails } from "@/lib/business-profile/service";
 import { getLocationById } from "@/lib/location";
 import SwipeDeck from "./_components/swipe-deck";
 
@@ -88,7 +88,7 @@ export default async function SwipePage({
     });
 
     // Get search config for colors
-    const config = await withBusinessDetails(await db.siteConfig.findUnique({ where: { locationId } }), locationId);
+    const config = await getLocationConfig(locationId);
     const primaryColor = config?.primaryColor || "#000000";
 
     return (

@@ -8,7 +8,6 @@ async function main() {
             id: true,
             name: true,
             domain: true,
-            siteConfig: { select: { domain: true } },
         },
         orderBy: { name: "asc" },
     });
@@ -31,13 +30,12 @@ async function main() {
     const report = locations.map((location) => {
         const locationBindings = bindings.filter((item) => item.locationId === location.id);
         const canonical = locationBindings.find((item) => item.role === "CANONICAL" && item.status === "ACTIVE")?.hostname || null;
-        const values = [canonical, location.siteConfig?.domain || null, location.domain || null, documentByLocation.get(location.id) || null];
+        const values = [canonical, location.domain || null, documentByLocation.get(location.id) || null];
         const distinct = Array.from(new Set(values.map((value) => value || null)));
         return {
             locationId: location.id,
             name: location.name,
             canonical,
-            siteConfig: location.siteConfig?.domain || null,
             location: location.domain || null,
             settingsDocument: documentByLocation.get(location.id) || null,
             bindings: locationBindings,

@@ -262,52 +262,7 @@ export async function updateAiSettings(
             schemaVersion: 1,
         });
 
-        // AI model and transcript settings are still read straight from SiteConfig across the app; kept in step until
-        // those readers move to the AI settings document (phase 6).
-        {
-            await db.siteConfig.upsert({
-                where: { locationId },
-                create: {
-                    locationId,
-                    googleAiModel: payload.googleAiModel,
-                    googleAiModelExtraction: payload.googleAiModelExtraction,
-                    googleAiModelDesign: payload.googleAiModelDesign,
-                    googleAiModelTranscription: payload.googleAiModelTranscription,
-                    googleAiModelTranslation: payload.googleAiModelTranslation,
-                    whatsappTranscriptOnDemandEnabled: payload.whatsappTranscriptOnDemandEnabled,
-                    whatsappTranscriptRetentionDays: payload.whatsappTranscriptRetentionDays,
-                    whatsappTranscriptVisibility: payload.whatsappTranscriptVisibility,
-                    viewingSessionRetentionDays: payload.viewingSessionRetentionDays,
-                    viewingSessionTranscriptVisibility: payload.viewingSessionTranscriptVisibility,
-                    viewingSessionAiDisclosureRequired: payload.viewingSessionAiDisclosureRequired,
-                    viewingSessionAiDisclosureVersion: payload.viewingSessionAiDisclosureVersion,
-                    viewingSessionRawAudioStorageEnabled: payload.viewingSessionRawAudioStorageEnabled,
-                    viewingSessionTranslationModel: payload.viewingSessionTranslationModel,
-                    viewingSessionInsightsModel: payload.viewingSessionInsightsModel,
-                    viewingSessionSummaryModel: payload.viewingSessionSummaryModel,
-                    outreachConfig: payload.outreachConfig,
-                },
-                update: {
-                    googleAiModel: payload.googleAiModel,
-                    googleAiModelExtraction: payload.googleAiModelExtraction,
-                    googleAiModelDesign: payload.googleAiModelDesign,
-                    googleAiModelTranscription: payload.googleAiModelTranscription,
-                    googleAiModelTranslation: payload.googleAiModelTranslation,
-                    whatsappTranscriptOnDemandEnabled: payload.whatsappTranscriptOnDemandEnabled,
-                    whatsappTranscriptRetentionDays: payload.whatsappTranscriptRetentionDays,
-                    whatsappTranscriptVisibility: payload.whatsappTranscriptVisibility,
-                    viewingSessionRetentionDays: payload.viewingSessionRetentionDays,
-                    viewingSessionTranscriptVisibility: payload.viewingSessionTranscriptVisibility,
-                    viewingSessionAiDisclosureRequired: payload.viewingSessionAiDisclosureRequired,
-                    viewingSessionAiDisclosureVersion: payload.viewingSessionAiDisclosureVersion,
-                    viewingSessionRawAudioStorageEnabled: payload.viewingSessionRawAudioStorageEnabled,
-                    viewingSessionTranslationModel: payload.viewingSessionTranslationModel,
-                    viewingSessionInsightsModel: payload.viewingSessionInsightsModel,
-                    viewingSessionSummaryModel: payload.viewingSessionSummaryModel,
-                    outreachConfig: payload.outreachConfig,
-                },
-            });
-        }
+        // AI model and transcript settings are read from this document everywhere (location-config); nothing else to keep in step.
 
 
         const submittedVoice = formData.has("brandVoice") ? String(formData.get("brandVoice") || "").trim() : undefined;
