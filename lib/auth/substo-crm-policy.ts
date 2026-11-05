@@ -11,6 +11,8 @@ export const SUBSTO_CRM_PAGE_PATTERNS = [
   /^\/admin\/site-settings(?:\/navigation)?$/,
   /^\/admin\/content\/pages\/[^/]+\/preview$/,
   /^\/admin\/settings(?:\/notifications)?$/,
+  // Business onboarding: authorised per Location by its page and API (admins change, members read).
+  /^\/admin\/onboarding$/,
   /^\/admin\/team$/,
   /^\/admin\/user-profile(?:\/.*)?$/,
 ] as const;
@@ -24,6 +26,7 @@ export const SUBSTO_CRM_API_PATTERNS = [
   /^\/api\/notifications\/(?:events|subscriptions)$/,
   /^\/api\/media\/attachments\/[^/]+$/,
   /^\/api\/images\/direct-upload$/,
+  /^\/api\/onboarding$/,
 ] as const;
 
 export function isSubstoCrmPage(path: string): boolean {

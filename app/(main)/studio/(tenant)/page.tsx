@@ -4,6 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getStudioAccess } from "@/lib/studio/access";
+import { onboardingRedirectFor } from "@/lib/onboarding/auto-open";
 
 export const dynamic = "force-dynamic";
 
@@ -17,9 +18,12 @@ export default async function StudioWorkspacePage({
   if (!userId) redirect("/sign-in?redirect_url=%2Fstudio");
   const access = await getStudioAccess(locationId);
   if (!access) notFound();
+  // Until the business profile is finished, an admin lands on onboarding ("Later" defers it for the session).
+  const onboardingPath = access.role === "ADMIN" ? await onboardingRedirectFor(locationId, "studio") : null;
+  if (onboardingPath) redirect(onboardingPath);
 
   const profile = await getBrandProfile(locationId);
-  const onboarding = !profile ? <section className="rounded-xl border bg-card p-6"><h2 className="text-lg font-medium">Set up your brand</h2><Link className="text-primary underline" href="/studio/onboarding">Build your brand profile</Link></section> : null;
+  const onboarding = !profile ? <section className="rounded-xl border bg-card p-6"><h2 className="text-lg font-medium">Set up your brand</h2><Link className="text-primary underline" href="/studio/onboarding">Fill in your business profile</Link></section> : null;
 
   if (access.app === "substo") {
     return (

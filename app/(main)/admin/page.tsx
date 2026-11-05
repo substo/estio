@@ -8,6 +8,8 @@ import { auth } from "@clerk/nextjs/server";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 import { getPlatformAdminContext } from "@/lib/auth/platform-access";
+import { redirect } from "next/navigation";
+import { onboardingRedirectFor } from "@/lib/onboarding/auto-open";
 
 export default async function Dashboard() {
   const realm = await getRequestAuthRealm();
@@ -21,6 +23,9 @@ export default async function Dashboard() {
     location?.id &&
     await verifyUserIsLocationAdmin(userId, location.id)
   );
+  // Until the business profile is finished, an admin lands on onboarding ("Later" defers it for the session).
+  const onboarding = location?.id && isLocationAdmin ? await onboardingRedirectFor(location.id, "crm") : null;
+  if (onboarding) redirect(onboarding);
 
   return (
     <div className="p-6 space-y-6 max-w-5xl">

@@ -95,6 +95,8 @@ export default async function SettingsPage() {
   const isAdmin = access?.role === "ADMIN";
   const visibleSections = SETTINGS_SECTIONS.filter((section) => (!section.requiresAdmin || isAdmin)).map((section) => realm === "substo" && section.href === "/admin/team" ? { ...section, description: "Manage your brand team.", href: "/brand/team" } : realm === "substo" ? { ...section, setupPending: !isSubstoCrmPage(section.href) } : section);
 
+  // The business profile is filled in by onboarding; Settings reopens it to update anything.
+  if (isAdmin) visibleSections.unshift({ title: "Business profile", description: "Your business details, contact, offer, market and brand, used across CRM, Studio, your website and AI.", href: "/admin/onboarding?update=1", actionLabel: "Open Business Profile" });
   if (realm === "substo" && isAdmin) visibleSections.unshift({ title: "Brand website", description: "Publish your brand’s pages and blog on Substo.", href: "/admin/content/website", actionLabel: "Manage Website" });
   if (realm === "substo" && isAdmin) visibleSections.unshift({ title: "Brand settings", description: "Rename your brand.", href: "/brand/settings", actionLabel: "Manage Brand" });
 

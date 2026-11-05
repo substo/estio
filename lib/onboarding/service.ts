@@ -57,7 +57,7 @@ export async function startResearch(actor: Actor, input: { name?: string; websit
   const batch = randomUUID().slice(0, 18);
   const topics = topicsFor(actor.app).map(t => t.id);
   await updateOnboardingState(actor.locationId, s => say(say(startBatch(s, batch, topics, { ...(name ? { name } : {}), ...(website ? { website } : {}) }), "owner",
-    [name, website].filter(Boolean).join(" · ")), "agent", "Thanks. I'm looking your business up now, one topic at a time. Suggestions appear on the left as I find them; confirm or edit each one."), owner(actor));
+    [name, website].filter(Boolean).join(" · ")), "agent", "Thanks. I'm looking your business up now, one topic at a time. Suggestions appear in your profile as I find them; confirm or edit each one."), owner(actor));
   await studioDb.call("studio_enqueue_job", { p_location_id: actor.locationId, p_kind: ONBOARDING_FETCH, p_payload: { batch, topics, ...(website ? { website } : {}), actorId: actor.dbUserId, createdBy: actor.clerkUserId },
     p_idempotency_key: `onboarding:${batch}:fetch`, p_created_by: actor.clerkUserId, p_max_attempts: 3 });
   return getOnboardingView(actor);
@@ -132,7 +132,7 @@ export async function answer(actor: Actor, text: string, topicId?: string) {
     if (textField && topic.fields.filter(f => "profile" in f.target).length === 1) { await edit(actor, topic.id, textField.key, clean); saved.push(textField.label); }
   }
   const view = await getOnboardingView(actor);
-  const reply = saved.length ? `Saved ${saved.join(", ")}. ${view.nextPrompt}` : `I couldn't place that automatically; please fill it in on the left. ${view.nextPrompt}`;
+  const reply = saved.length ? `Saved ${saved.join(", ")}. ${view.nextPrompt}` : `I couldn't place that automatically; please fill it in in your profile. ${view.nextPrompt}`;
   await updateOnboardingState(actor.locationId, s => say(s, "agent", reply, topic.id), owner(actor));
   return getOnboardingView(actor);
 }
@@ -140,7 +140,7 @@ export async function setStatus(actor: Actor, action: "finish" | "reopen") {
   requireEditor(actor);
   await updateOnboardingState(actor.locationId, (s: OnboardingState) => action === "finish"
     ? say(finish(s), "agent", "All set. Your business profile is saved; you can come back to update it any time from Settings.")
-    : say(reopen(s), "agent", "Let's update your business profile. Change anything on the left, or ask me to research again."), owner(actor));
+    : say(reopen(s), "agent", "Let's update your business profile. Change anything in your profile, or ask me to research again."), owner(actor));
   return getOnboardingView(actor);
 }
 /** Where the app should send an admin: the onboarding screen, until it is done. */

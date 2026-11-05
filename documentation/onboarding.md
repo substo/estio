@@ -62,3 +62,22 @@ connections; `openMode`; `nextPrompt`; completeness). `POST` actions, each retur
 - The onboarding screen (timeline beside chat), auto-open for admins and the Settings entry in both apps, replacing
   Studio's old brand wizard.
 - Mac companion research handler (with web search enabled only for this job kind), shipped with the Studio Mac app.
+
+## The screen (2026-11-05)
+
+One shared client component, `components/onboarding/onboarding-screen.tsx`, rendered by `components/onboarding/onboarding-page.tsx` inside each product's shell:
+- **CRM:** `/admin/onboarding` (both apps; allowed on Substo by `lib/auth/substo-crm-policy.ts`, as is `/api/onboarding`).
+- **Studio:** `/studio/onboarding`, which replaces Studio's former 4-step brand wizard (`profile-editor.tsx` and `lib/studio/brand-onboarding-script.ts` are removed; `/studio/brand-profile` still re-exports the page). The Studio home's "Set up your brand" link opens it.
+
+Layout: the profile **timeline** (topics in order, each with a status icon: not started, researching, suggestions to confirm, done, skipped) beside the **chat**. Topics open as they fill; every value shows its status and source links, with inline Confirm and Edit (one editor for all kinds: lists one per line, structured entries as `a | b` columns, see `lib/onboarding/field-text.ts`; Escape cancels and returns focus). The chat shows the transcript, then one card at a time:
+- **Locked** (no AI connection): a "Connect an AI" card linking to that app's connection screens (`connectLinks` in `lib/onboarding/entry.ts`: Estio CRM ChatGPT subscription and OpenAI key; Substo Studio AI settings; both a paired Mac). The answer box is disabled.
+- **Start:** business name (pre-filled with the Location's name) and website, then research starts in the background.
+- **Topic:** research findings for the current topic ("Is this right?") with Confirm all, Edit, Skip; or the topic's question with "Fill in directly" and Skip. Research progress and failures show under it.
+- **Summary:** everything that will be saved and what's still missing, then Finish (and Research again).
+Free answers go through the `say` command for the current topic. The view is polled every 3 seconds while research runs. Below the `lg` breakpoint (phones, portrait iPad) the two panes become Chat / Profile tabs; choosing Edit from the chat switches to the profile.
+
+Entry points:
+- **Automatic:** the CRM home (`/admin`) and Studio home (`/studio`) redirect an admin to onboarding while it isn't done (`lib/onboarding/auto-open.ts`), unless they pressed **Later**, which sets a session cookie for that Location (`onboarding_later`). Members, impersonators and finished profiles are never redirected; a failure in this check never blocks the home screen.
+- **Manual:** Settings → Business profile (`/admin/onboarding?update=1`, both apps) and Substo's Brand settings (`/studio/onboarding?update=1`). A finished profile stays fully editable; reopening it doesn't make it auto-open again.
+
+Verified with a local harness (mocked view, Tailwind) at 1280 and 820 px wide for the locked, start, researching, mostly confirmed and summary states. Not verified: the real app shell, live research and keyboard behaviour in a real browser session.

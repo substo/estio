@@ -1,12 +1,10 @@
 import { z } from "zod";
-import { auth } from "@clerk/nextjs/server";
 import { studioRouteParams, withStudioRoute } from "@/lib/studio/route-context";
-import { getStudioAccess } from "@/lib/studio/access";
 import { getPlatformProfile } from "@/lib/platform/profile";
 import { studioCommandResponse } from "@/lib/studio/command-http";
 import { StudioCommandError } from "@/lib/studio/command-error";
-import { resolveAuthenticatedDbUserId } from "@/lib/auth/current-user";
-import { answer, confirm, confirmTopic, edit, getOnboardingView, OnboardingError, setStatus, skip, startResearch, type Actor } from "@/lib/onboarding/service";
+import { answer, confirm, confirmTopic, edit, getOnboardingView, OnboardingError, setStatus, skip, startResearch } from "@/lib/onboarding/service";
+import { onboardingActor as actorFor } from "@/lib/onboarding/actor";
 
 /**
  * Business onboarding for the active Location (both apps). Members may read; changes need an admin acting as
@@ -25,13 +23,6 @@ const commandSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("reopen") }).strict(),
 ]);
 export const dynamic = "force-dynamic";
-
-async function actorFor(locationId: string): Promise<Actor | null> {
-  const access = await getStudioAccess(locationId);
-  if (!access) return null;
-  const [session, dbUserId] = await Promise.all([auth(), resolveAuthenticatedDbUserId()]);
-  return { locationId, app: access.app === "substo" ? "substo" : "estio", role: access.role, impersonating: Boolean(session.actor), clerkUserId: access.userId, dbUserId };
-}
 
 export const GET = withStudioRoute(async (request, { params }) => {
   const { locationId } = await studioRouteParams(params, request);

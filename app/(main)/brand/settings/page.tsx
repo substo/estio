@@ -3,6 +3,7 @@ import { getStudioShellData } from "../../studio/_components/studio-shell-data";
 import { redirect } from "next/navigation";
 import { getSubstoLocationActor } from "@/lib/locations/substo-locations";
 import { RenameLocationForm } from "../_components/location-forms";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "General settings" };
@@ -21,6 +22,10 @@ export default async function BrandSettingsPage() {
         <h1 className="text-3xl font-semibold tracking-tight">General settings</h1>
         <p className="text-muted-foreground">Manage the name used across CRM and Studio for {actor.locationName}.</p>
       </header>
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-5">
+        <div><h2 className="text-lg font-medium">Business profile</h2><p className="mt-1 text-sm text-muted-foreground">Your business details, offer, market and brand, used across CRM, Studio, your website and AI.</p></div>
+        <Link href="/studio/onboarding?update=1" className="text-sm font-medium text-primary hover:underline">Open business profile</Link>
+      </section>
       <section className="rounded-xl border bg-card p-5">
         <h2 className="text-lg font-medium">Name</h2>
         <p className="mb-4 mt-1 text-sm text-muted-foreground">{isAdmin ? "Shown to your team in CRM and Studio." : "Only brand admins can rename the brand."}</p>

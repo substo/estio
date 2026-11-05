@@ -53,7 +53,7 @@ const show = (value: FieldValue | null): string => {
 export function nextPrompt(topics: TopicView[], aiAvailable: boolean): string {
   if (!aiAvailable) return "To research your business for you, I need an AI connection first. Connect a ChatGPT subscription, a Mac with Codex or Claude, or an API key in Settings, then come back.";
   const open = topics.find(t => t.status === "suggested" || t.status === "empty");
-  if (!open) return "Everything is filled in. Review the summary on the left and press Finish when you're happy.";
+  if (!open) return "Everything is filled in. Review the summary and press Finish when you're happy.";
   if (open.status === "suggested") {
     const found = open.fields.filter(f => f.status === "suggested").map(f => `${f.label}: ${f.suggestion?.value ?? show(f.value)}`).slice(0, 6);
     return `${open.title}: here is what I found. ${found.join("; ")}. Confirm it, or tell me what to change.`;
