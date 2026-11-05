@@ -7,6 +7,8 @@ import { applyDetailsPatch } from './patch';
 import { businessView, type BusinessDetailsPatch, type BusinessView } from './view';
 import { overlayBusinessDetails } from './overlay';
 import { profileFromLegacy } from './copy';
+import { getWebsiteSettings } from '@/lib/website/settings-service';
+import { overlayWebsiteLayout } from '@/lib/website/settings';
 
 /**
  * The Business profile of a Location: the single home for its business details (settings document location.business).
@@ -32,10 +34,14 @@ export async function getBusinessViewIfAny(locationId: string): Promise<Business
     const location = await db.location.findUnique({ where: { id: locationId }, select: { name: true, timeZone: true, domain: true } });
     return businessView(profile, location ?? {});
 }
-/** A website config row (SiteConfig shape) with its business fields taken from the profile. See overlay.ts. */
+/**
+ * A website config row (SiteConfig shape) as renderers need it: layout from the website document, then business fields
+ * from the profile (overlay.ts). Rows of Locations without either keep their stored values.
+ */
 export async function withBusinessDetails<T extends Record<string, any> | null | undefined>(row: T, locationId: string | null | undefined): Promise<T> {
     if (!row || !locationId) return row;
-    return overlayBusinessDetails(row, await getBusinessViewIfAny(locationId));
+    const [website, view] = await Promise.all([getWebsiteSettings(locationId), getBusinessViewIfAny(locationId)]);
+    return overlayBusinessDetails(overlayWebsiteLayout(row, website?.payload), view);
 }
 
 /**
@@ -44,11 +50,11 @@ export async function withBusinessDetails<T extends Record<string, any> | null |
  */
 async function seedProfile(locationId: string): Promise<BusinessProfile> {
     const [docs, siteConfig] = await Promise.all([
-        db.settingsDocument.findMany({ where: { scopeType: 'LOCATION', scopeId: locationId, domain: { in: [SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE, SETTINGS_DOMAINS.LOCATION_NAVIGATION, SETTINGS_DOMAINS.LOCATION_AI] } } }),
+        db.settingsDocument.findMany({ where: { scopeType: 'LOCATION', scopeId: locationId, domain: { in: [SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE, SETTINGS_DOMAINS.LOCATION_AI] } } }),
         db.siteConfig.findUnique({ where: { locationId } }),
     ]);
     const payload = (domain: string) => docs.find(d => d.domain === domain)?.payload as Record<string, any> | undefined;
-    return profileFromLegacy({ publicSite: payload(SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE), navigation: payload(SETTINGS_DOMAINS.LOCATION_NAVIGATION),
+    return profileFromLegacy({ publicSite: payload(SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE), navigation: null,
         ai: payload(SETTINGS_DOMAINS.LOCATION_AI), siteConfig: siteConfig as Record<string, any> | null }).profile;
 }
 

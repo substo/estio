@@ -14,8 +14,6 @@ import { settingsService } from '@/lib/settings/service';
 import {
     SETTINGS_DOMAINS,
     SETTINGS_SECRET_KEYS,
-    isSettingsDualWriteLegacyEnabled,
-    isSettingsParityCheckEnabled,
 } from '@/lib/settings/constants';
 import { SettingsVersionConflictError } from '@/lib/settings/errors';
 import {
@@ -253,7 +251,7 @@ export async function saveLegacyCrmLeadEmailSettings(data: any) {
             schemaVersion: 1,
         });
 
-        if (isSettingsDualWriteLegacyEnabled()) {
+        { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
             await db.location.update({
                 where: { id: context.locationId },
                 data: {
@@ -265,16 +263,6 @@ export async function saveLegacyCrmLeadEmailSettings(data: any) {
                     legacyCrmLeadEmailAutoProcess: payload.legacyCrmLeadEmailAutoProcess,
                     legacyCrmLeadEmailAutoDraftFirstContact: payload.legacyCrmLeadEmailAutoDraftFirstContact,
                 } as any
-            });
-        }
-
-        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
-            await settingsService.checkDocumentParity({
-                scopeType: "LOCATION",
-                scopeId: context.locationId,
-                domain: SETTINGS_DOMAINS.LOCATION_CRM,
-                legacyPayload: payload,
-                actorUserId: context.localUserId,
             });
         }
 
@@ -357,7 +345,7 @@ export async function saveCrmCredentials(data: any) {
             });
         }
 
-        if (isSettingsDualWriteLegacyEnabled()) {
+        { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
             await db.user.update({
                 where: { id: context.localUserId },
                 data: {
@@ -376,23 +364,6 @@ export async function saveCrmCredentials(data: any) {
                     publicListingUrlMode: locationPayload.publicListingUrlMode,
                     legacyPublicListingUrlPattern: locationPayload.legacyPublicListingUrlPattern || null,
                 }
-            });
-        }
-
-        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
-            await settingsService.checkDocumentParity({
-                scopeType: "LOCATION",
-                scopeId: context.locationId,
-                domain: SETTINGS_DOMAINS.LOCATION_CRM,
-                legacyPayload: locationPayload,
-                actorUserId: context.localUserId,
-            });
-            await settingsService.checkDocumentParity({
-                scopeType: "USER",
-                scopeId: context.localUserId,
-                domain: SETTINGS_DOMAINS.USER_CRM,
-                legacyPayload: { crmUsername: crmUsername || null },
-                actorUserId: context.localUserId,
             });
         }
 
@@ -563,7 +534,7 @@ export async function saveLeadSchema(schema: any, locationId?: string | null) {
             schemaVersion: 1,
         });
 
-        if (isSettingsDualWriteLegacyEnabled()) {
+        { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
             await db.location.update({
                 where: { id: context.locationId },
                 data: { crmLeadSchema: schema },

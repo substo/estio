@@ -171,4 +171,28 @@ None of these write business fields to SiteConfig or to the `location.public_sit
   DRY RUN: 1 Location(s) with a plaintext Gemini key
   - cmingx6b10008rdycg7hwesyn: already has secret; would clear column
   ```
-  Still naming the column, until phase 6 drops it: the public-site loader (which blanks it), the historical `scripts/settings/backfill.ts`, and the retirement script. A contract test enforces this list.
+  Still naming the column, until phase 6 drops it: the public-site loader (which blanks it), the retirement script and its plan (`lib/ai/plaintext-key-move.ts`). A contract test enforces this list.
+
+## Phase 5: one website document, no transition flags (2026-11-05)
+
+- **The settings switch is gone.** `SETTINGS_READ_FROM_NEW`, `SETTINGS_DUAL_WRITE_LEGACY` and `SETTINGS_ENABLE_PARITY_CHECKS` and their helpers are removed, as is `settingsService.checkDocumentParity` (old `PARITY_MISMATCH` audit rows stay). Settings documents are the read path everywhere; a Location without a document shows its stored row. `scripts/settings/backfill.ts` (the historical copier) is deleted.
+- **One website document.** `location.public_site` now holds all website layout: theme layout (background/text colours, header and menu style, logo text lines), menus (nav, footer, legal), footer disclaimer, public-listing switch, hero, home sections and the favorites/search/submissions page settings. The `location.navigation` and `location.content` domains are removed from the registry. Helpers: `lib/website/settings.ts` (pure: layout keys, `websiteLayoutOnly`, `overlayWebsiteLayout`, `mergeWebsiteDocuments`) and `lib/website/settings-service.ts` (`getWebsiteSettings`, `saveWebsiteLayout`, which merges so one editor never drops another's keys).
+- **Readers.** `withBusinessDetails` (public site, widgets, content editors, AI loaders) now lays the website document over the stored row, then the Business profile over that. The site-settings, navigation, website editor (`lib/website/editor-config.ts`) and Substo hosted site (`getPublishedWebsite`) read the same way.
+- **Writers.** General site settings, navigation, home page content, favorites/search/submissions settings and the Substo design form save layout only to the website document (Substo via an injected `LayoutSaver`). The general save still writes `SiteConfig.domain`, which the public site is looked up by.
+- **Business copies removed from documents.** The schema no longer declares `domain`, `locationName`, `locationTimeZone`, `contactInfo`, `socialLinks`, `footerBio`, `marketProfile`, theme brand colours or logo URLs on the website document, and `websiteLayoutOnly` strips them on every save.
+- **One-time merge:** `scripts/settings/merge-website-documents.ts` (dry run by default, `--apply`; plan logic in `lib/website/merge-plan.ts`) folds navigation and content into the website document (on a differing key the newer document wins and it is reported), strips business copies from the website and AI documents after checking each value is in the Business profile (otherwise that Location is skipped), and deletes the old documents. Production dry run:
+  ```
+  DRY RUN: 4 Location(s)
+  - Down Town Cyprus - OLD [estio] cmingx6b10008rdycg7hwesyn: website document with keys favoritesConfig, footerDisclaimer, footerLinks, heroContent, homeSections, legalLinks, menuStyle, navLinks, publicListingEnabled, searchConfig, submissionsConfig, theme; delete navigation; delete content; strip brand voice from AI settings
+      (10 stripped business values, all present in the Business profile or on Location)
+  - Down Town Cyprus, Estio, Substo: nothing to merge
+  ```
+
+**Still to retire in phase 6:**
+- `SiteConfig` operational columns: `domain` (public-site lookup), Substo `substoSiteSlug`/`substoSitePublished`/`substoSiteConfig.title`, search defaults (`minPrice`, `maxPrice`, `defaultCity`, `defaultRegion`, `allowedTypes`).
+- `SiteConfig` AI and transcript columns (`googleAiModel*`, WhatsApp transcript and viewing-session settings, `outreachConfig`): the AI settings save keeps them in step because they are read directly in `lib/ai/*` (orchestrator, coordinator, extraction, smart replies, property translation, model fetch, context builder, audio transcription and viewing-notes extraction, transcript maintenance), viewing sessions (service and API routes), conversations actions, CRM import, print AI and AI property extraction.
+- Stale `SiteConfig` layout and business columns (navigation, hero/sections, theme, contact, social, footer, colours): no longer written; still the fallback for Locations without a website document. `app/(main)/page.tsx` and the `seed-about-us`/`seed-why-sell` admin routes read `SiteConfig.theme` directly.
+- Location columns (`crmUrl`, URL patterns, `legacyCrmLeadEmail*`, `crmLeadSchema`) and User columns (`crmUsername`, plaintext `crmPassword`, Google/Outlook tokens and sync switches, WhatsApp settings): their settings saves still write them (now unconditionally) because many readers query them directly.
+- The cleared `SiteConfig.googleAiApiKey` column and the unused `studio.studio_location_ai_credentials` table.
+- `lib/substo-sites/service.db.test.ts` (needs its disposable database) still asserts pre-phase-3 storage of colours and email in `SiteConfig`; update it when that database is available.
+

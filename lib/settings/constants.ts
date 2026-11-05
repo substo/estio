@@ -2,8 +2,6 @@ export const SETTINGS_DOMAINS = {
     LOCATION_BUSINESS: "location.business",
     LOCATION_PUBLIC_SITE: "location.public_site",
     LOCATION_AI: "location.ai",
-    LOCATION_NAVIGATION: "location.navigation",
-    LOCATION_CONTENT: "location.content",
     LOCATION_INTEGRATIONS: "location.integrations",
     LOCATION_CRM: "location.crm",
     USER_CRM: "user.crm",
@@ -34,20 +32,3 @@ export const SETTINGS_SECRET_KEYS = {
 } as const;
 
 export type SettingsSecretKey = typeof SETTINGS_SECRET_KEYS[keyof typeof SETTINGS_SECRET_KEYS];
-
-function parseBoolean(value: string | undefined, fallback: boolean): boolean {
-    if (value === undefined) return fallback;
-    return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
-}
-
-export function isSettingsReadFromNewEnabled(): boolean {
-    return parseBoolean(process.env.SETTINGS_READ_FROM_NEW, false);
-}
-
-export function isSettingsDualWriteLegacyEnabled(): boolean {
-    return parseBoolean(process.env.SETTINGS_DUAL_WRITE_LEGACY, true);
-}
-
-export function isSettingsParityCheckEnabled(): boolean {
-    return parseBoolean(process.env.SETTINGS_ENABLE_PARITY_CHECKS, true);
-}

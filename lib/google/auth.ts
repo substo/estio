@@ -5,7 +5,6 @@ import { settingsService } from '@/lib/settings/service';
 import {
     SETTINGS_DOMAINS,
     SETTINGS_SECRET_KEYS,
-    isSettingsDualWriteLegacyEnabled,
 } from '@/lib/settings/constants';
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -118,7 +117,7 @@ export async function handleGoogleCallback(code: string, userId: string, baseUrl
         schemaVersion: 1,
     });
 
-    if (isSettingsDualWriteLegacyEnabled()) {
+    { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
         // Save tokens to legacy columns for compatibility during migration window.
         await db.user.update({
             where: { id: userId },
@@ -127,13 +126,6 @@ export async function handleGoogleCallback(code: string, userId: string, baseUrl
                 // Google may omit this on reconnect; preserve the existing
                 // refresh token instead of replacing it with null.
                 ...(tokens.refresh_token && { googleRefreshToken: tokens.refresh_token }),
-                googleSyncEnabled: true,
-            }
-        });
-    } else {
-        await db.user.update({
-            where: { id: userId },
-            data: {
                 googleSyncEnabled: true,
             }
         });
@@ -229,7 +221,7 @@ export async function getValidAccessToken(userId: string) {
                 });
             }
 
-            if (isSettingsDualWriteLegacyEnabled()) {
+            { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
                 await db.user.update({
                     where: { id: userId },
                     data: {

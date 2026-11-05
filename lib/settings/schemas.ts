@@ -39,19 +39,13 @@ const navLinkSchema: z.ZodType<any> = z.lazy(() => z.object({
     children: z.array(navLinkSchema).optional(),
 }).passthrough());
 
+// Logo image URLs and brand colours are business facts (Business profile); the theme keeps logo text and layout.
 const logoSchema = z.object({
-    url: nullableTrimmedString,
-    lightUrl: nullableTrimmedString,
-    iconUrl: nullableTrimmedString,
-    faviconUrl: nullableTrimmedString,
     textTop: nullableTrimmedString,
     textBottom: nullableTrimmedString,
 }).passthrough();
 
 const themeSchema = z.object({
-    primaryColor: optionalHexColor,
-    secondaryColor: optionalHexColor,
-    accentColor: optionalHexColor,
     backgroundColor: optionalHexColor,
     textColor: optionalHexColor,
     headerStyle: z.enum(["transparent", "solid"]).default("transparent"),
@@ -59,49 +53,21 @@ const themeSchema = z.object({
     logo: logoSchema.default({}),
 }).passthrough();
 
-const contactInfoSchema = z.object({
-    address: nullableTrimmedString,
-    mapsLink: nullableTrimmedString,
-    mapsLinkTitle: nullableTrimmedString,
-    mobile: nullableTrimmedString,
-    landline: nullableTrimmedString,
-    email: nullableTrimmedString,
-}).passthrough();
-
-const marketServiceAreaSchema = z.object({
-    id: z.string().trim().min(1),
-    label: z.string().trim().min(1),
-    aliases: z.array(z.string().trim().min(1)).default([]),
-    parentId: nullableTrimmedString,
-    kind: z.enum(["country", "region", "city", "district", "locality", "neighborhood"]).default("locality"),
-}).passthrough();
-
-const marketProfileSchema = z.object({
-    countryCode: nullableTrimmedString,
-    countryName: nullableTrimmedString,
-    locale: nullableTrimmedString,
-    currencyCode: nullableTrimmedString,
-    supportedLanguages: z.array(z.string().trim().min(1)).default([]),
-    serviceAreas: z.array(marketServiceAreaSchema).default([]),
-}).passthrough().default({});
-
+// Website settings: layout only. Business details live in the Business profile (location.business); name, time zone
+// and domain on Location. Menus (formerly location.navigation) and page content (formerly location.content) live here.
 const publicSiteSchema = z.object({
-    domain: nullableTrimmedString,
-    locationName: nullableTrimmedString,
-    locationTimeZone: nullableTrimmedString,
     theme: themeSchema,
-    contactInfo: contactInfoSchema.default({}),
-    marketProfile: marketProfileSchema,
     navLinks: z.array(navLinkSchema).default([]),
     footerLinks: z.array(navLinkSchema).default([]),
-    socialLinks: z.array(z.object({
-        platform: z.string().trim().min(1),
-        url: z.string().trim().min(1),
-    }).passthrough()).default([]),
     legalLinks: z.array(navLinkSchema).default([]),
     footerDisclaimer: nullableTrimmedString,
-    footerBio: nullableTrimmedString,
+    menuStyle: z.enum(["side", "top"]).optional(),
     publicListingEnabled: z.boolean().optional(),
+    heroContent: z.unknown().optional(),
+    homeSections: z.array(z.unknown()).optional(),
+    favoritesConfig: z.unknown().optional(),
+    searchConfig: z.unknown().optional(),
+    submissionsConfig: z.unknown().optional(),
 }).passthrough();
 
 const aiSchema = z.object({
@@ -137,28 +103,6 @@ const aiSchema = z.object({
     viewingSessionTranslationModel: nullableTrimmedString,
     viewingSessionInsightsModel: nullableTrimmedString,
     viewingSessionSummaryModel: nullableTrimmedString,
-}).passthrough();
-
-const navigationSchema = z.object({
-    navLinks: z.array(navLinkSchema).default([]),
-    footerLinks: z.array(navLinkSchema).default([]),
-    socialLinks: z.array(z.object({
-        platform: z.string().trim().min(1),
-        url: z.string().trim().min(1),
-    }).passthrough()).default([]),
-    legalLinks: z.array(navLinkSchema).default([]),
-    footerDisclaimer: nullableTrimmedString,
-    footerBio: nullableTrimmedString,
-    menuStyle: z.enum(["side", "top"]).default("side"),
-    publicListingEnabled: z.boolean().default(true),
-}).passthrough();
-
-const contentSchema = z.object({
-    heroContent: z.unknown().optional(),
-    homeSections: z.array(z.unknown()).default([]),
-    favoritesConfig: z.unknown().optional(),
-    searchConfig: z.unknown().optional(),
-    submissionsConfig: z.unknown().optional(),
 }).passthrough();
 
 const locationIntegrationsSchema = z.object({
@@ -238,8 +182,6 @@ export const SETTINGS_DOMAIN_SCHEMAS: Record<SettingsDomain, z.ZodTypeAny> = {
     [SETTINGS_DOMAINS.LOCATION_BUSINESS]: businessProfileSchema,
     [SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE]: publicSiteSchema,
     [SETTINGS_DOMAINS.LOCATION_AI]: aiSchema,
-    [SETTINGS_DOMAINS.LOCATION_NAVIGATION]: navigationSchema,
-    [SETTINGS_DOMAINS.LOCATION_CONTENT]: contentSchema,
     [SETTINGS_DOMAINS.LOCATION_INTEGRATIONS]: locationIntegrationsSchema,
     [SETTINGS_DOMAINS.LOCATION_CRM]: locationCrmSchema,
     [SETTINGS_DOMAINS.USER_CRM]: userCrmSchema,

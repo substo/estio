@@ -9,7 +9,6 @@ import { settingsService } from "@/lib/settings/service";
 import {
     SETTINGS_DOMAINS,
     SETTINGS_SECRET_KEYS,
-    isSettingsReadFromNewEnabled,
 } from "@/lib/settings/constants";
 import { normalizeContactProfileVerificationConfig } from "@/lib/ai/contact-profile-verification/config";
 import { EMPTY_AI_RUNTIME_SUMMARY } from "@/lib/ai/settings/runtime-summary";
@@ -42,7 +41,8 @@ function buildAiInitialData({
 }) {
     const aiPayload = aiDoc?.payload;
 
-    if (isSettingsReadFromNewEnabled() && aiDoc) {
+    // The AI settings document is the read path; a Location without one shows its stored row.
+    if (aiDoc) {
         return {
             ...aiPayload,
             // keep compatibility for old optional reads

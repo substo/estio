@@ -27,8 +27,6 @@ import {
 import { settingsService } from "@/lib/settings/service";
 import {
     SETTINGS_DOMAINS,
-    isSettingsDualWriteLegacyEnabled,
-    isSettingsParityCheckEnabled,
 } from "@/lib/settings/constants";
 import { SettingsVersionConflictError } from "@/lib/settings/errors";
 import { runRequirementsIntelligenceCron } from "@/lib/ai/requirements-intelligence/service";
@@ -264,7 +262,9 @@ export async function updateAiSettings(
             schemaVersion: 1,
         });
 
-        if (isSettingsDualWriteLegacyEnabled()) {
+        // AI model and transcript settings are still read straight from SiteConfig across the app; kept in step until
+        // those readers move to the AI settings document (phase 6).
+        {
             await db.siteConfig.upsert({
                 where: { locationId },
                 create: {
@@ -309,19 +309,6 @@ export async function updateAiSettings(
             });
         }
 
-        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
-            const legacyComparablePayload: Record<string, unknown> = { ...payload };
-            delete legacyComparablePayload.automationConfig;
-            delete legacyComparablePayload.defaultReplyLanguage;
-            await settingsService.checkDocumentParity({
-                scopeType: "LOCATION",
-                scopeId: locationId,
-                domain: SETTINGS_DOMAINS.LOCATION_AI,
-                legacyPayload: legacyComparablePayload,
-                ignoreKeys: ["precisionRemoveEnabled"],
-                actorUserId: localUser?.id,
-            });
-        }
 
         const submittedVoice = formData.has("brandVoice") ? String(formData.get("brandVoice") || "").trim() : undefined;
         if (submittedVoice !== undefined && localUser?.id) {

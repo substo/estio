@@ -7,7 +7,8 @@ import db from "@/lib/db";
 import { SiteSettingsForm } from "./site-settings-form";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { settingsService } from "@/lib/settings/service";
-import { SETTINGS_DOMAINS, isSettingsReadFromNewEnabled } from "@/lib/settings/constants";
+import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
+import { overlayWebsiteLayout } from "@/lib/website/settings";
 import { listPublicSiteDomains } from "@/lib/public-site-domains/service";
 import { PublicSiteDomainManager } from "./public-site-domain-manager";
 import { getBusinessViewIfAny } from "@/lib/business-profile/service";
@@ -47,32 +48,18 @@ export default async function SiteSettingsPage() {
 
     const canonicalDomain = publicSiteDomains.find((item) => item.role === "CANONICAL" && item.status === "ACTIVE");
 
-    const initialDataBase = isSettingsReadFromNewEnabled() && settingsDoc
-        ? {
-            ...settingsDoc.payload,
-            domain: canonicalDomain?.hostname ?? siteConfig?.domain ?? null,
-            theme: settingsDoc.payload?.theme ?? siteConfig?.theme ?? {},
-            contactInfo: settingsDoc.payload?.contactInfo ?? siteConfig?.contactInfo ?? {},
-            navLinks: settingsDoc.payload?.navLinks ?? siteConfig?.navLinks ?? [],
-            footerLinks: settingsDoc.payload?.footerLinks ?? siteConfig?.footerLinks ?? [],
-            socialLinks: settingsDoc.payload?.socialLinks ?? siteConfig?.socialLinks ?? [],
-            legalLinks: settingsDoc.payload?.legalLinks ?? siteConfig?.legalLinks ?? [],
-            footerDisclaimer: settingsDoc.payload?.footerDisclaimer ?? siteConfig?.footerDisclaimer ?? null,
-            footerBio: settingsDoc.payload?.footerBio ?? siteConfig?.footerBio ?? null,
-            primaryColor: (settingsDoc.payload?.theme as any)?.primaryColor ?? siteConfig?.primaryColor ?? null,
-            secondaryColor: (settingsDoc.payload?.theme as any)?.secondaryColor ?? siteConfig?.secondaryColor ?? null,
-            accentColor: (settingsDoc.payload?.theme as any)?.accentColor ?? siteConfig?.accentColor ?? null,
-        }
-        : siteConfig
-            ? { ...siteConfig, domain: canonicalDomain?.hostname ?? siteConfig.domain }
-            : siteConfig;
+    // Layout from the website document over the stored row (Locations without a document keep the row); domain from the
+    // active canonical domain.
+    const initialDataBase = siteConfig || settingsDoc
+        ? { ...overlayWebsiteLayout({ ...(siteConfig ?? {}) } as Record<string, any>, settingsDoc?.payload), domain: canonicalDomain?.hostname ?? siteConfig?.domain ?? null }
+        : null;
     // Contact details, brand colours, logos and market come from the Business profile; layout from website settings.
     const business = await getBusinessViewIfAny(locationId);
     const initialData = {
         ...overlayBusinessDetails({ ...(initialDataBase || {}) } as Record<string, any>, business),
         marketProfile: business ? { countryCode: business.market.countryCode, countryName: business.market.countryName, locale: business.market.locale,
             currencyCode: business.market.currencyCode, supportedLanguages: business.market.supportedLanguages, serviceAreas: business.market.serviceAreas }
-            : settingsDoc?.payload?.marketProfile || {},
+            : {},
     };
 
     const settingsVersion = settingsDoc?.version ?? 0;

@@ -18,7 +18,7 @@ async function main() {
         const [existing, publicSite, navigation, ai, siteConfig] = await Promise.all([
             settingsService.getDocument({ ...scope, domain: SETTINGS_DOMAINS.LOCATION_BUSINESS }),
             settingsService.getDocument<Record<string, unknown>>({ ...scope, domain: SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE }),
-            settingsService.getDocument<Record<string, unknown>>({ ...scope, domain: SETTINGS_DOMAINS.LOCATION_NAVIGATION }),
+            settingsService.getDocument<Record<string, unknown>>({ ...scope, domain: 'location.navigation' as never /* removed in phase 5; read only if still present */ }),
             settingsService.getDocument<Record<string, unknown>>({ ...scope, domain: SETTINGS_DOMAINS.LOCATION_AI }),
             db.siteConfig.findUnique({ where: { locationId: location.id }, select: { contactInfo: true, theme: true, socialLinks: true, footerBio: true, brandVoice: true, primaryColor: true, secondaryColor: true, accentColor: true } }),
         ]);

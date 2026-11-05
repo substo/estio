@@ -4,43 +4,26 @@ import { GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH
 import { SETTINGS_DOMAINS } from "./constants";
 import { validateSettingsPayload } from "./schemas";
 
-test("location public-site settings support an international market profile", () => {
+test("website settings hold layout, menus and page content", () => {
     const payload = validateSettingsPayload(SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE, {
-        theme: {},
-        marketProfile: {
-            countryCode: "AE",
-            countryName: "United Arab Emirates",
-            locale: "ar-AE",
-            currencyCode: "AED",
-            supportedLanguages: ["ar", "en"],
-            serviceAreas: [
-                {
-                    id: "dubai-marina",
-                    label: "Dubai Marina",
-                    aliases: ["مرسى دبي"],
-                    parentId: "dubai",
-                    kind: "locality",
-                },
-            ],
-        },
+        theme: { backgroundColor: "#ffffff", logo: { textTop: "DOWN TOWN" } },
+        navLinks: [{ label: "Home", href: "/" }],
+        homeSections: [{ type: "hero" }],
+        heroContent: { headline: "Hello" },
+        menuStyle: "top",
     }) as any;
-
-    assert.equal(payload.marketProfile.currencyCode, "AED");
-    assert.deepEqual(payload.marketProfile.supportedLanguages, ["ar", "en"]);
-    assert.equal(payload.marketProfile.serviceAreas[0].aliases[0], "مرسى دبي");
+    assert.equal(payload.theme.logo.textTop, "DOWN TOWN");
+    assert.equal(payload.navLinks[0].href, "/");
+    assert.equal(payload.homeSections[0].type, "hero");
+    assert.equal(payload.menuStyle, "top");
 });
 
-test("location public-site settings keep market profile optional for legacy locations", () => {
+test("website settings no longer add business defaults (market, contact, colours live in the Business profile)", () => {
     const payload = validateSettingsPayload(SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE, { theme: {} }) as any;
-
-    assert.deepEqual(payload.marketProfile, {
-        countryCode: null,
-        countryName: null,
-        locale: null,
-        currencyCode: null,
-        supportedLanguages: [],
-        serviceAreas: [],
-    });
+    assert.equal(payload.marketProfile, undefined);
+    assert.equal(payload.contactInfo, undefined);
+    assert.equal(payload.theme.primaryColor, undefined);
+    assert.equal(payload.theme.logo.url, undefined);
 });
 
 test("location AI settings schema fills defaults for legacy payloads", () => {

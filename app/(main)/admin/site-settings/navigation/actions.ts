@@ -7,12 +7,8 @@ import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import db from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
-import { settingsService } from "@/lib/settings/service";
-import {
-    SETTINGS_DOMAINS,
-    isSettingsDualWriteLegacyEnabled,
-    isSettingsParityCheckEnabled,
-} from "@/lib/settings/constants";
+import { getWebsiteSettings, saveWebsiteLayout } from "@/lib/website/settings-service";
+import { overlayWebsiteLayout } from "@/lib/website/settings";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { saveBusinessDetails } from "@/lib/business-profile/service";
 
@@ -48,33 +44,20 @@ async function assertAdmin(locationId: string): Promise<string> {
 }
 
 async function getNavigationPayload(locationId: string): Promise<{ payload: NavigationPayload; version: number }> {
-    const [doc, config] = await Promise.all([
-        settingsService.getDocument<NavigationPayload>({
-            scopeType: "LOCATION",
-            scopeId: locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_NAVIGATION,
-        }),
-        db.siteConfig.findUnique({ where: { locationId } }),
-    ]);
-
-    const theme = (config?.theme as any) || {};
-
-    if (doc) {
-        // Older documents still carry business copies; they are dropped on the next save.
-        const { socialLinks: _social, footerBio: _bio, ...layout } = doc.payload as NavigationPayload & { socialLinks?: unknown; footerBio?: unknown };
-        return { payload: layout, version: doc.version };
-    }
-
+    // Layout comes from the website document, over the stored row for Locations that don't have one yet.
+    const [website, config] = await Promise.all([getWebsiteSettings(locationId), db.siteConfig.findUnique({ where: { locationId } })]);
+    const row = overlayWebsiteLayout({ ...(config ?? {}) } as Record<string, any>, website?.payload);
+    const theme = (row.theme as any) || {};
     return {
         payload: {
-            navLinks: (config?.navLinks as any[]) || [],
-            footerLinks: (config?.footerLinks as any[]) || [],
-            legalLinks: (config?.legalLinks as any[]) || [],
-            footerDisclaimer: config?.footerDisclaimer || null,
-            menuStyle: theme.menuStyle === "top" ? "top" : "side",
-            publicListingEnabled: config?.publicListingEnabled ?? true,
+            navLinks: (row.navLinks as any[]) || [],
+            footerLinks: (row.footerLinks as any[]) || [],
+            legalLinks: (row.legalLinks as any[]) || [],
+            footerDisclaimer: row.footerDisclaimer || null,
+            menuStyle: (theme.menuStyle ?? row.menuStyle) === "top" ? "top" : "side",
+            publicListingEnabled: row.publicListingEnabled ?? true,
         },
-        version: 0,
+        version: website?.version ?? 0,
     };
 }
 
@@ -83,57 +66,10 @@ async function saveNavigationPayload(
     actorUserId: string,
     payload: NavigationPayload
 ) {
-    const saved = await settingsService.upsertDocument({
-        scopeType: "LOCATION",
-        scopeId: locationId,
-        domain: SETTINGS_DOMAINS.LOCATION_NAVIGATION,
-        payload,
-        actorUserId,
-        schemaVersion: 1,
-    });
-
-    if (isSettingsDualWriteLegacyEnabled() || await getRequestAuthRealm() === "substo") {
-        const existing = await db.siteConfig.findUnique({ where: { locationId } });
-        const currentTheme = (existing?.theme as any) || {};
-        await db.siteConfig.upsert({
-            where: { locationId },
-            create: {
-                locationId,
-                navLinks: payload.navLinks,
-                footerLinks: payload.footerLinks,
-                legalLinks: payload.legalLinks,
-                footerDisclaimer: payload.footerDisclaimer || null,
-                publicListingEnabled: payload.publicListingEnabled,
-                theme: {
-                    ...currentTheme,
-                    menuStyle: payload.menuStyle,
-                },
-            },
-            update: {
-                navLinks: payload.navLinks,
-                footerLinks: payload.footerLinks,
-                legalLinks: payload.legalLinks,
-                footerDisclaimer: payload.footerDisclaimer || null,
-                publicListingEnabled: payload.publicListingEnabled,
-                theme: {
-                    ...currentTheme,
-                    menuStyle: payload.menuStyle,
-                },
-            },
-        });
-    }
-
-    if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
-        await settingsService.checkDocumentParity({
-            scopeType: "LOCATION",
-            scopeId: locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_NAVIGATION,
-            legacyPayload: payload,
-            actorUserId,
-        });
-    }
-
-    return saved;
+    // Menus live only in the website document; menu style is part of its theme.
+    const current = await getWebsiteSettings(locationId);
+    const { menuStyle, ...links } = payload;
+    return saveWebsiteLayout(locationId, { ...links, theme: { ...((current?.payload?.theme as object) ?? {}), menuStyle } }, actorUserId);
 }
 
 export async function saveNavigation(locationId: string, type: "nav" | "footer" | "social" | "legal", links: any[]) {

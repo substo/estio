@@ -13,11 +13,8 @@ import { verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
 import { normalizeIanaTimeZoneOrThrow, ViewingDateTimeValidationError } from "@/lib/viewings/datetime";
 import { settingsService } from "@/lib/settings/service";
-import {
-    SETTINGS_DOMAINS,
-    isSettingsDualWriteLegacyEnabled,
-    isSettingsParityCheckEnabled,
-} from "@/lib/settings/constants";
+import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
+import { saveWebsiteLayout } from "@/lib/website/settings-service";
 import { SettingsVersionConflictError } from "@/lib/settings/errors";
 import { clearLocationMarketContextCache } from "@/lib/locations/market-context";
 import { parseLocationMarketProfileSettings } from "@/lib/locations/market-profile-settings";
@@ -48,7 +45,7 @@ export async function updateSiteSettings(
     if (await getRequestAuthRealm() === "substo") {
         const actor = await getSubstoLocationActor();
         if (!actor) return { message: "Brand admin access is required." };
-        const result = await saveWebsiteDesign(db, actor, formData, saveBusinessDetails);
+        const result = await saveWebsiteDesign(db, actor, formData, saveBusinessDetails, saveWebsiteLayout);
         revalidatePath("/admin/site-settings");
         revalidatePath("/admin/content/website");
         return result;
@@ -187,48 +184,16 @@ export async function updateSiteSettings(
             validatedLocationTimeZone = normalizeIanaTimeZoneOrThrow(locationTimeZone);
         }
 
-        const updateData: any = {
-            domain: domainVal,
-            theme: themeData,
-        };
+        // Website layout lives only in the website document (merged, so menus and page content are kept). Name, time zone
+        // and domain live on Location; business details in the Business profile.
+        const existingPayload = (settingsDoc?.payload ?? {}) as Record<string, any>;
+        const savedDoc = await saveWebsiteLayout(locationId, {
+            theme: { ...(existingPayload.theme ?? {}), ...themeData, logo: { ...(existingPayload.theme?.logo ?? {}), ...themeData.logo } },
+            ...(navLinksForUpdate !== undefined ? { navLinks: navLinksForUpdate } : existingPayload.navLinks === undefined ? { navLinks: navLinksForCreate } : {}),
+        }, localUser?.id, expectedVersion);
 
-        if (navLinksForUpdate !== undefined) {
-            updateData.navLinks = navLinksForUpdate;
-        }
-
-        // Name and time zone live only on Location; business details only in the Business profile.
-        const payload = {
-            domain: domainVal,
-            theme: themeData,
-            navLinks: navLinksForUpdate ?? navLinksForCreate,
-            footerLinks: (existingConfig?.footerLinks as any[]) || [],
-            legalLinks: (existingConfig?.legalLinks as any[]) || [],
-            footerDisclaimer: existingConfig?.footerDisclaimer || null,
-            publicListingEnabled: existingConfig?.publicListingEnabled ?? true,
-        };
-
-        const savedDoc = await settingsService.upsertDocument({
-            scopeType: "LOCATION",
-            scopeId: locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE,
-            payload,
-            expectedVersion,
-            actorUserId: localUser?.id,
-            schemaVersion: 1,
-        });
-
-        if (isSettingsDualWriteLegacyEnabled()) {
-            await db.siteConfig.upsert({
-                where: { locationId },
-                create: {
-                    locationId,
-                    domain: domainVal,
-                    theme: themeData,
-                    navLinks: navLinksForCreate,
-                },
-                update: updateData,
-            });
-        }
+        // SiteConfig keeps only the domain the public site is looked up by (operational routing, retired in phase 6).
+        await db.siteConfig.upsert({ where: { locationId }, create: { locationId, domain: domainVal }, update: { domain: domainVal } });
 
         if (!localUser?.id) return { message: "Account unavailable. Sign in again." };
         await saveBusinessDetails(locationId, businessPatch, localUser.id);
@@ -242,16 +207,6 @@ export async function updateSiteSettings(
                 timeZone: validatedLocationTimeZone
             }
         });
-
-        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
-            await settingsService.checkDocumentParity({
-                scopeType: "LOCATION",
-                scopeId: locationId,
-                domain: SETTINGS_DOMAINS.LOCATION_PUBLIC_SITE,
-                legacyPayload: payload,
-                actorUserId: localUser?.id,
-            });
-        }
 
         clearLocationMarketContextCache(locationId);
 

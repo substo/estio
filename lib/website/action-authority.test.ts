@@ -54,7 +54,7 @@ test("shared navigation rejects foreign brand IDs and resolves the admin inside 
 });
 
 
-test("shared homepage action rejects foreign brands/property sections and mirrors generic sections for publication", async () => {
+test("shared homepage action rejects foreign brands/property sections and saves generic sections to the website document", async () => {
     const writes: any[] = [];
     const actions = load("app/(main)/admin/content/actions.ts", {
         "@/lib/auth/crm-action-guard": { assertCrmActionAllowed: async () => {} },
@@ -62,9 +62,8 @@ test("shared homepage action rejects foreign brands/property sections and mirror
         "@/lib/auth/request-realm": { getRequestAuthRealm: async () => "substo" },
         "@/lib/auth/location-context": { getLocationContext: async () => ({ id: "own-brand" }) },
         "@/lib/auth/permissions": { verifyUserIsLocationAdmin: async () => true },
-        "@/lib/db": { user: { findUnique: async ({ where }: any) => { assert.equal(where.authRealm_clerkId.authRealm, "substo"); return { id: "user" }; } }, siteConfig: { upsert: async (query: any) => { writes.push(query); } } },
-        "@/lib/settings/service": { settingsService: { getDocument: async () => null, upsertDocument: async () => ({}) } },
-        "@/lib/settings/constants": { SETTINGS_DOMAINS: { LOCATION_CONTENT: "content" }, isSettingsDualWriteLegacyEnabled: () => false, isSettingsParityCheckEnabled: () => false },
+        "@/lib/db": { user: { findUnique: async ({ where }: any) => { assert.equal(where.authRealm_clerkId.authRealm, "substo"); return { id: "user" }; } } },
+        "@/lib/website/settings-service": { saveWebsiteLayout: async (locationId: string, patch: any) => { writes.push({ locationId, patch }); } },
         "next/cache": { revalidatePath: () => {} },
     });
     const form = new FormData(); form.set("locationId", "foreign"); form.set("blocks", "[]");
@@ -73,7 +72,7 @@ test("shared homepage action rejects foreign brands/property sections and mirror
     assert.equal((await actions.updateHomeConfig({}, form)).success, false); assert.equal(writes.length, 0);
     form.set("blocks", JSON.stringify([{ type: "hero", headline: "Our business" }, { type: "features", title: "Services" }]));
     assert.equal((await actions.updateHomeConfig({}, form)).success, true);
-    assert.equal(writes.length, 1); assert.equal(writes[0].where.locationId, "own-brand");
-    assert.equal(writes[0].update.heroContent.headline, "Our business");
-    assert.deepEqual(Array.from(writes[0].update.homeSections, (section: any) => section.type), ["hero", "features"]);
+    assert.equal(writes.length, 1); assert.equal(writes[0].locationId, "own-brand");
+    assert.equal(writes[0].patch.heroContent.headline, "Our business");
+    assert.deepEqual(Array.from(writes[0].patch.homeSections, (section: any) => section.type), ["hero", "features"]);
 });

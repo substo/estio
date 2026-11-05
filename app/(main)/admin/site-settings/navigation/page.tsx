@@ -7,8 +7,8 @@ import { SocialLinksEditor } from "./_components/social-links-editor";
 import { getLivePages } from "./actions";
 import { MenuStyleSelector } from "./_components/menu-style-selector";
 import { PublicListingToggle } from "./_components/public-listing-toggle";
-import { settingsService } from "@/lib/settings/service";
-import { SETTINGS_DOMAINS, isSettingsReadFromNewEnabled } from "@/lib/settings/constants";
+import { getWebsiteSettings } from "@/lib/website/settings-service";
+import { overlayWebsiteLayout } from "@/lib/website/settings";
 import { getLocationContext } from "@/lib/auth/location-context";
 import { getBusinessViewIfAny } from "@/lib/business-profile/service";
 
@@ -18,33 +18,26 @@ export default async function NavigationSettingsPage() {
 
     if (!orgId) return null;
 
-    const [config, navigationDoc] = await Promise.all([
-        db.siteConfig.findUnique({
-            where: { locationId: orgId },
-        }),
-        settingsService.getDocument<any>({
-            scopeType: "LOCATION",
-            scopeId: orgId,
-            domain: SETTINGS_DOMAINS.LOCATION_NAVIGATION,
-        }),
+    // Layout from the website document over the stored row (Locations without a document keep the row).
+    const [config, website] = await Promise.all([
+        db.siteConfig.findUnique({ where: { locationId: orgId } }),
+        getWebsiteSettings(orgId),
     ]);
+    const row = overlayWebsiteLayout({ ...(config ?? {}) } as Record<string, any>, website?.payload);
 
     const realEstateEnabled = await getRequestAuthRealm() !== "substo";
     const livePages = await getLivePages(orgId);
-    const readNew = isSettingsReadFromNewEnabled() && Boolean(navigationDoc);
-    const theme = (config?.theme as any) || {};
+    const theme = (row.theme as any) || {};
 
-    const navLinks = readNew ? (navigationDoc?.payload?.navLinks || []) : ((config?.navLinks as any[]) || []);
-    const footerLinks = readNew ? (navigationDoc?.payload?.footerLinks || []) : ((config?.footerLinks as any[]) || []);
+    const navLinks = (row.navLinks as any[]) || [];
+    const footerLinks = (row.footerLinks as any[]) || [];
     const business = await getBusinessViewIfAny(orgId);
-    const socialLinks = business ? business.socialLinks : readNew ? (navigationDoc?.payload?.socialLinks || []) : ((config?.socialLinks as any[]) || []);
-    const legalLinks = readNew ? (navigationDoc?.payload?.legalLinks || []) : ((config?.legalLinks as any[]) || []);
-    const footerDisclaimer = readNew ? (navigationDoc?.payload?.footerDisclaimer || "") : ((config?.footerDisclaimer as string) || "");
-    const footerBio = business ? (business.summary || "") : readNew ? (navigationDoc?.payload?.footerBio || "") : ((config?.footerBio as string) || "");
-    const menuStyle = readNew ? (navigationDoc?.payload?.menuStyle || "side") : (theme.menuStyle || "side");
-    const publicListingEnabled = readNew
-        ? (navigationDoc?.payload?.publicListingEnabled ?? true)
-        : (config?.publicListingEnabled ?? true);
+    const socialLinks = business ? business.socialLinks : ((row.socialLinks as any[]) || []);
+    const legalLinks = (row.legalLinks as any[]) || [];
+    const footerDisclaimer = (row.footerDisclaimer as string) || "";
+    const footerBio = business ? (business.summary || "") : ((row.footerBio as string) || "");
+    const menuStyle = theme.menuStyle || row.menuStyle || "side";
+    const publicListingEnabled = row.publicListingEnabled ?? true;
 
     return (
         <div className="p-6 space-y-8 max-w-4xl">

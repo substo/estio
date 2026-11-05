@@ -12,8 +12,6 @@ import { settingsService } from "@/lib/settings/service";
 import {
     SETTINGS_DOMAINS,
     SETTINGS_SECRET_KEYS,
-    isSettingsDualWriteLegacyEnabled,
-    isSettingsParityCheckEnabled,
 } from "@/lib/settings/constants";
 import { getLegacyCryptr } from "@/lib/security/legacy-cryptr";
 import {
@@ -226,7 +224,7 @@ export async function updateWhatsAppSettings(formData: FormData) {
         });
     }
 
-    if (isSettingsDualWriteLegacyEnabled()) {
+    { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
         const updateData: any = {
             whatsappBusinessAccountId: payload.whatsappBusinessAccountId,
             whatsappPhoneNumberId: payload.whatsappPhoneNumberId,
@@ -252,16 +250,6 @@ export async function updateWhatsAppSettings(formData: FormData) {
         await db.location.update({
             where: { id: resolvedLocationId },
             data: updateData
-        });
-    }
-
-    if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
-        await settingsService.checkDocumentParity({
-            scopeType: "LOCATION",
-            scopeId: resolvedLocationId,
-            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
-            legacyPayload: payload,
-            actorUserId: localUserId,
         });
     }
 
@@ -1230,7 +1218,7 @@ export async function exchangeSystemUserToken(
         const currentSettings = await db.location.findUnique({ where: { id: resolvedLocationId }, select: { whatsappWebhookSecret: true } });
         const webhookSecret = currentSettings?.whatsappWebhookSecret || crypto.randomUUID();
 
-        if (isSettingsDualWriteLegacyEnabled()) {
+        { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
             const encryptedAccessToken = getLegacyCryptr().encrypt(accessToken);
             await db.location.update({
                 where: { id: resolvedLocationId },
@@ -1250,19 +1238,6 @@ export async function exchangeSystemUserToken(
         await syncWhatsAppTemplates(resolvedLocationId).catch((error) => {
             console.warn("[WhatsApp Cloud] Embedded signup template sync failed:", error?.message || error);
         });
-
-        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
-            await settingsService.checkDocumentParity({
-                scopeType: "LOCATION",
-                scopeId: resolvedLocationId,
-                domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
-                legacyPayload: {
-                    ...integrationPayload,
-                    whatsappWebhookSecret: webhookSecret,
-                },
-                actorUserId: localUserId,
-            });
-        }
 
         console.log("🎉 WhatsApp Settings Updated Successfully!");
 

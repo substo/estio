@@ -2,9 +2,6 @@ import db from "@/lib/db";
 import { settingsService } from "@/lib/settings/service";
 import {
     SETTINGS_DOMAINS,
-    isSettingsDualWriteLegacyEnabled,
-    isSettingsParityCheckEnabled,
-    isSettingsReadFromNewEnabled,
 } from "@/lib/settings/constants";
 
 export type GoogleAutoSyncMode = "LINK_ONLY" | "LINK_OR_CREATE";
@@ -80,10 +77,6 @@ export function buildGoogleIntegrationSettings(
 }
 
 export async function getGoogleIntegrationSettingsForRead(user: GoogleIntegrationLegacyUser) {
-    if (!isSettingsReadFromNewEnabled()) {
-        return buildGoogleIntegrationSettings(user);
-    }
-
     const doc = await settingsService.getDocument<Partial<GoogleIntegrationSettings>>({
         scopeType: "USER",
         scopeId: user.id,
@@ -127,23 +120,11 @@ export async function updateGoogleIntegrationSettings(input: {
     });
 
     const legacyData = stripUndefined(input.legacyData || {});
-    if (isSettingsDualWriteLegacyEnabled() && Object.keys(legacyData).length > 0) {
+    if (Object.keys(legacyData).length > 0) {
         await db.user.update({
             where: { id: input.user.id },
             data: legacyData as Record<string, boolean | string | null>,
         });
     }
 
-    if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
-        await settingsService.checkDocumentParity({
-            scopeType: "USER",
-            scopeId: input.user.id,
-            domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-            legacyPayload: {
-                ...buildGoogleIntegrationSettings(input.user),
-                ...patch,
-            },
-            actorUserId: input.user.id,
-        });
-    }
 }

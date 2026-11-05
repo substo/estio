@@ -5,7 +5,6 @@ import { settingsService } from '@/lib/settings/service';
 import {
     SETTINGS_DOMAINS,
     SETTINGS_SECRET_KEYS,
-    isSettingsDualWriteLegacyEnabled,
 } from '@/lib/settings/constants';
 import 'isomorphic-fetch';
 
@@ -140,21 +139,13 @@ export async function handleMicrosoftCallback(code: string, userId: string, base
         });
     }
 
-    if (isSettingsDualWriteLegacyEnabled()) {
+    { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
         // Save to legacy columns for compatibility during migration window.
         await db.user.update({
             where: { id: userId },
             data: {
                 outlookAccessToken: tokens.access_token,
                 outlookRefreshToken: tokens.refresh_token,
-                outlookAuthMethod: 'oauth',
-                outlookSyncEnabled: true,
-            }
-        });
-    } else {
-        await db.user.update({
-            where: { id: userId },
-            data: {
                 outlookAuthMethod: 'oauth',
                 outlookSyncEnabled: true,
             }
@@ -238,7 +229,7 @@ export async function refreshMicrosoftToken(userId: string, refreshToken: string
         actorUserId: userId,
     });
 
-    if (isSettingsDualWriteLegacyEnabled()) {
+    { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
         await db.user.update({
             where: { id: userId },
             data: {

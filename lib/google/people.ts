@@ -7,7 +7,6 @@ import { settingsService } from '@/lib/settings/service';
 import {
     SETTINGS_DOMAINS,
     SETTINGS_SECRET_KEYS,
-    isSettingsDualWriteLegacyEnabled,
 } from '@/lib/settings/constants';
 import {
     getGoogleContactDirectoryIndexStatus,
@@ -427,7 +426,7 @@ export async function syncContactsFromGoogle(userId: string, locationId: string)
                 plaintext: nextSyncToken,
                 actorUserId: userId,
             });
-            if (isSettingsDualWriteLegacyEnabled()) {
+            { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
                 await db.user.update({
                     where: { id: userId },
                     data: { googleSyncToken: nextSyncToken }
@@ -450,7 +449,7 @@ export async function syncContactsFromGoogle(userId: string, locationId: string)
                 secretKey: SETTINGS_SECRET_KEYS.GOOGLE_SYNC_TOKEN,
                 actorUserId: userId,
             });
-            if (isSettingsDualWriteLegacyEnabled()) {
+            { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
                 await db.user.update({
                     where: { id: userId },
                     data: { googleSyncToken: null }

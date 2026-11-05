@@ -6,6 +6,7 @@ import { safeImageUrl, siteSlug, websiteSettings, type WebsiteSettings } from ".
 import { businessProfileSchema } from "@/lib/business-profile/schema";
 import { businessView, type BusinessDetailsPatch } from "@/lib/business-profile/view";
 import { overlayBusinessDetails } from "@/lib/business-profile/overlay";
+import { overlayWebsiteLayout } from "@/lib/website/settings";
 
 export type SiteDatabase = Pick<PrismaClient, "siteConfig" | "contentPage" | "blogPost" | "location" | "settingsDocument">;
 /** Business details (contact, colours, logos, description) are saved to the Business profile by the caller's saver. */
@@ -15,6 +16,13 @@ async function profileView(db: SiteDatabase, locationId: string, name: string | 
   const doc = await db.settingsDocument.findUnique({ where: { scopeType_scopeId_domain: { scopeType: "LOCATION", scopeId: locationId, domain: "location.business" } } });
   const parsed = doc ? businessProfileSchema.safeParse(doc.payload) : null;
   return parsed?.success ? businessView(parsed.data, { name }) : null;
+}
+/** Website layout (menus, theme layout, page content) is saved to the website settings document by the caller's saver. */
+export type LayoutSaver = (locationId: string, patch: Record<string, unknown>, actorUserId: string) => Promise<unknown>;
+/** The Location's website settings document, read through the same database handle; null when it has none yet. */
+async function websitePayload(db: SiteDatabase, locationId: string) {
+  const doc = await db.settingsDocument.findUnique({ where: { scopeType_scopeId_domain: { scopeType: "LOCATION", scopeId: locationId, domain: "location.public_site" } } });
+  return (doc?.payload as Record<string, any> | undefined) ?? null;
 }
 export type PublicWebsite = { slug: string; locationId: string; settings: WebsiteSettings; config?: ReturnType<typeof hostedWebsiteConfig>; homeBlocks?: any[] };
 export type WebsiteActor = { userId: string; locationId: string; role: string };
@@ -29,9 +37,10 @@ export async function getPublishedWebsite(db: SiteDatabase, slug: string): Promi
     select: { homeSections: true, heroContent: true, ...websiteDesignSelect, locationId: true, substoSiteSlug: true, substoSiteConfig: true, location: { select: { name: true } } },
   });
   if (!row) return null;
-  const config = hostedWebsiteConfig(overlayBusinessDetails(row, await profileView(db, row.locationId, row.location.name)), slug, row.location.name || "Our brand");
+  const site = overlayWebsiteLayout(row, await websitePayload(db, row.locationId));
+  const config = hostedWebsiteConfig(overlayBusinessDetails(site, await profileView(db, row.locationId, row.location.name)), slug, row.location.name || "Our brand");
   const settings = { title: config.name, description: config.footerBio, email: config.contactInfo.email, accent: config.theme.primaryColor, logoUrl: config.theme.logo.url };
-  return { slug, locationId: row.locationId, settings, config, homeBlocks: Array.isArray(row.homeSections) ? hostedBlocks(homeSectionBlocks(row, false), slug, config) : undefined };
+  return { slug, locationId: row.locationId, settings, config, homeBlocks: Array.isArray(site.homeSections) ? hostedBlocks(homeSectionBlocks(site, false), slug, config) : undefined };
 }
 export function publishedPageWhere(site: PublicWebsite) {
   return { locationId: site.locationId, published: true, location: publicSiteWhere(site.slug) };
@@ -76,7 +85,7 @@ export async function saveWebsiteSettings(db: SiteDatabase, actor: WebsiteActor,
 }
 
 /** Edition adapter for the shared theme form. Authority and allowed write fields are checked here. */
-export async function saveWebsiteDesign(db: SiteDatabase, actor: WebsiteActor, form: FormData, saveBusiness?: BusinessSaver) {
+export async function saveWebsiteDesign(db: SiteDatabase, actor: WebsiteActor, form: FormData, saveBusiness?: BusinessSaver, saveLayout?: LayoutSaver) {
   const location = actor.role === "ADMIN" ? await db.location.findFirst({ where: {
     id: actor.locationId, authRealm: "substo", users: { some: { id: actor.userId, authRealm: "substo" } },
     userRoles: { some: { userId: actor.userId, role: "ADMIN" } },
@@ -85,8 +94,8 @@ export async function saveWebsiteDesign(db: SiteDatabase, actor: WebsiteActor, f
   const text = (key: string, max = 2000) => String(form.get(key) || "").trim().slice(0, max);
   const color = (key: string, fallback: string) => /^#[\da-f]{6}$/i.test(text(key)) ? text(key) : fallback;
   const image = (key: string) => safeImageUrl(text(key)) || "";
-  const existing = await db.siteConfig.findUnique({ where: { locationId: actor.locationId }, select: { theme: true } });
-  // Layout stays on the website settings; brand colours, logos and contact details go to the Business profile.
+  const existing = overlayWebsiteLayout(await db.siteConfig.findUnique({ where: { locationId: actor.locationId }, select: { theme: true } }) ?? { theme: {} }, await websitePayload(db, actor.locationId));
+  // Layout goes to the website settings document; brand colours, logos and contact details to the Business profile.
   const data = {
     theme: {
       backgroundColor: color("backgroundColor", "#ffffff"), textColor: color("textColor", "#000000"),
@@ -95,7 +104,7 @@ export async function saveWebsiteDesign(db: SiteDatabase, actor: WebsiteActor, f
       menuStyle: (existing?.theme as any)?.menuStyle === "top" ? "top" : "side",
     },
   };
-  await db.siteConfig.upsert({ where: { locationId: actor.locationId }, create: { locationId: actor.locationId, ...data }, update: data });
+  await saveLayout?.(actor.locationId, data, actor.userId);
   const phones = [["Mobile", text("contactMobile")], ["Landline", text("contactLandline")]].filter(([, n]) => n).map(([label, number]) => ({ label, number }));
   const mapsLink = safeImageUrl(text("contactMapsLink")) || "";
   await saveBusiness?.(actor.locationId, {

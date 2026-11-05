@@ -8,12 +8,7 @@ import db from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { verifyUserHasAccessToLocation, verifyUserIsLocationAdmin } from "@/lib/auth/permissions";
-import { settingsService } from "@/lib/settings/service";
-import {
-    SETTINGS_DOMAINS,
-    isSettingsDualWriteLegacyEnabled,
-    isSettingsParityCheckEnabled,
-} from "@/lib/settings/constants";
+import { saveWebsiteLayout } from "@/lib/website/settings-service";
 import { getLocationContext } from "@/lib/auth/location-context";
 
 // Reserved slugs to prevent breaking the app
@@ -373,68 +368,8 @@ export async function updateHomeConfig(prevState: any, formData: FormData) {
     }
 
     try {
-        const existingDoc = await settingsService.getDocument<any>({
-            scopeType: "LOCATION",
-            scopeId: locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
-        });
-        const existingPayload = existingDoc?.payload || {};
-
-        const payload = {
-            ...existingPayload,
-            heroContent: heroContent as any,
-            homeSections: homeSections as any,
-        };
-
-        await settingsService.upsertDocument({
-            scopeType: "LOCATION",
-            scopeId: locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
-            payload,
-            actorUserId: context.localUserId,
-            schemaVersion: 1,
-        });
-
-        if (isSettingsDualWriteLegacyEnabled() || genericEdition) {
-            await db.siteConfig.upsert({
-                where: { locationId },
-                create: {
-                    locationId,
-                    heroContent: heroContent as any,
-                    homeSections: homeSections as any,
-                },
-                update: {
-                    heroContent: heroContent as any,
-                    homeSections: homeSections as any,
-                },
-            });
-        }
-
-        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
-            const legacySiteConfig = await db.siteConfig.findUnique({
-                where: { locationId },
-                select: {
-                    heroContent: true,
-                    homeSections: true,
-                    favoritesConfig: true,
-                    searchConfig: true,
-                    submissionsConfig: true,
-                },
-            });
-            await settingsService.checkDocumentParity({
-                scopeType: "LOCATION",
-                scopeId: locationId,
-                domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
-                legacyPayload: {
-                    heroContent: legacySiteConfig?.heroContent ?? null,
-                    homeSections: legacySiteConfig?.homeSections ?? [],
-                    favoritesConfig: legacySiteConfig?.favoritesConfig ?? null,
-                    searchConfig: legacySiteConfig?.searchConfig ?? null,
-                    submissionsConfig: legacySiteConfig?.submissionsConfig ?? null,
-                },
-                actorUserId: context.localUserId,
-            });
-        }
+        // Page content lives in the website document (no SiteConfig copy).
+        await saveWebsiteLayout(locationId, { heroContent: heroContent as any, homeSections: homeSections as any }, context.localUserId);
     } catch (e) {
         console.error("Failed to update home config", e);
         return { message: "Database update failed", success: false };
@@ -468,58 +403,8 @@ export async function updateFavoritesConfig(prevState: any, formData: FormData) 
     };
 
     try {
-        const existingDoc = await settingsService.getDocument<any>({
-            scopeType: "LOCATION",
-            scopeId: locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
-        });
-        const payload = {
-            ...(existingDoc?.payload || {}),
-            favoritesConfig,
-        };
-
-        await settingsService.upsertDocument({
-            scopeType: "LOCATION",
-            scopeId: locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
-            payload,
-            actorUserId: context.localUserId,
-            schemaVersion: 1,
-        });
-
-        if (isSettingsDualWriteLegacyEnabled()) {
-            await db.siteConfig.upsert({
-                where: { locationId },
-                create: { locationId, favoritesConfig },
-                update: { favoritesConfig },
-            });
-        }
-
-        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
-            const legacySiteConfig = await db.siteConfig.findUnique({
-                where: { locationId },
-                select: {
-                    heroContent: true,
-                    homeSections: true,
-                    favoritesConfig: true,
-                    searchConfig: true,
-                    submissionsConfig: true,
-                },
-            });
-            await settingsService.checkDocumentParity({
-                scopeType: "LOCATION",
-                scopeId: locationId,
-                domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
-                legacyPayload: {
-                    heroContent: legacySiteConfig?.heroContent ?? null,
-                    homeSections: legacySiteConfig?.homeSections ?? [],
-                    favoritesConfig: legacySiteConfig?.favoritesConfig ?? null,
-                    searchConfig: legacySiteConfig?.searchConfig ?? null,
-                    submissionsConfig: legacySiteConfig?.submissionsConfig ?? null,
-                },
-                actorUserId: context.localUserId,
-            });
-        }
+        // Page content lives in the website document (no SiteConfig copy).
+        await saveWebsiteLayout(locationId, { favoritesConfig }, context.localUserId);
 
         revalidatePath(`/admin/content/favorites`);
         return { success: true, message: "Favorites configuration saved" };
@@ -550,58 +435,8 @@ export async function updateSearchConfig(prevState: any, formData: FormData) {
     };
 
     try {
-        const existingDoc = await settingsService.getDocument<any>({
-            scopeType: "LOCATION",
-            scopeId: locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
-        });
-        const payload = {
-            ...(existingDoc?.payload || {}),
-            searchConfig,
-        };
-
-        await settingsService.upsertDocument({
-            scopeType: "LOCATION",
-            scopeId: locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
-            payload,
-            actorUserId: context.localUserId,
-            schemaVersion: 1,
-        });
-
-        if (isSettingsDualWriteLegacyEnabled()) {
-            await db.siteConfig.upsert({
-                where: { locationId },
-                create: { locationId, searchConfig },
-                update: { searchConfig },
-            });
-        }
-
-        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
-            const legacySiteConfig = await db.siteConfig.findUnique({
-                where: { locationId },
-                select: {
-                    heroContent: true,
-                    homeSections: true,
-                    favoritesConfig: true,
-                    searchConfig: true,
-                    submissionsConfig: true,
-                },
-            });
-            await settingsService.checkDocumentParity({
-                scopeType: "LOCATION",
-                scopeId: locationId,
-                domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
-                legacyPayload: {
-                    heroContent: legacySiteConfig?.heroContent ?? null,
-                    homeSections: legacySiteConfig?.homeSections ?? [],
-                    favoritesConfig: legacySiteConfig?.favoritesConfig ?? null,
-                    searchConfig: legacySiteConfig?.searchConfig ?? null,
-                    submissionsConfig: legacySiteConfig?.submissionsConfig ?? null,
-                },
-                actorUserId: context.localUserId,
-            });
-        }
+        // Page content lives in the website document (no SiteConfig copy).
+        await saveWebsiteLayout(locationId, { searchConfig }, context.localUserId);
 
         revalidatePath(`/admin/content/search`);
         return { success: true, message: "Search configuration saved" };
@@ -633,58 +468,8 @@ export async function updateSubmissionsConfig(prevState: any, formData: FormData
     };
 
     try {
-        const existingDoc = await settingsService.getDocument<any>({
-            scopeType: "LOCATION",
-            scopeId: locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
-        });
-        const payload = {
-            ...(existingDoc?.payload || {}),
-            submissionsConfig,
-        };
-
-        await settingsService.upsertDocument({
-            scopeType: "LOCATION",
-            scopeId: locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
-            payload,
-            actorUserId: context.localUserId,
-            schemaVersion: 1,
-        });
-
-        if (isSettingsDualWriteLegacyEnabled()) {
-            await db.siteConfig.upsert({
-                where: { locationId },
-                create: { locationId, submissionsConfig },
-                update: { submissionsConfig },
-            });
-        }
-
-        if (isSettingsDualWriteLegacyEnabled() && isSettingsParityCheckEnabled()) {
-            const legacySiteConfig = await db.siteConfig.findUnique({
-                where: { locationId },
-                select: {
-                    heroContent: true,
-                    homeSections: true,
-                    favoritesConfig: true,
-                    searchConfig: true,
-                    submissionsConfig: true,
-                },
-            });
-            await settingsService.checkDocumentParity({
-                scopeType: "LOCATION",
-                scopeId: locationId,
-                domain: SETTINGS_DOMAINS.LOCATION_CONTENT,
-                legacyPayload: {
-                    heroContent: legacySiteConfig?.heroContent ?? null,
-                    homeSections: legacySiteConfig?.homeSections ?? [],
-                    favoritesConfig: legacySiteConfig?.favoritesConfig ?? null,
-                    searchConfig: legacySiteConfig?.searchConfig ?? null,
-                    submissionsConfig: legacySiteConfig?.submissionsConfig ?? null,
-                },
-                actorUserId: context.localUserId,
-            });
-        }
+        // Page content lives in the website document (no SiteConfig copy).
+        await saveWebsiteLayout(locationId, { submissionsConfig }, context.localUserId);
 
         revalidatePath(`/admin/content/submissions`);
         return { success: true, message: "Submissions configuration saved" };

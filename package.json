@@ -15,7 +15,6 @@
         "start:device-tunnel-gateway": "tsx scripts/device-tunnel-gateway.ts",
         "ops:viewings:retention": "tsx scripts/cleanup-viewing-session-retention.ts",
         "lint": "next lint",
-        "settings:backfill": "tsx scripts/settings/backfill.ts",
         "settings:kms-preflight": "tsx scripts/settings/kms-preflight.ts",
         "settings:rotate-secrets": "tsx scripts/settings/rotate-secrets.ts",
         "settings:provision-location-chatgpt": "tsx scripts/settings/provision-location-chatgpt.ts",

@@ -25,8 +25,8 @@ test("location key resolution never falls through to the Estio global key", asyn
 
 test("no app or script code reads the retired plaintext SiteConfig.googleAiApiKey column", async () => {
     const { execFileSync } = await import("node:child_process");
-    // Only the column-retirement script and the historical settings backfill may name it; the public-site loader blanks it.
-    const allowed = new Set(["scripts/ai/move-plaintext-keys.ts", "scripts/settings/backfill.ts", "lib/public-data.ts"]);
+    // Only the column-retirement script and its plan may name it; the public-site loader blanks it.
+    const allowed = new Set(["scripts/ai/move-plaintext-keys.ts", "lib/ai/plaintext-key-move.ts", "lib/public-data.ts"]);
     const hits = execFileSync("git", ["grep", "-l", "googleAiApiKey", "--", "app", "lib", "scripts", "components"], { cwd: root, encoding: "utf8" })
         .split("\n").filter(Boolean).filter(file => !allowed.has(file) && !/\.test\.ts$/.test(file));
     for (const file of hits) {
