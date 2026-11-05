@@ -33,7 +33,7 @@ export async function revokeYoutubeToken(token: string, fetcher: typeof fetch = 
   try { await fetcher("https://oauth2.googleapis.com/revoke", { method: "POST", body: new URLSearchParams({ token }), redirect: "error", signal: AbortSignal.timeout(10_000) }); } catch { /* Local deletion must still succeed when Google is offline. */ }
 }
 export interface YoutubeAuth { accessToken?: string; apiKey?: string; }
-export interface YoutubeVideo { id: string; title: string; channelId: string; channelTitle: string; publishedAt: string; }
+export interface YoutubeVideo { id: string; title: string; channelId: string; channelTitle: string; publishedAt: string; description?: string; thumbnailUrl?: string; }
 export interface YoutubeChannel { id: string; title: string; }
 export function createYoutubeApi(auth: YoutubeAuth, fetcher: typeof fetch = fetch) {
   async function get(resource: string, params: Record<string, string>) {
@@ -52,7 +52,7 @@ export function createYoutubeApi(auth: YoutubeAuth, fetcher: typeof fetch = fetc
     if (!ids.length) return [];
     const body = await get("videos", { part: "snippet,status", id: ids.slice(0, 20).join(","), maxResults: "20" });
     return body.items.filter(v => v && ids.includes(v.id) && /^[A-Za-z0-9_-]{11}$/.test(v.id) && v.status?.privacyStatus === "public" && typeof v.snippet?.title === "string" && /^UC[A-Za-z0-9_-]{22}$/.test(v.snippet.channelId))
-      .map(v => ({ id: v.id, title: v.snippet.title, channelId: v.snippet.channelId, channelTitle: String(v.snippet.channelTitle ?? ""), publishedAt: String(v.snippet.publishedAt ?? "") }));
+      .map(v => ({ id: v.id, title: v.snippet.title, channelId: v.snippet.channelId, channelTitle: String(v.snippet.channelTitle ?? ""), publishedAt: String(v.snippet.publishedAt ?? ""), ...(typeof v.snippet.description === "string" ? { description: v.snippet.description.slice(0,20000) } : {}), ...(v.snippet.thumbnails ? { thumbnailUrl: String(v.snippet.thumbnails?.high?.url ?? v.snippet.thumbnails?.default?.url ?? "").slice(0,2048) } : {}) }));
   }
   return {
     async subscriptions(pageToken = "", channelId = "") {

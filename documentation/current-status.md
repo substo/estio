@@ -1,10 +1,32 @@
 # Current release and work
 
-Updated 2026-11-03. This is the task/status source of truth; [architecture and decisions](how-the-app-works.md) owns product rules. Historical checkpoints do not override this page.
+Updated 2026-11-05. This is the task/status source of truth; [architecture and decisions](how-the-app-works.md) owns product rules. Historical checkpoints do not override this page.
 
 ## Release
 
-Build `zSXjwCjdSkQWjl0bMBVP0`, blue/3001, deployed 2026-11-03 around 15:10 UTC through the owned migrate-only workflow. Source is base `6be4c78af9f08c1bd7d3a86dce7d35215d000623` plus the uncommitted Build changes; no commit or push was made. Build-input fingerprint: `a1fbf89d4d27717722440e6a4d8e80351abe7f16085c8b84944f5dbf910acc4c`. The isolated release checkout `/tmp/estio-build-release-20261103` excluded unrelated SIMRelay edits. The main release branch still points to the base; preserve its deployed working changes until committed/reconciled. October acceptance below is historical and does not prove current signed-in acceptance.
+Browse-first Library correction deployed from clean, pushed source `7593c2e008ee7d08b630c674b094fb4cf2574707` on `release/studio-library-20261105`, checkout `/tmp/estio-library-release-20261105`. Live build `4qEh7QykvJ0QPnDc9PLIx`, blue/3001, verified 2026-11-05 at 14:41 UTC after resuming from a quota interruption. The existing owned deploy log ends in successful completion; no duplicate deployment was run. `PRISMA_SCHEMA_SYNC_MODE=migrate-only` found no pending migrations. Health/version, Caddy validation, 20-second soak and required PM2 services passed; web, Studio, scrape and viewing relay online with zero restarts. Green completed its normal drain. No rollback. Existing runtime-drift hotfix skip and global build type-validation skip remain limitations.
+
+Correction includes only ten UI/policy files: compact browse-first header, accessible Add source dialog, hidden completed/no-op enrichment telemetry, focused tests and canonical UI principles linked from AGENTS.md. Import request logic, tenant fences, schema and processing policy are unchanged. The pinned Build memory decision was not duplicated.
+
+19 focused tests, strict UI TypeScript and diff validation passed before deployment; the owned production build passed. Live signed-in Substo populated browse: first cards at 216px in measured 1280×639 and 243px at 390×844; document widths 1280/390 respectively. No inline form or idle zero-result telemetry. Dialog keyboard opening, URL input focus, Tab/Shift+Tab containment, Escape and focus return passed on Substo; mobile dialog fits within viewport. Estio signed-in mobile empty view has no automatic form/dialog, document width 390px, and its empty-state action opens the labelled dialog with input focus. Temporary browser viewport was reset. No real import/provider/subscription call was submitted for this acceptance. OAuth and production paired-device summary execution remain unverified; this does not establish sustained companion processing.
+
+Source manifest SHA256 `db5ab4f8e9a7dd1570e2ea46ec30d21c9253f9ae9cb269fac2992754f2b0f0f7`. Private evidence: `/tmp/studio-library-correction-release-evidence`, `/tmp/studio-library-correction-deploy.log`, `/tmp/studio-library-correction-release-tests.log`, `/tmp/studio-library-correction-release-types.log`. Final root verification found no changed file hashes; index, status and HEAD remain identical to the predeploy snapshot. Phase-6 migration is absent. Integrate this same linear release branch (including its evidence commits) through the root owner's coordinated workflow before another root deployment; preserve unfinished work and reconcile overlapping documentation. Do not separately recommit the copied Library implementation.
+
+### Previous Library release
+
+Studio Library deployed 2026-11-05 at approximately 10:49 UTC from source commit `ae4204c12434fb5028cd02064cc06e0d0052c78f`, branch `release/studio-library-20261105`, checkout `/tmp/estio-library-release-20261105`. Build `5GYm7caXnqjTVofK9kTx7`, green/3002. Owned `PRISMA_SCHEMA_SYNC_MODE=migrate-only ./deploy-local-build.sh` exited 0. Only `20261105140000_studio_library_summary` applied; phase-6 schema/retirement migration and SIMRelay were excluded. Base `84765413` was verified as the live phase-5 source using build `787P0nnbWuoEsS5ab74wp` and successful `/tmp/deploy-phase5.log`.
+
+Public health/version, Caddy validation, 20-second soak and Studio readiness passed. Web, Studio, scrape and viewing relay were online with zero restarts; blue retained for normal 900-second drain. No rollback. Existing script skips unmanaged-runtime-drift preflight (hotfix); build skips global type validation and retains dependency/Browserslist warnings. The backup check found a clean committed checkout and performed no Git backup; no new database-backup claim is made.
+
+Isolated verification: 113 focused tests, disposable SQL assertions, focused strict TypeScript and production build passed. Prior combined dirty-root suite passed 134 tests and actual local Codex subscription generation passed; these do not establish production companion execution. Signed-in desktop Library renders on both apps; Substo cards have loaded thumbnails, platform/view controls and preserved research notes. Estio's Library is empty. Build now renders the external-review card in Now with exact ID anchor and expandable evidence; existing ledger updated revision 3 → 4. No duplicate implementation dispatched.
+
+Existing Mac companion pairing is preserved. No Node companion process or LaunchAgent was running; no unattended queue loop, login command or opt-in was started. Production paired-device summaries, connected YouTube OAuth and signed-in mobile acceptance remain unverified. See [Library](studio-library.md).
+
+Source manifest SHA256: `24493953039efced46e759b0807b88909362a8eaefbd172b7e95791edec547a1` (tracked source before this evidence-only documentation commit). Private manifests/index snapshot and deployment log: `/tmp/studio-library-release-evidence`, `/tmp/studio-library-isolated-deploy.log`. Root file hashes and index were unchanged at verification.
+
+### Shared-checkout integration
+
+The root checkout remains at `84765413` with its original index and all uncommitted work preserved. The Library release is a linear descendant, not a competing implementation. Before the next release, coordinate the root owner's integration of this release branch and its evidence-only follow-up; do not reimplement or separately commit the copied Library changes. Reconcile the overlapping documentation against this release record while preserving phase-6 edits. Do not deploy the dirty root until that integration is complete. Moving the root branch/index now would violate the requirement to preserve them exactly, so that integration remains with the owning implementation.
 
 ## Done
 

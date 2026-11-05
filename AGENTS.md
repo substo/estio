@@ -18,3 +18,7 @@ Read [architecture and decisions](documentation/how-the-app-works.md) and [curre
 ## Video editor
 
 - `video-editor/` is the native macOS video editor (Swift, SwiftPM) used by both apps. It is not part of the Next.js build or the server deploy. Follow `video-editor/AGENTS.md` when working there.
+
+## UI design
+
+Follow [UI design principles](documentation/ui-design-principles.md). The first viewport serves the page's primary task: collection screens put existing content and browsing controls first, with secondary creation disclosed through compact actions. This does not require every form to be a modal. Verify populated/empty/mobile and keyboard disclosure states; do not surface idle automation telemetry.

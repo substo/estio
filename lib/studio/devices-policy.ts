@@ -159,7 +159,7 @@ export function readDeviceCommand(operation: DeviceOperation, value: unknown): R
     valid(Number.isInteger(v.leaseSeconds) && Number(v.leaseSeconds) >= 10 && Number(v.leaseSeconds) <= 3600);
     out.leaseSeconds = v.leaseSeconds;
   }
-  if (operation === "claim") { valid(Number.isInteger(v.limit) && Number(v.limit) >= 1 && Number(v.limit) <= 50); return { ...out, limit: v.limit }; }
+  if (operation === "claim") { valid(Number.isInteger(v.limit) && Number(v.limit) >= 1 && Number(v.limit) <= 50); return { ...out, limit: v.limit, summaryReady: v.summaryReady === true }; }
   valid(typeof v.jobId === "string" && uuid.test(v.jobId) && typeof v.leaseToken === "string" && uuid.test(v.leaseToken));
   Object.assign(out, { jobId: v.jobId, leaseToken: v.leaseToken });
   if (operation === "complete") { out.result = readDeviceDiagnosticResult(v.result); }

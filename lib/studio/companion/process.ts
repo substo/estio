@@ -1,9 +1,20 @@
+import { StudioProviderRejectedError } from "../worker/handlers";
 import { spawn } from "node:child_process";
 
 export class CompanionProcessError extends Error {
   constructor(public readonly code: "cli_unavailable" | "cli_failed" | "cli_timeout" | "cli_cancelled" | "cli_output_limit") {
     super(code); this.name = "CompanionProcessError";
   }
+}
+/** Only native structured rejection metadata, after a nonzero process close. No model text matching. */
+export function completedRateLimit(stdout: string, exitCode: number | null): boolean {
+  if (exitCode === null || exitCode === 0) return false;
+  try {
+    const events = stdout.trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
+    return events.length > 0 && events.every(e => e && typeof e === "object") &&
+      !events.some(e => e.type === "turn.completed" || e.type === "item.completed" || e.type === "assistant") &&
+      events.some(e => e.type === "error" && e.error?.code === "rate_limit_exceeded");
+  } catch { return false; }
 }
 export interface ProcessRequest {
   command: string; args: string[]; cwd: string; input?: string; signal?: AbortSignal;
@@ -49,5 +60,5 @@ export const runNativeProcess: ProcessRunner = request => new Promise((resolve, 
   const cleanup = () => { clearTimeout(timer); clearTimeout(killTimer); request.signal?.removeEventListener("abort", abort); killGroup("SIGKILL"); };
   child.once("error", () => { cleanup(); reject(new CompanionProcessError("cli_unavailable")); });
   child.once("close", code => { cleanup(); if (failure) reject(failure);
-    else if (code !== 0) reject(new CompanionProcessError("cli_failed")); else resolve({ stdout, stderr }); });
+    else if (code !== 0) reject(completedRateLimit(stdout, code) ? new StudioProviderRejectedError("rate_limited", "Subscription rejected the request due to a rate limit.", true) : new CompanionProcessError("cli_failed")); else resolve({ stdout, stderr }); });
 });
