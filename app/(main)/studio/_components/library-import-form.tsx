@@ -1,13 +1,14 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useId, useRef, useState, type Ref } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LIBRARY_PLATFORMS, platformLabels } from "@/lib/studio/library-presentation";
 
-export function LibraryImportForm({ locationId }: { locationId: string }) {
+export function LibraryImportForm({ locationId, inputRef }: { locationId: string; inputRef?: Ref<HTMLInputElement> }) {
+  const inputId = useId();
   const router = useRouter();
   const [input, setInput] = useState("");
   const [platform, setPlatform] = useState("");
@@ -36,11 +37,11 @@ export function LibraryImportForm({ locationId }: { locationId: string }) {
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not connect. Try again with the same source."); }
     finally { setPending(false); }
   }
-  return <form onSubmit={submit} className="space-y-3 rounded-xl border bg-card p-4 md:p-5" aria-label="Add to library">
-    <label htmlFor="library-input" className="block text-sm font-medium">Add to your library</label>
-    <div className="flex flex-col gap-2 sm:flex-row">
-      <Input id="library-input" value={input} onChange={event => { setInput(event.target.value); setError(""); setSuccess(""); }} required maxLength={20000} disabled={pending} placeholder="Paste a video, post, channel URL or @handle" className="min-w-0 flex-1" />
-      {ambiguous ? <select aria-label="Handle platform" required value={platform} disabled={pending} onChange={event => setPlatform(event.target.value)} className="h-10 rounded-md border bg-background px-3 text-sm"><option value="">Choose platform</option>{LIBRARY_PLATFORMS.filter(item => item !== "other").map(item => <option key={item} value={item}>{platformLabels[item]}</option>)}</select> : null}
+  return <form onSubmit={submit} className="min-w-0 space-y-3" aria-label="Add to library">
+    <label htmlFor={inputId} className="block text-sm font-medium">Source URL or @handle</label>
+    <div className="flex min-w-0 flex-col gap-3">
+      <Input ref={inputRef} id={inputId} value={input} onChange={event => { setInput(event.target.value); setError(""); setSuccess(""); }} required maxLength={20000} disabled={pending} placeholder="Paste a video, post, channel URL or @handle" className="min-w-0 flex-1" />
+      {ambiguous ? <select aria-label="Handle platform" required value={platform} disabled={pending} onChange={event => setPlatform(event.target.value)} className="h-10 w-full min-w-0 rounded-md border bg-background px-3 text-sm"><option value="">Choose platform</option>{LIBRARY_PLATFORMS.filter(item => item !== "other").map(item => <option key={item} value={item}>{platformLabels[item]}</option>)}</select> : null}
       <Button type="submit" disabled={pending || !input.trim()}>{pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}{pending ? "Adding…" : "Add source"}</Button>
     </div>
     <p className="text-xs text-muted-foreground">Save videos and posts for inspiration, or add a channel to your watchlist.</p>

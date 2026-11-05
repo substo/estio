@@ -86,6 +86,6 @@ export function LibraryAutoEnrich({ locationId, records }: { locationId: string;
     });
     return () => controller.abort();
   }, [locationId, router]);
-  if (!progress) return null;
-  return <p role="status" className="text-xs text-muted-foreground">{progress.done ? `${progress.saved} saved ${progress.saved === 1 ? "source" : "sources"} updated.` : `Updating saved source details… ${progress.completed} checked`}</p>;
+  if (!progress || progress.done) return null;
+  return <p role="status" className="text-xs text-muted-foreground">{`Updating saved source details… ${progress.completed} checked`}</p>;
 }

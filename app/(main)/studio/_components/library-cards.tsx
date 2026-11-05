@@ -42,7 +42,7 @@ export function LibraryCards({ records, channels = false }: { records: LibraryCa
   const landscape = records.filter(record => !libraryPresentation(record).portrait);
   const portrait = records.filter(record => libraryPresentation(record).portrait);
   return <div className="space-y-8">
-    {landscape.length ? <section aria-label="Videos and posts" className="space-y-3"><h2 className="text-sm font-medium text-muted-foreground">Videos & posts</h2><div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">{landscape.map(record => <LibraryCard key={record.id} record={record} />)}</div></section> : null}
+    {landscape.length ? <section aria-label="Videos and posts" className="space-y-3"><div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">{landscape.map(record => <LibraryCard key={record.id} record={record} />)}</div></section> : null}
     {portrait.length ? <section aria-label="Short videos and reels" className="space-y-3"><h2 className="text-sm font-medium text-muted-foreground">Shorts & reels</h2><div className="grid items-start gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">{portrait.map(record => <LibraryCard key={record.id} record={record} />)}</div></section> : null}
   </div>;
 }
