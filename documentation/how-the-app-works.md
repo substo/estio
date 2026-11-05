@@ -37,6 +37,10 @@ Decided 2026-10-27. In the database, code and docs, each thing has exactly one n
 9. **Everything live while developing.** Both apps are public for testing, and unfinished parts are allowed. Every committed change gets deployed, so the live app shows what works. Retain the verified cutover backups and frozen source; use the unified database recovery procedure before risky changes.
 10. **All paid usage counts.** Every paid API call, AI or not, from CRM or Studio, is recorded against the Location. The header shows one daily and monthly total per Location. Shared CRM and Studio recorded totals are live. This is not provider invoice reconciliation; missing historical usage is not reconstructed.
 
+## Business profile and onboarding
+
+All business details (contact, offer, market, brand voice and look, competitors, real estate) live in one Business profile, the settings document `location.business`; name, domain and time zone stay on Location. See [business data](business-data.md). New businesses fill it through the AI onboarding, which researches the business with the Location's own AI and asks the owner to confirm: [onboarding](onboarding.md).
+
 ## Data and hosting
 
 - **CRM database** (Prisma/Postgres): accounts, Locations, teams, and all CRM data for both apps.

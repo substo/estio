@@ -472,6 +472,8 @@ export function buildCodexCliCommand(args: {
     outputSchemaFile?: string | null;
     accessToken?: string | null;
     codexHome: string;
+    /** Live web search, off unless a caller (onboarding research) asks for it. */
+    webSearch?: boolean;
 }): CodexCliCommand {
     const command = String(process.env.CODEX_CLI_PATH || "codex").trim() || "codex";
     const model = stripChatGptSubscriptionModelPrefix(args.model) || CHATGPT_SUBSCRIPTION_DEFAULT_MODEL;
@@ -486,6 +488,7 @@ export function buildCodexCliCommand(args: {
     const commandArgs = [
         "--ask-for-approval",
         "never",
+        ...(args.webSearch ? ["-c", 'web_search="live"'] : []),
         "exec",
         "--ephemeral",
         "--ignore-rules",
@@ -527,6 +530,7 @@ export async function callChatGptSubscriptionWithMetadata(
         markUnhealthy?: () => Promise<void>;
         runner?: CodexCliRunner;
         jsonSchema?: Record<string, unknown> | null;
+        webSearch?: boolean;
     } = {}
 ): Promise<ChatGptSubscriptionResult> {
     if (!isChatGptSubscriptionTransportEnabled()) {
@@ -569,6 +573,7 @@ export async function callChatGptSubscriptionWithMetadata(
             outputSchemaFile,
             accessToken,
             codexHome,
+            webSearch: options.webSearch === true,
         });
 
         try {

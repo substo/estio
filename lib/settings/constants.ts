@@ -1,5 +1,6 @@
 export const SETTINGS_DOMAINS = {
     LOCATION_BUSINESS: "location.business",
+    LOCATION_ONBOARDING: "location.onboarding",
     LOCATION_PUBLIC_SITE: "location.public_site",
     LOCATION_AI: "location.ai",
     LOCATION_INTEGRATIONS: "location.integrations",

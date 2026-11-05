@@ -6,6 +6,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { studioReadinessRequired, STUDIO_WORKER_HANDLERS } from "../lib/studio/readiness";
 import { readStudioRelease, runtimeStudioReadiness } from "../lib/studio/readiness-runtime";
 import { studioJobHandlers } from "../lib/studio/worker/handlers";
+import { createOnboardingHandlers } from "../lib/onboarding/research";
 import { createStudioR2Store, readStudioR2Config } from "../lib/studio/media-r2";
 import { createTranscribeUploadHandler, productionTranscribeDeps } from "../lib/studio/worker/transcribe-upload";
 import { createDbStudioQueue } from "../lib/studio/worker/queue";
@@ -50,6 +51,8 @@ async function main() {
   handlers["studio.script_brief"] = createScriptBriefHandler(productionScriptBriefDeps(db));
   handlers["studio.knowledge_extract"] = createKnowledgeExtractionHandler(productionKnowledgeExtractionDeps(db));
   handlers["studio.youtube_discovery"] = createYoutubeDiscoveryHandler(productionYoutubeDiscoveryDeps(db));
+  // Business onboarding research (both apps) runs on the same durable queue.
+  Object.assign(handlers, createOnboardingHandlers(db));
   const r2 = readStudioR2Config();
   // Startup preflight has already required the dedicated R2/media dependencies.
   if (r2) {
