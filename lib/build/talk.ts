@@ -43,7 +43,7 @@ export async function talkOwner(input: z.infer<typeof talkOwnerCommand>, actor: 
       const chosen = input.profileId && control ? profilesSpec.parse(control.profiles).find(p => p.id === input.profileId && p.enabled && p.taskTypes.includes("review")) : undefined;
       requireCondition(!input.profileId || chosen, "That model is no longer allowed");
       const profile = chosen ?? (control && talkProfile(control.profiles, control.worker));
-      requireCondition(profile, "Allow at least one model first (settings)");
+      requireCondition(control && profile, "Allow at least one model first (settings)");
       const head = (control.worker as { head?: string }).head;
       requireCondition(/^[a-f0-9]{40}$/.test(head ?? ""), "The Mac worker has not reported the code yet; wake the Mac and try again");
       return db.buildTalk.create({ data: { title: input.text.split("\n")[0].slice(0, 80), state: "queued", base: head, profile: json(profile), messages: json([message]) } });

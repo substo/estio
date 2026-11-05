@@ -98,7 +98,7 @@ async function main() {
         const pending = feedback.filter(f => f.decision === "redo" && !f.sentAt);
         const feedbackText = pending.length ? `Owner feedback on your previous result (address it within the same approved scope; never commit, push or deploy; leave changes uncommitted; finish with actual checks, the next step, and a "Decisions:" section listing choices you made that the owner didn't specify):\n${pending.map(f => `- ${f.note}`).join("\n")}` : "";
         let delivery: DeliveryCheckpoint;
-        let result: CliOutcome & { needsAnswer?: boolean };
+        let result: CliOutcome & { needsAnswer?: boolean; thread?: { threadId: string; branch: string } };
         if (executor === "t3") {
           // Retries get a fresh thread/branch; the prior worktree stays preserved for the owner.
           stopped = false; // A started thread is a live writer until T3 reports it idle.

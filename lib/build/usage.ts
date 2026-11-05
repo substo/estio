@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
+import { promisify } from "node:util";
 import type { Usage } from "./contract";
 
 /**
@@ -29,8 +30,8 @@ function helperEnvironment() {
   return { PATH: [`${home}/.local/bin`, "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", process.env.PATH ?? ""].join(":"), HOME: home, USER: process.env.USER ?? "",
     TMPDIR: process.env.TMPDIR ?? "/tmp", CODEXBAR_CONFIG: path.join(home, "Library/Application Support/QuotaCell/backend.json"), CODEXBAR_DISABLE_KEYCHAIN_ACCESS: "1", NO_COLOR: "1" };
 }
-const run = (helper: string, args: string[]) => new Promise<string>((resolve, reject) =>
-  execFile(helper, args, { env: helperEnvironment(), timeout: 60_000, maxBuffer: 1024 * 1024 }, (error, stdout) => error ? reject(error) : resolve(stdout)));
+const run = async (helper: string, args: string[]) =>
+  (await promisify(execFile)(helper, args, { env: helperEnvironment() as unknown as NodeJS.ProcessEnv, timeout: 60_000, maxBuffer: 1024 * 1024, encoding: "utf8" })).stdout;
 export async function readUsage(helper: string) {
   const usage: Usage = {};
   for (const [provider, bucket] of Object.entries(usageProviders)) {

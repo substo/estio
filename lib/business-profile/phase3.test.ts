@@ -21,10 +21,10 @@ test('with a profile, business fields come only from it and layout stays as stor
     assert.deepEqual(out.socialLinks, [{ platform: 'facebook', url: 'https://facebook.com/x' }]);
     assert.equal(out.footerBio, 'We sell homes');
     assert.equal(out.brandVoice, 'Be warm');
-    assert.equal(out.theme.primaryColor, '#9d0917'); assert.equal(out.primaryColor, '#9d0917'); assert.equal(out.theme.secondaryColor, null);
+    assert.equal(out.theme.primaryColor, '#9d0917'); assert.equal(out.primaryColor, '#9d0917'); assert.equal((out.theme as Record<string, unknown>).secondaryColor, null);
     // Logo text lines and other layout are untouched; an unknown primary logo does not resurface the stale one.
     assert.equal(out.theme.logo.textTop, 'DOWN TOWN'); assert.equal(out.theme.logo.textBottom, 'CYPRUS'); assert.equal(out.theme.backgroundColor, '#ffffff');
-    assert.equal(out.theme.logo.url, ''); assert.equal(out.theme.logo.iconUrl, 'https://cdn/icon.png');
+    assert.equal(out.theme.logo.url, ''); assert.equal((out.theme.logo as Record<string, unknown>).iconUrl, 'https://cdn/icon.png');
     assert.deepEqual(out.navLinks, row.navLinks);
     assert.equal(out.substoSiteConfig.title, 'Site'); assert.equal(out.substoSiteConfig.description, 'We sell homes'); assert.equal(out.substoSiteConfig.logoUrl, '');
 });

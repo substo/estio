@@ -75,7 +75,7 @@ export function profileFromLegacy(data: LegacyBusinessData): CopyResult {
         const value = str(market[key]); if (value) put('audienceMarket', key, fact(key.endsWith('Code') ? value.toUpperCase() : value), `market ${key}`);
     }
     const languages = (Array.isArray(market.supportedLanguages) ? market.supportedLanguages : []).map(str).filter(Boolean);
-    if (languages.length) put('audienceMarket', 'supportedLanguages', fact(languages.map(l => fact(l))), 'languages');
+    if (languages.length) put('audienceMarket', 'supportedLanguages', fact(languages.map((l: string) => fact(l))), 'languages');
     const areas = (Array.isArray(market.serviceAreas) ? market.serviceAreas : []).flatMap((a: Record<string, unknown>) => { const id = str(a.id), label = str(a.label); if (!id || !label) return [];
         return [{ id: fact(id), label: fact(label), aliases: fact((Array.isArray(a.aliases) ? a.aliases : []).map(str).filter(Boolean).map(x => fact(x))),
             ...(str(a.parentId) ? { parentId: fact(str(a.parentId)) } : {}), ...(str(a.kind) ? { kind: fact(str(a.kind)) } : {}) }]; });
@@ -92,7 +92,7 @@ export function profileFromLegacy(data: LegacyBusinessData): CopyResult {
         if (str(p.audience)) put('audienceMarket', 'audience', fact(str(p.audience)), 'audience');
         if (str(p.tone)) put('brandVoice', 'tone', fact(str(p.tone)), 'tone');
         for (const [from, to] of [['useWords', 'preferredWords'], ['avoidWords', 'avoidedWords'], ['pillars', 'contentPillars']] as const) {
-            const list = (Array.isArray(p[from]) ? p[from] : []).map(str).filter(Boolean);
+            const list = (Array.isArray(p[from]) ? p[from] : []).map(str).filter((w): w is string => Boolean(w));
             if (list.length) put('brandVoice', to, fact(list.map((w: string) => fact(w))), to);
         }
         const answers = Object.fromEntries(Object.entries(brand.answers ?? {}).flatMap(([k, v]) => str(v) ? [[k, fact(str(v))]] : []));

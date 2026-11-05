@@ -1286,7 +1286,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                 thinkingBudget,
             });
             const cacheModel = await getDraftModelWithCachedContext({
-                apiKey,
+                apiKey: apiKey ?? "",
                 modelName: candidateModel,
                 generationConfig,
                 cacheKey: [
