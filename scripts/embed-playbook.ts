@@ -1,3 +1,4 @@
+import { findAnyLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 
 import db from "@/lib/db";
 import { generateEmbedding } from "@/lib/ai/embeddings";
@@ -13,16 +14,14 @@ async function main() {
     // 0. Resolve API Key
     let apiKey = process.env.GOOGLE_API_KEY;
     if (!apiKey) {
-        console.log("⚠️ GOOGLE_API_KEY not found in env. Checking SiteConfig...");
-        const siteConfig = await db.siteConfig.findFirst({
-            where: { googleAiApiKey: { not: null } }
-        });
-        if (siteConfig?.googleAiApiKey) {
-            apiKey = siteConfig.googleAiApiKey.trim();
-            console.log(`✅ Using API Key from SiteConfig (Location: ${siteConfig.locationId})`);
+        console.log("⚠️ GOOGLE_API_KEY not found in env. Checking encrypted Location settings...");
+        const found = await findAnyLocationGoogleAiApiKey();
+        if (found) {
+            apiKey = found.apiKey;
+            console.log(`✅ Using API Key from encrypted Location settings (Location: ${found.locationId})`);
             console.log(`🔑 Key Prefix: ${apiKey.substring(0, 10)}...`);
         } else {
-            console.error("❌ No API Key found in env or SiteConfig. Exiting.");
+            console.error("❌ No API Key found in env or encrypted Location settings. Exiting.");
             process.exit(1);
         }
     }

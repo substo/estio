@@ -155,12 +155,6 @@ export async function runAiProviderCatalogRefresh(): Promise<AiProviderCatalogRe
         select: { scopeId: true },
         distinct: ["scopeId"],
     });
-    const googleSiteConfigScopes = await db.siteConfig.findMany({
-        where: {
-            googleAiApiKey: { not: null },
-        },
-        select: { locationId: true },
-    });
     const openAiSecrets = await db.settingsSecret.findMany({
         where: {
             scopeType: "LOCATION",
@@ -182,7 +176,6 @@ export async function runAiProviderCatalogRefresh(): Promise<AiProviderCatalogRe
 
     const googleLocationIds = Array.from(new Set([
         ...googleSecretScopes.map((secret) => secret.scopeId),
-        ...googleSiteConfigScopes.map((config) => config.locationId),
     ].filter(Boolean)));
 
     const stats: AiProviderCatalogRefreshStats = {

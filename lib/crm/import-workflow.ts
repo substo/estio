@@ -1,3 +1,4 @@
+import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 
 import db from "@/lib/db";
 import { scrapeNotionProperty, resolveGoogleMapsLocation, scrapeAddressFromMaps, convertMapUrl, getShortMapLink } from "@/lib/crm/notion-scraper";
@@ -143,7 +144,7 @@ export async function* runImportWorkflow(notionUrl: string, aiModel: string = DE
         let notionData;
         try {
             // Fetch API Key for AI services
-            const apiKey = context.siteConfig?.googleAiApiKey;
+            const apiKey = await resolveLocationGoogleAiApiKey(context.access.locationId);
 
             if (notionUrl.includes("notion.site")) {
                 notionData = await scrapeNotionProperty(notionUrl, aiModel, context.access.locationId);
@@ -210,7 +211,7 @@ export async function* runImportWorkflow(notionUrl: string, aiModel: string = DE
                 // Must fetch API key again or pass it down?
                 // We fetched user and config in ai-property-extraction but we are in workflow now.
                 // Re-fetch config for API Key.
-                const apiKey = context.siteConfig?.googleAiApiKey;
+                const apiKey = await resolveLocationGoogleAiApiKey(context.access.locationId);
 
                 if (apiKey) {
                     const { scrapeAddressFromMaps } = await import("@/lib/crm/notion-scraper");

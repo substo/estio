@@ -148,3 +148,27 @@ None of these write business fields to SiteConfig or to the `location.public_sit
 - The plaintext `googleAiApiKey` column and AI model columns (phase 4).
 - Layout, search defaults, feature flags, viewing/transcript settings and Substo slug/publish; their consolidation into one website document is phase 5.
 - Flag-driven dual writes and parity checks (`SETTINGS_*`) also remain until phase 5/6.
+
+## Phase 4: AI connections and keys (2026-11-05)
+
+- **One answer to "which AI can this Location use?"**: `getAiConnections(locationId)` in `lib/ai/connections.ts` (server-only; callers pass an already-authorised Location). It returns `{ available, sources[] }` with no secret values. Sources:
+  - the Location Gemini and OpenAI keys (encrypted `SettingsSecret`, LOCATION scope, domain `location.ai`);
+  - the Location's ChatGPT subscription (`location.integrations` document enabled and connected, plus its encrypted Codex token or auth cache);
+  - each paired, non-revoked Mac companion whose Codex or Claude CLI is signed in with a subscription (ChatGPT / claude.ai, not an API key). Ready only when that Mac is online and not paused.
+
+  `available` means at least one source is ready; it will gate the onboarding chat. The rules are the pure `assembleAiConnections` in the client-safe `lib/ai/connections-model.ts`.
+- **Studio uses the Location's OpenAI key.** The Studio AI settings page reads, saves and removes the same encrypted key the CRM uses (`lib/studio/ai-settings.ts`). Text runs and transcription load it through an injected `loadKey` (`loadLocationOpenAiKey` in `lib/studio/worker/text-run.ts`, imported lazily). Studio budgets stay in `studio.studio_location_ai_settings`. Migration `20261105100000_studio_ai_key_from_settings` makes `studio.studio_reserve_ai_spend` check that key instead of `studio_location_ai_credentials`, which is no longer read or written (0 rows in production; dropped in phase 6).
+- **The plaintext Gemini key is retired.** Every reader now uses `resolveLocationGoogleAiApiKey`, with no column fallback:
+  - feed analysis;
+  - property import scraping;
+  - the AI orchestrator;
+  - the provider catalog refresh;
+  - the Gemini and AI settings pages;
+  - maintenance scripts, via `findAnyLocationGoogleAiApiKey`.
+
+  Removing a Gemini connection no longer touches the column. `scripts/ai/move-plaintext-keys.ts` copies any plaintext key into the encrypted secret when none exists, then clears the column. Production dry run, 2026-11-05:
+  ```
+  DRY RUN: 1 Location(s) with a plaintext Gemini key
+  - cmingx6b10008rdycg7hwesyn: already has secret; would clear column
+  ```
+  Still naming the column, until phase 6 drops it: the public-site loader (which blanks it), the historical `scripts/settings/backfill.ts`, and the retirement script. A contract test enforces this list.

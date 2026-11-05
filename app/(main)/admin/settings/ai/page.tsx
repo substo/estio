@@ -173,7 +173,7 @@ export default async function AiSettingsPage() {
             initialData?.googleAiModelExtraction || initialData?.googleAiModel
         ),
     };
-    const geminiConnected = hasGoogleAiApiKey || Boolean(siteConfig?.googleAiApiKey);
+    const geminiConnected = hasGoogleAiApiKey;
     const hasLocationChatGptCredential = hasLocationAccessToken || hasLocationAuthCache;
     const locationChatGptConnected = locationIntegrations?.payload?.chatGptSubscription?.enabled === true
         && locationIntegrations?.payload?.chatGptSubscription?.health === "connected"
@@ -216,7 +216,7 @@ export default async function AiSettingsPage() {
                     initialData={initialData}
                     locationId={locationId}
                     settingsVersion={settingsVersion}
-                    hasGoogleAiApiKey={hasGoogleAiApiKey || Boolean(siteConfig?.googleAiApiKey)}
+                    hasGoogleAiApiKey={hasGoogleAiApiKey}
                     connectionSummary={{
                         primaryProvider,
                         fallbackProvider,

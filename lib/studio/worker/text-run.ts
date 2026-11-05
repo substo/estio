@@ -1,14 +1,14 @@
 import { Prisma } from "@prisma/client";
 import type { StudioDb } from "../db";
 import { authorizeScheduledTextJob } from "../schedule-authority";
-import { aiCredentialContext, decryptStudioSecret } from "../secrets";
 import type { IdeaSnapshot } from "../idea-review-policy";
 import { StudioJobError, StudioProviderRejectedError, type StudioJobHandler } from "./handlers";
 import type { TextProviderResult, TextRunSpec } from "./openai-text";
 export interface TextRunDeps<T, S = IdeaSnapshot> {
   db: StudioDb;
   authorizeScheduledJob?(locationId: string, jobId: string): Promise<boolean>;
-  decryptKey(locationId: string, credential: { ciphertext: string; iv: string; auth_tag: string; key_id: string }): string;
+  /** The Location's OpenAI key from encrypted settings (shared with the CRM); null when none is saved. */
+  loadKey(locationId: string): Promise<string | null>;
   generate(snapshot: S, key: string, signal: AbortSignal): Promise<TextProviderResult<T>>;
 }
 export function createTextRunHandler<T, S = IdeaSnapshot>(spec: TextRunSpec<T, S>, deps: TextRunDeps<T, S>): StudioJobHandler {
@@ -20,11 +20,10 @@ export function createTextRunHandler<T, S = IdeaSnapshot>(spec: TextRunSpec<T, S
     if (review.model !== spec.model || review.prompt_version !== spec.promptVersion || review.workflow !== spec.workflow) throw new StudioJobError("text_run_version_unsupported", "This review requires a matching worker version before processing.", false);
     if (review.result) return { reviewId, alreadyReviewed: true };
     if (deps.authorizeScheduledJob && !await deps.authorizeScheduledJob(job.location_id, job.id)) throw new StudioJobError("schedule_authority_revoked", "The recurring schedule author no longer has workspace access. Reauthorize the schedule before retrying.", false);
-    const [credential] = await deps.db.rows<{ ciphertext: string; iv: string; auth_tag: string; key_id: string }>(Prisma.sql`select ciphertext,iv,auth_tag,key_id from studio.studio_location_ai_credentials t where location_id = ${job.location_id} and provider = ${'openai'} limit 1`);
-    if (!credential) throw new StudioJobError("openai_key_missing", "Add an OpenAI key in AI settings before retrying.", false);
-    let key: string;
-    try { key = deps.decryptKey(job.location_id, credential); }
+    let key: string | null;
+    try { key = await deps.loadKey(job.location_id); }
     catch { throw new StudioJobError("openai_key_unreadable", "Save the workspace OpenAI key again before retrying.", false); }
+    if (!key) throw new StudioJobError("openai_key_missing", "Add an OpenAI key in AI settings before retrying.", false);
     const fence = { p_location_id: job.location_id, p_review_id: reviewId, p_job_id: job.id, p_worker_id: context.workerId, p_lease_token: job.lease_token };
     const rpc = <T>(name: string, body: Record<string, unknown>) => deps.db.call<T>(name, body);
     const active = () => { if (context.signal.aborted) throw new StudioJobError("worker_lease_lost", "The worker lost its lease.", true); };
@@ -54,5 +53,10 @@ export function createTextRunHandler<T, S = IdeaSnapshot>(spec: TextRunSpec<T, S
 }
 const uncertain = () => new StudioJobError("ai_outcome_uncertain", "An AI call may have been billed without a usable saved result. The budget hold is retained; an AI manager can review this from Jobs. Automatic resend is blocked.", false);
 export function productionTextRunDeps<T, S = IdeaSnapshot>(db: TextRunDeps<T, S>["db"], generate: TextRunDeps<T, S>["generate"]): TextRunDeps<T, S> {
-  return { db, generate, authorizeScheduledJob: (locationId, jobId) => authorizeScheduledTextJob(db, locationId, jobId), decryptKey: (locationId, c) => decryptStudioSecret({ ciphertext: c.ciphertext, iv: c.iv, authTag: c.auth_tag, keyId: c.key_id }, aiCredentialContext(locationId, "openai")) };
+  return { db, generate, authorizeScheduledJob: (locationId, jobId) => authorizeScheduledTextJob(db, locationId, jobId), loadKey: loadLocationOpenAiKey };
+}
+/** Production key loading, imported lazily so worker unit tests never load the settings service. */
+export async function loadLocationOpenAiKey(locationId: string) {
+  const { resolveLocationOpenAiApiKey } = await import("../../ai/location-openai-key");
+  return resolveLocationOpenAiApiKey(locationId);
 }

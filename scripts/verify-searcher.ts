@@ -1,3 +1,4 @@
+import { findAnyLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 
 import db from "@/lib/db";
 import { hybridPropertySearch } from "@/lib/ai/search/hybrid-search";
@@ -9,12 +10,10 @@ async function main() {
 
     // 0. Resolve API Key and set to ENV for downstream tools
     if (!process.env.GOOGLE_API_KEY) {
-        const siteConfig = await db.siteConfig.findFirst({
-            where: { googleAiApiKey: { not: null } }
-        });
-        if (siteConfig?.googleAiApiKey) {
-            process.env.GOOGLE_API_KEY = siteConfig.googleAiApiKey;
-            console.log("✅ Loaded API Key from SiteConfig into process.env");
+        const found = await findAnyLocationGoogleAiApiKey();
+        if (found) {
+            process.env.GOOGLE_API_KEY = found.apiKey;
+            console.log("✅ Loaded API Key from encrypted Location settings into process.env");
         } else {
             console.warn("⚠️ No API Key found. Search will likely fail.");
         }

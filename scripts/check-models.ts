@@ -1,3 +1,4 @@
+import { findAnyLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 
 import db from "@/lib/db";
 
@@ -9,12 +10,10 @@ async function main() {
     let source = "env";
 
     if (!apiKey) {
-        const siteConfig = await db.siteConfig.findFirst({
-            where: { googleAiApiKey: { not: null } }
-        });
-        if (siteConfig?.googleAiApiKey) {
-            apiKey = siteConfig.googleAiApiKey.trim();
-            source = `SiteConfig (Location: ${siteConfig.locationId})`;
+        const found = await findAnyLocationGoogleAiApiKey();
+        if (found) {
+            apiKey = found.apiKey;
+            source = `encrypted Location settings (Location: ${found.locationId})`;
         } else {
             console.error("❌ No API Key found.");
             process.exit(1);

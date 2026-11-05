@@ -63,7 +63,6 @@ function fixture(options: { outcome?: string; lostCommit?: boolean; failCommit?:
   const deps: IdeaReviewDeps={
     db: fixtureDb(async <T>(p: string,init?: RequestInit) => {
       if(p.startsWith("studio_idea_reviews")) return [{snapshot,result:saved?result:null,model:IDEA_REVIEW_MODEL,prompt_version:"studio.idea-review.v2",workflow:"idea_review"}] as T;
-      if(p.startsWith("studio_location_ai_credentials")) return (options.missingKey?[]:[{}]) as T;
       const body=JSON.parse(String(init?.body)); calls.push({name:p,body});
       if(p.endsWith("studio_begin_text_run_attempt")) { if(state) return {outcome:state} as T; state="uncertain"; return {outcome:"started",attempt_id:"a"} as T; }
       if(p.endsWith("studio_finish_text_run_attempt")) {
@@ -73,7 +72,7 @@ function fixture(options: { outcome?: string; lostCommit?: boolean; failCommit?:
       if(p.endsWith("studio_close_ai_attempt") && body.p_rejected) state=undefined;
       return true as T;
     }),
-    decryptKey: () => "sk-synthetic",
+    loadKey: async () => options.missingKey ? null : "sk-synthetic",
     generate: async () => { providerCalls++; if(options.abort) controller.abort(); if(options.providerError) throw options.providerError;
       return { result,providerResponseId:"resp_synthetic",inputTokens:1001,outputTokens:100,costMicros:151,rateVersion:"gpt-6-luna-standard-2026-10-23" }; },
   };

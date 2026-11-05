@@ -1,3 +1,4 @@
+import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { auth } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 
@@ -44,7 +45,7 @@ export async function POST(request: Request) {
                 location: {
                     select: {
                         siteConfig: {
-                            select: { googleAiApiKey: true, googleAiModel: true },
+                            select: { googleAiModel: true },
                         },
                     },
                 },
@@ -55,7 +56,7 @@ export async function POST(request: Request) {
             return NextResponse.json({ success: false, error: 'Company not found or access denied.' }, { status: 404 });
         }
 
-        const apiKey = company.location.siteConfig?.googleAiApiKey;
+        const apiKey = await resolveLocationGoogleAiApiKey(location.id);
         const modelName = company.location.siteConfig?.googleAiModel || undefined;
         if (!apiKey) {
             return NextResponse.json({ success: false, error: 'Google AI API key is not configured.' }, { status: 400 });

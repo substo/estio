@@ -1,3 +1,4 @@
+import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { getBusinessViewIfAny } from "@/lib/business-profile/service";
 import db from "@/lib/db";
 import { classifyIntent } from "./classifier";
@@ -146,7 +147,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
                 intent: resolvedIntent,
                 sentiment,
                 memories,
-                apiKey: contactData?.location?.siteConfig?.googleAiApiKey ?? undefined,
+                apiKey: (contactData?.locationId ? await resolveLocationGoogleAiApiKey(contactData.locationId) : null) ?? undefined,
                 agentName,
                 businessName: contactData?.location?.name ?? undefined,
                 websiteDomain: contactData?.location?.siteConfig?.domain ?? contactData?.location?.domain ?? undefined,

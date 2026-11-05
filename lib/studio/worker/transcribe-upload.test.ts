@@ -46,12 +46,11 @@ function fakeDeps(options: { duration?: number; reserve?: string | null; credent
       }
       if (p.startsWith("studio_uploads")) return [{ object_key: `${ws}/uploads/${uploadId}/original`, status: "uploaded" }] as T;
       if (p.startsWith("studio_transcripts")) return (options.transcript ? [{ duration_seconds: 1 }] : []) as T;
-      if (p.startsWith("studio_location_ai_credentials")) return (options.credential === false ? [] : [{ ciphertext: "c", iv: "i", auth_tag: "t", key_id: "v1" }]) as T;
       if (p.startsWith("studio_transcript_chunks")) return [...chunks.keys()].sort().map(i => ({ chunk_index: i, duration_seconds: chunks.get(i) })) as T;
       throw new Error(`unexpected ${p}`);
     }),
     presignWorkerRead: async key => `https://r2.example/${key}?sig=SECRET`,
-    decryptKey: () => "sk-test-key",
+    loadKey: async () => options.credential === false ? null : "sk-test-key",
     probe: async () => ({ durationSeconds: options.duration ?? 1500, hasAudio: true }),
     extractChunks: async (_url, dir) => Array.from({ length: Math.ceil((options.duration ?? 1500) / CHUNK_SECONDS) }, (_, i) => path.join(dir, `chunk-${String(i).padStart(5, "0")}.ogg`)),
     transcribe: async file => {

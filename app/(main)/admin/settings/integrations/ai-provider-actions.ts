@@ -78,7 +78,6 @@ async function mutateProvider(provider: "gemini" | "openai", formData: FormData)
 
         if (operation === "remove") {
             await settingsService.clearSecret({ scopeType: "LOCATION", scopeId: locationId, domain: SETTINGS_DOMAINS.LOCATION_AI, secretKey, actorUserId });
-            if (provider === "gemini") await db.siteConfig.updateMany({ where: { locationId }, data: { googleAiApiKey: null } });
             await recordProviderStatus({ locationId, actorUserId, provider, operation, health: "disconnected" });
             revalidatePath(`/admin/settings/integrations/${provider === "gemini" ? "gemini" : "openai-api"}`);
             revalidatePath("/admin/settings/ai");

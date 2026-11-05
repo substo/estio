@@ -3,7 +3,7 @@ import type { StudioDb } from "../db";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { aiCredentialContext, decryptStudioSecret } from "../secrets";
+import { loadLocationOpenAiKey } from "./text-run";
 import { extractAudioChunks, probeMedia } from "./ffmpeg";
 import { StudioJobError, StudioProviderRejectedError, type StudioJobHandler } from "./handlers";
 import { TRANSCRIBE_MODEL, transcribeChunk, type TranscribedChunk } from "./openai-transcribe";
@@ -14,7 +14,8 @@ const MAX_DURATION_SECONDS = 6 * 3600;
 export interface TranscribeDeps {
   db: StudioDb;
   presignWorkerRead(key: string): Promise<string>;
-  decryptKey(locationId: string, credential: { ciphertext: string; iv: string; auth_tag: string; key_id: string }): string;
+  /** The Location's OpenAI key from encrypted settings; null when none is saved. */
+  loadKey(locationId: string): Promise<string | null>;
   probe(url: string, signal: AbortSignal): Promise<{ durationSeconds: number; hasAudio: boolean }>;
   extractChunks(url: string, directory: string, chunkSeconds: number, signal: AbortSignal): Promise<string[]>;
   transcribe(filePath: string, apiKey: string, signal: AbortSignal): Promise<TranscribedChunk>;
@@ -43,11 +44,11 @@ export function createTranscribeUploadHandler(deps: TranscribeDeps): StudioJobHa
     const existing = await deps.db.rows<{ duration_seconds: number }>(Prisma.sql`select duration_seconds from studio.studio_transcripts t where location_id = ${locationId} and upload_id = ${uploadId}::uuid limit 1`);
     if (existing.length) return { uploadId, alreadyTranscribed: true };
 
-    const [credential] = await deps.db.rows<{ ciphertext: string; iv: string; auth_tag: string; key_id: string }>(Prisma.sql`select ciphertext,iv,auth_tag,key_id from studio.studio_location_ai_credentials t where location_id = ${locationId} and provider = ${'openai'} limit 1`);
-    if (!credential) throw new StudioJobError("openai_key_missing", "Add an OpenAI key in AI settings, then retry this job.", false);
-    let apiKey: string;
-    try { apiKey = deps.decryptKey(locationId, credential); }
+    let loaded: string | null;
+    try { loaded = await deps.loadKey(locationId); }
     catch { throw new StudioJobError("openai_key_unreadable", "The saved OpenAI key could not be read. Save it again in AI settings, then retry.", false); }
+    if (!loaded) throw new StudioJobError("openai_key_missing", "Add an OpenAI key in AI settings, then retry this job.", false);
+    const apiKey: string = loaded;
 
     const url = await deps.presignWorkerRead(upload.object_key);
     const media = await deps.probe(url, context.signal);
@@ -117,5 +118,5 @@ function uncertainOutcome() {
 /** Production wiring: service REST, private R2 reads, ffmpeg, and OpenAI. */
 export function productionTranscribeDeps(input: { db: TranscribeDeps["db"]; presignWorkerRead: TranscribeDeps["presignWorkerRead"] }): TranscribeDeps {
   return { ...input, probe: probeMedia, extractChunks: extractAudioChunks, transcribe: (file, key, signal) => transcribeChunk(file, key, signal),
-    decryptKey: (locationId, c) => decryptStudioSecret({ ciphertext: c.ciphertext, iv: c.iv, authTag: c.auth_tag, keyId: c.key_id }, aiCredentialContext(locationId, "openai")) };
+    loadKey: loadLocationOpenAiKey };
 }
