@@ -18,7 +18,7 @@ type Worker = { daily?: { enabled: boolean; profileId: string; lastRunDate?: str
 type Data = { control: { paused: boolean; revision: number; profiles: Profile[]; worker: Worker } | null; nodes: Node[]; edges: { fromId: string; toId: string; kind: string }[]; jobs: Job[]; talks?: Talk[] };
 type Send = (command: unknown) => Promise<boolean>;
 type Merge = { state: "queued" | "merging" | "resolving" | "merged" | "failed"; at: string; sha?: string; reason?: string; local?: string; branch?: string };
-type Checkpoint = { merge?: Merge; evidence?: { ok?: boolean; files?: string[] }; reason?: string; nextStep?: string; result?: { text?: string; needsAnswer?: boolean; decisions?: string | null }; review?: { path: string; change: "added" | "modified" | "deleted"; size: number; truncated?: boolean }[]; t3?: { threadId?: string; branch?: string }; feedback?: { at: string; decision: string; note: string; sentAt?: string }[]; auto?: { wouldApprove: boolean; reasons: string[] }; proposalsCreated?: number };
+type Checkpoint = { external?: { threadId: string; status: string; note: string; at: string; evidence: string[] }; merge?: Merge; evidence?: { ok?: boolean; files?: string[] }; reason?: string; nextStep?: string; result?: { text?: string; needsAnswer?: boolean; decisions?: string | null }; review?: { path: string; change: "added" | "modified" | "deleted"; size: number; truncated?: boolean }[]; t3?: { threadId?: string; branch?: string }; feedback?: { at: string; decision: string; note: string; sentAt?: string }[]; auto?: { wouldApprove: boolean; reasons: string[] }; proposalsCreated?: number };
 type CatalogModel = { provider: string; model: string; name: string };
 type Tier = "off" | "routine" | "hard";
 
@@ -251,6 +251,7 @@ function Watching({ data, busy, send }: { data: Data; busy: boolean; send: Send 
 }
 
 function stateWord(j: Job) {
+  if (j.state.startsWith("external-")) return `External · ${j.state.slice(9)}`;
   return ({ proposed: "suggested", approved: "queued", working: "running", stopping: "stopping", review: "ready for you", done: "done", failed: "failed", revoked: "dropped" } as Record<string, string>)[j.state] ?? "stuck";
 }
 /** Next · Now · Done. Cards say where in the app, how hard, which model, and where the work is. */
@@ -259,8 +260,8 @@ function Progress({ data, busy, send }: { data: Data; busy: boolean; send: Send 
   const screenName = (j: Job) => { const n = data.nodes.find(n => j.spec.nodeIds.includes(n.id) && n.spec.kind === "page"); return n ? `${n.spec.section} › ${n.spec.name}` : j.spec.scope[0]; };
   const columns: [string, Job[]][] = [
     ["Next", data.jobs.filter(j => ["proposed", "approved"].includes(j.state))],
-    ["Now", data.jobs.filter(j => ["working", "stopping", "review"].includes(j.state) || ["queued", "merging", "resolving"].includes(cp(j).merge?.state ?? ""))],
-    ["Done", data.jobs.filter(j => j.state === "done" && !["queued", "merging", "resolving"].includes(cp(j).merge?.state ?? "")).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))],
+    ["Now", data.jobs.filter(j => ["working", "stopping", "review", "external-working", "external-blocked", "external-review", "external-failed"].includes(j.state) || ["queued", "merging", "resolving"].includes(cp(j).merge?.state ?? ""))],
+    ["Done", data.jobs.filter(j => ["done", "external-done"].includes(j.state) && !["queued", "merging", "resolving"].includes(cp(j).merge?.state ?? "")).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))],
   ];
   return <section className="space-y-2">
     <h2 className={label}>Progress</h2>
@@ -268,7 +269,7 @@ function Progress({ data, busy, send }: { data: Data; busy: boolean; send: Send 
       <p className="text-xs font-semibold text-muted-foreground">{name} · {jobs.length}</p>
       {!jobs.length && <p className="text-xs text-muted-foreground">{name === "Next" ? "Start something in Talk." : name === "Now" ? "Nothing running." : "Nothing finished yet."}</p>}
       {jobs.slice(0, name === "Done" ? 12 : 20).map(j => { const c = cp(j), m = model(j, data);
-        return <button key={j.id} onClick={() => setOpen(open === j.id ? null : j.id)} className="block w-full rounded-md bg-muted/60 px-2.5 py-2 text-left text-sm hover:bg-muted">
+        return <button id={j.id} key={j.id} onClick={() => setOpen(open === j.id ? null : j.id)} className="block w-full rounded-md bg-muted/60 px-2.5 py-2 text-left text-sm hover:bg-muted">
           <span className="font-medium">{j.spec.title}</span>
           <span className="block text-xs text-muted-foreground">{screenName(j)} · {j.spec.taskType === "implementation" ? level(j) : "Review"}{m ? ` · ${m}` : ""} · {stateWord(j)} {ago(j.updatedAt)}</span>
           {c.merge && <span className={`block text-xs ${c.merge.state === "failed" ? "text-red-600" : c.merge.state === "merged" ? "text-emerald-700 dark:text-emerald-400" : "text-amber-600"}`}>{mergeWords(c.merge)}</span>}
@@ -276,6 +277,7 @@ function Progress({ data, busy, send }: { data: Data; busy: boolean; send: Send 
           {open === j.id && <span className="mt-1.5 block space-y-1 text-xs">
             <span className="block">{j.spec.outcome}</span>
             {c.t3?.branch && <span className="block">Work is on branch {c.t3.branch}{j.state === "done" && c.merge?.state !== "merged" ? ", not merged" : ""} · T3 thread &quot;Build: {j.spec.title}&quot;</span>}
+            {c.external && <span className="block">Externally executing T3 thread {c.external.threadId} · reported {ago(c.external.at)}. Tracking only; merge and deploy require separate approval.{c.external.evidence.map((e, i) => <span className="block" key={i}>{e}</span>)}</span>}
             {c.merge?.local && <span className="block text-muted-foreground">{c.merge.local}</span>}
             {c.nextStep && <span className="block text-muted-foreground">{c.nextStep}</span>}
             {c.feedback?.map((f, i) => <span key={i} className="block">{f.decision === "redo" ? "You asked" : "You noted"}: {f.note}</span>)}

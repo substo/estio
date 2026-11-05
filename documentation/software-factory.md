@@ -149,3 +149,11 @@ External references and what we take from them. **Live in Build → The app › 
 - 2026-11-04: No file-count limit on tasks: scope lists files or folders and the fence enforces it; size only affects difficulty and autopilot. Plans contain independent tasks only; dependent steps are planned after a merge.
 - 2026-11-04: Results show the agent's own decisions ("check before merging") and every changed file, readable on the page. Agreed architecture decisions are kept as pinned product memory.
 
+
+## Externally executing T3 work
+
+Owner-authorized work already running in T3 can be recorded without dispatching another implementation. `lib/build/external.ts` writes the existing BuildJob ledger under `external-t3:<thread UUID>`, with immutable scope, revision-checked updates and bounded status/evidence history. External states never enter the worker claim/lease lifecycle, auto-approval or merge flow. Progress displays these as reported external work; reports are not independent verification or release evidence. Stale reports retain their timestamp rather than pretending a live heartbeat.
+
+An operator posts JSON to `/api/build/external`, authenticated with the existing private worker bearer credential. `node --env-file=.env.build-worker.local --import tsx scripts/build-external.ts < command.json` is the client. For registration before the endpoint is deployed, an operator with existing database authority can use `node --env-file=.env.prod --import tsx scripts/build-external.ts --database < command.json`. Never copy credentials into commands or reports. Neither path queues work or authorizes merge/deploy.
+
+Registration requires `threadId`, `spec` (the existing jobSpec), `status` and `note`. Updates require `threadId`, the last returned `revision`, `status`, `note`, and optionally `evidence` (required for `review` or `done`); omit `spec`. Status is working / blocked / review / done / failed. The returned ID and dashboard fragment are stable. External done means the executor reports completion, not owner acceptance, merge or deployment.

@@ -14,7 +14,6 @@ export function applyDesiredConfig(desired: { version: number; value?: unknown }
   const unsupported: Record<string, string> = {};
   if (config.resources.launchAtLogin) unsupported["resources.launchAtLogin"] = unsupportedReasons.launchAtLogin;
   if (config.features.transcription) unsupported["features.transcription"] = unsupportedReasons.localWorkflow;
-  if (config.features.text) unsupported["features.text"] = unsupportedReasons.localWorkflow;
   return { config, ack: { version: desired.version, status: "applied", ...(Object.keys(unsupported).length ? { unsupported } : {}) } };
 }
 /** Tracks server device state, the applied config and the acknowledgement still to be sent. */

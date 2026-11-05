@@ -1,45 +1,36 @@
 import { studioRouteParams } from "@/lib/studio/route-context";
 import Link from "next/link";
-import { randomUUID } from "node:crypto";
 import { notFound } from "next/navigation";
 import { listStudioLibrary } from "@/lib/studio/library";
-import { safeStudioSourceUrl } from "@/lib/studio/library-policy";
-import { LibraryRecordForm } from "../../_components/library-record-form";
+import { LIBRARY_PLATFORMS, libraryHref, platformLabels } from "@/lib/studio/library-presentation";
+import { LibraryImportForm } from "../../_components/library-import-form";
+import { LibraryAutoEnrich } from "../../_components/library-auto-enrich";
+import { LibraryCards } from "../../_components/library-cards";
 
 export const dynamic = "force-dynamic";
 
 export default async function StudioLibraryPage({ params, searchParams }: {
-  params: Promise<{  }>; searchParams: Promise<{ page?: string }>;
+  params: Promise<{}>; searchParams: Promise<{ page?: string; view?: string; platform?: string }>;
 }) {
   const { locationId } = await studioRouteParams(params);
   const query = await searchParams;
-  const result = await listStudioLibrary(locationId, Number(query.page || 0));
+  const view = query.view === "channels" ? "channels" : "sources";
+  const platform = LIBRARY_PLATFORMS.find(item => item === query.platform) || "";
+  const result = await listStudioLibrary(locationId, Number(query.page || 0), { kind: view === "channels" ? "channel" : "reference", platform: platform || undefined });
   if (!result) notFound();
-  const root = `/studio`;
-  return (
-    <main className="mx-auto min-w-0 w-full max-w-6xl space-y-8 p-6 md:p-10">
-      <header className="space-y-2">
-        <nav className="flex flex-wrap gap-4 text-sm"><Link href={root} className="text-muted-foreground hover:underline">{result.access.locationName}</Link><Link href={`${root}/content`} className="text-muted-foreground hover:underline">Content pipeline</Link></nav>
-        <h1 className="text-3xl font-semibold tracking-tight">Research library</h1>
-        <p className="text-muted-foreground">Keep sources, channel references, citations, and research notes together for this location.</p>
-      </header>
-      <section className="grid gap-4 sm:grid-cols-2" aria-label="Library records">
-        {result.records.map((record) => {
-          const url = safeStudioSourceUrl(record.source_url);
-          return <article key={record.id} className="min-w-0 space-y-3 rounded-xl border bg-card p-5">
-            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground"><span>{record.kind === "channel" ? "Channel" : "Source"}</span><span>{record.approved ? "Approved" : "Needs review"}</span>{record.archived ? <span>Archived</span> : null}</div>
-            <h2 className="font-medium"><Link href={`${root}/library/${record.id}`} className="hover:underline">{record.title}</Link></h2>
-            {record.summary ? <p className="line-clamp-3 whitespace-pre-wrap text-sm text-muted-foreground">{record.summary}</p> : null}
-            {url ? <a href={url} target="_blank" rel="noopener noreferrer" className="block truncate text-sm text-primary hover:underline">{url}</a> : null}
-          </article>;
-        })}
-        {!result.records.length ? <p className="text-sm text-muted-foreground">No sources saved on this page. Add a source below.</p> : null}
-      </section>
-      <nav className="flex gap-5 text-sm" aria-label="Library pages">
-        {result.page > 0 ? <Link href={`${root}/library?page=${result.page - 1}`}>Previous page</Link> : null}
-        {result.hasNext ? <Link href={`${root}/library?page=${result.page + 1}`}>Next page</Link> : null}
-      </nav>
-      <section className="max-w-3xl space-y-4"><h2 className="text-xl font-medium">Add a source or channel</h2><LibraryRecordForm locationId={locationId} recordId={randomUUID()} version={0} /></section>
-    </main>
-  );
+  return <main className="mx-auto w-full min-w-0 max-w-6xl space-y-6 p-4 md:p-10">
+    <header className="space-y-2">
+      <nav className="flex flex-wrap gap-4 text-sm"><Link href="/studio" className="text-muted-foreground hover:underline">{result.access.locationName}</Link><Link href="/studio/content" className="text-muted-foreground hover:underline">Content pipeline</Link></nav>
+      <h1 className="text-3xl font-semibold tracking-tight">Research library</h1>
+      <p className="text-sm text-muted-foreground">Save what inspires you. Keep your sources and creators close.</p>
+    </header>
+    <LibraryImportForm locationId={locationId} />
+    <LibraryAutoEnrich key={`${locationId}:${view}:${platform}:${result.page}`} locationId={locationId} records={result.records} />
+    <div className="space-y-4">
+      <nav aria-label="Library views" className="flex gap-6 border-b">{[{ value: "sources", label: "Videos & posts" }, { value: "channels", label: "Watched channels" }].map(tab => <Link key={tab.value} href={libraryHref(tab.value, platform)} aria-current={view === tab.value ? "page" : undefined} className={`border-b-2 px-1 pb-3 text-sm font-medium ${view === tab.value ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{tab.label}</Link>)}</nav>
+      <nav aria-label="Filter by source platform" className="flex flex-wrap gap-2">{["", ...LIBRARY_PLATFORMS].map(item => <Link key={item} href={libraryHref(view, item)} aria-current={platform === item ? "page" : undefined} className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${platform === item ? "border-primary bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted"}`}>{item ? platformLabels[item as keyof typeof platformLabels] : "All platforms"}</Link>)}</nav>
+    </div>
+    {result.records.length ? <LibraryCards records={result.records} channels={view === "channels"} /> : <section className="rounded-xl border border-dashed px-6 py-14 text-center"><h2 className="font-medium">{view === "channels" ? "No watched channels yet" : "No saved sources yet"}</h2><p className="mt-2 text-sm text-muted-foreground">{platform ? "Try another platform, or add a matching source above." : view === "channels" ? "Paste a channel URL or @handle above to start your watchlist." : "Paste a video or post URL above to start your collection."}</p></section>}
+    <nav className="flex justify-between gap-5 text-sm" aria-label="Library pages">{result.page > 0 ? <Link className="rounded-md border px-4 py-2 hover:bg-muted" href={libraryHref(view, platform, result.page - 1)}>Previous page</Link> : <span />}{result.hasNext ? <Link className="rounded-md border px-4 py-2 hover:bg-muted" href={libraryHref(view, platform, result.page + 1)}>Next page</Link> : null}</nav>
+  </main>;
 }

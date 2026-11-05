@@ -14,6 +14,10 @@ import { executeProviderCommand } from "../lib/studio/companion/commands";
 import { runStudioJob, runStudioWorker } from "../lib/studio/worker/runner";
 import type { StudioQueue } from "../lib/studio/worker/queue";
 
+import path from "node:path";
+import { readUsage } from "../lib/build/usage";
+import { createLibrarySummaryHandler } from "../lib/studio/companion/library-summary";
+
 const version = "studio-companion-2";
 const rediscoverMs = 10 * 60_000;
 const usage = "Usage: npm run start:studio-companion -- pair --origin <https origin> [--name 'My Mac'] | start [--once] | readiness";
@@ -61,7 +65,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const instanceId = randomUUID();
     const workerId = `mac:${config.deviceId}:${process.pid}`;
     const settings = new DeviceSettings();
-    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, handlers: ["studio.diagnostic"], ...providers, ...discovery });
+    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, handlers: ["studio.diagnostic", "studio.library_summary"], ...providers, ...discovery });
 
     // Provider login/logout commands arrive with heartbeats; one at a time per provider.
     const handled = new Set<string>(); const active = new Map<LocalProvider, Promise<void>>();
@@ -78,7 +82,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
         .finally(() => active.delete(cmd.provider));
       active.set(cmd.provider, task);
     };
-    const inner = createDeviceStudioQueue(credentials, { capabilities, configAck: () => settings.pendingAck,
+    const inner = createDeviceStudioQueue(credentials, { capabilities, summaryReady: () => settings.config.features.text && localGate({ state: settings.state, config: settings.config, power: discovery.hardware.power, freeDiskGb: discovery.hardware.freeDiskGb }).processing, configAck: () => settings.pendingAck,
       onHeartbeat: (state, sentAck) => {
         if (settings.update(state, sentAck)) { log({ event: "config_applied", version: settings.appliedVersion, status: settings.pendingAck?.status }); pulse(); }
         if (state && !once) for (const cmd of state.commands) runCommand(cmd);
@@ -96,7 +100,11 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
         return gate.diagnostics ? inner.claim(id, limit, leaseSeconds) : [];
       } };
     const diagnostic = createCompanionDiagnostic(provider => adapters[provider]);
-    const handlers = { "studio.diagnostic": (job: Parameters<typeof diagnostic>[0], context: Parameters<typeof diagnostic>[1]) =>
+    let quotaAt = 0; let quota: Awaited<ReturnType<typeof readUsage>> = {};
+    const summary = createLibrarySummaryHandler({ adapter: p => adapters[p],
+      enabled: () => settings.config.features.text && localGate({ state: settings.state, config: settings.config, power: discovery.hardware.power, freeDiskGb: discovery.hardware.freeDiskGb }).processing,
+      usage: async () => { if (Date.now() - quotaAt >= 300_000) { quota = await readUsage(path.join(os.homedir(), "Applications/QuotaCell.app/Contents/Helpers/CodexBarCLI")); quotaAt = Date.now(); } return quota; } });
+    const handlers = { "studio.library_summary": summary, "studio.diagnostic": (job: Parameters<typeof diagnostic>[0], context: Parameters<typeof diagnostic>[1]) =>
       diagnostic(job, { ...context, signal: AbortSignal.any([context.signal, controller.signal]) }) };
     const report = { instanceId, handlers: Object.keys(handlers) };
     if (once) {
