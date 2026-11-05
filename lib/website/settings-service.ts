@@ -1,4 +1,3 @@
-import "server-only";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import { overlayWebsiteLayout, websiteLayoutOnly } from "./settings";
