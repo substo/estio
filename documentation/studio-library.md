@@ -1,6 +1,6 @@
 # Studio Library
 
-Release candidate (2026-11-05), isolated from unfinished phase 6. Shared by Estio and Substo under the canonical active Location and account authority. The owner explicitly authorized the isolated release and migrate-only production deployment on 2026-11-05.
+Deployed 2026-11-05, isolated from unfinished phase 6. Shared by Estio and Substo under the canonical active Location and account authority. The owner explicitly authorized the isolated release and migrate-only production deployment on 2026-11-05.
 
 ## Behavior
 
@@ -34,3 +34,9 @@ Implementation belongs to T3 thread `73b15758-ef2d-45c2-9055-69d72ce849f6`. The 
 Base `84765413` (phase 5), verified against live build `787P0nnbWuoEsS5ab74wp` and `/tmp/deploy-phase5.log`. Release checkout `/tmp/estio-library-release-20261105`, branch `release/studio-library-20261105`. Only the 40 Library-owned files were transferred. Prisma schema is unchanged; only migration `20261105140000_studio_library_summary` is added. Root index and tracked/untracked file hashes captured privately in `/tmp/studio-library-release-evidence`. No phase-6 fields or retirement migration are included.
 
 Isolated verification: 113 focused tests passed; disposable SQL assertions passed. Existing companion pairing exists but no running Node companion or LaunchAgent was found; no queue loop, pairing, login or opt-in was started. Preview opens to sign-in; signed-in mobile and connected OAuth acceptance remain open.
+
+## Production release evidence
+
+Source `ae4204c12434fb5028cd02064cc06e0d0052c78f`, build `5GYm7caXnqjTVofK9kTx7`, green/3002. Owned migrate-only workflow exited 0; additive Library migration applied, Caddy validation/20-second soak passed, no rollback. Health/version and required PM2 services passed. Signed-in desktop Library rendered on Estio and Substo with original-platform thumbnails loaded and research notes preserved; subscription waiting status is visible. Build renders the external-review card in Now with exact anchor; ledger revision 4 records deployment. Earlier pending-approval statements above describe historical local checks, not current release authority.
+
+No whole-project type-clean, signed-in mobile, connected OAuth or production paired-device generation claim. Existing Node companion pairing remains preserved but no running process/LaunchAgent was found; safe activation requires controlled queue/login-command review and existing text opt-in/subscription readiness. Source is available in the isolated release checkout; no new pairing or opt-in was enabled. Root integration instructions and private manifest/log paths are in current status.
