@@ -41,6 +41,8 @@ async function push(input: MergeInput, cwd: string, sha: string) {
 /** Brings the owner's checkout forward when it is on the target and can fast-forward cleanly; otherwise says so. */
 export async function updateCheckout(input: MergeInput) {
   try {
+    // Never move a shared dirty checkout underneath another implementation.
+    if (await git(input.checkout, "status", "--porcelain")) return "Shared checkout preserved; canonical release is on the remote. Use its clean integration worktree.";
     if (await git(input.checkout, "symbolic-ref", "-q", "--short", "HEAD") !== input.target) return `Your Mac checkout is on another branch; ${input.target} on GitHub has the merge`;
     await git(input.checkout, "merge", "--ff-only", "--quiet", `refs/remotes/${input.remote ?? "origin"}/${input.target}`);
     return "Your Mac checkout is up to date";

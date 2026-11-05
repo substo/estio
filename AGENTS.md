@@ -22,3 +22,7 @@ Read [architecture and decisions](documentation/how-the-app-works.md) and [curre
 ## UI design
 
 Follow [UI design principles](documentation/ui-design-principles.md). The first viewport serves the page's primary task: collection screens put existing content and browsing controls first, with secondary creation disclosed through compact actions. This does not require every form to be a modal. Verify populated/empty/mobile and keyboard disclosure states; do not surface idle automation telemetry.
+
+## Release integration
+
+Follow [one canonical release](documentation/release-workflow.md). Task worktrees merge into `release/studio-go-live`; deploy only its clean, committed, freshly fetched tip through the owned migrate-only script. Never deploy a sibling feature or dirty root. Preserve both parent changes and migrations. The server lease, deployed revision ancestry, immutable-input checks and release manifest are mandatory; do not bypass or delete locks. The shared root is a working branch; the dedicated canonical checkout owns deployments.

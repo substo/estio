@@ -5,7 +5,7 @@ description: Prepare, run, verify, and report an Estio production deployment thr
 
 # Deploy Estio
 
-Deploy the current Estio working state through the repository-owned blue/green workflow. Caddy owns TLS and reverse proxying; Cloudflare provides DNS and edge proxying; the application runs on the self-managed Hetzner server. Never introduce Vercel deployment or cron assumptions.
+Deploy the clean committed canonical Estio release through the repository-owned blue/green workflow. Caddy owns TLS and reverse proxying; Cloudflare provides DNS and edge proxying; the application runs on the self-managed Hetzner server. Never introduce Vercel deployment or cron assumptions.
 
 ## Establish the release state
 
@@ -13,7 +13,7 @@ Before any production mutation:
 
 1. Read `AGENTS.md` and inspect `deploy-local-build.sh` if it changed since the skill was last used.
 2. Report the current branch, commit, upstream relationship, and `git status --short`.
-3. Treat the working tree as deployable input: the script uploads the local tree, so uncommitted changes can reach production. Identify every relevant modified or untracked file. Do not silently deploy unrelated changes.
+3. Follow [release workflow](../../../documentation/release-workflow.md). Require `release/studio-go-live` equal to the freshly fetched remote tip, containing the production manifest revision. All tracked inputs must be committed; untracked/ignored uploaded inputs are refused. Task worktrees merge first. Never deploy a sibling branch or dirty root.
 4. Confirm `Caddyfile` and `.env.prod` exist without printing secrets. Check that required local dependencies are available.
 5. Run targeted tests appropriate to the changed area. The deployment script performs the production build itself; avoid a redundant full build unless the risk or recent failure justifies it.
 
@@ -35,7 +35,7 @@ Immediately before running the deployment, show:
 - the exact deployment command;
 - expected production effects, including backup, upload, PM2 process changes, Caddy switch, and background-service restarts or checks.
 
-Obtain explicit approval for this production mutation. A request to inspect, build, prepare, or diagnose is not deployment approval.
+Require explicit approval for this production mutation; approval already granted in the session persists and must not be requested again. A request to inspect, build, prepare, or diagnose is not deployment approval.
 
 ## Execute the owned workflow
 
@@ -60,3 +60,7 @@ After a successful script exit, verify proportionately:
 - changed user-facing or operational behavior passes a focused smoke test.
 
 Return a concise report containing the deployed commit and dirty-tree state, schema mode, checks run, active slot or process when known, health/version results, service state, warnings, and rollback status. Never include secret values.
+
+## Mandatory server guards
+
+The owned script acquires the server lease before mutation and supervises every remote operation. Never delete a lock, bypass identity/ancestry checks, bootstrap automatically, or hand-switch traffic. The server forced-command gate rejects old raw deployment scripts. Inspect the serving manifest after soak; it records actual revision/build/fingerprint and previous identity. A guard checksum mismatch needs a reviewed installation, not a bypass. Preserve failure output and diagnose before any reviewed retry.

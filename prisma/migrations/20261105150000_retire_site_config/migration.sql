@@ -1,3 +1,4 @@
+BEGIN;
 -- Phase 6 of the business-data consolidation (documentation/business-data.md).
 -- 1. SiteConfig ("SearchConfig") is retired: every value lives in Location, the settings documents or the Business
 --    profile, copied by scripts/settings/retire-site-config.ts before this migration is deployed.
@@ -11,7 +12,7 @@ CREATE OR REPLACE FUNCTION studio.studio_readiness_snapshot() RETURNS jsonb
     AS $$
  select pg_catalog.jsonb_build_object('schema',29,'protocol',1,'checkedAt',pg_catalog.statement_timestamp(),
   'keyIds',coalesce((select jsonb_agg(k) from (
-   select refresh_cipher->>'keyId' from studio.platform_google_youtube_connections
+   select refresh_cipher->>'keyId' as k from studio.platform_google_youtube_connections
   ) keys),'[]'::jsonb),
   'queue',pg_catalog.jsonb_build_object(
    'due',(select count(*) from studio.studio_jobs where status='queued' and run_after<=pg_catalog.statement_timestamp()),
@@ -28,3 +29,5 @@ $$;
 DROP FUNCTION IF EXISTS studio.studio_set_ai_credential(text, text, text, text, text, text, text, text, text);
 DROP FUNCTION IF EXISTS studio.studio_clear_ai_credential(text, text, text, text);
 DROP TABLE IF EXISTS studio.studio_location_ai_credentials;
+
+COMMIT;

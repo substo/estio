@@ -3,7 +3,7 @@
 # Local Build Deployment Script
 # Builds LOCALLY to avoid Server OOM/Thrashing, then uploads artifacts.
 
-set -e
+set -eo pipefail
 
 SERVER="root@138.199.214.117"
 BASE_DIR="/home/martin"
@@ -55,21 +55,49 @@ if [ ! -s Caddyfile ]; then
     exit 1
 fi
 
-# AUTOMATED BACKUP
-./scripts/backup.sh
-
-# SSH Multiplexing
-SSH_CONTROL_PATH="/tmp/estio-deploy-mux-%r@%h:%p"
-SSH_OPTS="-S $SSH_CONTROL_PATH"
-
-echo "🔌 Setting up SSH multiplexing..."
-ssh -M -S "$SSH_CONTROL_PATH" -fnNT $SERVER
-
+# A single committed canonical tip and server identity are mandatory before any mutation.
+if [ "$PRISMA_SCHEMA_SYNC_MODE" != "migrate-only" ]; then
+    echo "Only migrate-only is supported by the agent-owned release workflow." >&2; exit 1
+fi
+GUARD_REMOTE="python3 /usr/local/lib/estio/deploy-guard.py"
+GUARD_HASH=$(shasum -a 256 scripts/deploy-server-guard.py | awk '{print $1}')
+/usr/bin/ssh "$SERVER" "$GUARD_REMOTE verify-code $GUARD_HASH"
+LIVE_RELEASE=$(/usr/bin/ssh "$SERVER" "$GUARD_REMOTE inspect")
+LIVE_REVISION=$(printf '%s' "$LIVE_RELEASE" | node -e 'let s="";process.stdin.on("data",x=>s+=x).on("end",()=>process.stdout.write(JSON.parse(s).revision))')
+CANDIDATE=$(node scripts/deploy-candidate.cjs "$LIVE_REVISION")
+RELEASE_REVISION=$(printf '%s' "$CANDIDATE" | node -e 'let s="";process.stdin.on("data",x=>s+=x).on("end",()=>process.stdout.write(JSON.parse(s).revision))')
+export ESTIO_DEPLOY_TOKEN="$DEPLOY_TOKEN"
+LEASE_READY=$(mktemp /tmp/estio-deploy-ready.XXXXXX)
+rm "$LEASE_READY"
+python3 scripts/deploy-lease-client.py "$SERVER" "$DEPLOY_TOKEN" "$LIVE_REVISION" "$LEASE_READY" "$$" "$RELEASE_REVISION" &
+LEASE_CLIENT_PID=$!
 cleanup() {
-    echo "🔌 Closing SSH connection..."
-    ssh -S "$SSH_CONTROL_PATH" -O exit $SERVER 2>/dev/null || true
+    trap - EXIT TERM INT
+    kill "$LEASE_CLIENT_PID" 2>/dev/null || true
+    wait "$LEASE_CLIENT_PID" 2>/dev/null || true
+    rm -f "$LEASE_READY"
 }
 trap cleanup EXIT
+trap 'exit 143' TERM INT
+for i in $(seq 1 25); do
+    [ -f "$LEASE_READY" ] && break
+    kill -0 "$LEASE_CLIENT_PID" 2>/dev/null || { echo 'Deployment lease failed' >&2; exit 1; }
+    sleep 1
+done
+[ -f "$LEASE_READY" ] || { echo 'Deployment lease timed out' >&2; exit 1; }
+# Every SSH/rsync operation is supervised by the holder of the server lock.
+SSH_OPTS="-o ControlMaster=no -o ControlPath=none"
+ssh() { python3 scripts/deploy-ssh.py "$@"; }
+assert_release_input() {
+    node scripts/deploy-candidate.cjs "$LIVE_REVISION" "$RELEASE_REVISION" "$RELEASE_REVISION" >/dev/null
+    kill -0 "$LEASE_CLIENT_PID"
+    if [ -n "${BUILD_SOURCE_HASH:-}" ] && [ "$(node scripts/deploy-build-fingerprint.cjs)" != "$BUILD_SOURCE_HASH" ]; then
+        echo 'Source/environment changed after build' >&2; exit 1
+    fi
+    /usr/bin/ssh "$SERVER" "$GUARD_REMOTE check $DEPLOY_TOKEN $LIVE_REVISION"
+}
+assert_release_input
+./scripts/backup.sh
 
 # Fail fast, before the local build, if the server cannot hold this release.
 ssh $SSH_OPTS $SERVER /bin/bash -s << DISKCHECK
@@ -291,6 +319,9 @@ else
 fi
 rm -f .env.production.local
 
+# Recheck canonical/live ancestry and exact build inputs before slot deletion.
+assert_release_input
+
 # Step 2: Prepare Target Directory
 echo "📁 Preparing target directory ($TARGET_DIR)..."
 # A skipped worker may still have its kernel cwd in the inactive slot.
@@ -331,7 +362,7 @@ ssh $SSH_OPTS $SERVER "rm -rf $TARGET_DIR || (echo '⚠️ First rm failed, retr
 # Step 3: Upload Code + Artifacts
 echo "📦 Uploading Pre-Built Artifacts to $TARGET_COLOR slot..."
 # Simple rsync: upload everything EXCEPT what we explicitly exclude
-rsync -avz --progress -e "ssh $SSH_OPTS" \
+rsync -avz --progress -e "python3 scripts/deploy-ssh.py $SSH_OPTS" \
            --exclude='.next/cache' \
            --exclude='node_modules' \
            --exclude='node_modules_trash' \
@@ -340,6 +371,9 @@ rsync -avz --progress -e "ssh $SSH_OPTS" \
            --exclude='.next_bak' \
            --exclude='Down-Town-Cyprus-Website-Redesign' \
            --exclude='video-editor/' \
+           --exclude='SIMRelay/' \
+           --exclude='next-env.d.ts' \
+           --exclude='__pycache__/' \
            --exclude='.git' \
            --exclude='.env*' \
            --exclude='.DS_Store' \
@@ -384,8 +418,10 @@ MERGE_SECRET_ENV
 echo "🔄 Verifying Log Rotation Configuration..."
 # We need to upload the script separately since we excluded scripts/ folder
 ssh $SSH_OPTS $SERVER "mkdir -p $TARGET_DIR/scripts"
-rsync -avz -e "ssh $SSH_OPTS" ./scripts/setup-log-rotation.sh $SERVER:$TARGET_DIR/scripts/setup-log-rotation.sh
+rsync -avz -e "python3 scripts/deploy-ssh.py $SSH_OPTS" ./scripts/setup-log-rotation.sh $SERVER:$TARGET_DIR/scripts/setup-log-rotation.sh
 ssh $SSH_OPTS $SERVER "chmod +x $TARGET_DIR/scripts/setup-log-rotation.sh && $TARGET_DIR/scripts/setup-log-rotation.sh"
+
+assert_release_input
 
 # Step 5: Install Production Deps & Schema Sync
 echo "📦 Installing Production Dependencies on Server..."
@@ -399,6 +435,8 @@ ssh $SSH_OPTS $SERVER /bin/bash -s << ENDSSH
     cd "\$TARGET_DIR"
     npm ci --omit=dev --legacy-peer-deps
     npx prisma@"\$PRISMA_CLI_VERSION" generate
+
+    ESTIO_DEPLOY_TOKEN="$DEPLOY_TOKEN" ESTIO_LIVE_REVISION="$LIVE_REVISION" node --env-file=.env --import tsx scripts/settings/recover-retirement-migration.ts --apply
 
     case "\$PRISMA_SCHEMA_SYNC_MODE" in
         migrate-only)
@@ -440,6 +478,7 @@ else
     ACTIVE_APP_NAME="${APP_NAME_PREFIX}-${ACTIVE_COLOR}"
 fi
 
+assert_release_input
 echo "🔄 Switching live with health-checked runtime cutover..."
 ssh $SSH_OPTS $SERVER bash << ENDSSH
     set -euo pipefail
@@ -509,7 +548,26 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
         fi
     fi
 
-    echo "🔎 Preflight: unmanaged runtime drift check is temporarily skipped (hotfix)."
+    python3 /usr/local/lib/estio/deploy-guard.py check "$DEPLOY_TOKEN" "$LIVE_REVISION"
+    TRAFFIC_CHANGED=0
+    RELEASE_COMMITTED=0
+    ROLLBACK_CADDY="/etc/caddy/Caddyfile.rollback.$DEPLOY_TOKEN"
+    cp /etc/caddy/Caddyfile "\$ROLLBACK_CADDY"
+    rollback_on_error() {
+        rc=\$?
+        trap - EXIT TERM INT
+        if [ "\$rc" -ne 0 ] && [ "\$TRAFFIC_CHANGED" -eq 1 ] && [ "\$RELEASE_COMMITTED" -eq 0 ]; then
+            cp "\$ROLLBACK_CADDY" /etc/caddy/Caddyfile
+            caddy validate --config /etc/caddy/Caddyfile
+            systemctl reload caddy
+            ln -sfn "\$ACTIVE_DIR" "\$SYMLINK_PATH"
+            bash "\$TARGET_DIR/scripts/studio-worker-restore.sh" "\$ACTIVE_DIR" "\$TARGET_DIR" "\$STUDIO_WORKER_APP_NAME" || true
+            echo 'Interrupted release: previous traffic restored; manifest unchanged.'
+        fi
+        exit "\$rc"
+    }
+    trap rollback_on_error EXIT
+    trap 'exit 143' TERM INT
 
     echo "▶️  Starting target process \$TARGET_APP_NAME on :\$TARGET_PORT"
     if pm2 describe "\$TARGET_APP_NAME" > /dev/null 2>&1; then
@@ -547,6 +605,8 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     # The helper checks dependencies before replacing a worker and requires this exact release/instance.
     bash "\$TARGET_DIR/scripts/studio-deploy-readiness.sh" "\$TARGET_DIR" "\$ACTIVE_DIR" "\$STUDIO_WORKER_APP_NAME"
 
+    python3 /usr/local/lib/estio/deploy-guard.py check "$DEPLOY_TOKEN" "$LIVE_REVISION"
+    TRAFFIC_CHANGED=1
     # Keep symlink aligned with active release directory for operational visibility.
     ln -sfn "\$TARGET_DIR" "\$SYMLINK_PATH"
 
@@ -623,6 +683,8 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
         exit 1
     fi
     echo "✅ Post-switch soak checks passed"
+    python3 /usr/local/lib/estio/deploy-guard.py publish "$DEPLOY_TOKEN" "$RELEASE_REVISION" "$(cat .next/BUILD_ID)" "$BUILD_SOURCE_HASH" "$TARGET_COLOR"
+    RELEASE_COMMITTED=1
 
     if [ "\$DEPLOY_RUNTIME_SCOPE" != "web-viewing" ]; then
     echo "🧠 Ensuring dedicated scraping worker is running (\$SCRAPE_WORKER_APP_NAME)..."
