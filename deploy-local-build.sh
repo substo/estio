@@ -75,7 +75,7 @@ cleanup() {
     trap - EXIT TERM INT
     kill "$LEASE_CLIENT_PID" 2>/dev/null || true
     wait "$LEASE_CLIENT_PID" 2>/dev/null || true
-    rm -f "$LEASE_READY"
+    python3 -c 'from pathlib import Path; import sys; Path(sys.argv[1]).unlink(missing_ok=True); Path(".env.production.local").unlink(missing_ok=True)' "$LEASE_READY"
 }
 trap cleanup EXIT
 trap 'exit 143' TERM INT

@@ -22,7 +22,7 @@ async function main() {
  if(!process.argv.includes('--apply'))return;
  if(!process.env.ESTIO_DEPLOY_TOKEN || !process.env.ESTIO_LIVE_REVISION)throw Error('Recovery requires the owned server deployment lease');
  execFileSync('python3',['/usr/local/lib/estio/deploy-guard.py','check',process.env.ESTIO_DEPLOY_TOKEN,process.env.ESTIO_LIVE_REVISION],{stdio:'inherit'});
- execFileSync('node_modules/.bin/prisma',['migrate','resolve','--rolled-back',migration],{stdio:'inherit'});
+ execFileSync('npx',['--yes','prisma@6.19.0','migrate','resolve','--rolled-back',migration],{stdio:'inherit'});
  const [record]=await db.$queryRaw<Array<{rolled_back_at:Date|null}>>`select rolled_back_at from public._prisma_migrations where id=${failed[0].id}`;
  if(!record?.rolled_back_at)throw Error('Migration recovery was not recorded');
  console.log('Only the observed failed ledger record marked rolled back; migrate deploy owns schema application.');

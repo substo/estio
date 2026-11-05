@@ -14,3 +14,5 @@ test('owned deploy fences all mutation stages and publishes only after soak',()=
  assert.doesNotMatch(s,/drift check is temporarily skipped/);assert.match(s,/trap rollback_on_error EXIT/);
  assert.match(s,/--exclude='SIMRelay\/'/);
 });
+
+test('retirement recovery uses pinned CLI available with production omit-dev install',()=>{const s=read('scripts/settings/recover-retirement-migration.ts','utf8');assert.match(s,/execFileSync\('npx',\['--yes','prisma@6.19.0','migrate','resolve'/);assert.doesNotMatch(s,/node_modules\/\.bin\/prisma/);});
