@@ -36,3 +36,7 @@ Next: Parent attaches this story and evidence to the existing Library record/con
 Desktop (1440×844) and phone (390×844) fixtures render the actual detail page with stubbed form/actions/attachments. Populated and empty evidence, original-source destination, preserved notes, overflow and native disclosure keyboard activation pass. Screenshots: `/tmp/library-detail-{1440,390}.png` and `/tmp/library-detail-empty-{1440,390}.png`. Existing browse/modal UI tests pass; this is not signed-in browser or real provider acceptance.
 
 T3 preview status exposed no tabs; two corrected HTTP opens returned `Too many server browser tabs are open. Close one with t3_preview_close, or reuse a tabId from preview_status tabs.` Used a separate headless Playwright fixture browser; no human tabs/logins were operated. No new database transaction acceptance, real import, provider execution or recurring schedule was run against production.
+
+## Urgent import recovery story
+
+Achieved: Valid imports behind Caddy pass public-origin verification instead of being rejected against the internal Next URL. How: reuse the canonical request-origin policy, require serialized HTTP(S) Origin, reject cross-site requests, and retain the existing tenant/account/import service. Next: parent integrates this scoped fix and coordinates the held deployment. The existing approved Library spec and Build implementation scope are unchanged. Focused evidence: `/tmp/library-origin-tests.log` and `/tmp/library-origin-types.log`.

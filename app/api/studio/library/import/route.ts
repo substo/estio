@@ -1,3 +1,4 @@
+import { isAllowedRequestOrigin } from "@/lib/auth/request-origin-policy";
 import { z } from 'zod';
 import { studioRouteParams, withStudioRoute } from '@/lib/studio/route-context';
 import { importStudioLibrary } from '@/lib/studio/library-import';
@@ -7,7 +8,16 @@ const schema = z.object({ input: z.string().min(1).max(2048), platform: z.string
 export const dynamic = 'force-dynamic';
 export const POST = withStudioRoute(async (request, { params }) => {
   const origin = request.headers.get('origin');
-  if (!origin || origin !== new URL(request.url).origin) return Response.json({error:'Use Studio to import sources.'},{status:403});
+  const requestOrigin = new URL(request.url).origin;
+  // Browser mutations require a serialized Origin. The shared policy understands
+  // Caddy's forwarded public host/protocol without trusting arbitrary origins.
+  if (!origin || request.headers.get('sec-fetch-site') === 'cross-site' ||
+      !/^https?:\/\//.test(origin) || (() => { try { return new URL(origin).origin !== origin; } catch { return true; } })() ||
+      !isAllowedRequestOrigin({ origin, requestOrigin, appUrl: requestOrigin,
+        host: request.headers.get('host'), forwardedHost: request.headers.get('x-forwarded-host'),
+        forwardedProto: request.headers.get('x-forwarded-proto') })) {
+    return Response.json({error:'Source import was blocked because the request origin could not be verified. Reload Studio and try again.'},{status:403,headers:{'Cache-Control':'no-store'}});
+  }
   const { locationId } = await studioRouteParams(params, request);
   const respond = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store' } });
   // Bound the request before parsing, including chunked requests.

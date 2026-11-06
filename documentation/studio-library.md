@@ -21,3 +21,9 @@ Reuse decisions: [audit](studio-library-reuse.md). Focused validation artifacts 
 ## Next
 
 Optional bounded latest-video browsing should reuse Discovery and its save tickets. Automatic caption retrieval, autonomous research and suggested channels remain roadmap items. The parent owns updates to the existing Build concept/ledger contract; approved specifications remain immutable and Platform Build feature development is separate.
+
+## Import proxy-origin regression
+
+The import route previously compared the browser's public Origin with Next's internal HTTP origin, rejecting valid imports behind Caddy. It now uses the shared proxy-aware request-origin policy with this request's host/protocol, still requires a well-formed browser Origin and rejects `Sec-Fetch-Site: cross-site`. No global second-app origin is added to the allowlist. Active Location, account, impersonation and transaction fences remain unchanged. The error now explains failed origin verification and suggests reloading Studio.
+
+Route regression tests cover public Substo/Estio origins with internal Next URLs and forwarded headers, missing/malformed/unrelated origins, cross-site requests, and both reported URL forms for video `KD71g4TK6Sg`. Local tests are synthetic and perform no real import or production write. Release integration/build/deployment remains owned by the parent.
