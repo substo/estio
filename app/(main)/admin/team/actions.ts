@@ -687,7 +687,7 @@ export async function executeTransferResponsibilities(input: {
                             googleSyncEnabled: false, googleAutoSyncEnabled: false,
                             outlookSyncEnabled: false,
                             outlookSubscriptionId: null, outlookSubscriptionExpiry: null,
-                            outlookPasswordEncrypted: null, outlookSessionCookies: null, outlookSessionExpiry: null,
+                            outlookSessionExpiry: null,
                         } : {}),
                         locations: { disconnect: { id: token.locationId } },
                     },

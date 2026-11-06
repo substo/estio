@@ -183,7 +183,7 @@ export async function updateWhatsAppSettings(formData: FormData) {
         schemaVersion: 1,
     });
 
-    // Encrypted secret; also removes the former plain-text column/document copies.
+    // Webhook verify token: encrypted settings secret.
     await setLocationWhatsAppWebhookSecret(resolvedLocationId, webhookSecret || null, localUserId);
 
     const shouldUpdateAccessToken = accessTokenInput.length > 0 && accessTokenInput !== MASKED_SECRET;

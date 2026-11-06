@@ -34,6 +34,8 @@ Each drop migration runs in a transaction and first refuses (`RAISE EXCEPTION`) 
 - the first: any non-empty `crmPassword` or token column, or a non-empty `crmUsername` whose user has no `user.crm` document;
 - the second: any non-null browser column, or any non-empty column or document verify token.
 
+`bash scripts/test-credential-migrations-db.sh` exercises both guards on a throwaway local PostgreSQL.
+
 `crmUsername` moved too because every reader already used the helper and production's one value was already in the document. The helper therefore has no column fallback.
 
 ## Deploy order
