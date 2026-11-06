@@ -20,7 +20,13 @@ export function claudeLoginMethod(status: Record<string, unknown>): LoginMethod 
 }
 export interface TextRequest<T> {
   model?: string; prompt: string; jsonSchema: Record<string, unknown>; validate: (value: unknown) => T; signal: AbortSignal;
+  /** Live web search (Codex `web_search="live"`, Claude WebSearch/WebFetch). Only onboarding research sets this; it is off for everything else. */
+  webSearch?: boolean;
+  /** Bounds for longer structured replies (research). Defaults: 90 s and 4 KiB. */
+  timeoutMs?: number; maxResultBytes?: number;
 }
+/** Read-only web tools Claude may use for research; nothing that runs code, edits files or reaches MCP servers. */
+export const claudeResearchTools = "WebSearch,WebFetch";
 export interface LocalTextAdapter {
   provider: LocalProvider;
   readiness(signal?: AbortSignal): Promise<CliReadiness>;
@@ -58,6 +64,9 @@ export function createLocalTextAdapter(provider: LocalProvider, run: ProcessRunn
   return { provider, readiness,
     async generate<T>(request: TextRequest<T>): Promise<T> {
       if (request.model !== undefined && !modelPattern.test(request.model) || !request.prompt || Buffer.byteLength(request.prompt) > 64 * 1024) throw new Error("invalid_text_request");
+      const webSearch = request.webSearch === true;
+      const maxResultBytes = Math.min(Math.max(request.maxResultBytes ?? 4096, 1), 32 * 1024);
+      const timeoutMs = Math.min(Math.max(request.timeoutMs ?? 90_000, 1000), 15 * 60_000);
       if (!(await readiness(request.signal)).ready) throw new Error("provider_not_ready");
       return isolated(async cwd => {
         let args: string[];
@@ -67,16 +76,17 @@ export function createLocalTextAdapter(provider: LocalProvider, run: ProcessRunn
           args = ["exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only",
             ...(request.model ? ["--model", request.model] : []), "--json", "--output-schema", schemaPath,
             "-c", 'model_provider="openai"', "-c", 'forced_login_method="chatgpt"', "-c", 'approval_policy="never"',
-            "-c", 'web_search="disabled"', "-c", "features.shell_tool=false", "-c", "features.unified_exec=false",
+            "-c", webSearch ? 'web_search="live"' : 'web_search="disabled"', "-c", "features.shell_tool=false", "-c", "features.unified_exec=false",
             "-c", "features.apps=false", "-c", "features.plugins=false", "-c", "features.hooks=false", "-c", "features.multi_agent=false",
             "-c", "features.code_mode=false", "-c", "features.skill_search=false", "-c", "features.skip_host_skill_discovery=true", "-"];
         } else {
           args = ["-p", "--output-format", "stream-json", "--verbose", ...(request.model ? ["--model", request.model] : []),
-            "--safe-mode", "--restricted", "--tools", "", "--permission-mode", "dontAsk", "--permission-prompts", "none",
+            "--safe-mode", "--restricted", "--tools", webSearch ? claudeResearchTools : "", ...(webSearch ? ["--allowedTools", claudeResearchTools] : []), "--permission-mode", "dontAsk", "--permission-prompts", "none",
             "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "", "--no-session-persistence",
             "--disable-slash-commands", "--no-chrome", "--json-schema", JSON.stringify(request.jsonSchema)];
         }
-        const { stdout } = await run({ command: provider, args, cwd, input: request.prompt, signal: request.signal, timeoutMs: 90_000, maxOutputBytes: 256 * 1024 });
+        // Web search adds tool events to the stream, so research allows a larger (still bounded) output.
+        const { stdout } = await run({ command: provider, args, cwd, input: request.prompt, signal: request.signal, timeoutMs, maxOutputBytes: webSearch ? 4 * 1024 * 1024 : 256 * 1024 });
         try {
           const events = stdout.trim().split("\n").filter(Boolean).map(line => object.parse(JSON.parse(line)));
           let value: unknown;
@@ -85,14 +95,14 @@ export function createLocalTextAdapter(provider: LocalProvider, run: ProcessRunn
             const messages = events.filter(e => e.type === "item.completed" && object.safeParse(e.item).success)
               .map(e => object.parse(e.item)).filter(item => item.type === "agent_message");
             const text = messages.at(-1)?.text;
-            if (typeof text !== "string" || Buffer.byteLength(text) > 4096) throw new Error();
+            if (typeof text !== "string" || Buffer.byteLength(text) > maxResultBytes) throw new Error();
             value = JSON.parse(text);
           } else {
             const results = events.filter(e => e.type === "result");
             if (results.length !== 1 || results[0].is_error !== false || results[0].subtype !== "success") throw new Error();
             value = results[0].structured_output;
           }
-          if (value === undefined || Buffer.byteLength(JSON.stringify(value)) > 4096) throw new Error();
+          if (value === undefined || Buffer.byteLength(JSON.stringify(value)) > maxResultBytes) throw new Error();
           return request.validate(value);
         } catch { throw new Error("invalid_provider_result"); }
       });

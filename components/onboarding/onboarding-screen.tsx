@@ -70,7 +70,7 @@ export function OnboardingScreen({ initialView, locationId, connect, homeHref, u
             onConfirmAll={() => command({ action: "confirm-topic", topic: current.id }, () => chatInput.current?.focus())}
             onEdit={field => edit(current.id, field)} onSkip={() => command({ action: "skip", topic: current.id }, () => chatInput.current?.focus())} />
         : <Summary view={view} busy={busy} onFinish={() => command({ action: "finish" })} onResearch={() => command({ action: "start", ...view.input })} />}
-      {started && !locked && <ResearchProgress topics={view.topics} researching={view.researching} />}
+      {started && !locked && <ResearchProgress topics={view.topics} researching={view.researching} note={view.researchNote} />}
       <div ref={chatEnd} />
     </div>
     <form className="flex items-end gap-2 border-t p-3" onSubmit={async e => {
@@ -162,11 +162,12 @@ function TopicPrompt({ topic, busy, onConfirmAll, onEdit, onSkip }: { topic: Top
   </div>;
 }
 
-function ResearchProgress({ topics, researching }: { topics: TopicView[]; researching: boolean }) {
+function ResearchProgress({ topics, researching, note }: { topics: TopicView[]; researching: boolean; note?: string | null }) {
   const running = topics.filter(t => t.researching), failed = topics.filter(t => t.researchError);
   if (!researching && !failed.length) return null;
   return <div className="space-y-1 text-xs text-muted-foreground" role="status">
     {researching && <p className="flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" aria-hidden />Researching {running.length ? running.map(t => t.title.toLowerCase()).join(", ") : "your website"}…</p>}
+    {researching && note && <p>{note}</p>}
     {failed.map(t => <p key={t.id}>Couldn&apos;t research {t.title.toLowerCase()}: {t.researchError}. You can fill it in yourself.</p>)}
   </div>;
 }

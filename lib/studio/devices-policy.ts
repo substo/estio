@@ -6,6 +6,21 @@ export type DeviceOperation = typeof deviceOperations[number];
 export const devicePairingOperations = ["start", "poll"] as const;
 export type DevicePairingOperation = typeof devicePairingOperations[number];
 export type DeviceProvider = "codex" | "claude";
+/** A device counts as running while its last heartbeat is this recent (same window as hosted workers). */
+export const DEVICE_ONLINE_SECONDS = 90;
+/** Work a paired computer may run. Mac checks are always allowed; the others are granted while processing is On. */
+export const DEVICE_WORK_KINDS = ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research"] as const;
+export type DeviceWorkKind = typeof DEVICE_WORK_KINDS[number];
+export const ONBOARDING_RESEARCH_KIND: DeviceWorkKind = "studio.onboarding_research";
+export const deviceWorkLabels: Record<DeviceWorkKind, string> = {
+  "studio.diagnostic": "Mac checks", "studio.library_summary": "Library summaries", "studio.onboarding_research": "Business research",
+};
+/** Local reasons a running companion is holding processing back (reported in its heartbeat). */
+export const DEVICE_BLOCK_REASONS = {
+  on_battery_or_unknown_power: "On battery (allow work on battery in Setup, or plug in)",
+  outside_working_hours: "Outside the working hours in Setup",
+  low_disk_space: "Less free disk than Setup requires",
+} as const;
 export type DeviceManagementCommand =
   | { action: "approve_pairing"; userCode: string; requestId: string }
   | { action: "deny_pairing" | "lookup_pairing"; userCode: string }
@@ -69,7 +84,12 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
   for (const key of ["instanceId", "platform", "arch", "version"])
     if (typeof v[key] === "string" && /^[A-Za-z0-9._:/ -]{1,100}$/.test(v[key])) result[key] = v[key];
   for (const key of ["healthy", "draining"]) if (typeof v[key] === "boolean") result[key] = v[key];
-  if (Array.isArray(v.handlers)) result.handlers = v.handlers.filter(x => x === "studio.diagnostic");
+  if (Array.isArray(v.handlers)) result.handlers = v.handlers.filter((x, i, all) => (DEVICE_WORK_KINDS as readonly unknown[]).includes(x) && all.indexOf(x) === i);
+  if (v.capacity && typeof v.capacity === "object" && !Array.isArray(v.capacity)) {
+    const c = v.capacity as Record<string, unknown>;
+    result.capacity = compact({ codex: typeof c.codex === "boolean" ? c.codex : undefined, claude: typeof c.claude === "boolean" ? c.claude : undefined });
+  }
+  if (Array.isArray(v.processingBlocked)) result.processingBlocked = v.processingBlocked.filter((x, i, all) => typeof x === "string" && x in DEVICE_BLOCK_REASONS && all.indexOf(x) === i);
   if (v.hardware && typeof v.hardware === "object" && !Array.isArray(v.hardware)) {
     const h = v.hardware as Record<string, unknown>;
     const power = h.power && typeof h.power === "object" && !Array.isArray(h.power) ? h.power as Record<string, unknown> : null;
@@ -103,6 +123,17 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
     if (!longest.length) break; longest.pop();
   }
   return result;
+}
+/** Largest research reply a Mac may return (the device request body is bounded at 32 KiB). */
+export const DEVICE_RESEARCH_RESULT_BYTES = 24576;
+/** Onboarding research from a Mac: the structured reply, which subscription CLI ran it, and no raw provider output. */
+export function readDeviceResearchResult(value: unknown): Record<string, unknown> {
+  const result = object(value);
+  valid(Object.keys(result).every(key => ["research", "provider", "model"].includes(key)));
+  valid(isProvider(result.provider) && result.model === "native-default");
+  object(result.research);
+  valid(new TextEncoder().encode(JSON.stringify(result)).length <= DEVICE_RESEARCH_RESULT_BYTES);
+  return { research: result.research, provider: result.provider, model: result.model };
 }
 export function readDeviceDiagnosticResult(value: unknown): Record<string, unknown> {
   const result = object(value);
@@ -159,10 +190,10 @@ export function readDeviceCommand(operation: DeviceOperation, value: unknown): R
     valid(Number.isInteger(v.leaseSeconds) && Number(v.leaseSeconds) >= 10 && Number(v.leaseSeconds) <= 3600);
     out.leaseSeconds = v.leaseSeconds;
   }
-  if (operation === "claim") { valid(Number.isInteger(v.limit) && Number(v.limit) >= 1 && Number(v.limit) <= 50); return { ...out, limit: v.limit, summaryReady: v.summaryReady === true }; }
+  if (operation === "claim") { valid(Number.isInteger(v.limit) && Number(v.limit) >= 1 && Number(v.limit) <= 50); return { ...out, limit: v.limit, summaryReady: v.summaryReady === true, researchReady: v.researchReady === true }; }
   valid(typeof v.jobId === "string" && uuid.test(v.jobId) && typeof v.leaseToken === "string" && uuid.test(v.leaseToken));
   Object.assign(out, { jobId: v.jobId, leaseToken: v.leaseToken });
-  if (operation === "complete") { out.result = readDeviceDiagnosticResult(v.result); }
+  if (operation === "complete") { out.result = v.result && typeof v.result === "object" && "research" in v.result ? readDeviceResearchResult(v.result) : readDeviceDiagnosticResult(v.result); }
   if (operation === "fail") {
     const f = object(v.failure); valid(typeof f.code === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(f.code));
     valid(typeof f.message === "string" && f.message.length <= 500 && typeof f.retryable === "boolean");
@@ -247,6 +278,45 @@ export function readDeviceConfig(value: unknown): StudioDeviceConfig {
     resources: { modelBudgetGb: numberIn(r.modelBudgetGb, 1, 500), minFreeDiskGb: numberIn(r.minFreeDiskGb, 5, 500),
       allowOnBattery: r.allowOnBattery as boolean, maxConcurrentJobs: 1, launchAtLogin: r.launchAtLogin as boolean, workingHours },
   };
+}
+
+export interface DeviceResearchInput {
+  revoked: boolean; paused: boolean; processingEnabled: boolean; allowedKinds: readonly string[]; seenAt: string | null;
+  /** Already passed through safeDeviceCapabilities. */
+  capabilities: Record<string, unknown>;
+}
+export interface DeviceResearchReadiness { online: boolean; ready: boolean; providers: DeviceProvider[]; reason: string | null }
+const subscriptionLogin: Record<DeviceProvider, string> = { codex: "chatgpt", claude: "claudeai" };
+/** Whether the companion is running now: a fresh heartbeat that is not its final "draining" report. */
+export function deviceOnline(seenAt: string | null, capabilities: Record<string, unknown>, now = Date.now(), onlineSeconds = DEVICE_ONLINE_SECONDS) {
+  return capabilities.draining !== true && seenAt !== null && now - Date.parse(seenAt) < onlineSeconds * 1000;
+}
+/**
+ * Can this paired Mac run onboarding research right now? Only while its companion is running, recently seen, processing
+ * is On and not paused, the research kind is allowed, the companion has the research handler, and Codex or Claude is
+ * signed in with a subscription that has capacity. `reason` is the first thing missing, in plain words.
+ */
+export function deviceResearchReadiness(input: DeviceResearchInput, now = Date.now(), onlineSeconds = DEVICE_ONLINE_SECONDS): DeviceResearchReadiness {
+  const online = !input.revoked && deviceOnline(input.seenAt, input.capabilities, now, onlineSeconds);
+  const no = (reason: string): DeviceResearchReadiness => ({ online, ready: false, providers: [], reason });
+  if (input.revoked) return no("Revoked");
+  if (!online) return no("The Studio companion isn't running on this Mac");
+  if (input.paused) return no("Paused");
+  if (!input.processingEnabled) return no("Processing is off");
+  if (!input.allowedKinds.includes(ONBOARDING_RESEARCH_KIND)) return no("Business research isn't allowed yet: turn processing off and on again");
+  const handlers = Array.isArray(input.capabilities.handlers) ? input.capabilities.handlers : [];
+  if (!handlers.includes(ONBOARDING_RESEARCH_KIND)) return no("Update the Studio companion on this Mac");
+  const blocked = Array.isArray(input.capabilities.processingBlocked) ? input.capabilities.processingBlocked as (keyof typeof DEVICE_BLOCK_REASONS)[] : [];
+  if (blocked.length) return no(DEVICE_BLOCK_REASONS[blocked[0]] ?? "Held back by the Mac's Setup");
+  const signedIn = (["codex", "claude"] as const).filter(p => {
+    const r = input.capabilities[p] as { authenticated?: unknown; ready?: unknown; loginMethod?: unknown } | undefined;
+    return r?.authenticated === true && r.ready === true && r.loginMethod === subscriptionLogin[p];
+  });
+  if (!signedIn.length) return no("Codex or Claude isn't signed in with a subscription");
+  const capacity = input.capabilities.capacity as Partial<Record<DeviceProvider, boolean>> | undefined;
+  const providers = signedIn.filter(p => capacity?.[p] === true);
+  if (!providers.length) return no("No subscription capacity reading (QuotaCell), or the limits are used up");
+  return { online, ready: true, providers, reason: null };
 }
 
 /**

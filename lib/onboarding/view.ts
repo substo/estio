@@ -14,10 +14,12 @@ export type OnboardingView = {
   app: "estio" | "substo"; status: OnboardingState["status"]; openMode: "none" | "open" | "locked"; canEdit: boolean;
   ai: AiConnections; researching: boolean; input: OnboardingState["input"]; topics: TopicView[]; messages: OnboardingState["messages"];
   nextPrompt: string; completeness: { confirmed: number; total: number };
+  /** While research waits on a paired Mac: whether it is running there, or what it is waiting for. */
+  researchNote: string | null;
 };
 
 export function buildOnboardingView(input: { app: "estio" | "substo"; profile: BusinessProfile | null; location: { name: string | null; timeZone: string | null };
-  state: OnboardingState; ai: AiConnections; role: string | null; impersonating: boolean }): OnboardingView {
+  state: OnboardingState; ai: AiConnections; role: string | null; impersonating: boolean; researchNote?: string | null }): OnboardingView {
   const { state } = input;
   const topics: TopicView[] = topicsFor(input.app).map(topic => {
     const fields: FieldView[] = topic.fields.map(field => {
@@ -41,6 +43,7 @@ export function buildOnboardingView(input: { app: "estio" | "substo"; profile: B
     openMode: onboardingOpenMode({ role: input.role, impersonating: input.impersonating, status: state.status, aiAvailable: input.ai.available }),
     nextPrompt: nextPrompt(topics, input.ai.available),
     completeness: { confirmed: topics.filter(t => t.status === "confirmed" || t.status === "skipped").length, total: topics.length },
+    researchNote: researching(state) ? input.researchNote ?? null : null,
   };
 }
 
@@ -51,7 +54,7 @@ const show = (value: FieldValue | null): string => {
 };
 /** What the agent says next: the first topic still open, with what was found or its question. */
 export function nextPrompt(topics: TopicView[], aiAvailable: boolean): string {
-  if (!aiAvailable) return "To research your business for you, I need an AI connection first. Connect a ChatGPT subscription or an OpenAI or Gemini API key in Settings, then come back.";
+  if (!aiAvailable) return "To research your business for you, I need an AI connection first. Connect a ChatGPT subscription or an OpenAI or Gemini API key in Settings, or use a paired Mac running the Studio companion with processing on, then come back.";
   const open = topics.find(t => t.status === "suggested" || t.status === "empty");
   if (!open) return "Everything is filled in. Review the summary and press Finish when you're happy.";
   if (open.status === "suggested") {

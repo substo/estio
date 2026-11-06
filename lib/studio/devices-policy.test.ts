@@ -78,3 +78,39 @@ test("the Connected-computer page refreshes fast only during a command and stops
   assert.equal(companionRefreshDelay(false, COMPANION_REFRESH_WINDOW_MS - 1), 60_000);
   assert.equal(companionRefreshDelay(true, COMPANION_REFRESH_WINDOW_MS), null);
 });
+
+test("research kinds, capacity and local blocks are the only new report fields kept", async () => {
+  const { safeDeviceCapabilities: safe } = await import("./devices-policy");
+  assert.deepEqual(safe({ handlers: ["studio.diagnostic", "studio.onboarding_research", "studio.onboarding_research", "studio.library_summary", "x"],
+    capacity: { codex: true, claude: "yes", other: true }, processingBlocked: ["on_battery_or_unknown_power", "rm -rf"] }),
+    { handlers: ["studio.diagnostic", "studio.onboarding_research", "studio.library_summary"], capacity: { codex: true }, processingBlocked: ["on_battery_or_unknown_power"] });
+});
+test("Mac research results are bounded and carry no raw provider output", async () => {
+  const { readDeviceCommand: read } = await import("./devices-policy");
+  const base = { workerId: "mac", jobId: requestId, leaseToken: requestId };
+  assert.deepEqual(read("complete", { ...base, result: { research: { fields: [] }, provider: "claude", model: "native-default" } }).result, { research: { fields: [] }, provider: "claude", model: "native-default" });
+  for (const result of [{ research: { fields: [] }, provider: "openai", model: "native-default" }, { research: { fields: [] }, provider: "codex", model: "gpt-5" },
+    { research: "text", provider: "codex", model: "native-default" }, { research: {}, provider: "codex", model: "native-default", stdout: "x" },
+    { research: { big: "x".repeat(30000) }, provider: "codex", model: "native-default" }]) assert.throws(() => read("complete", { ...base, result }));
+  assert.equal(read("claim", { workerId: "mac", limit: 1, leaseSeconds: 60, researchReady: true }).researchReady, true);
+  assert.equal(read("claim", { workerId: "mac", limit: 1, leaseSeconds: 60, researchReady: "true" }).researchReady, false);
+});
+test("a Mac is research-capable only while running, opted in, allowed, signed in and with capacity", async () => {
+  const { deviceResearchReadiness } = await import("./devices-policy");
+  const now = Date.parse("2026-11-06T12:00:00Z");
+  const good = { revoked: false, paused: false, processingEnabled: true, allowedKinds: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research"],
+    seenAt: "2026-11-06T11:59:30Z", capabilities: { handlers: ["studio.onboarding_research"], capacity: { codex: true, claude: true },
+      codex: { authenticated: true, ready: true, loginMethod: "chatgpt" }, claude: { authenticated: true, ready: true, loginMethod: "console" } } };
+  assert.deepEqual(deviceResearchReadiness(good, now), { online: true, ready: true, providers: ["codex"], reason: null });
+  const reason = (patch: Record<string, unknown>, caps: Record<string, unknown> = {}) => deviceResearchReadiness({ ...good, ...patch, capabilities: { ...good.capabilities, ...caps } }, now).reason;
+  assert.match(reason({ seenAt: "2026-11-06T11:55:00Z" })!, /companion isn't running/);
+  assert.match(reason({}, { draining: true })!, /companion isn't running/);
+  assert.equal(reason({ paused: true }), "Paused");
+  assert.equal(reason({ processingEnabled: false }), "Processing is off");
+  assert.match(reason({ allowedKinds: ["studio.diagnostic"] })!, /isn't allowed/);
+  assert.match(reason({}, { handlers: ["studio.diagnostic"] })!, /Update the Studio companion/);
+  assert.match(reason({}, { processingBlocked: ["on_battery_or_unknown_power"] })!, /battery/);
+  assert.match(reason({}, { codex: { authenticated: true, ready: true, loginMethod: "api_key" } })!, /subscription/);
+  assert.match(reason({}, { capacity: { codex: false } })!, /capacity/);
+  assert.match(reason({}, { capacity: undefined })!, /capacity/);
+});

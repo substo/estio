@@ -8,9 +8,8 @@ import { requireOwnStudioCommandLocation } from "./paid-workspace";
 import { StudioCommandError } from "./command-error";
 import { StudioDbError } from "./db";
 import { authorizeEstioSchedule, currentEstioScheduleAuthority } from "./schedule-authority";
-import { WORKER_ONLINE_SECONDS } from "./jobs";
 import {
-  defaultDeviceConfig, formatPairingCode, isAllowedProviderLoginUrl, PAIRING_CODE_ALPHABET, safeDeviceCapabilities,
+  defaultDeviceConfig, deviceOnline, deviceResearchReadiness, type DeviceResearchReadiness, formatPairingCode, isAllowedProviderLoginUrl, PAIRING_CODE_ALPHABET, safeDeviceCapabilities,
   type DeviceManagementCommand, type DeviceOperation, type DeviceProvider, type StudioDeviceConfig,
 } from "./devices-policy";
 
@@ -30,8 +29,10 @@ export interface StudioDeviceSummary {
     report: { unsupported?: Record<string, string>; error?: string } };
   /** Latest command per provider (at most one each). */
   commands: StudioDeviceCommandSummary[];
+  /** Whether onboarding research can run on this Mac now, and if not, why. */
+  research: DeviceResearchReadiness;
 }
-type DeviceRow = Omit<StudioDeviceSummary, "last_seen_at" | "capabilities" | "online" | "busy" | "status" | "processingEnabled" | "paused" | "config" | "commands"> & {
+type DeviceRow = Omit<StudioDeviceSummary, "last_seen_at" | "capabilities" | "online" | "busy" | "status" | "processingEnabled" | "paused" | "config" | "commands" | "research"> & {
   seen_at: string | null; report: Record<string, unknown>; processing_enabled: boolean; paused: boolean; desired_config: Record<string, unknown>;
   config_version: number; applied_config_version: number; config_status: StudioDeviceSummary["config"]["status"]; config_report: Record<string, unknown>;
 };
@@ -63,7 +64,7 @@ export async function getStudioDevices(locationId: string) {
   const busy = new Set(running.map(job => job.device_id));
   const now = Date.now();
   return { canManage: canManageStudioAi(access), devices: rows.map((row): StudioDeviceSummary => {
-    const online = !row.revoked_at && row.report.draining !== true && row.seen_at !== null && now - Date.parse(row.seen_at) < WORKER_ONLINE_SECONDS * 1000;
+    const online = !row.revoked_at && deviceOnline(row.seen_at, row.report, now);
     const status: StudioDeviceStatus = row.revoked_at ? "revoked" : row.paused ? "paused" : !online ? "offline" : busy.has(row.id) ? "busy" : "online";
     const latest: StudioDeviceCommandSummary[] = [];
     for (const { device_id, ...command } of commands) if (device_id === row.id && !latest.some(c => c.provider === command.provider))
@@ -76,6 +77,8 @@ export async function getStudioDevices(locationId: string) {
       config: { version: row.config_version, value: row.config_version > 0 ? row.desired_config as unknown as StudioDeviceConfig : defaultDeviceConfig,
         appliedVersion: row.applied_config_version, status: row.config_status, report: safeConfigReport(row.config_report) },
       commands: latest,
+      research: deviceResearchReadiness({ revoked: Boolean(row.revoked_at), paused: row.paused, processingEnabled: row.processing_enabled,
+        allowedKinds: row.allowed_kinds, seenAt: row.seen_at, capabilities }, now),
     };
   }) };
 }
@@ -111,7 +114,8 @@ export async function executeStudioDeviceCommand(token: string, brand: "estio" |
     if (!identity || !await authorizeEstio(identity.locationId, identity.approvedBy)) throw new StudioCommandError("Access denied.", 403);
     estioAuthorizedBy = identity.approvedBy;
   }
-  return studioDb.call<unknown>("studio_library_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy });
+  // Outermost device entry point: onboarding research, then Library summaries, then the base device protocol.
+  return studioDb.call<unknown>("studio_onboarding_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy });
 }
 
 export const PAIRING_POLL_SECONDS = 5;

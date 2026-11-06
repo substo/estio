@@ -7,10 +7,21 @@ import { useStudioCommand } from "@/app/(main)/studio/_components/use-studio-com
 import type { StudioDeviceCommandSummary, StudioDeviceSummary } from "@/lib/studio/devices";
 import { DeviceSetupForm } from "./device-setup-form";
 import { buttonClass, endpoint, inputClass, providerReport, record, type Provider } from "./shared";
-import { companionRefreshDelay } from "@/lib/studio/devices-policy";
+import { companionRefreshDelay, DEVICE_WORK_KINDS, deviceWorkLabels, type DeviceWorkKind } from "@/lib/studio/devices-policy";
 
 const when = (value: string) => new Date(value).toLocaleString("en-GB", { timeZone: "Asia/Nicosia", dateStyle: "medium", timeStyle: "short" });
 const providerName = (provider: Provider) => provider === "codex" ? "Codex" : "Claude";
+/** "3 minutes ago", "9 days ago": how stale the last heartbeat is, next to the exact time. */
+export function sinceText(value: string, now = Date.now()) {
+  const minutes = Math.max(0, Math.round((now - Date.parse(value)) / 60_000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} days ago`;
+}
+export const companionRunCommand = "bash scripts/studio-companion-launchagent.sh install";
 const finalStatuses = ["succeeded", "failed", "cancelled"];
 export const isCommandActive = (command: StudioDeviceCommandSummary) => !finalStatuses.includes(command.status);
 const statusLabel: Record<StudioDeviceSummary["status"], string> = { online: "Online", busy: "Busy", paused: "Paused", offline: "Offline", revoked: "Revoked" };
@@ -97,6 +108,17 @@ function Hardware({ device }: { device: StudioDeviceSummary }) {
   </div>;
 }
 
+/** What this Mac can do right now: signed-in subscriptions, the work it is allowed, and whether research can run. */
+function Capabilities({ device }: { device: StudioDeviceSummary }) {
+  const ready = (provider: Provider) => { const r = providerReport(device, provider); return r.authenticated === true && r.ready === true; };
+  const allowed = DEVICE_WORK_KINDS.filter(kind => device.allowed_kinds.includes(kind)).map((kind: DeviceWorkKind) => deviceWorkLabels[kind]);
+  return <div className="space-y-1">
+    <p><span className="font-medium">Subscriptions:</span> {(["codex", "claude"] as const).map(p => `${providerName(p)} ${ready(p) ? "ready" : "not ready"}`).join(" · ")}</p>
+    <p><span className="font-medium">Allowed work:</span> {allowed.join(", ")}{device.processingEnabled ? "" : " (turn processing on to allow research and summaries)"}</p>
+    <p><span className="font-medium">Business research:</span> {device.research.ready ? `Ready on ${device.research.providers.map(providerName).join(" and ")}` : `Not available: ${device.research.reason}`}</p>
+  </div>;
+}
+
 function ProviderConnection({ device, provider, canManage }: { device: StudioDeviceSummary; provider: Provider; canManage: boolean }) {
   const report = providerReport(device, provider);
   const command = device.commands.find(c => c.provider === provider) ?? null;
@@ -126,12 +148,19 @@ function DeviceCard({ device, canManage }: { device: StudioDeviceSummary; canMan
       <h3 className="font-medium">{device.name}{device.platform ? <span className="text-muted-foreground"> · {device.platform}</span> : null}</h3>
       <span className="rounded-full border px-2 py-0.5 text-xs">{statusLabel[device.status]}</span>
     </div>
-    <p className="text-muted-foreground">{revoked ? `Revoked ${when(device.revoked_at!)}. Pair again to reconnect.` : device.last_seen_at ? `Last seen ${when(device.last_seen_at)}` : "Not connected yet"}</p>
+    <p className="text-muted-foreground">{revoked ? `Revoked ${when(device.revoked_at!)}. Pair again to reconnect.`
+      : device.online ? `Companion running · last seen ${device.last_seen_at ? sinceText(device.last_seen_at) : "just now"}`
+      : device.last_seen_at ? `Companion not running · last seen ${sinceText(device.last_seen_at)} (${when(device.last_seen_at)})` : "Paired, but the companion has never connected"}</p>
     {revoked ? null : <>
+      {!device.online && device.processingEnabled ? <div role="status" className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
+        <p className="font-medium">Processing is on, but nothing will run until the Studio companion is running on this Mac.</p>
+        <p className="text-muted-foreground">On the Mac, in this app&apos;s source checkout, run <code className="rounded bg-muted px-1">{companionRunCommand}</code> once. It starts the companion now and at every login, and restarts it if it stops.</p>
+      </div> : null}
+      <Capabilities device={device} />
       <Hardware device={device} />
       <div className="space-y-2">
         <p className="font-medium">Use this computer for processing?</p>
-        <p className="text-muted-foreground">When On, this Mac may run this Business&apos;s queued local work while the companion is running. Off by default. Mac checks work either way. No local workflows are available yet, so turning this on does not run anything today.</p>
+        <p className="text-muted-foreground">When On, this Mac may run Business research (onboarding) and Library summaries on its own Codex or Claude subscription while the companion is running, with no paid API fallback. Library summaries also need &quot;Text work&quot; in Setup. Off by default. Mac checks work either way.</p>
         <p>Processing: <span className="font-medium">{device.processingEnabled ? "On" : "Off"}</span>{device.paused ? " · Paused (nothing will be picked up, including checks)" : ""}</p>
         {canManage ? <div className="flex flex-wrap gap-2">
           <ActionButton label={device.processingEnabled ? "Turn processing off" : "Turn processing on"} pendingLabel="Saving…" command={{ action: "set_processing", deviceId: device.id, enabled: !device.processingEnabled }}
@@ -162,6 +191,8 @@ function PairingApproval({ code, businessName, canManage }: { code: string; busi
   const router = useRouter();
   const lookup = useStudioCommand(endpoint);
   const decide = useStudioCommand(endpoint);
+  const enable = useStudioCommand(endpoint);
+  const [processing, setProcessing] = useState(true);
   const [pairing, setPairing] = useState<Pairing | null>(null);
   const [outcome, setOutcome] = useState<"approved" | "denied" | null>(null);
   const userCode = formatCode(code);
@@ -181,16 +212,23 @@ function PairingApproval({ code, businessName, canManage }: { code: string; busi
       : lookup.error ? <p role="alert" className="text-destructive">{lookup.error}</p>
       : pairing ? pairing.status !== "pending" ? <p className="text-muted-foreground">{pairing.status === "approved" || pairing.status === "consumed" ? "This computer is already approved." : `This code is ${pairing.status}. Run pairing on the Mac again.`}</p> : <>
         <p>{pairing.name}{pairing.platform ? ` · ${pairing.platform}` : ""} · expires {when(pairing.expiresAt)}</p>
-        <p className="text-muted-foreground">Approving lets this Mac connect to {businessName} only. Processing stays Off until you turn it on.</p>
+        <p className="text-muted-foreground">Approving lets this Mac connect to {businessName} only.</p>
+        <label className="flex items-start gap-2"><input type="checkbox" className="mt-1" checked={processing} onChange={event => setProcessing(event.target.checked)} disabled={decide.pending} />
+          <span>Also turn processing on: this Mac may run Business research and Library summaries on its own Codex or Claude subscription. You can turn it off at any time.</span></label>
         <div className="flex flex-wrap gap-2">
-          <button type="button" className={buttonClass} disabled={decide.pending} onClick={async () => {
-            const result = await decide.run({ action: "approve_pairing", userCode, requestId: crypto.randomUUID() }); if (result?.ok) done("approved");
-          }}>{decide.pending ? "Saving…" : decide.retry ? "Retry approve" : "Approve"}</button>
+          <button type="button" className={buttonClass} disabled={decide.pending || enable.pending} onClick={async () => {
+            const result = await decide.run({ action: "approve_pairing", userCode, requestId: crypto.randomUUID() });
+            if (!result?.ok || !result.data.ok) return;
+            const deviceId = (result.data.data as { deviceId?: string } | undefined)?.deviceId;
+            if (processing && deviceId) await enable.run({ action: "set_processing", deviceId, enabled: true });
+            done("approved");
+          }}>{decide.pending || enable.pending ? "Saving…" : decide.retry ? "Retry approve" : "Approve"}</button>
           <button type="button" className={`${buttonClass} text-destructive`} disabled={decide.pending || decide.retry} onClick={async () => {
             const result = await decide.run({ action: "deny_pairing", userCode }); if (result?.ok) done("denied");
           }}>Deny</button>
         </div>
         {decide.error ? <p role="alert" className="text-destructive">{decide.error}</p> : null}
+        {enable.error ? <p role="alert" className="text-destructive">Approved, but processing could not be turned on: {enable.error}</p> : null}
       </> : null}
   </section>;
 }
@@ -212,17 +250,6 @@ export function CompanionSettings({ canManage, devices, origin, businessName, co
   useAutoRefresh(devices.some(device => device.commands.some(isCommandActive)));
   return <div className="space-y-6">
     {code ? <PairingApproval code={code} businessName={businessName} canManage={canManage} /> : null}
-    <section className="space-y-3 rounded-xl border bg-card p-5 text-sm" aria-labelledby="pair-heading">
-      <h2 id="pair-heading" className="text-lg font-medium">Use this computer for processing?</h2>
-      <p>Connect a Mac to run this Business&apos;s checks (and later, local transcription and text work) on your own hardware. Mac work waits while the Mac is offline; it never falls back to a paid API.</p>
-      <ol className="list-decimal space-y-1 pl-5">
-        <li>In this app&apos;s source checkout on your Mac, run:
-          <pre className="my-2 overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 text-xs">npm run start:studio-companion -- pair --origin {origin} --name &apos;My Mac&apos;</pre></li>
-        <li>It opens this page with a code. Check the code matches, then approve.</li>
-        <li>Start the companion: <code>npm run start:studio-companion -- start</code></li>
-      </ol>
-      {canManage ? code ? null : <CodeEntry /> : <p className="text-muted-foreground">Ask a Business admin to approve a new computer.</p>}
-    </section>
     <section className="space-y-4 rounded-xl border bg-card p-5 text-sm" aria-labelledby="devices-heading">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 id="devices-heading" className="text-lg font-medium">Computers</h2>
@@ -231,6 +258,17 @@ export function CompanionSettings({ canManage, devices, origin, businessName, co
       {!canManage ? <p className="text-muted-foreground">You can see status. Ask a Business admin to change settings.</p> : null}
       {devices.map(device => <DeviceCard key={device.id} device={device} canManage={canManage} />)}
       {!devices.length ? <p className="text-muted-foreground">No computers connected yet.</p> : null}
+    </section>
+    <section className="space-y-3 rounded-xl border bg-card p-5 text-sm" aria-labelledby="pair-heading">
+      <h2 id="pair-heading" className="text-lg font-medium">Connect a Mac</h2>
+      <p>Run this Business&apos;s research, summaries and checks on your own Mac and its Codex or Claude subscription. Mac work waits while the Mac is offline; it never falls back to a paid API.</p>
+      <ol className="list-decimal space-y-1 pl-5">
+        <li>In this app&apos;s source checkout on your Mac, run:
+          <pre className="my-2 overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 text-xs">npm run start:studio-companion -- pair --origin {origin} --name &apos;My Mac&apos;</pre></li>
+        <li>It opens this page with a code. Check the code matches, then approve.</li>
+        <li>Keep the companion running in the background (starts at login, restarts if it stops, logs in <code>~/Library/Logs/Estio/</code>): <code>{companionRunCommand}</code></li>
+      </ol>
+      {canManage ? code ? null : <CodeEntry /> : <p className="text-muted-foreground">Ask a Business admin to approve a new computer.</p>}
     </section>
   </div>;
 }

@@ -6,13 +6,22 @@ import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import { businessProfileSchema, type BusinessProfile } from "@/lib/business-profile/schema";
 import { getAiConnections as getAllAiConnections } from "@/lib/ai/connections";
+import type { AiConnections, AiConnectionSource } from "@/lib/ai/connections-model";
+import { readyResearchDevice, researchDevices, researchNoteFor, type ResearchDevice } from "./device-route";
 /**
- * Onboarding needs a connection that can research today. A paired Mac counts as a connection elsewhere, but it can't run
- * onboarding research until the Mac app ships a handler, so on its own it leaves onboarding locked.
+ * Onboarding needs a connection that can research today: a server connection (ChatGPT subscription, OpenAI or Gemini key)
+ * or a paired Mac that is ready right now (running, recently seen, processing On, not paused, research allowed, signed in
+ * with a subscription that has capacity). Mac sources show their own research readiness instead of the generic one.
  */
 async function getAiConnections(locationId: string) {
-  const [ai, provider] = await Promise.all([getAllAiConnections(locationId), chooseResearchProvider(locationId).catch(() => null)]);
-  return { ...ai, available: ai.available && provider !== null };
+  const [ai, provider, devices] = await Promise.all([getAllAiConnections(locationId), chooseResearchProvider(locationId).catch(() => null),
+    researchDevices(studioDb, locationId).catch(() => [] as ResearchDevice[])]);
+  const name = (p: "codex" | "claude") => p === "codex" ? "Codex (ChatGPT)" : "Claude";
+  const macSources: AiConnectionSource[] = devices.map(d => ({ kind: d.readiness.providers[0] === "claude" ? "device_claude" : "device_codex", scope: "device",
+    label: d.readiness.ready ? `${d.readiness.providers.map(name).join(" and ")} on ${d.name}` : `Mac: ${d.name}`, ready: d.readiness.ready,
+    ...(d.readiness.reason ? { detail: d.readiness.reason } : {}) }));
+  const connections: AiConnections = { available: provider !== null || readyResearchDevice(devices) !== null, sources: [...ai.sources.filter(s => s.scope !== "device"), ...macSources] };
+  return { connections, devices };
 }
 import { findTopic, topicsFor, type FieldValue } from "./topics";
 import { confirmField, setOwnerField } from "./facts";
@@ -36,7 +45,8 @@ async function load(actor: Actor) {
     db.location.findUnique({ where: { id: actor.locationId }, select: { name: true, timeZone: true } }),
     getAiConnections(actor.locationId),
   ]);
-  return { state, profile: doc ? businessProfileSchema.parse(doc.payload) : null, location: { name: location?.name ?? null, timeZone: location?.timeZone ?? null }, ai };
+  return { state, profile: doc ? businessProfileSchema.parse(doc.payload) : null, location: { name: location?.name ?? null, timeZone: location?.timeZone ?? null },
+    ai: ai.connections, researchNote: researchNoteFor(state, ai.devices) };
 }
 export async function getOnboardingView(actor: Actor) {
   const loaded = await load(actor);
@@ -61,7 +71,8 @@ export async function startResearch(actor: Actor, input: { name?: string; websit
   if (website) { try { const u = new URL(website); if (!["http:", "https:"].includes(u.protocol) || u.username || u.password) throw new Error(); } catch { throw new OnboardingError("That website address doesn't look right."); } }
   const name = normalizeName(input.name) || undefined;
   if (!name && !website) throw new OnboardingError("Give me your business name or website to start.");
-  if (!await chooseResearchProvider(actor.locationId)) throw new OnboardingError("Connect an AI first (Settings → Integrations): a ChatGPT subscription or an API key.");
+  if (!(await getAiConnections(actor.locationId)).connections.available)
+    throw new OnboardingError("Connect an AI first: a ChatGPT subscription, an API key, or a paired Mac running the Studio companion with processing on.");
   const batch = randomUUID().slice(0, 18);
   const topics = topicsFor(actor.app).map(t => t.id);
   await updateOnboardingState(actor.locationId, s => say(say(startBatch(s, batch, topics, { ...(name ? { name } : {}), ...(website ? { website } : {}) }), "owner",
@@ -155,5 +166,5 @@ export async function setStatus(actor: Actor, action: "finish" | "reopen") {
 export async function onboardingOpenModeFor(actor: Actor) {
   const [{ state }, ai] = await Promise.all([loadOnboardingState(actor.locationId), getAiConnections(actor.locationId)]);
   const { onboardingOpenMode } = await import("./state");
-  return onboardingOpenMode({ role: actor.role, impersonating: actor.impersonating, status: state.status, aiAvailable: ai.available });
+  return onboardingOpenMode({ role: actor.role, impersonating: actor.impersonating, status: state.status, aiAvailable: ai.connections.available });
 }

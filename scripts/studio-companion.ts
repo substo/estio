@@ -13,14 +13,19 @@ import { DeviceSettings, localGate } from "../lib/studio/companion/settings";
 import { executeProviderCommand } from "../lib/studio/companion/commands";
 import { runStudioJob, runStudioWorker } from "../lib/studio/worker/runner";
 import type { StudioQueue } from "../lib/studio/worker/queue";
+import type { StudioJobHandler } from "../lib/studio/worker/handlers";
 
 import path from "node:path";
 import { readUsage } from "../lib/build/usage";
 import { createLibrarySummaryHandler } from "../lib/studio/companion/library-summary";
+import { createOnboardingResearchHandler, subscriptionCapacity } from "../lib/studio/companion/onboarding-research";
+import { DEVICE_BLOCK_REASONS } from "../lib/studio/devices-policy";
 
-const version = "studio-companion-2";
+const version = "studio-companion-3";
+const quotaMs = 5 * 60_000;
+const quotaHelper = () => path.join(os.homedir(), "Applications/QuotaCell.app/Contents/Helpers/CodexBarCLI");
 const rediscoverMs = 10 * 60_000;
-const usage = "Usage: npm run start:studio-companion -- pair --origin <https origin> [--name 'My Mac'] | start [--once] | readiness";
+const usage = "Usage: npm run start:studio-companion -- pair --origin <https origin> [--name 'My Mac'] | start [--once] | readiness\nRun in the background: bash scripts/studio-companion-launchagent.sh install";
 const messages: Record<string, string> = {
   setup_replaced: "`setup` with a pasted device token was replaced by browser pairing. Run: npm run start:studio-companion -- pair --origin <https origin> --name 'My Mac'",
   invalid_arguments: usage, invalid_app_origin: "Use the app's https origin, for example --origin https://substo.com",
@@ -65,7 +70,17 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const instanceId = randomUUID();
     const workerId = `mac:${config.deviceId}:${process.pid}`;
     const settings = new DeviceSettings();
-    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, handlers: ["studio.diagnostic", "studio.library_summary"], ...providers, ...discovery });
+    // QuotaCell capacity readings: refreshed every 5 minutes and reported, so the server only routes research to a Mac with capacity.
+    let quotaAt = 0; let quota: Awaited<ReturnType<typeof readUsage>> = {};
+    const usageNow = async () => { if (Date.now() - quotaAt >= quotaMs) { quota = await readUsage(quotaHelper()).catch(() => ({})); quotaAt = Date.now(); } return quota; };
+    await usageNow();
+    const gate = () => localGate({ state: settings.state, config: settings.config, power: discovery.hardware.power, freeDiskGb: discovery.hardware.freeDiskGb });
+    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research"], ...providers, ...discovery,
+      capacity: subscriptionCapacity(quota), processingBlocked: gate().reasons.filter(reason => reason in DEVICE_BLOCK_REASONS) });
+    const researchReady = () => {
+      const capacity = subscriptionCapacity(quota);
+      return gate().processing && (["codex", "claude"] as const).some(p => capacity[p] && providers[p].ready);
+    };
 
     // Provider login/logout commands arrive with heartbeats; one at a time per provider.
     const handled = new Set<string>(); const active = new Map<LocalProvider, Promise<void>>();
@@ -82,7 +97,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
         .finally(() => active.delete(cmd.provider));
       active.set(cmd.provider, task);
     };
-    const inner = createDeviceStudioQueue(credentials, { capabilities, summaryReady: () => settings.config.features.text && localGate({ state: settings.state, config: settings.config, power: discovery.hardware.power, freeDiskGb: discovery.hardware.freeDiskGb }).processing, configAck: () => settings.pendingAck,
+    const inner = createDeviceStudioQueue(credentials, { capabilities, summaryReady: () => settings.config.features.text && gate().processing, researchReady, configAck: () => settings.pendingAck,
       onHeartbeat: (state, sentAck) => {
         if (settings.update(state, sentAck)) { log({ event: "config_applied", version: settings.appliedVersion, status: settings.pendingAck?.status }); pulse(); }
         if (state && !once) for (const cmd of state.commands) runCommand(cmd);
@@ -93,19 +108,18 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const queue: StudioQueue = { ...inner,
       heartbeat: (...args) => { last = args; return inner.heartbeat(...args); },
       claim: async (id, limit, leaseSeconds) => {
-        // Local policy before claiming. Only diagnostics are registered; future processing kinds must also require gate.processing.
-        const gate = localGate({ state: settings.state, config: settings.config, power: discovery.hardware.power, freeDiskGb: discovery.hardware.freeDiskGb });
-        const reasons = gate.reasons.join(",");
-        if (reasons !== lastReasons) { lastReasons = reasons; log({ event: "local_gate", diagnostics: gate.diagnostics, processing: gate.processing, reasons: gate.reasons }); }
-        return gate.diagnostics ? inner.claim(id, limit, leaseSeconds) : [];
+        // Local policy before claiming. Processing kinds are only requested (summaryReady/researchReady) when gate.processing allows.
+        const current = gate();
+        const reasons = current.reasons.join(",");
+        if (reasons !== lastReasons) { lastReasons = reasons; log({ event: "local_gate", diagnostics: current.diagnostics, processing: current.processing, reasons: current.reasons }); }
+        return current.diagnostics ? inner.claim(id, limit, leaseSeconds) : [];
       } };
     const diagnostic = createCompanionDiagnostic(provider => adapters[provider]);
-    let quotaAt = 0; let quota: Awaited<ReturnType<typeof readUsage>> = {};
-    const summary = createLibrarySummaryHandler({ adapter: p => adapters[p],
-      enabled: () => settings.config.features.text && localGate({ state: settings.state, config: settings.config, power: discovery.hardware.power, freeDiskGb: discovery.hardware.freeDiskGb }).processing,
-      usage: async () => { if (Date.now() - quotaAt >= 300_000) { quota = await readUsage(path.join(os.homedir(), "Applications/QuotaCell.app/Contents/Helpers/CodexBarCLI")); quotaAt = Date.now(); } return quota; } });
-    const handlers = { "studio.library_summary": summary, "studio.diagnostic": (job: Parameters<typeof diagnostic>[0], context: Parameters<typeof diagnostic>[1]) =>
-      diagnostic(job, { ...context, signal: AbortSignal.any([context.signal, controller.signal]) }) };
+    const summary = createLibrarySummaryHandler({ adapter: p => adapters[p], enabled: () => settings.config.features.text && gate().processing, usage: usageNow });
+    // Research needs processing On (its grant), not the text-feature setup; web search is enabled only inside this handler.
+    const research = createOnboardingResearchHandler({ adapter: p => adapters[p], enabled: () => gate().processing, usage: usageNow });
+    const withShutdown = (handler: StudioJobHandler): StudioJobHandler => (job, context) => handler(job, { ...context, signal: AbortSignal.any([context.signal, controller.signal]) });
+    const handlers: Record<string, StudioJobHandler> = { "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
     const report = { instanceId, handlers: Object.keys(handlers) };
     if (once) {
       const startedAt = new Date();
@@ -122,7 +136,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const refresh = setInterval(() => { if (!refreshing && !controller.signal.aborted) {
       refreshing = true; void Promise.all([readiness(), discover()]).then(([p, d]) => { providers = p; discovery = d; }).catch(() => {}).finally(() => { refreshing = false; });
     } }, rediscoverMs);
-    const quick = setInterval(() => { if (!refreshing) void discoverPowerAndDisk().then(v => { discovery = { ...discovery, hardware: { ...discovery.hardware, ...v } }; }).catch(() => {}); }, 60_000);
+    const quick = setInterval(() => { if (!refreshing) void Promise.all([discoverPowerAndDisk().then(v => { discovery = { ...discovery, hardware: { ...discovery.hardware, ...v } }; }), usageNow()]).catch(() => {}); }, 60_000);
     try { await runStudioWorker({ queue, handlers, workerId, release: version, report, concurrency: 1,
       // Sign-in commands ride on heartbeats, so they stay at 30s; an idle Mac claims at most once a minute.
       heartbeatMs: 30_000, idlePollMaxMs: 60_000, signal: controller.signal, log }); }

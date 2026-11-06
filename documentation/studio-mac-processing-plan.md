@@ -5,9 +5,25 @@ Updated 2026-10-26 with the owner's decisions. Reuse one Mac companion, sign-in 
 ## Current implementation
 
 - **Both apps.** Business admins (Substo owner/admin, Estio location ADMIN) manage computers in **Studio → Settings → Connected computer**. Estio device requests re-check the approving admin on every call.
-- **Pairing (slices 1–2):** on the Mac run `npm run start:studio-companion -- pair --origin https://substo.com --name 'My Mac'` (or `https://estio.co`). It opens an approval link with a short code; an admin approves it for the active Business. The device token is issued once to the Mac, stored in macOS Keychain, and only its hash is kept on the server. Then `npm run start:studio-companion -- start`.
+- **Pairing (slices 1–2):** on the Mac run `npm run start:studio-companion -- pair --origin https://substo.com --name 'My Mac'` (or `https://estio.co`). It opens an approval link with a short code; an admin approves it for the active Business. The device token is issued once to the Mac, stored in macOS Keychain, and only its hash is kept on the server. Then keep it running with `bash scripts/studio-companion-launchagent.sh install` (or run `npm run start:studio-companion -- start` in a terminal).
 - **Settings:** status (online/busy/paused/offline), hardware, runtimes and local models reported by the Mac; "Use this computer for processing?" (default off); pause/resume; revoke; Mac check and CLI check jobs; Connect/Disconnect Codex or Claude (the Mac runs `codex login --device-auth` / `claude auth login --claudeai` and Settings shows only the link and code); a setup form (features, languages, quality, text provider/model, resources) that the Mac applies and acknowledges, with a reason for each unsupported setting.
-- **Not built yet:** local transcription and text workflows (settings are saved for later), model downloads, the model catalogue, Process now, launch at login and a packaged Mac app. Hosted workers never claim Mac jobs; offline work waits without API fallback.
+- **Running in the background (like the Build worker / T3 on this Mac):** after pairing, in the source checkout run
+  `bash scripts/studio-companion-launchagent.sh install`. It writes LaunchAgent `co.estio.studio-companion`
+  (`~/Library/LaunchAgents/co.estio.studio-companion.plist`: `node --import tsx scripts/studio-companion.ts start`, starts at
+  login, restarts when it stops, 30 s throttle), logs to `~/Library/Logs/Estio/studio-companion.log` and
+  `studio-companion-error.log`. `status`, `restart` (after updating the checkout) and `uninstall` are the other commands.
+  Settings shows Online only while a heartbeat is under 90 s old; otherwise "Companion not running · last seen …", and when
+  processing is On it says plainly that nothing will run until the companion is running.
+- **Allowed work (2026-11-06):** Mac checks are always allowed. Turning processing On grants `studio.library_summary` and
+  `studio.onboarding_research` (a database trigger keeps `allowed_kinds` in step with the opt-in; Off returns to checks
+  only and cancels queued research). Pairing approval has an "Also turn processing on" opt-in. Devices that already had
+  processing On were upgraded by migration `20261106120000_studio_device_onboarding_research`, so no re-pairing is needed;
+  an older companion must only be updated and restarted (it reports `studio-companion-3` and the research handler).
+- **Working text workflows:** Library summaries ([Studio Library](studio-library.md)) and Business onboarding research
+  ([onboarding](onboarding.md)), both on the Mac's Codex/Claude subscription with QuotaCell capacity and no API fallback.
+  The heartbeat reports per-CLI capacity and local blocks (battery, working hours, disk) so the server only routes
+  research to a Mac that can take it.
+- **Not built yet:** local transcription, model downloads, the model catalogue, Process now and a packaged Mac app. Hosted workers never claim Mac jobs; offline work waits without API fallback.
 
 The sections below are the target design; only the current implementation above is available so far.
 
