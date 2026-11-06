@@ -78,7 +78,8 @@ async function main() {
     save();
     const timer = setInterval(() => void heartbeat(), 10000);
     let outcome = "failed";
-    const compact = (result: CliOutcome) => ({ ...result, text: result.text.slice(0, 12000), textTruncated: result.text.length > 12000 });
+    // Long reports keep their start and their end, where the "Story:" and "Decisions:" sections are.
+    const compact = (result: CliOutcome) => ({ ...result, text: result.text.length > 12000 ? `${result.text.slice(0, 7000)}\n…\n${result.text.slice(-5000)}` : result.text, textTruncated: result.text.length > 12000 });
     try {
       // The checkout may be ahead of the approved base (another task merged); the task still starts from its base.
       try { execFileSync("git", ["merge-base", "--is-ancestor", job.spec.baseRevision, "HEAD"], { cwd: checkout }); } catch { throw new Error("Approved base is not in the checkout's history"); }
