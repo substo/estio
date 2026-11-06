@@ -43,8 +43,17 @@ export function safeLibraryThumbnailUrl(value: unknown) {
   if (typeof value !== 'string') return '';
   try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password && !u.port && !isIP(u.hostname.replace(/^\[|\]$/g, '')) && !/^(localhost|.*\.(local|internal|localhost))$/i.test(u.hostname) && u.hostname.includes('.') && !u.hostname.endsWith('.home.arpa') ? u.href.slice(0,2048) : ''; } catch { return ''; }
 }
-export async function fetchLibraryImportMetadata(target: ReturnType<typeof libraryImportTarget>, dependencies = { page: fetchPublicPage, fetcher: fetch }, native?: { title: unknown; channelName: unknown; description: unknown; thumbnailUrl: unknown } | null) {
+export function validatedYoutubeCreator(value: unknown): { channelUrl: string; channelId?: string } | null {
+  if (typeof value !== 'string') return null;
+  try {
+    const target = libraryImportTarget(value);
+    if (target.platform !== 'youtube' || target.kind !== 'channel') return null;
+    return { channelUrl: target.url, ...(target.url.match(/\/channel\/(UC[\w-]{22})$/)?.[1] ? { channelId: target.url.split('/').pop()! } : {}) };
+  } catch { return null; }
+}
+export async function fetchLibraryImportMetadata(target: ReturnType<typeof libraryImportTarget>, dependencies = { page: fetchPublicPage, fetcher: fetch }, native?: { title: unknown; channelName: unknown; description: unknown; thumbnailUrl: unknown; channelUrl?: unknown } | null) {
   let title = '', channelName = '', thumbnailUrl = '', description = '';
+  let creator = native ? validatedYoutubeCreator(native.channelUrl) : null;
   const evidence: Record<string, unknown> = { sourceUrl: target.url, fetchedAt: new Date().toISOString(), method: 'public_page' };
   if (native) { title = text(native.title,180); channelName = text(native.channelName,500); description = text(native.description,20000); thumbnailUrl = safeLibraryThumbnailUrl(native.thumbnailUrl); evidence.method = 'youtube_data_api'; evidence.descriptionSource = description ? target.url : null; }
   if (target.videoId && !title) {
@@ -56,6 +65,7 @@ export async function fetchLibraryImportMetadata(target: ReturnType<typeof libra
     try { while (true) { const part = await reader.read(); if (part.done) break; bytes += part.value.byteLength; if (bytes > 64000) throw new LibraryImportError('Metadata response was too large.', 422); body += new TextDecoder().decode(part.value, { stream: true }); } } finally { await reader.cancel(); }
     const data = JSON.parse(body);
     title = text(data.title, 180); channelName = text(data.author_name, 500); thumbnailUrl = safeLibraryThumbnailUrl(data.thumbnail_url);
+    creator = validatedYoutubeCreator(data.author_url);
     evidence.method = 'youtube_oembed'; evidence.authorUrl = text(data.author_url, 2048);
   }
   try {
@@ -65,5 +75,5 @@ export async function fetchLibraryImportMetadata(target: ReturnType<typeof libra
   } catch (error) { if (!title) throw new LibraryImportError('Public metadata is unavailable. Check the URL or try again later.', 422); }
   if (!title) throw new LibraryImportError('The source did not provide a title.', 422);
   if (target.kind === 'channel') channelName ||= title;
-  return { kind: target.kind, title, payload: { title, url: target.url, platform: target.platform, format: target.kind === 'channel' ? 'channel' : target.format, thumbnailUrl, channelName, description, summaryStatus: 'not_generated', importEvidence: evidence } };
+  return { kind: target.kind, title, payload: { title, url: target.url, platform: target.platform, format: target.kind === 'channel' ? 'channel' : target.format, thumbnailUrl, channelName, description, ...creator, summaryStatus: 'not_generated', importEvidence: evidence } };
 }
