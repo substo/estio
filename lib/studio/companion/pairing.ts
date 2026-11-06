@@ -41,7 +41,7 @@ export async function pairDevice(input: { origin: string; name: string; platform
     await store.save(origin, result.token);
     await saveConfig({ version: 2, origin, name, deviceId: result.deviceId }, deps.configDir ?? defaultConfigDir());
     const business = printable(result.businessName);
-    print(`Paired with ${business || "your Business"}. Run: npm run start:studio-companion -- start`);
+    print(`Paired with ${business || "your Business"}. Keep it running in the background: bash scripts/studio-companion-launchagent.sh install`);
     return { deviceId: result.deviceId, businessName: business };
   }
   throw new Error("pairing_expired");

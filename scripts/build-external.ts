@@ -1,19 +1,22 @@
 /** JSON command on stdin. Use the existing private worker env, never tokens on the command line.
+ * An external-work report (externalCommand), or {"action":"story","id":"<Build record id>","story":{...}} to set the
+ * readable story of any Build record.
  * --database uses the configured DATABASE_URL authority for an operator registration before route deployment.
  */
 import { readFileSync } from "node:fs";
-import { externalCommand } from "../lib/build/external";
+import { externalCommand, storyCommand } from "../lib/build/external";
 async function main() {
-  const input = externalCommand.parse(JSON.parse(readFileSync(0, "utf8")));
+  const raw = JSON.parse(readFileSync(0, "utf8"));
+  const input = raw?.action === "story" ? storyCommand.parse(raw) : externalCommand.parse(raw);
   if (process.argv.includes("--database")) {
     // Existing operator database authority; no queue approval/lease is manufactured.
     const { PrismaClient } = await import("@prisma/client");
-    const { trackExternal } = await import("../lib/build/external");
+    const { setStory, trackExternal } = await import("../lib/build/external");
     const db = new PrismaClient();
     try {
       const result = await db.$transaction(async tx => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(741903211)`;
-        return trackExternal(tx, input);
+        return "action" in input ? setStory(tx, input.id, input.story, "worker") : trackExternal(tx, input);
       });
       console.log(JSON.stringify(result));
     } finally { await db.$disconnect(); }

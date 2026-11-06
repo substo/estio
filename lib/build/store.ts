@@ -7,6 +7,8 @@ import { experienceFor } from "./experience";
 import { describeUrl, watchId } from "./watch";
 import { validateScopeEntry } from "./delivery";
 import { screenDraft, screenInstruction, undescribed } from "./contract";
+import { keepStory, makeStory, storyFrom, storyInput, storyOf } from "./story";
+import { setStory } from "./external";
 import { decisionsOf, playbookNames, playbookText, type PlaybookEdits } from "./playbook";
 import { memoryHeading, memoryText, remember, type MemoryEntry, type MemoryKind } from "./memory";
 import { remainingByBucket, usageFloor, usageLow, usageSpec } from "./contract";
@@ -31,7 +33,7 @@ function summarizeCheckpoint(value: unknown) {
   const v = value as Record<string, any>;
   // Changed files are listed here; their text is fetched one at a time (jobFile) so the page refresh stays small.
   return { review: Array.isArray(v.review) ? v.review.map((f: { path: string; change: string; text?: string; truncated?: boolean }) => ({ path: f.path, change: f.change, size: f.text?.length ?? 0, truncated: f.truncated })) : undefined,
-    external: v.external, reason: v.reason, nextStep: v.nextStep, t3: v.t3, merge: v.merge, talkId: v.talkId, feedback: v.feedback, auto: v.auto, localCheckpoint: v.localCheckpoint, delivery: v.delivery, evidence: v.evidence, reviewedDiffDigest: v.reviewedDiffDigest, result: v.result ? { status: v.result.status, text: String(v.result.text ?? "").slice(0, 6000), decisions: decisionsOf(String(v.result.text ?? "")), usage: v.result.usage, needsAnswer: v.result.needsAnswer === true } : undefined, independentReview: v.independentReview ? { status: v.independentReview.status, text: String(v.independentReview.text ?? "").slice(0, 2000) } : undefined };
+    story: v.story, external: v.external, reason: v.reason, nextStep: v.nextStep, t3: v.t3, merge: v.merge, talkId: v.talkId, feedback: v.feedback, auto: v.auto, localCheckpoint: v.localCheckpoint, delivery: v.delivery, evidence: v.evidence, reviewedDiffDigest: v.reviewedDiffDigest, result: v.result ? { status: v.result.status, text: String(v.result.text ?? "").slice(0, 6000), decisions: decisionsOf(String(v.result.text ?? "")), usage: v.result.usage, needsAnswer: v.result.needsAnswer === true } : undefined, independentReview: v.independentReview ? { status: v.independentReview.status, text: String(v.independentReview.text ?? "").slice(0, 2000) } : undefined };
 }
 /** Routing inputs from the worker's reports: subscriptions that hit a limit, and fresh remaining allowance. */
 export function routing(worker: unknown) {
@@ -81,6 +83,7 @@ export const operatorCommand = z.discriminatedUnion("action", [
   z.object({ action: z.literal("memory-update"), memoryId: z.string().max(40), pinned: z.boolean().optional(), remove: z.literal(true).optional() }).strict(),
   z.object({ action: z.literal("playbook"), name: z.enum(playbookNames), text: z.string().trim().min(20).max(8000).optional(), reset: z.literal(true).optional() }).strict(),
   z.object({ action: z.literal("pause"), paused: z.boolean() }).strict(),
+  z.object({ action: z.literal("story"), id, story: storyInput }).strict(),
   z.object({ action: z.literal("daily"), enabled: z.boolean(), profileId: id }).strict(),
   z.object({ action: z.literal("recheck"), bucket: id, evidence: z.string().min(10).max(2000) }).strict(),
   z.object({ action: z.literal("profiles"), revision: z.number().int(), profiles: profilesSpec }).strict(),
@@ -138,6 +141,7 @@ export async function operator(input: z.infer<typeof operatorCommand>, actor: st
         const memory = (meta.memory ?? []).flatMap(m => m.id !== input.memoryId ? [m] : input.remove ? [] : [{ ...m, pinned: input.pinned ?? m.pinned }]);
         return tx.buildControl.update({ where: { id: "build" }, data: { worker: json({ ...meta, memory }) } });
       }
+      case "story": return setStory(tx, input.id, input.story, "owner");
       case "pause": return tx.buildControl.update({ where: { id: "build" }, data: { paused: input.paused } });
       case "profiles": {
         requireCondition(control.revision === input.revision, "Profile policy changed; reload");
@@ -423,7 +427,7 @@ export async function worker(input: z.infer<typeof workerCommand>) {
         const exhausted = Object.keys((control.worker as { quotaBuckets?: object }).quotaBuckets ?? {});
         const profile = prior?.nextProfileId ? profiles.find(p => p.id === prior.nextProfileId && !exhausted.includes(p.quotaBucket)) : selectProfile(profiles, spec, routing(control.worker));
         if (!profile || (spec.taskType !== "inspect" && !((spec.taskType === "review" && input.review && spec.tools.every(t => t === "git-read")) || (spec.taskType === "implementation" && input.implementation && spec.tools.includes("code-write"))))) {
-          await tx.buildJob.update({ where: { id: job.id }, data: { state: profile ? "blocked-configuration" : "waiting-for-capacity", checkpoint: { reason: profile ? "Worker lacks this execution capability; implementation writes disabled" : "No eligible approved profile", stopped: true } } }); continue;
+          await tx.buildJob.update({ where: { id: job.id }, data: { state: profile ? "blocked-configuration" : "waiting-for-capacity", checkpoint: json(keepStory(job.checkpoint, { reason: profile ? "Worker lacks this execution capability; implementation writes disabled" : "No eligible approved profile", stopped: true })) } }); continue;
         }
         const claimed = await tx.buildJob.update({ where: { id: job.id }, data: {
           state: "working", workerId: input.workerId, leaseToken: randomUUID(), leaseUntil: new Date(now.getTime() + 60000),
@@ -445,7 +449,7 @@ export async function worker(input: z.infer<typeof workerCommand>) {
       const approval = job.approval as { policyRevision: number; nodes: { id: string; revision: number }[] };
       const currentNodes = await tx.buildNode.findMany({ where: { id: { in: approval.nodes.map(n => n.id) } } });
       if (approval.policyRevision !== control.revision || approval.nodes.some(n => !currentNodes.some(v => v.id === n.id && v.revision === n.revision))) return { stop: true, reason: "Approval superseded; stop and preserve checkpoint" };
-      return tx.buildJob.update({ where: { id: job.id }, data: { checkpoint: json(input.checkpoint), leaseUntil: new Date(now.getTime() + 60000) } });
+      return tx.buildJob.update({ where: { id: job.id }, data: { checkpoint: json(keepStory(job.checkpoint, input.checkpoint)), leaseUntil: new Date(now.getTime() + 60000) } });
     }
     requireCondition(!control.paused || input.outcome === "stopped", "Paused: stop and preserve checkpoint");
     if (input.outcome === "review") {
@@ -463,7 +467,7 @@ export async function worker(input: z.infer<typeof workerCommand>) {
       const eligible = candidate && attempt.count < attempt.profile.maxAttempts && control.revision === (job.approval as { policyRevision: number }).policyRevision;
       return tx.buildJob.update({ where: { id: job.id }, data: {
         state: eligible ? "approved" : "waiting-for-capacity", leaseToken: null, leaseUntil: null,
-        checkpoint: json({ ...input.checkpoint, stopped: true, exhaustedBuckets, reason: eligible ? "Stopped; qualified approved fallback pending" : "No eligible fallback or attempt limit reached; owner action required" }),
+        checkpoint: json({ ...keepStory(job.checkpoint, input.checkpoint), stopped: true, exhaustedBuckets, reason: eligible ? "Stopped; qualified approved fallback pending" : "No eligible fallback or attempt limit reached; owner action required" }),
         attempt: json({ ...attempt, exhaustedBuckets, nextProfileId: eligible ? candidate.id : null, history: [...(attempt.history ?? []), { profile: attempt.profile, outcome: "capacity", stopped: true, at: now.toISOString() }] }),
       } });
     }
@@ -495,8 +499,11 @@ export async function worker(input: z.infer<typeof workerCommand>) {
         nextStep: created.length ? `${created.length} proposal${created.length === 1 ? "" : "s"} added as unapproved cards` : "Review found nothing worth proposing" };
       if ((job.approval as { standingGrantId?: string } | null)?.standingGrantId) state = "done";
     }
+    // The report's "Story:" section becomes the card's story; without one the previous story stays.
+    const told = storyOf(String((input.checkpoint.result as { text?: unknown } | undefined)?.text ?? ""));
+    const story = told ? makeStory({ ...told, area: told.area ?? storyFrom(job.checkpoint)?.area }, "task", now) : undefined;
     return tx.buildJob.update({ where: { id: job.id }, data: {
-      state, checkpoint: json(input.checkpoint), leaseToken: null, leaseUntil: null,
+      state, checkpoint: json(keepStory(job.checkpoint, { ...input.checkpoint, story })), leaseToken: null, leaseUntil: null,
     } });
   });
 }

@@ -14,7 +14,7 @@ export const researchOutputJsonSchema = {
       sources: { type: "array", items: { type: "string" } }, confidence: { type: "string", enum: ["high", "medium", "low"] } } } },
   },
 } as const;
-const outputSchema = z.object({
+export const researchOutputSchema = z.object({
   businessName: z.string().max(200).nullable().optional(),
   fields: z.array(z.object({ key: z.string().max(60), valueJson: z.string().max(20000), sources: z.array(z.string().max(2048)).max(20), confidence: z.enum(["high", "medium", "low"]) })).max(40),
 });
@@ -68,8 +68,8 @@ export function parseResearchOutput(topicId: string, raw: string, options: { own
   const topic = findTopic(topicId);
   if (!topic) return { suggestions: [] as Suggestion[], dropped: ["unknown topic"], businessName: null as string | null };
   const json = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
-  let parsed: z.infer<typeof outputSchema>;
-  try { parsed = outputSchema.parse(JSON.parse(json)); } catch { return { suggestions: [], dropped: ["reply was not valid JSON"], businessName: null }; }
+  let parsed: z.infer<typeof researchOutputSchema>;
+  try { parsed = researchOutputSchema.parse(JSON.parse(json)); } catch { return { suggestions: [], dropped: ["reply was not valid JSON"], businessName: null }; }
   const suggestions: Suggestion[] = [], dropped: string[] = [];
   for (const item of parsed.fields) {
     const field = (options.ownerAnswer ? topic.fields : researchFields(topic)).find(f => f.key === item.key);
