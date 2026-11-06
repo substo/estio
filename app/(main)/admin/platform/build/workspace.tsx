@@ -8,17 +8,15 @@ import { suggestedReferences } from "@/lib/build/watch-suggestions";
 import { loop } from "@/lib/build/factory-guide";
 import { TalkPanel, type Talk } from "./talk";
 import { Playbook } from "./playbook";
+import { Progress, ago, canMerge, cp, stateWord, type Checkpoint, type Job } from "./progress";
 import type { PlaybookEdits } from "@/lib/build/playbook";
 import type { MemoryEntry } from "@/lib/build/memory";
 import type { Usage } from "@/lib/build/contract";
 
 type Node = { id: string; revision: number; spec: z.infer<typeof nodeSpec>; updatedAt: string };
-type Job = { id: string; key: string; revision: number; state: string; spec: z.infer<typeof jobSpec>; checkpoint: unknown; attempt: unknown; approval: unknown; createdAt: string; updatedAt: string };
 type Worker = { daily?: { enabled: boolean; profileId: string; lastRunDate?: string }; quotaBuckets?: Record<string, { observedAt: string; reset: string }>; catalog?: CatalogModel[]; catalogAt?: string; autoApprove?: { mode: "off" | "record" | "on" }; head?: string; id?: string; lastSeenAt?: string; playbook?: PlaybookEdits; usage?: Usage; memory?: MemoryEntry[]; docs?: { at?: string; files: { path: string; size: number }[] } };
 type Data = { control: { paused: boolean; revision: number; profiles: Profile[]; worker: Worker } | null; nodes: Node[]; edges: { fromId: string; toId: string; kind: string }[]; jobs: Job[]; talks?: Talk[] };
 type Send = (command: unknown) => Promise<boolean>;
-type Merge = { state: "queued" | "merging" | "resolving" | "merged" | "failed"; at: string; sha?: string; reason?: string; local?: string; branch?: string };
-type Checkpoint = { external?: { threadId: string; status: string; note: string; at: string; evidence: string[] }; merge?: Merge; evidence?: { ok?: boolean; files?: string[] }; reason?: string; nextStep?: string; result?: { text?: string; needsAnswer?: boolean; decisions?: string | null }; review?: { path: string; change: "added" | "modified" | "deleted"; size: number; truncated?: boolean }[]; t3?: { threadId?: string; branch?: string }; feedback?: { at: string; decision: string; note: string; sentAt?: string }[]; auto?: { wouldApprove: boolean; reasons: string[] }; proposalsCreated?: number };
 type CatalogModel = { provider: string; model: string; name: string };
 type Tier = "off" | "routine" | "hard";
 
@@ -27,10 +25,6 @@ const solid = "rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primar
 const field = "rounded-md border bg-background p-2 text-sm";
 const label = "text-xs font-medium uppercase tracking-wide text-muted-foreground";
 const sections = ["CRM", "Studio", "Public website", "Platform admin", "Account & onboarding"];
-const cp = (j: Job) => (j.checkpoint ?? {}) as Checkpoint;
-const ago = (iso: string) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : new Date(iso).toLocaleDateString(); };
-const level = (j: Job) => j.spec.quality === difficulty.hard ? "Hard" : "Routine";
-const model = (j: Job, data: Data) => (j.attempt as { profile?: Profile } | null)?.profile?.model ?? data.control?.profiles.find(p => p.id === j.spec.profileId)?.model;
 // Profiles are generated from catalog choices, never typed. One quota bucket per provider subscription.
 const makeProfile = (m: CatalogModel, tier: "routine" | "hard", write: boolean): Profile => ({ id: `${m.provider}.${m.model}`, enabled: true, provider: m.provider, account: "default", billing: "subscription", model: m.model, options: {}, quotaBucket: m.provider, taskTypes: write ? ["inspect", "implementation", "review"] : ["inspect", "review"], tools: write ? ["git-read", "code-write"] : ["git-read"], dataScope: "estio-repository", quality: difficulty[tier], concurrency: 1, maxAttempts: 2, fallbacks: [] });
 const blockedStates = ["blocked-lease-expired", "waiting-for-capacity", "blocked-configuration", "blocked-stale-approval"];
@@ -72,7 +66,7 @@ export default function BuildWorkspace() {
       blocker={!online ? "The Mac is offline; it relays the conversation." : models.some(p => p.tools.includes("code-write")) ? null : "Allow a model that may write code first (Settings)."} />}
     {data && <NeedsYou data={data} busy={busy} send={send} online={online} openSettings={() => setSettings(true)} />}
     {data && <AppMap data={data} busy={busy} send={send} ask={ask} />}
-    {data && <Progress data={data} busy={busy} send={send} />}
+    {data && <Progress jobs={data.jobs} nodes={data.nodes} profiles={data.control?.profiles ?? []} busy={busy} send={send} />}
     {data && <Playbook memory={w?.memory ?? []} edits={w?.playbook} docs={w?.docs?.files ?? []} busy={busy} send={send} ask={ask} />}
   </main>;
 }
@@ -123,10 +117,6 @@ function NeedsYou({ data, busy, send, online, openSettings }: { data: Data; busy
     <h2 className={label}>Needs you{rows.length ? ` · ${rows.length}` : ""}</h2>
     {rows.length ? <div className="space-y-2">{rows}</div> : <p className="rounded-lg border p-3 text-sm text-muted-foreground">Nothing is waiting for you.</p>}
   </section>;
-}
-const canMerge = (j: Job) => j.spec.taskType === "implementation" && !!cp(j).t3?.branch && cp(j).evidence?.ok === true && !!cp(j).evidence?.files?.length && !["queued", "merging", "resolving", "merged"].includes(cp(j).merge?.state ?? "");
-function mergeWords(m: Merge) {
-  return m.state === "merged" ? `Merged${m.sha ? ` (${m.sha.slice(0, 7)})` : ""}, not deployed yet` : m.state === "resolving" ? "Merging: an agent is resolving conflicts" : m.state === "failed" ? `Merge failed: ${m.reason ?? "unknown"}` : "Merging…";
 }
 function plainBlock(j: Job) {
   return j.state === "waiting-for-capacity" ? "The allowed models hit their usage limit. It continues when a limit resets, or allow another model."
@@ -248,43 +238,6 @@ function Watching({ data, busy, send }: { data: Data; busy: boolean; send: Send 
       : <button className={`${btn} mt-2`} onClick={() => setAdding(true)}>+ Watch a link</button>}
     {suggestions.length > 0 && <div className="mt-2 space-y-1"><p className="text-xs text-muted-foreground">Mentioned before, not added:</p>{suggestions.map(r => <div key={r.url} className="flex items-start gap-2 text-xs"><button className={btn} disabled={busy} onClick={() => send({ action: "watch", url: r.url, note: r.note, screenIds: [] })}>Add</button><span><span className="break-all">{r.url}</span><br /><span className="text-muted-foreground">{r.note}</span></span></div>)}</div>}
   </details>;
-}
-
-function stateWord(j: Job) {
-  if (j.state.startsWith("external-")) return `External · ${j.state.slice(9)}`;
-  return ({ proposed: "suggested", approved: "queued", working: "running", stopping: "stopping", review: "ready for you", done: "done", failed: "failed", revoked: "dropped" } as Record<string, string>)[j.state] ?? "stuck";
-}
-/** Next · Now · Done. Cards say where in the app, how hard, which model, and where the work is. */
-function Progress({ data, busy, send }: { data: Data; busy: boolean; send: Send }) {
-  const [open, setOpen] = useState<string | null>(null);
-  const screenName = (j: Job) => { const n = data.nodes.find(n => j.spec.nodeIds.includes(n.id) && n.spec.kind === "page"); return n ? `${n.spec.section} › ${n.spec.name}` : j.spec.scope[0]; };
-  const columns: [string, Job[]][] = [
-    ["Next", data.jobs.filter(j => ["proposed", "approved"].includes(j.state))],
-    ["Now", data.jobs.filter(j => ["working", "stopping", "review", "external-working", "external-blocked", "external-review", "external-failed"].includes(j.state) || ["queued", "merging", "resolving"].includes(cp(j).merge?.state ?? ""))],
-    ["Done", data.jobs.filter(j => ["done", "external-done"].includes(j.state) && !["queued", "merging", "resolving"].includes(cp(j).merge?.state ?? "")).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))],
-  ];
-  return <section className="space-y-2">
-    <h2 className={label}>Progress</h2>
-    <div className="grid gap-2 md:grid-cols-3">{columns.map(([name, jobs]) => <div key={name} className="space-y-1.5 rounded-lg border p-2.5">
-      <p className="text-xs font-semibold text-muted-foreground">{name} · {jobs.length}</p>
-      {!jobs.length && <p className="text-xs text-muted-foreground">{name === "Next" ? "Start something in Talk." : name === "Now" ? "Nothing running." : "Nothing finished yet."}</p>}
-      {jobs.slice(0, name === "Done" ? 12 : 20).map(j => { const c = cp(j), m = model(j, data);
-        return <button id={j.id} key={j.id} onClick={() => setOpen(open === j.id ? null : j.id)} className="block w-full rounded-md bg-muted/60 px-2.5 py-2 text-left text-sm hover:bg-muted">
-          <span className="font-medium">{j.spec.title}</span>
-          <span className="block text-xs text-muted-foreground">{screenName(j)} · {j.spec.taskType === "implementation" ? level(j) : "Review"}{m ? ` · ${m}` : ""} · {stateWord(j)} {ago(j.updatedAt)}</span>
-          {c.merge && <span className={`block text-xs ${c.merge.state === "failed" ? "text-red-600" : c.merge.state === "merged" ? "text-emerald-700 dark:text-emerald-400" : "text-amber-600"}`}>{mergeWords(c.merge)}</span>}
-          {j.state === "done" && canMerge(j) && <span role="button" tabIndex={0} className={`${btn} mt-1 inline-block`} onClick={e => { e.stopPropagation(); if (!busy) void send({ action: "merge", id: j.id, revision: j.revision }); }}>Merge</span>}
-          {open === j.id && <span className="mt-1.5 block space-y-1 text-xs">
-            <span className="block">{j.spec.outcome}</span>
-            {c.t3?.branch && <span className="block">Work is on branch {c.t3.branch}{j.state === "done" && c.merge?.state !== "merged" ? ", not merged" : ""} · T3 thread &quot;Build: {j.spec.title}&quot;</span>}
-            {c.external && <span className="block">Externally executing T3 thread {c.external.threadId} · reported {ago(c.external.at)}. Tracking only; merge and deploy require separate approval.{c.external.evidence.map((e, i) => <span className="block" key={i}>{e}</span>)}</span>}
-            {c.merge?.local && <span className="block text-muted-foreground">{c.merge.local}</span>}
-            {c.nextStep && <span className="block text-muted-foreground">{c.nextStep}</span>}
-            {c.feedback?.map((f, i) => <span key={i} className="block">{f.decision === "redo" ? "You asked" : "You noted"}: {f.note}</span>)}
-          </span>}
-        </button>; })}
-    </div>)}</div>
-  </section>;
 }
 
 /** One-time choices: models, autopilot, daily review, the queue switch, and a short how-it-works. */
