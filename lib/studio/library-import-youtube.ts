@@ -22,6 +22,7 @@ export async function readLibraryYoutubeMetadata(access: StudioAccess, target: R
   const body = JSON.parse(Buffer.concat(parts).toString('utf8'));
   const snippet = body?.items?.[0]?.snippet;
   if (typeof snippet?.title !== 'string') return null;
-  return { connectionVersion: version, title: snippet.title, channelName: target.videoId ? snippet.channelTitle : snippet.title, description: snippet.description,
+  const channelId = target.videoId ? snippet.channelId : body.items[0].id;
+  return { channelUrl: typeof channelId === 'string' && /^UC[\w-]{22}$/.test(channelId) ? `https://www.youtube.com/channel/${channelId}` : undefined, connectionVersion: version, title: snippet.title, channelName: target.videoId ? snippet.channelTitle : snippet.title, description: snippet.description,
     thumbnailUrl: snippet.thumbnails?.high?.url || snippet.thumbnails?.default?.url };
 }

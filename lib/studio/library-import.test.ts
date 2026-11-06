@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { Prisma } from '@prisma/client';
-import { LibraryImportError, libraryImportTarget } from './library-import-metadata';
-function load(options: { denied?: boolean; actor?: boolean; replay?: { id: string; url: string }[] } = {}) {
+import { LibraryImportError, libraryImportTarget, validatedYoutubeCreator } from './library-import-metadata';
+function load(options: { denied?: boolean; actor?: boolean; replay?: { id: string; url: string; payload?: Record<string, unknown> }[] } = {}) {
   let fetches = 0, reads = 0;
   const module = { exports: {} as any };
   const deps: Record<string,unknown> = {
@@ -15,7 +15,7 @@ function load(options: { denied?: boolean; actor?: boolean; replay?: { id: strin
     './access': { getStudioAccess: async () => options.denied ? null : {locationId:'location',userId:'person',app:'substo'} },
     './merge-gate': {assertStudioMergeReady:()=>{}},
     './library-import-youtube': {readLibraryYoutubeMetadata:async()=>{fetches++;return null;}},
-    './library-import-metadata': {LibraryImportError,libraryImportTarget,fetchLibraryImportMetadata:async()=>{throw Error('unexpected fetch');}}
+    './library-import-metadata': {LibraryImportError,libraryImportTarget,validatedYoutubeCreator,fetchLibraryImportMetadata:async()=>{throw Error('unexpected fetch');}}
   };
   vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/studio/library-import.ts','utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,{module,exports:module.exports,require:(name:string)=>{assert.ok(name in deps,name);return deps[name];}});
   return {run:module.exports.importStudioLibrary,counts:()=>({reads,fetches})};
@@ -41,7 +41,7 @@ function serviceFixture(options: { revoked?: boolean; oauth?: boolean; changed?:
     './studio-db':{studioDb:{}}, '../google/profile-youtube-credentials':{readProfileYoutubeConnection:async()=>({version:'one'})},
     './library-summary':{enqueueLibrarySummary:async()=>{if(options.summaryFails)throw Error('offline');return {summaryStatus:'waiting_for_device'};}},
     './library-import-youtube':{readLibraryYoutubeMetadata:async()=>options.oauth?{connectionVersion:'one'}:null},
-    './library-import-metadata':{LibraryImportError,libraryImportTarget,fetchLibraryImportMetadata:async(target:any)=>{network++;return {kind:'reference',title:'Fetched title',payload:{url:target.url,thumbnailUrl:'https://example.com/thumb',channelName:'Fetched creator',description:'Fetched description',summaryStatus:'not_generated',platform:'youtube',format:target.format,importEvidence:{method:'test'}}};}},
+    './library-import-metadata':{LibraryImportError,libraryImportTarget,validatedYoutubeCreator,fetchLibraryImportMetadata:async(target:any)=>{network++;return {kind:'reference',title:'Fetched title',payload:{url:target.url,thumbnailUrl:'https://example.com/thumb',channelName:'Fetched creator',description:'Fetched description',summaryStatus:'not_generated',platform:'youtube',format:target.format,importEvidence:{method:'test'}}};}},
   };
   const query = async (strings:any,...values:any[]) => {
     const sql = strings.sql ?? strings.join('?'); const args = Array.isArray(strings) ? values : strings.values; queries.push({sql,args});
@@ -87,4 +87,18 @@ test('revoked membership and changed OAuth are rejected before saving',async()=>
 });
 test('summary enqueue failure reports pending while retaining saved metadata',async()=>{
   const f=serviceFixture({summaryFails:true});const result=await f.run('location',command);assert.equal(result.summaryStatus,'pending');assert.ok(result.summaryError);assert.equal(f.rows().length,1);
+});
+
+test('watch rejects missing or cross-Location source metadata before external requests', async()=>{
+  const api=load();
+  await assert.rejects(api.run('location',{...command,input:'https://youtube.com/@creator',sourceId:'550e8400-e29b-41d4-a716-446655440000',sourceVersion:1}), (error:any)=>error.status===409);
+  assert.equal(api.counts().fetches,0);
+});
+
+test('channel alias dedupe retains the original request target for same-key replay',async()=>{
+ const key='substo:person:'+command.idempotencyKey;
+ const api=load({replay:[{id:'channel',url:'https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv',payload:{importRequestSources:{[key]:'https://www.youtube.com/@creator'}}}]});
+ assert.equal((await api.run('location',{...command,input:'https://youtube.com/@creator'})).recordId,'channel');
+ assert.equal(api.counts().fetches,0);
+ await assert.rejects(api.run('location',{...command,input:'https://youtube.com/@different'}),(error:any)=>error.status===409);
 });

@@ -3,7 +3,7 @@ import { studioRouteParams, withStudioRoute } from '@/lib/studio/route-context';
 import { importStudioLibrary } from '@/lib/studio/library-import';
 import { LibraryImportError } from '@/lib/studio/library-import-metadata';
 import { toStudioDbError } from '@/lib/studio/db';
-const schema = z.object({ input: z.string().min(1).max(2048), platform: z.string().max(40).optional(), idempotencyKey: z.string().uuid() }).strict();
+const schema = z.object({ input: z.string().min(1).max(2048), platform: z.string().max(40).optional(), sourceId: z.string().uuid().optional(), sourceVersion: z.number().int().nonnegative().optional(), idempotencyKey: z.string().uuid() }).strict().refine(value => Boolean(value.sourceId) === (value.sourceVersion !== undefined));
 export const dynamic = 'force-dynamic';
 export const POST = withStudioRoute(async (request, { params }) => {
   const origin = request.headers.get('origin');
