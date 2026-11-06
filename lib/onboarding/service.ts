@@ -5,7 +5,15 @@ import { studioDb } from "@/lib/studio/studio-db";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import { businessProfileSchema, type BusinessProfile } from "@/lib/business-profile/schema";
-import { getAiConnections } from "@/lib/ai/connections";
+import { getAiConnections as getAllAiConnections } from "@/lib/ai/connections";
+/**
+ * Onboarding needs a connection that can research today. A paired Mac counts as a connection elsewhere, but it can't run
+ * onboarding research until the Mac app ships a handler, so on its own it leaves onboarding locked.
+ */
+async function getAiConnections(locationId: string) {
+  const [ai, provider] = await Promise.all([getAllAiConnections(locationId), chooseResearchProvider(locationId).catch(() => null)]);
+  return { ...ai, available: ai.available && provider !== null };
+}
 import { findTopic, topicsFor, type FieldValue } from "./topics";
 import { confirmField, setOwnerField } from "./facts";
 import { answerPrompt, isValidFieldValue, parseResearchOutput } from "./research-contract";

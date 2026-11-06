@@ -51,7 +51,7 @@ const show = (value: FieldValue | null): string => {
 };
 /** What the agent says next: the first topic still open, with what was found or its question. */
 export function nextPrompt(topics: TopicView[], aiAvailable: boolean): string {
-  if (!aiAvailable) return "To research your business for you, I need an AI connection first. Connect a ChatGPT subscription, a Mac with Codex or Claude, or an API key in Settings, then come back.";
+  if (!aiAvailable) return "To research your business for you, I need an AI connection first. Connect a ChatGPT subscription or an OpenAI or Gemini API key in Settings, then come back.";
   const open = topics.find(t => t.status === "suggested" || t.status === "empty");
   if (!open) return "Everything is filled in. Review the summary and press Finish when you're happy.";
   if (open.status === "suggested") {
