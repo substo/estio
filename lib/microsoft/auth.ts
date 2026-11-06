@@ -2,10 +2,8 @@ import { Client } from '@microsoft/microsoft-graph-client';
 import { randomUUID } from 'crypto';
 import db from '@/lib/db';
 import { settingsService } from '@/lib/settings/service';
-import {
-    SETTINGS_DOMAINS,
-    SETTINGS_SECRET_KEYS,
-} from '@/lib/settings/constants';
+import { SETTINGS_DOMAINS } from '@/lib/settings/constants';
+import { setOutlookOAuthTokens } from './credentials';
 import 'isomorphic-fetch';
 
 const CLIENT_ID = process.env.MICROSOFT_CLIENT_ID;
@@ -120,37 +118,16 @@ export async function handleMicrosoftCallback(code: string, userId: string, base
         actorUserId: userId,
         schemaVersion: 1,
     });
-    await settingsService.setSecret({
-        scopeType: "USER",
-        scopeId: userId,
-        domain: SETTINGS_DOMAINS.USER_MICROSOFT_INTEGRATIONS,
-        secretKey: SETTINGS_SECRET_KEYS.OUTLOOK_ACCESS_TOKEN,
-        plaintext: tokens.access_token,
-        actorUserId: userId,
-    });
-    if (tokens.refresh_token) {
-        await settingsService.setSecret({
-            scopeType: "USER",
-            scopeId: userId,
-            domain: SETTINGS_DOMAINS.USER_MICROSOFT_INTEGRATIONS,
-            secretKey: SETTINGS_SECRET_KEYS.OUTLOOK_REFRESH_TOKEN,
-            plaintext: tokens.refresh_token,
-            actorUserId: userId,
-        });
-    }
+    await setOutlookOAuthTokens(userId, { accessToken: tokens.access_token, refreshToken: tokens.refresh_token });
 
-    { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
-        // Save to legacy columns for compatibility during migration window.
-        await db.user.update({
-            where: { id: userId },
-            data: {
-                outlookAccessToken: tokens.access_token,
-                outlookRefreshToken: tokens.refresh_token,
-                outlookAuthMethod: 'oauth',
-                outlookSyncEnabled: true,
-            }
-        });
-    }
+    // Method and sync switch columns are still read directly elsewhere; tokens live only in the encrypted store.
+    await db.user.update({
+        where: { id: userId },
+        data: {
+            outlookAuthMethod: 'oauth',
+            outlookSyncEnabled: true,
+        }
+    });
 
     // Optional: Trigger Initial Sync via Queue or return success
     console.log(`Microsoft Auth Success for User ${userId}`);
@@ -212,32 +189,7 @@ export async function refreshMicrosoftToken(userId: string, refreshToken: string
 
     const nextRefreshToken = tokens.refresh_token || refreshToken;
 
-    await settingsService.setSecret({
-        scopeType: "USER",
-        scopeId: userId,
-        domain: SETTINGS_DOMAINS.USER_MICROSOFT_INTEGRATIONS,
-        secretKey: SETTINGS_SECRET_KEYS.OUTLOOK_ACCESS_TOKEN,
-        plaintext: tokens.access_token,
-        actorUserId: userId,
-    });
-    await settingsService.setSecret({
-        scopeType: "USER",
-        scopeId: userId,
-        domain: SETTINGS_DOMAINS.USER_MICROSOFT_INTEGRATIONS,
-        secretKey: SETTINGS_SECRET_KEYS.OUTLOOK_REFRESH_TOKEN,
-        plaintext: nextRefreshToken,
-        actorUserId: userId,
-    });
-
-    { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
-        await db.user.update({
-            where: { id: userId },
-            data: {
-                outlookAccessToken: tokens.access_token,
-                outlookRefreshToken: nextRefreshToken,
-            }
-        });
-    }
+    await setOutlookOAuthTokens(userId, { accessToken: tokens.access_token, refreshToken: nextRefreshToken });
 
     return tokens.access_token;
 }

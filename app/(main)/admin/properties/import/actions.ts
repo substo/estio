@@ -4,6 +4,7 @@ import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
 import db from "@/lib/db";
 import { puppeteerService } from "@/lib/crm/puppeteer-service";
+import { getUserCrmCredentials } from "@/lib/crm/credentials";
 import {
     requireAuthenticatedLocationContext,
     requirePropertyInActiveLocation,
@@ -13,20 +14,18 @@ type ActiveLocationContext = Awaited<ReturnType<typeof requireAuthenticatedLocat
 
 async function getCrmCredentials(context?: ActiveLocationContext) {
     const access = context || await requireAuthenticatedLocationContext();
-    const dbUser = await db.user.findUnique({
-        where: { clerkId: access.clerkUserId },
-        select: { crmUsername: true, crmPassword: true },
-    });
-
     const location = access.location;
-    if (!location?.crmUrl || !dbUser?.crmUsername || !dbUser.crmPassword) {
+    if (!location?.crmUrl) return null;
+
+    const { username, password } = await getUserCrmCredentials(access.dbUserId);
+    if (!username || !password) {
         return null;
     }
 
     return {
         url: location.crmUrl,
-        username: dbUser.crmUsername,
-        password: dbUser.crmPassword
+        username,
+        password
     };
 }
 

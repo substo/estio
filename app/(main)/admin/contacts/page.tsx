@@ -1,4 +1,5 @@
 import db from "@/lib/db";
+import { hasGoogleTokens } from "@/lib/google/credentials";
 
 import { AddContactDialog } from "./_components/add-contact-dialog";
 import { ContactRow } from "./_components/contact-row";
@@ -160,9 +161,9 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
     // Fetch full user for integration status
     const dbUser = await db.user.findUnique({
         where: { clerkId: access.userId },
-        select: { googleAccessToken: true, googleSyncEnabled: true }
+        select: { id: true, googleSyncEnabled: true }
     });
-    const isGoogleConnected = !!(dbUser?.googleAccessToken && dbUser?.googleSyncEnabled);
+    const isGoogleConnected = !!(dbUser?.googleSyncEnabled && await hasGoogleTokens(dbUser.id));
 
     // --- Parse Search Params ---
     const {

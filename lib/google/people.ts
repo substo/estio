@@ -3,11 +3,7 @@ import { google, people_v1 } from 'googleapis';
 import db from '@/lib/db';
 import { getValidAccessToken } from './auth';
 import { generateVisualId } from './utils';
-import { settingsService } from '@/lib/settings/service';
-import {
-    SETTINGS_DOMAINS,
-    SETTINGS_SECRET_KEYS,
-} from '@/lib/settings/constants';
+import { getGoogleSyncToken, setGoogleSyncToken } from './credentials';
 import {
     getGoogleContactDirectoryIndexStatus,
     mapGooglePersonToSearchResult,
@@ -371,19 +367,7 @@ export async function syncContactsFromGoogle(userId: string, locationId: string)
         const people = google.people({ version: 'v1', auth });
 
         // Get user's current sync token for delta sync
-        const [user, syncTokenFromSecrets] = await Promise.all([
-            db.user.findUnique({
-                where: { id: userId },
-                select: { googleSyncToken: true }
-            }),
-            settingsService.getSecret({
-                scopeType: "USER",
-                scopeId: userId,
-                domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-                secretKey: SETTINGS_SECRET_KEYS.GOOGLE_SYNC_TOKEN,
-            }).catch(() => null),
-        ]);
-        const currentSyncToken = syncTokenFromSecrets || user?.googleSyncToken || null;
+        const currentSyncToken = await getGoogleSyncToken(userId).catch(() => null);
 
         console.log(`[Google Sync] Starting inbound sync for user ${userId}. SyncToken: ${currentSyncToken ? 'present' : 'none (full sync)'}`);
 
@@ -418,20 +402,7 @@ export async function syncContactsFromGoogle(userId: string, locationId: string)
 
         // Save the sync token for next incremental sync
         if (nextSyncToken) {
-            await settingsService.setSecret({
-                scopeType: "USER",
-                scopeId: userId,
-                domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-                secretKey: SETTINGS_SECRET_KEYS.GOOGLE_SYNC_TOKEN,
-                plaintext: nextSyncToken,
-                actorUserId: userId,
-            });
-            { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
-                await db.user.update({
-                    where: { id: userId },
-                    data: { googleSyncToken: nextSyncToken }
-                });
-            }
+            await setGoogleSyncToken(userId, nextSyncToken);
             console.log(`[Google Sync] Saved new sync token for next delta sync`);
         }
 
@@ -442,19 +413,7 @@ export async function syncContactsFromGoogle(userId: string, locationId: string)
         // Handle sync token expired/invalid - do full sync
         if (error?.code === 410 || error?.message?.includes('Sync token')) {
             console.log(`[Google Sync] Sync token invalid, clearing for full sync next time`);
-            await settingsService.clearSecret({
-                scopeType: "USER",
-                scopeId: userId,
-                domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-                secretKey: SETTINGS_SECRET_KEYS.GOOGLE_SYNC_TOKEN,
-                actorUserId: userId,
-            });
-            { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
-                await db.user.update({
-                    where: { id: userId },
-                    data: { googleSyncToken: null }
-                });
-            }
+            await setGoogleSyncToken(userId, null);
             // Retry without sync token
             return syncContactsFromGoogle(userId, locationId);
         }

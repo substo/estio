@@ -8,6 +8,8 @@ import { getConversations, getMessages, getConversation, sendMessage, getMessage
 import { generateDraft } from "@/lib/ai/coordinator";
 import { refreshGhlAccessToken } from "@/lib/location";
 import db from "@/lib/db";
+import { hasGoogleTokens } from "@/lib/google/credentials";
+import { getOutlookCredentialPresence } from "@/lib/microsoft/credentials";
 import { resolveAuthenticatedDbUserId } from "@/lib/auth/current-user";
 import { updateConversationLastMessage } from "@/lib/conversations/update";
 import { seedConversationFromContactLeadText } from "@/lib/conversations/bootstrap";
@@ -8188,8 +8190,7 @@ export async function getEmailSyncProvidersStatus() {
         const user = await db.user.findUnique({
             where: { clerkId: clerkUserId },
             select: {
-                googleAccessToken: true,
-                googleRefreshToken: true,
+                id: true,
                 googleSyncEnabled: true,
                 gmailSyncState: {
                     select: {
@@ -8200,11 +8201,7 @@ export async function getEmailSyncProvidersStatus() {
                 },
                 outlookAuthMethod: true,
                 outlookEmail: true,
-                outlookAccessToken: true,
-                outlookRefreshToken: true,
                 outlookSyncEnabled: true,
-                outlookSessionCookies: true,
-                outlookPasswordEncrypted: true,
                 outlookSessionExpiry: true,
                 outlookSubscriptionExpiry: true,
                 outlookSyncState: {
@@ -8220,17 +8217,21 @@ export async function getEmailSyncProvidersStatus() {
             return { providers: [] as any[] };
         }
 
+        const [hasGoogleToken, outlookCredentials] = await Promise.all([
+            hasGoogleTokens(user.id),
+            getOutlookCredentialPresence(user.id),
+        ]);
+
         const now = Date.now();
         const minutesAgo = (value?: Date | null) =>
             value ? Math.floor((now - value.getTime()) / 60000) : null;
 
         const gmailConnected = !!(
             user.googleSyncEnabled &&
-            (user.googleAccessToken || user.googleRefreshToken)
+            hasGoogleToken
         );
         const gmailConfigured = !!(
-            user.googleAccessToken ||
-            user.googleRefreshToken ||
+            hasGoogleToken ||
             user.googleSyncEnabled ||
             user.gmailSyncState
         );
@@ -8254,16 +8255,16 @@ export async function getEmailSyncProvidersStatus() {
 
         const inferredOutlookMethod =
             (user.outlookAuthMethod as 'oauth' | 'puppeteer' | null)
-            || (user.outlookSessionCookies ? 'puppeteer' : null)
-            || ((user.outlookAccessToken || user.outlookRefreshToken) ? 'oauth' : null);
+            || (outlookCredentials.sessionCookies ? 'puppeteer' : null)
+            || ((outlookCredentials.accessToken || outlookCredentials.refreshToken) ? 'oauth' : null);
         const outlookConfigured = !!(
             user.outlookSyncEnabled ||
-            user.outlookSessionCookies ||
-            user.outlookAccessToken ||
-            user.outlookRefreshToken ||
+            outlookCredentials.sessionCookies ||
+            outlookCredentials.accessToken ||
+            outlookCredentials.refreshToken ||
             user.outlookAuthMethod
         );
-        const outlookCanAutoReconnect = inferredOutlookMethod === 'puppeteer' && !!user.outlookPasswordEncrypted;
+        const outlookCanAutoReconnect = inferredOutlookMethod === 'puppeteer' && outlookCredentials.password;
 
         const outlookSessionExpired = inferredOutlookMethod === 'puppeteer'
             ? (user.outlookSessionExpiry ? user.outlookSessionExpiry.getTime() < now : true)
@@ -8275,8 +8276,8 @@ export async function getEmailSyncProvidersStatus() {
         const outlookConnected = !!(
             user.outlookSyncEnabled &&
             (
-                (inferredOutlookMethod === 'puppeteer' && user.outlookSessionCookies && !outlookSessionExpired) ||
-                (inferredOutlookMethod === 'oauth' && (user.outlookAccessToken || user.outlookRefreshToken))
+                (inferredOutlookMethod === 'puppeteer' && outlookCredentials.sessionCookies && !outlookSessionExpired) ||
+                (inferredOutlookMethod === 'oauth' && (outlookCredentials.accessToken || outlookCredentials.refreshToken))
             )
         );
 

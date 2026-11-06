@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { ViewingOutbox, Prisma } from '@prisma/client';
 import db from '@/lib/db';
+import { hasGoogleTokens } from '@/lib/google/credentials';
 import { ensureRemoteContact } from '@/lib/crm/contact-sync';
 import { getGhlIntegrationDisabledReason, isGhlIntegrationEnabled } from '@/lib/ghl/integration-gate';
 import { GHLError } from '@/lib/ghl/client';
@@ -39,7 +40,7 @@ export type EnqueueViewingSyncJobsResult = {
 const MAX_OUTBOX_ATTEMPTS = 6;
 const STALE_PROCESSING_LOCK_MS = 5 * 60 * 1000;
 
-type SyncViewingRecord = Prisma.ViewingGetPayload<{
+type LoadedSyncViewing = Prisma.ViewingGetPayload<{
     include: {
         contact: {
             select: {
@@ -60,8 +61,6 @@ type SyncViewingRecord = Prisma.ViewingGetPayload<{
             select: {
                 id: true;
                 ghlCalendarId: true;
-                googleAccessToken: true;
-                googleRefreshToken: true;
                 googleCalendarId: true;
             };
         };
@@ -124,9 +123,11 @@ function isRetryableSyncError(provider: ViewingProvider, error: unknown): boolea
     return true;
 }
 
-function hasGoogleCredentials(user?: { googleAccessToken: string | null; googleRefreshToken: string | null } | null): boolean {
-    if (!user) return false;
-    return Boolean(user.googleAccessToken || user.googleRefreshToken);
+// Whether the viewing's agent holds Google tokens (encrypted settings secrets), resolved once per load.
+type SyncViewingRecord = LoadedSyncViewing & { userHasGoogleTokens: boolean };
+
+async function withGoogleConnection(viewing: LoadedSyncViewing): Promise<SyncViewingRecord> {
+    return { ...viewing, userHasGoogleTokens: viewing.user ? await hasGoogleTokens(viewing.user.id) : false };
 }
 
 function getProviderEligibility(viewing: SyncViewingRecord): {
@@ -145,7 +146,7 @@ function getProviderEligibility(viewing: SyncViewingRecord): {
         });
     }
 
-    if (hasGoogleCredentials(viewing.user)) {
+    if (viewing.userHasGoogleTokens) {
         availableProviders.push('google');
     } else {
         skippedProviders.push({
@@ -253,7 +254,7 @@ async function syncViewingToGhl(job: ViewingOutbox, viewing: SyncViewingRecord):
 
 async function syncViewingToGoogle(job: ViewingOutbox, viewing: SyncViewingRecord): Promise<ViewingSyncOperationResult> {
     const googleUser = viewing.user;
-    if (!hasGoogleCredentials(googleUser)) {
+    if (!googleUser || !viewing.userHasGoogleTokens) {
         throw new Error('Google sync unavailable: no connected user found for viewing');
     }
 
@@ -311,7 +312,7 @@ async function processSingleOutboxJob(jobId: string, workerId: string): Promise<
                         },
                     },
                     property: { select: { id: true, title: true } },
-                    user: { select: { id: true, ghlCalendarId: true, googleAccessToken: true, googleRefreshToken: true, googleCalendarId: true } },
+                    user: { select: { id: true, ghlCalendarId: true, googleCalendarId: true } },
                 },
             },
         },
@@ -331,9 +332,9 @@ async function processSingleOutboxJob(jobId: string, workerId: string): Promise<
 
     try {
         if (job.provider === 'ghl') {
-            result = await syncViewingToGhl(job, job.viewing as any);
+            result = await syncViewingToGhl(job, await withGoogleConnection(job.viewing as any));
         } else if (job.provider === 'google') {
-            result = await syncViewingToGoogle(job, job.viewing as any);
+            result = await syncViewingToGoogle(job, await withGoogleConnection(job.viewing as any));
         } else {
             throw new Error(`Unsupported provider: ${job.provider}`);
         }
@@ -418,7 +419,7 @@ export async function enqueueViewingSyncJobs(options: {
                 },
             },
             property: { select: { id: true, title: true } },
-            user: { select: { id: true, ghlCalendarId: true, googleAccessToken: true, googleRefreshToken: true, googleCalendarId: true } },
+            user: { select: { id: true, ghlCalendarId: true, googleCalendarId: true } },
         },
     });
 
@@ -433,7 +434,7 @@ export async function enqueueViewingSyncJobs(options: {
         };
     }
 
-    const { availableProviders, skippedProviders: providerEligibilitySkips } = getProviderEligibility(viewing as any);
+    const { availableProviders, skippedProviders: providerEligibilitySkips } = getProviderEligibility(await withGoogleConnection(viewing as any));
     const targetProviders = options.providers?.length
         ? options.providers.filter((provider) => availableProviders.includes(provider))
         : availableProviders;

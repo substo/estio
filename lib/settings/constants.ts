@@ -21,6 +21,7 @@ export const SETTINGS_SECRET_KEYS = {
     CHATGPT_CODEX_ACCESS_TOKEN: "chatgpt_codex_access_token",
     CHATGPT_CODEX_AUTH_CACHE: "chatgpt_codex_auth_cache",
     WHATSAPP_ACCESS_TOKEN: "whatsapp_access_token",
+    WHATSAPP_WEBHOOK_SECRET: "whatsapp_webhook_secret",
     TWILIO_AUTH_TOKEN: "twilio_auth_token",
     CRM_PASSWORD: "crm_password",
     GOOGLE_ACCESS_TOKEN: "google_access_token",

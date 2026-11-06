@@ -1,4 +1,5 @@
 import db from "@/lib/db";
+import { findUsersWithGoogleTokens } from "@/lib/google/credentials";
 import { findAndLinkExistingGoogleContact, syncContactToGoogle } from "@/lib/google/people";
 
 export type GoogleAutoSyncSource = "LEAD_CAPTURE" | "CONTACT_FORM" | "WHATSAPP_INBOUND";
@@ -21,10 +22,13 @@ function isSourceEnabled(user: AutomationUser, source: GoogleAutoSyncSource): bo
 }
 
 async function resolveAutomationUser(locationId: string, preferredUserId?: string | null): Promise<AutomationUser | null> {
+    // Users holding a Google refresh token (encrypted settings secret).
+    const withRefreshToken = [...await findUsersWithGoogleTokens(undefined, { requireRefreshToken: true })];
+    if (!withRefreshToken.length) return null;
     const baseWhere = {
+        id: { in: withRefreshToken },
         locations: { some: { id: locationId } },
         googleSyncEnabled: true,
-        googleRefreshToken: { not: null },
         googleAutoSyncEnabled: true
     };
 
@@ -32,7 +36,7 @@ async function resolveAutomationUser(locationId: string, preferredUserId?: strin
         const preferred = await db.user.findFirst({
             where: {
                 ...baseWhere,
-                id: preferredUserId
+                id: { in: withRefreshToken.filter((id) => id === preferredUserId) }
             },
             select: {
                 id: true,

@@ -2,10 +2,8 @@
 import { google } from 'googleapis';
 import db from '@/lib/db';
 import { settingsService } from '@/lib/settings/service';
-import {
-    SETTINGS_DOMAINS,
-    SETTINGS_SECRET_KEYS,
-} from '@/lib/settings/constants';
+import { SETTINGS_DOMAINS } from '@/lib/settings/constants';
+import { getGoogleTokens, setGoogleTokens } from './credentials';
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
@@ -77,24 +75,7 @@ export async function handleGoogleCallback(code: string, userId: string, baseUrl
 
     // Persist credentials before enabling the integration document. Secret
     // encryption failures must not leave a new connection marked as enabled.
-    await settingsService.setSecret({
-        scopeType: "USER",
-        scopeId: userId,
-        domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-        secretKey: SETTINGS_SECRET_KEYS.GOOGLE_ACCESS_TOKEN,
-        plaintext: tokens.access_token,
-        actorUserId: userId,
-    });
-    if (tokens.refresh_token) {
-        await settingsService.setSecret({
-            scopeType: "USER",
-            scopeId: userId,
-            domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-            secretKey: SETTINGS_SECRET_KEYS.GOOGLE_REFRESH_TOKEN,
-            plaintext: tokens.refresh_token,
-            actorUserId: userId,
-        });
-    }
+    await setGoogleTokens(userId, { accessToken: tokens.access_token, refreshToken: tokens.refresh_token });
     await settingsService.upsertDocument({
         scopeType: "USER",
         scopeId: userId,
@@ -117,19 +98,11 @@ export async function handleGoogleCallback(code: string, userId: string, baseUrl
         schemaVersion: 1,
     });
 
-    { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
-        // Save tokens to legacy columns for compatibility during migration window.
-        await db.user.update({
-            where: { id: userId },
-            data: {
-                googleAccessToken: tokens.access_token,
-                // Google may omit this on reconnect; preserve the existing
-                // refresh token instead of replacing it with null.
-                ...(tokens.refresh_token && { googleRefreshToken: tokens.refresh_token }),
-                googleSyncEnabled: true,
-            }
-        });
-    }
+    // The sync switch column is still read directly elsewhere; tokens live only in the encrypted store.
+    await db.user.update({
+        where: { id: userId },
+        data: { googleSyncEnabled: true },
+    });
 
     client.setCredentials({
         access_token: tokens.access_token || undefined,
@@ -164,29 +137,10 @@ export async function handleGoogleCallback(code: string, userId: string, baseUrl
 }
 
 export async function getValidAccessToken(userId: string) {
-    const [user, newAccessToken, newRefreshToken] = await Promise.all([
-        db.user.findUnique({
-        where: { id: userId },
-        select: { googleAccessToken: true, googleRefreshToken: true }
-        }),
-        settingsService.getSecret({
-            scopeType: "USER",
-            scopeId: userId,
-            domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-            secretKey: SETTINGS_SECRET_KEYS.GOOGLE_ACCESS_TOKEN,
-        }).catch(() => null),
-        settingsService.getSecret({
-            scopeType: "USER",
-            scopeId: userId,
-            domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-            secretKey: SETTINGS_SECRET_KEYS.GOOGLE_REFRESH_TOKEN,
-        }).catch(() => null),
-    ]);
+    const { accessToken, refreshToken } = await getGoogleTokens(userId)
+        .catch(() => ({ accessToken: null, refreshToken: null }));
 
-    const accessToken = newAccessToken || user?.googleAccessToken || null;
-    const refreshToken = newRefreshToken || user?.googleRefreshToken || null;
-
-    if (!user || (!accessToken && !refreshToken)) {
+    if (!accessToken && !refreshToken) {
         throw new Error('User not connected to Google');
     }
 
@@ -202,34 +156,7 @@ export async function getValidAccessToken(userId: string) {
     // Handle token refresh events for this specific client instance
     client.on('tokens', async (tokens) => {
         if (tokens.access_token) {
-            await settingsService.setSecret({
-                scopeType: "USER",
-                scopeId: userId,
-                domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-                secretKey: SETTINGS_SECRET_KEYS.GOOGLE_ACCESS_TOKEN,
-                plaintext: tokens.access_token,
-                actorUserId: userId,
-            });
-            if (tokens.refresh_token) {
-                await settingsService.setSecret({
-                    scopeType: "USER",
-                    scopeId: userId,
-                    domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-                    secretKey: SETTINGS_SECRET_KEYS.GOOGLE_REFRESH_TOKEN,
-                    plaintext: tokens.refresh_token,
-                    actorUserId: userId,
-                });
-            }
-
-            { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
-                await db.user.update({
-                    where: { id: userId },
-                    data: {
-                        googleAccessToken: tokens.access_token,
-                        ...(tokens.refresh_token && { googleRefreshToken: tokens.refresh_token })
-                    }
-                });
-            }
+            await setGoogleTokens(userId, { accessToken: tokens.access_token, refreshToken: tokens.refresh_token });
         }
     });
 

@@ -1,6 +1,7 @@
 import { puppeteerService } from './puppeteer-service';
 import { CRM_FIELD_MAPPING } from './field-mapping';
 import db from '@/lib/db';
+import { getUserCrmCredentials } from './credentials';
 import path from 'path';
 import fs from 'fs';
 import https from 'https';
@@ -24,15 +25,16 @@ export async function pushPropertyToCrm(input: {
 
     const user = await db.user.findUnique({
         where: { clerkId: clerkUserId },
-        select: { crmUsername: true, crmPassword: true },
+        select: { id: true },
     });
 
     if (!property) throw new Error("Property not found");
     if (!user) throw new Error("User not found");
 
     const crmUrl = location.crmUrl;
+    const { username: crmUsername, password: crmPassword } = await getUserCrmCredentials(user.id);
 
-    if (!crmUrl || !user.crmUsername || !user.crmPassword) {
+    if (!crmUrl || !crmUsername || !crmPassword) {
         throw new Error("Missing CRM configuration. Check location URL and user credentials.");
     }
 
@@ -41,7 +43,7 @@ export async function pushPropertyToCrm(input: {
         await puppeteerService.init();
 
         // 2. Login
-        await puppeteerService.login(crmUrl, user.crmUsername, user.crmPassword);
+        await puppeteerService.login(crmUrl, crmUsername, crmPassword);
 
         // 3. Navigate to Create Page
         const page = await puppeteerService.getPage();

@@ -1,6 +1,7 @@
 
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import db from "@/lib/db";
+import { hasGoogleTokens } from "@/lib/google/credentials";
 import { EditContactForm } from "../../_components/edit-contact-dialog";
 import ContactView from "../../_components/contact-view";
 import { buildContactVisibilityWhere, canManageContact, getActiveContactsAccess } from "@/lib/contacts/active-location-access";
@@ -86,9 +87,9 @@ export default async function ContactViewPage({ params, searchParams }: { params
     if (userId) {
         const dbUser = await db.user.findUnique({
             where: { clerkId: userId },
-            select: { googleAccessToken: true, googleSyncEnabled: true }
+            select: { id: true, googleSyncEnabled: true }
         });
-        isGoogleConnected = !!(dbUser?.googleAccessToken && dbUser?.googleSyncEnabled);
+        isGoogleConnected = !!(dbUser?.googleSyncEnabled && await hasGoogleTokens(dbUser.id));
     }
 
     // Check GHL connection (Location-level)

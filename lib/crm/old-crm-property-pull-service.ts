@@ -2,6 +2,7 @@ import db from "@/lib/db";
 import { MediaKind } from "@prisma/client";
 import { pullPropertyFromCrmWithContext } from "@/lib/crm/crm-puller";
 import { resolveOldCrmImportContextForUser } from "@/lib/crm/old-crm-import";
+import { getUserCrmCredentials } from "@/lib/crm/credentials";
 import type { PropertyMediaInput } from "@/lib/properties/save-property-record";
 
 type OldCrmPullArgs = {
@@ -644,7 +645,9 @@ export async function pullOldCrmPropertyForManualAction(
         const crmUrl = location?.crmUrl;
         const crmEditUrlPattern = location?.crmEditUrlPattern;
 
-        if (!location?.id || !crmUrl || !user.crmUsername || !user.crmPassword) {
+        const { username: crmUsername, password: crmPassword } = await getUserCrmCredentials(user.id);
+
+        if (!location?.id || !crmUrl || !crmUsername || !crmPassword) {
             throw new Error("Missing CRM configuration. Check location URL and user credentials.");
         }
 
@@ -657,8 +660,8 @@ export async function pullOldCrmPropertyForManualAction(
                     oldPropertyId: args.oldCrmPropertyId,
                     locationId: location.id,
                     crmUrl,
-                    crmUsername: user.crmUsername,
-                    crmPassword: user.crmPassword,
+                    crmUsername,
+                    crmPassword,
                     crmEditUrlPattern,
                     actorUserId: user.id,
                 });

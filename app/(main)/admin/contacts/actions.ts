@@ -5,6 +5,7 @@ import { assertCrmActionAllowed, assertGenericContactInput } from "@/lib/auth/cr
 
 import { z } from 'zod';
 import db from '@/lib/db';
+import { hasGoogleTokens } from "@/lib/google/credentials";
 import { revalidatePath, revalidateTag } from 'next/cache';
 import { auth } from '@clerk/nextjs/server';
 import { after } from 'next/server';
@@ -1668,10 +1669,10 @@ export async function getGoogleContactAction(resourceName: string) {
     // Check current user's Google connection
     const user = await db.user.findUnique({
       where: { clerkId: userId },
-      select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
+      select: { id: true, googleSyncEnabled: true }
     });
 
-    if (!user?.googleSyncEnabled || !user?.googleRefreshToken) {
+    if (!user?.googleSyncEnabled || !(await hasGoogleTokens(user.id, { requireRefreshToken: true }))) {
       return { success: false, message: 'GOOGLE_NOT_CONNECTED' };
     }
 
@@ -1697,10 +1698,10 @@ export async function warmupGoogleContactsSearchAction() {
   try {
     const user = await db.user.findUnique({
       where: { clerkId: userId },
-      select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
+      select: { id: true, googleSyncEnabled: true }
     });
 
-    if (!user?.googleSyncEnabled || !user?.googleRefreshToken) {
+    if (!user?.googleSyncEnabled || !(await hasGoogleTokens(user.id, { requireRefreshToken: true }))) {
       return { success: false, message: 'GOOGLE_NOT_CONNECTED' };
     }
 
@@ -1728,10 +1729,10 @@ export async function searchGoogleContactsAction(
     // Check current user's Google connection
     const user = await db.user.findUnique({
       where: { clerkId: userId },
-      select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
+      select: { id: true, googleSyncEnabled: true }
     });
 
-    if (!user?.googleSyncEnabled || !user?.googleRefreshToken) {
+    if (!user?.googleSyncEnabled || !(await hasGoogleTokens(user.id, { requireRefreshToken: true }))) {
       return { success: false, message: 'GOOGLE_NOT_CONNECTED' };
     }
 
@@ -1757,10 +1758,10 @@ export async function importNewGoogleContactAction(resourceName: string, expecte
     // Check current user's Google connection
     const user = await db.user.findUnique({
       where: { clerkId: userId },
-      select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
+      select: { id: true, googleSyncEnabled: true }
     });
 
-    if (!user?.googleSyncEnabled || !user?.googleRefreshToken) {
+    if (!user?.googleSyncEnabled || !(await hasGoogleTokens(user.id, { requireRefreshToken: true }))) {
       return { success: false, message: 'GOOGLE_NOT_CONNECTED' };
     }
 
@@ -1933,11 +1934,11 @@ export async function resolveSyncConflict(
     // Get internal user ID and check Google connection
     const user = await db.user.findUnique({
       where: { clerkId: userId },
-      select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
+      select: { id: true, googleSyncEnabled: true }
     });
     if (!user) return { success: false, message: 'User not found' };
 
-    if (!user.googleSyncEnabled || !user.googleRefreshToken) {
+    if (!user.googleSyncEnabled || !(await hasGoogleTokens(user.id, { requireRefreshToken: true }))) {
       return { success: false, message: 'GOOGLE_NOT_CONNECTED' };
     }
 
@@ -3335,9 +3336,9 @@ export async function getContactDetails(contactId: string) {
   // Check Google connection (User-level)
   const dbUser = await db.user.findUnique({
     where: { clerkId: userId },
-    select: { googleAccessToken: true, googleSyncEnabled: true }
+    select: { id: true, googleSyncEnabled: true }
   });
-  const isGoogleConnected = !!(dbUser?.googleAccessToken && dbUser?.googleSyncEnabled);
+  const isGoogleConnected = !!(dbUser?.googleSyncEnabled && await hasGoogleTokens(dbUser.id));
 
   // Check GHL connection (Location-level)
   const locationObj = await db.location.findUnique({
@@ -3408,10 +3409,10 @@ export async function verifyAndHealContact(contactId: string, error: string | nu
   // Check connection
   const user = await db.user.findUnique({
     where: { clerkId: access.userId },
-    select: { id: true, googleSyncEnabled: true, googleRefreshToken: true }
+    select: { id: true, googleSyncEnabled: true }
   });
 
-  if (user?.googleSyncEnabled && user?.googleRefreshToken) {
+  if (user?.googleSyncEnabled && await hasGoogleTokens(user.id, { requireRefreshToken: true })) {
     console.log(`[Auto-Heal] broken link detected for contact ${contactId}. Attempting recovery...`);
     // This sync call will trigger the self-healing logic in people.ts (search & re-link)
     const { syncContactToGoogle } = await import('@/lib/google/people');

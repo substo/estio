@@ -61,8 +61,9 @@ test('last-admin, other-membership, and legacy-unassigned classifications are se
 });
 
 test('private credentials are classified but never rendered or returned', () => {
-  assert.match(preview, /googleAccessToken/);
-  assert.match(preview, /outlookSessionCookies/);
+  assert.match(preview, /hasGoogleSecrets/);
+  assert.match(preview, /getOutlookCredentialPresence\(source\.id\)/);
+  assert.match(preview, /hasUserCrmPassword\(source\.id\)/);
   assert.doesNotMatch(component, /googleAccessToken|googleRefreshToken|outlookAccessToken|outlookRefreshToken|crmPassword/);
   assert.match(component, /Personal connections/);
 });

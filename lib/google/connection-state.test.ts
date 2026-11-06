@@ -6,8 +6,6 @@ const disconnected = {
     syncEnabled: false,
     hasEncryptedAccessToken: false,
     hasEncryptedRefreshToken: false,
-    legacyAccessToken: null,
-    legacyRefreshToken: null,
 };
 
 test("uses encrypted credentials as the canonical connected state", () => {
@@ -15,14 +13,6 @@ test("uses encrypted credentials as the canonical connected state", () => {
         ...disconnected,
         syncEnabled: true,
         hasEncryptedRefreshToken: true,
-    }), true);
-});
-
-test("supports legacy credentials during migration", () => {
-    assert.equal(resolveGoogleConnectionState({
-        ...disconnected,
-        syncEnabled: true,
-        legacyAccessToken: "legacy-access",
     }), true);
 });
 

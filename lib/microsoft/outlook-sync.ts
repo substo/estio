@@ -185,7 +185,7 @@ async function processOutlookMessage(userId: string, msg: Message) {
 async function isUserSender(userId: string, email: string): Promise<boolean> {
     // Check if the user's connected outlook email matches 'email'
     // Simple check: fetch user
-    const user = await db.user.findUnique({ where: { id: userId }, select: { email: true, crmUsername: true } }); // crmUsername might be email
+    const user = await db.user.findUnique({ where: { id: userId }, select: { email: true } });
     // Real check needs the 'Outlook Email' stored in OutlookSyncState.
     const state = await db.outlookSyncState.findUnique({ where: { userId } });
     return state?.emailAddress === email || user?.email === email; // simplified

@@ -26,7 +26,7 @@ The core logic resides here and uses Puppeteer to automate the external CRM inte
 
 #### A. Setup & Auth
 *   **Data Fetching:** Fetches the property (including media) and the user record from the database.
-*   **Credentials:** Extracts CRM credentials (`crmUrl`, `crmUsername`, `crmPassword`) from the user record.
+*   **Credentials:** `crmUrl` from the Location; the user's CRM username and password from the encrypted settings store (`getUserCrmCredentials` in `lib/crm/credentials.ts`, see `documentation/credentials.md`).
 *   **Login:** Initializes Puppeteer (via `PuppeteerService`), navigates to the CRM login page, and logs in.
 
 #### B. Navigation & Field Filling

@@ -2,6 +2,7 @@ import { getLocationConfig } from "@/lib/location-config/service";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 
 import db from "@/lib/db";
+import { getUserCrmCredentials } from "@/lib/crm/credentials";
 import { scrapeNotionProperty, resolveGoogleMapsLocation, scrapeAddressFromMaps, convertMapUrl, getShortMapLink } from "@/lib/crm/notion-scraper";
 import { scrapePropertyWithCrawl4AI } from "@/lib/crm/crawl4ai-service";
 import { deleteImage, uploadToCloudflare, getImageDeliveryUrl } from "@/lib/cloudflareImages";
@@ -41,7 +42,7 @@ async function getImportContext() {
     const [dbUser, siteConfig] = await Promise.all([
         db.user.findUnique({
             where: { clerkId: access.clerkUserId },
-            select: { firstName: true, lastName: true, crmUsername: true, crmPassword: true },
+            select: { firstName: true, lastName: true },
         }),
         getLocationConfig(access.locationId),
     ]);
@@ -106,17 +107,19 @@ export type ImportStatus =
     | { type: 'error'; message: string; code?: string };
 
 async function getCrmCredentials(context: Awaited<ReturnType<typeof getImportContext>>) {
-    const { access, dbUser } = context;
+    const { access } = context;
     const crmUrl = access.location.crmUrl;
+    if (!crmUrl) return null;
 
-    if (!crmUrl || !dbUser?.crmUsername || !dbUser?.crmPassword) {
+    const { username, password } = await getUserCrmCredentials(access.dbUserId);
+    if (!username || !password) {
         return null;
     }
 
     return {
         url: crmUrl,
-        username: dbUser.crmUsername,
-        password: dbUser.crmPassword
+        username,
+        password
     };
 }
 
