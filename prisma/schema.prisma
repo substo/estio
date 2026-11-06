@@ -268,9 +268,6 @@ model User {
   timeZone      String? // IANA timezone, e.g. "Europe/Nicosia"
   platformRole  PlatformRole @default(STANDARD)
 
-  // CRM Credentials (User-specific login)
-  crmUsername String?
-  crmPassword String?
 
   locations     Location[]         @relation("LocationToUser")
   locationRoles UserLocationRole[]
@@ -310,9 +307,6 @@ model User {
   analyticsEvents              AnalyticsEvent[]
 
   // Google Contact Sync Credentials
-  googleAccessToken             String?         @db.Text
-  googleRefreshToken            String?         @db.Text
-  googleSyncToken               String? // To track the last sync point
   googleSyncEnabled             Boolean         @default(false)
   googleSyncDirection           String? // "ESTIO_TO_GOOGLE" | "GOOGLE_TO_ESTIO" - Source of Truth setting
   googleAutoSyncEnabled         Boolean         @default(false) // Master toggle for opt-in Google contact automation
@@ -331,8 +325,6 @@ model User {
   gmailSyncOutboxJobs           GmailSyncOutbox[]
 
   // Outlook / Microsoft Sync Credentials (OAuth method)
-  outlookAccessToken        String?           @db.Text
-  outlookRefreshToken       String?           @db.Text
   outlookSyncEnabled        Boolean           @default(false)
   outlookSubscriptionId     String? // Webhook Subscription ID
   outlookSubscriptionExpiry DateTime? // Webhook Expiry
