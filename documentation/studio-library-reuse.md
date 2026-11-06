@@ -40,3 +40,7 @@ T3 preview status exposed no tabs; two corrected HTTP opens returned `Too many s
 ## Canonical integration validation
 
 The release integrator reran 47 focused tests and strict changed-module TypeScript. Disposable PostgreSQL acceptance executes the actual import transaction and existing record-link SQL with only authentication, network metadata and summary execution stubbed: atomic channel/link save, reverse relation read, channel-ID alias deduplication/retry, preservation of human evidence, stale-version rollback, cross-tenant rejection and revoked membership. No production import or provider execution is used for this check. Run `bash scripts/test-studio-library-summary.sh`; its creator acceptance requires the private disposable Unix socket and refuses production URLs. Deployment and signed-in acceptance are recorded in current status.
+
+## Urgent import recovery story
+
+Achieved: Valid imports behind Caddy pass public-origin verification instead of being rejected against the internal Next URL. How: reuse the canonical request-origin policy, require serialized HTTP(S) Origin, reject cross-site requests, and retain the existing tenant/account/import service. Next: parent integrates this scoped fix and coordinates the held deployment. The existing approved Library spec and Build implementation scope are unchanged. Focused evidence: `/tmp/library-origin-tests.log` and `/tmp/library-origin-types.log`.
