@@ -3,6 +3,19 @@
 import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
 import db from '@/lib/db';
+import { getUserCrmUsername, hasUserCrmPassword } from '@/lib/crm/credentials';
+import { GOOGLE_SECRET_KEYS } from '@/lib/google/credentials';
+import { getOutlookCredentialPresence } from '@/lib/microsoft/credentials';
+import { SETTINGS_DOMAINS } from '@/lib/settings/constants';
+import { findUserSecretKeys } from '@/lib/settings/user-secrets';
+
+// Encrypted personal credentials removed when a member's private state is cleared (Google, Outlook, Old CRM, ChatGPT).
+const OFFBOARDING_CREDENTIAL_SECRET_DOMAINS = [
+    SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
+    SETTINGS_DOMAINS.USER_MICROSOFT_INTEGRATIONS,
+    SETTINGS_DOMAINS.USER_CRM,
+    SETTINGS_DOMAINS.USER_CHATGPT_SUBSCRIPTION_INTEGRATIONS,
+];
 import { Prisma } from '@prisma/client';
 import { clerkClient } from '@clerk/nextjs/server';
 import { auth } from '@clerk/nextjs/server';
@@ -416,14 +429,22 @@ export async function previewTransferResponsibilities(input: {
             db.property.count({ where: { locationId, OR: [{ createdById: source.id }, { updatedById: source.id }] } }),
             db.contact.count({ where: { locationId, assignedUserId: null, leadAssignedToAgent: { not: null } } }),
             db.user.findUnique({ where: { id: source.id }, select: {
-                googleAccessToken: true, googleRefreshToken: true, googleSyncToken: true, googleSyncEnabled: true,
-                outlookAccessToken: true, outlookRefreshToken: true, outlookSyncEnabled: true,
-                outlookPasswordEncrypted: true, outlookSessionCookies: true, crmUsername: true, crmPassword: true,
+                googleSyncEnabled: true, outlookSyncEnabled: true,
                 gmailSyncState: { select: { id: true } }, outlookSyncState: { select: { id: true } },
                 taskReminderPreference: { select: { userId: true } },
                 _count: { select: { webPushSubscriptions: true, userNotifications: true } },
             } }),
         ]);
+
+        // Personal credentials live in encrypted settings secrets and the user.crm document; only presence is read.
+        const [googleSecrets, outlookCredentials, crmUsername] = await Promise.all([
+            findUserSecretKeys({ domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS, secretKeys: GOOGLE_SECRET_KEYS, userIds: [source.id] }),
+            getOutlookCredentialPresence(source.id),
+            getUserCrmUsername(source.id),
+        ]);
+        const hasGoogleSecrets = googleSecrets.has(source.id);
+        const hasOutlookSecrets = Object.values(outlookCredentials).some(Boolean);
+        const hasCrmCredentials = Boolean(crmUsername) || await hasUserCrmPassword(source.id);
 
         const otherMemberships = source.memberships.filter(
             (membership) => membership.locationId !== locationId && (membership.connected || membership.role),
@@ -484,9 +505,9 @@ export async function previewTransferResponsibilities(input: {
                 { label: 'Property creator/updater records', count: propertyAttribution },
             ],
             privateState: [
-                { label: 'Google OAuth and Gmail sync', configured: !!(privateUser?.googleAccessToken || privateUser?.googleRefreshToken || privateUser?.googleSyncToken || privateUser?.googleSyncEnabled || privateUser?.gmailSyncState), disposition: otherMemberships.length ? 'Preserve for other location memberships' : 'Clear after local commit; never transfer credentials or cursors' },
-                { label: 'Outlook OAuth and browser session', configured: !!(privateUser?.outlookAccessToken || privateUser?.outlookRefreshToken || privateUser?.outlookSyncEnabled || privateUser?.outlookPasswordEncrypted || privateUser?.outlookSessionCookies || privateUser?.outlookSyncState), disposition: otherMemberships.length ? 'Preserve for other location memberships' : 'Clear after local commit; never transfer credentials or cookies' },
-                { label: 'Personal CRM credentials', configured: !!(privateUser?.crmUsername || privateUser?.crmPassword), disposition: otherMemberships.length ? 'Preserve for other location memberships' : 'Clear after local commit; never transfer credentials' },
+                { label: 'Google OAuth and Gmail sync', configured: !!(hasGoogleSecrets || privateUser?.googleSyncEnabled || privateUser?.gmailSyncState), disposition: otherMemberships.length ? 'Preserve for other location memberships' : 'Clear after local commit; never transfer credentials or cursors' },
+                { label: 'Outlook OAuth and browser session', configured: !!(hasOutlookSecrets || privateUser?.outlookSyncEnabled || privateUser?.outlookSyncState), disposition: otherMemberships.length ? 'Preserve for other location memberships' : 'Clear after local commit; never transfer credentials or cookies' },
+                { label: 'Personal CRM credentials', configured: hasCrmCredentials, disposition: otherMemberships.length ? 'Preserve for other location memberships' : 'Clear after local commit; never transfer credentials' },
                 { label: 'Web push subscriptions', configured: !!privateUser?._count.webPushSubscriptions, disposition: otherMemberships.length ? 'Preserve for other location memberships' : 'Clear after local commit; never transfer subscriptions' },
                 { label: 'Notifications and reminder preferences', configured: !!(privateUser?._count.userNotifications || privateUser?.taskReminderPreference), disposition: 'Retain privately; never copy to successor' },
                 { label: 'Clerk sessions', configured: true, disposition: 'Location access removal is authoritative; global suspension requires scope confirmation' },
@@ -644,14 +665,14 @@ export async function executeTransferResponsibilities(input: {
                         where: {
                             scopeType: 'USER',
                             scopeId: token.sourceUserId,
-                            domain: 'user.integrations.chatgpt_subscription',
+                            domain: { in: OFFBOARDING_CREDENTIAL_SECRET_DOMAINS },
                         },
                     }),
                     tx.settingsDocument.deleteMany({
                         where: {
                             scopeType: 'USER',
                             scopeId: token.sourceUserId,
-                            domain: 'user.integrations.chatgpt_subscription',
+                            domain: { in: ['user.integrations.chatgpt_subscription', 'user.crm'] },
                         },
                     }),
                     tx.gmailSyncOutbox.updateMany({
@@ -663,12 +684,10 @@ export async function executeTransferResponsibilities(input: {
                     where: { id: token.sourceUserId },
                     data: {
                         ...(clearPrivateState ? {
-                            googleAccessToken: null, googleRefreshToken: null, googleSyncToken: null,
                             googleSyncEnabled: false, googleAutoSyncEnabled: false,
-                            outlookAccessToken: null, outlookRefreshToken: null, outlookSyncEnabled: false,
+                            outlookSyncEnabled: false,
                             outlookSubscriptionId: null, outlookSubscriptionExpiry: null,
                             outlookPasswordEncrypted: null, outlookSessionCookies: null, outlookSessionExpiry: null,
-                            crmUsername: null, crmPassword: null,
                         } : {}),
                         locations: { disconnect: { id: token.locationId } },
                     },

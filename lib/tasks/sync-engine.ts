@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { ContactTaskOutbox, Prisma } from '@prisma/client';
 import db from '@/lib/db';
+import { findUsersWithGoogleTokens } from '@/lib/google/credentials';
 import { ensureRemoteContact } from '@/lib/crm/contact-sync';
 import { getGhlIntegrationDisabledReason, isGhlIntegrationEnabled } from '@/lib/ghl/integration-gate';
 import { GHLError } from '@/lib/ghl/client';
@@ -27,7 +28,7 @@ import {
 const MAX_OUTBOX_ATTEMPTS = 6;
 const STALE_PROCESSING_LOCK_MS = 5 * 60 * 1000;
 
-type SyncTaskRecord = Prisma.ContactTaskGetPayload<{
+type LoadedSyncTask = Prisma.ContactTaskGetPayload<{
   include: {
     location: {
       select: {
@@ -45,29 +46,31 @@ type SyncTaskRecord = Prisma.ContactTaskGetPayload<{
     assignedUser: {
       select: {
         id: true;
-        googleAccessToken: true;
-        googleRefreshToken: true;
         googleTasklistId: true;
       };
     };
     createdByUser: {
       select: {
         id: true;
-        googleAccessToken: true;
-        googleRefreshToken: true;
         googleTasklistId: true;
       };
     };
     updatedByUser: {
       select: {
         id: true;
-        googleAccessToken: true;
-        googleRefreshToken: true;
         googleTasklistId: true;
       };
     };
   };
 }>;
+
+// Which of the task's users hold Google tokens (encrypted settings secrets), resolved once per load.
+type SyncTaskRecord = LoadedSyncTask & { googleConnectedUserIds: ReadonlySet<string> };
+
+async function withGoogleConnections(task: LoadedSyncTask): Promise<SyncTaskRecord> {
+  const userIds = [task.assignedUser?.id, task.createdByUser?.id, task.updatedByUser?.id].filter((id): id is string => Boolean(id));
+  return { ...task, googleConnectedUserIds: await findUsersWithGoogleTokens(userIds) };
+}
 
 type OutboxJobResult = 'success' | 'failed' | 'dead' | 'skipped';
 
@@ -134,17 +137,9 @@ function isRetryableSyncError(provider: TaskProvider, error: unknown): boolean {
   return true;
 }
 
-function hasGoogleCredentials(user?: {
-  googleAccessToken: string | null;
-  googleRefreshToken: string | null;
-} | null): boolean {
-  if (!user) return false;
-  return Boolean(user.googleAccessToken || user.googleRefreshToken);
-}
-
 function selectGoogleSyncUser(task: SyncTaskRecord) {
   const orderedUsers = [task.assignedUser, task.createdByUser, task.updatedByUser];
-  return orderedUsers.find((user) => hasGoogleCredentials(user)) || null;
+  return orderedUsers.find((user) => Boolean(user && task.googleConnectedUserIds.has(user.id))) || null;
 }
 
 function getAvailableProviders(task: SyncTaskRecord): TaskProvider[] {
@@ -460,24 +455,18 @@ async function processSingleOutboxJob(jobId: string, workerId: string): Promise<
           assignedUser: {
             select: {
               id: true,
-              googleAccessToken: true,
-              googleRefreshToken: true,
               googleTasklistId: true,
             },
           },
           createdByUser: {
             select: {
               id: true,
-              googleAccessToken: true,
-              googleRefreshToken: true,
               googleTasklistId: true,
             },
           },
           updatedByUser: {
             select: {
               id: true,
-              googleAccessToken: true,
-              googleRefreshToken: true,
               googleTasklistId: true,
             },
           },
@@ -508,9 +497,9 @@ async function processSingleOutboxJob(jobId: string, workerId: string): Promise<
 
   try {
     if (job.provider === 'ghl') {
-      result = await syncTaskToGhl(job, job.task);
+      result = await syncTaskToGhl(job, await withGoogleConnections(job.task));
     } else if (job.provider === 'google') {
-      result = await syncTaskToGoogle(job, job.task);
+      result = await syncTaskToGoogle(job, await withGoogleConnections(job.task));
     } else {
       throw new Error(`Unsupported provider: ${job.provider}`);
     }
@@ -638,24 +627,18 @@ export async function enqueueTaskSyncJobs(options: {
       assignedUser: {
         select: {
           id: true,
-          googleAccessToken: true,
-          googleRefreshToken: true,
           googleTasklistId: true,
         },
       },
       createdByUser: {
         select: {
           id: true,
-          googleAccessToken: true,
-          googleRefreshToken: true,
           googleTasklistId: true,
         },
       },
       updatedByUser: {
         select: {
           id: true,
-          googleAccessToken: true,
-          googleRefreshToken: true,
           googleTasklistId: true,
         },
       },
@@ -666,7 +649,7 @@ export async function enqueueTaskSyncJobs(options: {
     return { queued: 0, skippedProviders: options.providers || [] };
   }
 
-  const availableProviders = getAvailableProviders(task);
+  const availableProviders = getAvailableProviders(await withGoogleConnections(task));
   const targetProviders = options.providers?.length
     ? options.providers.filter((provider) => availableProviders.includes(provider))
     : availableProviders;

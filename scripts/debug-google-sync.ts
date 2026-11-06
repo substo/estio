@@ -1,6 +1,7 @@
 
 import db from '../lib/db';
 import { syncContactToGoogle } from '../lib/google/people';
+import { findUsersWithGoogleTokens } from '../lib/google/credentials';
 
 const CONTACT_ID = 'cml5ce95e00a1a4tkypx0xk06';
 
@@ -31,14 +32,14 @@ async function main() {
             name: true,
             email: true,
             googleSyncEnabled: true,
-            googleRefreshToken: true
         }
     });
+    const withRefreshToken = await findUsersWithGoogleTokens(users.map(user => user.id), { requireRefreshToken: true });
 
     let syncUser = null;
 
     for (const user of users) {
-        const hasToken = !!user.googleRefreshToken;
+        const hasToken = withRefreshToken.has(user.id);
         console.log(`User: ${user.name} (${user.email})`);
         console.log(`  - Sync Enabled: ${user.googleSyncEnabled}`);
         console.log(`  - Has Refresh Token: ${hasToken}`);

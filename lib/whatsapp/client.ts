@@ -34,7 +34,6 @@ export type WhatsAppCloudCredentials = {
     phoneNumberId: string;
     displayPhoneNumber?: string | null;
     accessToken: string;
-    webhookSecret: string;
     providerMode: WhatsAppProviderMode;
 };
 
@@ -243,7 +242,6 @@ export async function getWhatsAppCloudCredentials(locationId: string, channelId?
                 whatsappBusinessAccountId: true,
                 whatsappPhoneNumberId: true,
                 whatsappAccessToken: true,
-                whatsappWebhookSecret: true,
                 whatsappProviderMode: true,
             } as any,
         }),
@@ -266,7 +264,6 @@ export async function getWhatsAppCloudCredentials(locationId: string, channelId?
         : await getDefaultWhatsAppCloudChannel(locationId);
     const businessAccountId = String(channel?.wabaId || payload.whatsappBusinessAccountId || location?.whatsappBusinessAccountId || "").trim();
     const phoneNumberId = String(channel?.phoneNumberId || payload.whatsappPhoneNumberId || location?.whatsappPhoneNumberId || "").trim();
-    const webhookSecret = String(payload.whatsappWebhookSecret || location?.whatsappWebhookSecret || "").trim();
     const providerMode = normalizeProviderMode(channel?.providerMode || payload.whatsappProviderMode || (location as any)?.whatsappProviderMode);
     const accessToken = String(accessTokenSecret || decryptLegacyToken((location as any)?.whatsappAccessToken) || "").trim();
 
@@ -281,7 +278,6 @@ export async function getWhatsAppCloudCredentials(locationId: string, channelId?
         phoneNumberId,
         displayPhoneNumber: channel?.displayPhoneNumber || null,
         accessToken,
-        webhookSecret,
         providerMode,
     };
 }

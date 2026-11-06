@@ -1,6 +1,7 @@
 import { puppeteerService } from './puppeteer-service';
 import { CRM_LEAD_FIELD_MAPPING } from './lead-field-mapping';
 import db from '@/lib/db';
+import { getUserCrmCredentials } from './credentials';
 
 export async function scrapeCrmLeadData(crmLeadId: string, userId: string) {
     console.log(`[CRM SCRAPE] Starting for lead ID ${crmLeadId} by user ${userId}`);
@@ -15,13 +16,15 @@ export async function scrapeCrmLeadData(crmLeadId: string, userId: string) {
     const location = user.locations[0];
     const crmUrl = location?.crmUrl;
 
-    if (!crmUrl || !user.crmUsername || !user.crmPassword) {
+    const { username: crmUsername, password: crmPassword } = await getUserCrmCredentials(user.id);
+
+    if (!crmUrl || !crmUsername || !crmPassword) {
         throw new Error("Missing CRM configuration. Check location URL and user credentials.");
     }
 
     try {
         await puppeteerService.init();
-        await puppeteerService.login(crmUrl, user.crmUsername, user.crmPassword);
+        await puppeteerService.login(crmUrl, crmUsername, crmPassword);
 
         const page = await puppeteerService.getPage();
 

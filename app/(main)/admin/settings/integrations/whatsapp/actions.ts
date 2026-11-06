@@ -3,6 +3,7 @@
 import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
 import db from "@/lib/db";
+import { getLocationWhatsAppWebhookSecret, setLocationWhatsAppWebhookSecret } from "@/lib/whatsapp/webhook-secret";
 import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import axios from "axios";
@@ -168,7 +169,6 @@ export async function updateWhatsAppSettings(formData: FormData) {
     const payload = {
         whatsappBusinessAccountId: businessAccountId || null,
         whatsappPhoneNumberId: phoneNumberId || null,
-        whatsappWebhookSecret: webhookSecret || null,
         whatsappProviderMode,
         twilioAccountSid: twilioAccountSid || null,
         twilioWhatsAppFrom: twilioWhatsAppFrom || null,
@@ -182,6 +182,9 @@ export async function updateWhatsAppSettings(formData: FormData) {
         actorUserId: localUserId,
         schemaVersion: 1,
     });
+
+    // Encrypted secret; also removes the former plain-text column/document copies.
+    await setLocationWhatsAppWebhookSecret(resolvedLocationId, webhookSecret || null, localUserId);
 
     const shouldUpdateAccessToken = accessTokenInput.length > 0 && accessTokenInput !== MASKED_SECRET;
     const shouldUpdateTwilioAuthToken = twilioAuthTokenInput.length > 0 && twilioAuthTokenInput !== MASKED_SECRET;
@@ -228,7 +231,6 @@ export async function updateWhatsAppSettings(formData: FormData) {
         const updateData: any = {
             whatsappBusinessAccountId: payload.whatsappBusinessAccountId,
             whatsappPhoneNumberId: payload.whatsappPhoneNumberId,
-            whatsappWebhookSecret: payload.whatsappWebhookSecret,
             whatsappProviderMode: payload.whatsappProviderMode,
             twilioAccountSid: payload.twilioAccountSid,
             twilioWhatsAppFrom: payload.twilioWhatsAppFrom,
@@ -277,7 +279,7 @@ export async function getWhatsAppSettings(locationId?: string | null) {
     await assertCrmActionAllowed("settings/integrations/whatsapp/actions.ts", "getWhatsAppSettings");
     const { location: contextLocation } = await resolveAdminContext(locationId || null);
     const location = contextLocation;
-    const [doc, hasAccessToken, hasTwilioAuthToken] = await Promise.all([
+    const [doc, hasAccessToken, hasTwilioAuthToken, webhookSecret] = await Promise.all([
         settingsService.getDocument<any>({
             scopeType: "LOCATION",
             scopeId: location.id,
@@ -295,6 +297,7 @@ export async function getWhatsAppSettings(locationId?: string | null) {
             domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
             secretKey: SETTINGS_SECRET_KEYS.TWILIO_AUTH_TOKEN,
         }).catch(() => false),
+        getLocationWhatsAppWebhookSecret(location.id),
     ]);
 
     const payload = doc?.payload || {};
@@ -315,7 +318,7 @@ export async function getWhatsAppSettings(locationId?: string | null) {
         phoneNumberId: payload.whatsappPhoneNumberId || location.whatsappPhoneNumberId || "",
         accessToken: "",
         hasAccessToken: hasAccessToken || Boolean(location.whatsappAccessToken),
-        webhookSecret: payload.whatsappWebhookSecret || location.whatsappWebhookSecret || "",
+        webhookSecret: webhookSecret || "",
         whatsappProviderMode: providerMode,
         whatsappChannels,
         whatsappCallingConfig: serializeWhatsAppCallingConfig(callingConfig),
@@ -1195,10 +1198,12 @@ export async function exchangeSystemUserToken(
             actorUserId: localUserId,
         });
 
+        // Ensure the webhook verify token exists (encrypted secret).
+        const webhookSecret = await getLocationWhatsAppWebhookSecret(resolvedLocationId) || crypto.randomUUID();
+
         const integrationPayload = {
             whatsappBusinessAccountId: wabaId,
             whatsappPhoneNumberId: phoneNumberId,
-            whatsappWebhookSecret: location.whatsappWebhookSecret || crypto.randomUUID(),
             whatsappProviderMode: "cloud_primary",
             twilioAccountSid: location.twilioAccountSid || null,
             twilioWhatsAppFrom: location.twilioWhatsAppFrom || null,
@@ -1213,10 +1218,9 @@ export async function exchangeSystemUserToken(
             schemaVersion: 1,
         });
 
+        await setLocationWhatsAppWebhookSecret(resolvedLocationId, webhookSecret, localUserId);
+
         // 6. Dual-write to legacy columns
-        // Ensure webhook secret is set if missing
-        const currentSettings = await db.location.findUnique({ where: { id: resolvedLocationId }, select: { whatsappWebhookSecret: true } });
-        const webhookSecret = currentSettings?.whatsappWebhookSecret || crypto.randomUUID();
 
         { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
             const encryptedAccessToken = getLegacyCryptr().encrypt(accessToken);
@@ -1226,7 +1230,6 @@ export async function exchangeSystemUserToken(
                     whatsappBusinessAccountId: wabaId,
                     whatsappPhoneNumberId: phoneNumberId,
                     whatsappAccessToken: encryptedAccessToken,
-                    whatsappWebhookSecret: webhookSecret,
                     whatsappProviderMode: "cloud_primary",
                 } as any
             });

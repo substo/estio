@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import db from '@/lib/db';
+import { getOutlookCredentialPresence } from "@/lib/microsoft/credentials";
 import { syncEmailsFromOWA } from '@/lib/microsoft/owa-email-sync';
 
 // Allow long-running requests for sync
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'User not found' }, { status: 404 });
         }
 
-        if (!user.outlookSyncEnabled || !user.outlookSessionCookies) {
+        if (!user.outlookSyncEnabled || !(await getOutlookCredentialPresence(user.id)).sessionCookies) {
             return NextResponse.json({ error: 'Outlook sync is not configured or connected.' }, { status: 400 });
         }
 

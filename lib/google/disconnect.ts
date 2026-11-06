@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
-import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
+import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
+import { clearGoogleSecrets } from "./credentials";
 import { settingsService } from "@/lib/settings/service";
 
 export const DISCONNECTED_GOOGLE_SETTINGS = {
@@ -36,12 +37,7 @@ export async function disconnectGoogleLocally(
     const results = await Promise.all([
         tx.user.update({
             where: { id: input.userId },
-            data: {
-                googleAccessToken: null,
-                googleRefreshToken: null,
-                googleSyncToken: null,
-                ...DISCONNECTED_GOOGLE_SETTINGS,
-            },
+            data: DISCONNECTED_GOOGLE_SETTINGS,
         }),
         tx.gmailSyncState.deleteMany({ where: { userId: input.userId } }),
         tx.googleContactDirectoryEntry.deleteMany({ where: { userId: input.userId } }),
@@ -110,24 +106,7 @@ export async function disconnectGoogleLocally(
             where: { provider: "google", viewing: { userId: input.userId } },
             data: { status: "disabled", lastError: DISCONNECTED_REASON },
         }),
-        dependencies.clearSecret({
-            scopeType: "USER",
-            scopeId: input.userId,
-            domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-            secretKey: SETTINGS_SECRET_KEYS.GOOGLE_ACCESS_TOKEN,
-            actorUserId: input.userId,
-            requestId: input.requestId,
-            tx,
-        }),
-        dependencies.clearSecret({
-            scopeType: "USER",
-            scopeId: input.userId,
-            domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-            secretKey: SETTINGS_SECRET_KEYS.GOOGLE_REFRESH_TOKEN,
-            actorUserId: input.userId,
-            requestId: input.requestId,
-            tx,
-        }),
+        clearGoogleSecrets({ userId: input.userId, actorUserId: input.userId, requestId: input.requestId, tx }, dependencies),
         dependencies.upsertDocument({
             scopeType: "USER",
             scopeId: input.userId,

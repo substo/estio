@@ -4,6 +4,7 @@ import { assertCrmActionAllowed } from "@/lib/auth/crm-action-guard";
 
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import db from '@/lib/db';
+import { getOutlookCredentialPresence } from "@/lib/microsoft/credentials";
 import { auth } from '@clerk/nextjs/server';
 
 export interface OutlookEmail {
@@ -38,7 +39,6 @@ export async function fetchOutlookEmailsForContactAction(contactEmail: string): 
             select: {
                 id: true,
                 outlookAuthMethod: true,
-                outlookSessionCookies: true,
                 outlookSessionExpiry: true,
                 outlookSyncEnabled: true
             }
@@ -167,10 +167,10 @@ export async function getOutlookStatusAction(): Promise<{
         const user = await db.user.findUnique({
             where: { clerkId: clerkUserId },
             select: {
+                id: true,
                 outlookSyncEnabled: true,
                 outlookAuthMethod: true,
                 outlookEmail: true,
-                outlookAccessToken: true,
                 outlookSyncState: {
                     select: {
                         lastSyncedAt: true
@@ -184,7 +184,7 @@ export async function getOutlookStatusAction(): Promise<{
         }
 
         const connected = user.outlookSyncEnabled &&
-            (user.outlookAuthMethod === 'puppeteer' || !!user.outlookAccessToken);
+            (user.outlookAuthMethod === 'puppeteer' || (await getOutlookCredentialPresence(user.id)).accessToken);
 
         return {
             connected,

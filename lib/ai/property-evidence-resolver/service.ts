@@ -1,6 +1,7 @@
 import db from "@/lib/db";
 import { extractLegacyCrmRefCandidates, getOldCrmImportCapabilityForUser, type LegacyCrmRefCandidate } from "@/lib/crm/old-crm-import";
 import { crawlPropertyWithPython } from "@/lib/crm/crawl4ai-service";
+import { filterUserIdsWithCrmCredentials } from "@/lib/crm/credentials";
 import { applyPropertyInterestToContact } from "@/lib/leads/contact-property-interest";
 import { enqueuePasteLeadPropertyImport } from "@/lib/queue/paste-lead-property-import";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
@@ -237,26 +238,19 @@ export function extractListingFactsFromCrawl(args: {
   };
 }
 
+// The first team member (role, then join order) whose Old CRM login is stored: username in the user.crm
+// settings document and password in its encrypted secret (lib/crm/credentials.ts).
 async function resolveFallbackOldCrmActorUserId(locationId: string): Promise<string | null> {
-  const row = await db.userLocationRole.findFirst({
-    where: {
-      locationId,
-      user: {
-        AND: [
-          { crmUsername: { not: null } },
-          { crmUsername: { not: "" } },
-          { crmPassword: { not: null } },
-          { crmPassword: { not: "" } },
-        ],
-      },
-    },
+  const rows = await db.userLocationRole.findMany({
+    where: { locationId },
     orderBy: [
       { role: "asc" },
       { createdAt: "asc" },
     ],
     select: { userId: true },
   });
-  return row?.userId || null;
+  const [first] = await filterUserIdsWithCrmCredentials(rows.map((row) => row.userId));
+  return first || null;
 }
 
 export function formatPropertyEvidenceItem(item: PropertyEvidenceItem): string {

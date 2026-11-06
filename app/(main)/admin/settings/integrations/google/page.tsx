@@ -101,8 +101,6 @@ export default async function GoogleIntegrationPage({
         where: { clerkId: clerkUserId },
         select: {
             id: true,
-            googleAccessToken: true,
-            googleRefreshToken: true,
             ...googleIntegrationSettingsSelect,
         }
     });
@@ -131,8 +129,6 @@ export default async function GoogleIntegrationPage({
         syncEnabled: googleSettings.googleSyncEnabled,
         hasEncryptedAccessToken,
         hasEncryptedRefreshToken,
-        legacyAccessToken: user.googleAccessToken,
-        legacyRefreshToken: user.googleRefreshToken,
     });
     const resolvedParams = await searchParams;
     const isNewConnection = resolvedParams?.google_connected === 'true';

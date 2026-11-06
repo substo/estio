@@ -54,12 +54,7 @@ test("local Google disconnect clears private state and disables only user-bound 
         taskJobsDisabled: 4,
         viewingJobsDisabled: 5,
     });
-    assert.deepEqual((userUpdate.calls[0] as any).data, {
-        googleAccessToken: null,
-        googleRefreshToken: null,
-        googleSyncToken: null,
-        ...DISCONNECTED_GOOGLE_SETTINGS,
-    });
+    assert.deepEqual((userUpdate.calls[0] as any).data, DISCONNECTED_GOOGLE_SETTINGS);
     assert.deepEqual((providerOutboxUpdate.calls[0] as any).where, {
         provider: "google",
         providerAccountId: "user-1",
@@ -67,7 +62,11 @@ test("local Google disconnect clears private state and disables only user-bound 
     });
     assert.equal((taskOutboxUpdate.calls[0] as any).where.task.OR[0].assignedUserId, "user-1");
     assert.equal((viewingOutboxUpdate.calls[0] as any).where.viewing.userId, "user-1");
-    assert.equal(clearSecret.calls.length, 2);
+    assert.deepEqual(
+        clearSecret.calls.map((call: any) => call.secretKey),
+        ["google_access_token", "google_refresh_token", "google_sync_token"],
+    );
+    assert.ok(clearSecret.calls.every((call: any) => call.tx === tx && call.scopeId === "user-1"));
     assert.deepEqual((upsertDocument.calls[0] as any).payload, DISCONNECTED_GOOGLE_SETTINGS);
     assert.equal("contact" in tx, false, "business contacts must not be deleted or rewritten");
 });

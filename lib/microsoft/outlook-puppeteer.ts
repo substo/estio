@@ -1,6 +1,6 @@
 import puppeteer, { Browser, Page, Cookie } from 'puppeteer';
 import db from '@/lib/db';
-import { encryptCookies, decryptCookies, encryptPassword, decryptPassword } from '@/lib/crypto/password-encryption';
+import { clearOutlookSecrets, getOutlookBrowserCookies, getOutlookBrowserPassword, saveOutlookBrowserCredentials } from './credentials';
 import { addDays, isAfter } from 'date-fns';
 
 // OWA URLs
@@ -384,17 +384,15 @@ export class OutlookPuppeteerService {
      * Save credentials and session to database
      */
     async saveSession(userId: string, email: string, password: string, cookies: Cookie[]) {
-        const encryptedPassword = encryptPassword(password);
-        const encryptedCookies = encryptCookies(cookies);
         const sessionExpiry = addDays(new Date(), SESSION_VALIDITY_DAYS);
 
+        // Password and cookies go to the encrypted settings store; the row keeps only method, email and expiry.
+        await saveOutlookBrowserCredentials(userId, { password, cookies });
         await db.user.update({
             where: { id: userId },
             data: {
                 outlookAuthMethod: 'puppeteer',
                 outlookEmail: email,
-                outlookPasswordEncrypted: encryptedPassword,
-                outlookSessionCookies: encryptedCookies,
                 outlookSessionExpiry: sessionExpiry,
                 outlookSyncEnabled: true
             }
@@ -420,13 +418,11 @@ export class OutlookPuppeteerService {
         const user = await db.user.findUnique({
             where: { id: userId },
             select: {
-                outlookSessionCookies: true,
                 outlookSessionExpiry: true,
                 outlookEmail: true
             }
         });
-
-        if (!user?.outlookSessionCookies) {
+        if (!user) {
             return { valid: false };
         }
 
@@ -437,7 +433,10 @@ export class OutlookPuppeteerService {
         }
 
         try {
-            const cookies = decryptCookies(user.outlookSessionCookies);
+            const cookies = await getOutlookBrowserCookies<Cookie>(userId);
+            if (!cookies) {
+                return { valid: false };
+            }
             const page = existingPage || await this.getPage();
 
             // Check if existingPage is already on OWA - skip navigation if so
@@ -514,20 +513,19 @@ export class OutlookPuppeteerService {
      * Returns the authenticated page on success so caller can use it directly
      */
     async refreshSession(userId: string, existingPage?: Page): Promise<{ success: boolean; page?: Page }> {
-        const user = await db.user.findUnique({
-            where: { id: userId },
-            select: {
-                outlookEmail: true,
-                outlookPasswordEncrypted: true
-            }
-        });
+        const [user, password] = await Promise.all([
+            db.user.findUnique({
+                where: { id: userId },
+                select: { outlookEmail: true }
+            }),
+            getOutlookBrowserPassword(userId),
+        ]);
 
-        if (!user?.outlookEmail || !user?.outlookPasswordEncrypted) {
+        if (!user?.outlookEmail || !password) {
             console.log('[OutlookPuppeteer] No stored credentials for refresh');
             return { success: false };
         }
 
-        const password = decryptPassword(user.outlookPasswordEncrypted);
         const page = existingPage || await this.getPage();
 
         // Pass existingPage to loginToOWA
@@ -547,18 +545,15 @@ export class OutlookPuppeteerService {
      * Clear stored credentials and session
      */
     async disconnect(userId: string) {
+        // Clears the browser password and cookies and any OAuth tokens.
+        await clearOutlookSecrets({ userId });
         await db.user.update({
             where: { id: userId },
             data: {
                 outlookAuthMethod: null,
                 outlookEmail: null,
-                outlookPasswordEncrypted: null,
-                outlookSessionCookies: null,
                 outlookSessionExpiry: null,
                 outlookSyncEnabled: false,
-                // Also clear OAuth tokens if any
-                outlookAccessToken: null,
-                outlookRefreshToken: null
             }
         });
 

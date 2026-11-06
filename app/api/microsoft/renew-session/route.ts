@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import db from '@/lib/db';
+import { getOutlookCredentialPresence } from "@/lib/microsoft/credentials";
 import {
     getOutlookSessionRenewStatus,
     requestOutlookSessionRenew
@@ -22,8 +23,6 @@ export async function POST() {
                 id: true,
                 outlookAuthMethod: true,
                 outlookEmail: true,
-                outlookPasswordEncrypted: true,
-                outlookSessionCookies: true,
                 outlookSessionExpiry: true,
                 outlookSyncEnabled: true
             }
@@ -33,10 +32,11 @@ export async function POST() {
             return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 });
         }
 
+        const credentials = await getOutlookCredentialPresence(user.id);
         const inferredMethod =
             (user.outlookAuthMethod as 'oauth' | 'puppeteer' | null)
-            || (user.outlookSessionCookies ? 'puppeteer' : null)
-            || (user.outlookPasswordEncrypted ? 'puppeteer' : null);
+            || (credentials.sessionCookies ? 'puppeteer' : null)
+            || (credentials.password ? 'puppeteer' : null);
 
         if (inferredMethod !== 'puppeteer') {
             return NextResponse.json({
@@ -45,7 +45,7 @@ export async function POST() {
             }, { status: 400 });
         }
 
-        if (!user.outlookEmail || !user.outlookPasswordEncrypted) {
+        if (!user.outlookEmail || !credentials.password) {
             return NextResponse.json({
                 success: false,
                 error: 'Stored Outlook credentials are required to renew the session automatically.'

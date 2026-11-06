@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/lib/db';
+import { getOutlookCredentialPresenceForUsers } from "@/lib/microsoft/credentials";
 import { syncEmailsFromOWA } from '@/lib/microsoft/owa-email-sync';
 import { syncContactsFromOutlook } from '@/lib/microsoft/contact-sync';
 import { CronGuard } from '@/lib/cron/guard';
@@ -30,10 +31,13 @@ export async function GET(req: NextRequest) {
 
     try {
         // 3. Fetch Users with Outlook Sync Enabled and valid session
+        const withSession = [...(await getOutlookCredentialPresenceForUsers()).entries()]
+            .filter(([, credentials]) => credentials.sessionCookies)
+            .map(([userId]) => userId);
         const users = await db.user.findMany({
             where: {
+                id: { in: withSession },
                 outlookSyncEnabled: true,
-                outlookSessionCookies: { not: null }
             }
         });
 

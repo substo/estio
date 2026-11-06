@@ -6,6 +6,7 @@ import {
     verifyWhatsAppWebhookSignature,
 } from "@/lib/whatsapp/client";
 import { updateWhatsAppCloudStatus } from "@/lib/whatsapp/status-updates";
+import { isAcceptedWhatsAppVerifyToken } from "@/lib/whatsapp/webhook-secret";
 import { normalizeWhatsAppCloudInboundMessage } from "@/lib/whatsapp/webhook-normalizers";
 
 export async function GET(req: NextRequest) {
@@ -15,9 +16,7 @@ export async function GET(req: NextRequest) {
     const challenge = searchParams.get("hub.challenge");
 
     if (mode && token) {
-        const verifyToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
-
-        if (mode === "subscribe" && token === verifyToken) {
+        if (mode === "subscribe" && await isAcceptedWhatsAppVerifyToken(token)) {
             console.log("WEBHOOK_VERIFIED");
             return new NextResponse(challenge, { status: 200 });
         }

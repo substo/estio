@@ -10,6 +10,7 @@
 import { google } from "googleapis";
 import { getValidAccessToken } from "@/lib/google/auth";
 import db from "@/lib/db";
+import { hasGoogleTokens } from "@/lib/google/credentials";
 
 interface TimeSlot {
     start: Date;
@@ -48,15 +49,13 @@ export async function checkAvailability(
             name: true,
             firstName: true,
             lastName: true,
-            googleAccessToken: true,
-            googleRefreshToken: true
         },
     });
 
     if (!user) throw new Error("User not found");
 
     // Try Google Calendar if connected
-    if (user.googleAccessToken || user.googleRefreshToken) {
+    if (await hasGoogleTokens(user.id)) {
         try {
             return await getGoogleAvailability(user, startDate, endDate, durationMinutes, options);
         } catch (e) {
@@ -308,7 +307,7 @@ export async function confirmViewing(params: {
 
         // Get agent's Google Calendar access
         const agent = viewing.user;
-        if (!agent.googleAccessToken && !agent.googleRefreshToken) {
+        if (!(await hasGoogleTokens(agent.id))) {
             console.warn("No Google Calendar access for agent, skipping calendar invite");
             return { success: true }; // Still mark as success, just no calendar invite
         }

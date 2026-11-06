@@ -1,4 +1,5 @@
 import db from "@/lib/db";
+import { getUserCrmCredentials } from "@/lib/crm/credentials";
 
 export interface OldCrmImportCapability {
     canImportOldCrmProperties: boolean;
@@ -46,21 +47,18 @@ export async function getOldCrmImportCapabilityForUser(args: {
     locationId: string;
     userId: string;
 }): Promise<OldCrmImportCapability> {
-    const [location, user] = await Promise.all([
+    const [location, credentials] = await Promise.all([
         db.location.findUnique({
             where: { id: args.locationId },
             select: { crmUrl: true, crmEditUrlPattern: true },
         }),
-        db.user.findUnique({
-            where: { id: args.userId },
-            select: { crmUsername: true, crmPassword: true },
-        }),
+        getUserCrmCredentials(args.userId),
     ]);
 
     const capability = hasOldCrmImportCapability({
         crmUrl: location?.crmUrl,
-        crmUsername: user?.crmUsername,
-        crmPassword: user?.crmPassword,
+        crmUsername: credentials.username,
+        crmPassword: credentials.password,
     });
 
     return {
@@ -69,8 +67,8 @@ export async function getOldCrmImportCapabilityForUser(args: {
         userId: args.userId,
         crmUrl: location?.crmUrl || null,
         crmEditUrlPattern: location?.crmEditUrlPattern || null,
-        crmUsername: user?.crmUsername || null,
-        hasCrmPassword: Boolean(user?.crmPassword),
+        crmUsername: credentials.username,
+        hasCrmPassword: Boolean(credentials.password),
         missing: capability.missing,
     };
 }
@@ -79,21 +77,18 @@ export async function resolveOldCrmImportContextForUser(args: {
     locationId: string;
     userId: string;
 }): Promise<ResolvedOldCrmImportContext> {
-    const [location, user] = await Promise.all([
+    const [location, credentials] = await Promise.all([
         db.location.findUnique({
             where: { id: args.locationId },
             select: { crmUrl: true, crmEditUrlPattern: true },
         }),
-        db.user.findUnique({
-            where: { id: args.userId },
-            select: { crmUsername: true, crmPassword: true },
-        }),
+        getUserCrmCredentials(args.userId),
     ]);
 
     const capability = hasOldCrmImportCapability({
         crmUrl: location?.crmUrl,
-        crmUsername: user?.crmUsername,
-        crmPassword: user?.crmPassword,
+        crmUsername: credentials.username,
+        crmPassword: credentials.password,
     });
 
     if (!capability.canImportOldCrmProperties) {
@@ -106,8 +101,8 @@ export async function resolveOldCrmImportContextForUser(args: {
         userId: args.userId,
         crmUrl: String(location?.crmUrl),
         crmEditUrlPattern: location?.crmEditUrlPattern || null,
-        crmUsername: String(user?.crmUsername),
-        crmPassword: String(user?.crmPassword),
+        crmUsername: String(credentials.username),
+        crmPassword: String(credentials.password),
         hasCrmPassword: true,
         missing: [],
     };

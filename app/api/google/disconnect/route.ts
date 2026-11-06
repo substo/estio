@@ -4,30 +4,11 @@ import { NextResponse } from "next/server";
 import db from "@/lib/db";
 import { createOAuth2Client } from "@/lib/google/auth";
 import { disconnectGoogleLocally } from "@/lib/google/disconnect";
-import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
-import { settingsService } from "@/lib/settings/service";
+import { getGoogleTokens } from "@/lib/google/credentials";
 
-async function readRevocationToken(user: {
-    id: string;
-    googleAccessToken: string | null;
-    googleRefreshToken: string | null;
-}) {
-    const [accessToken, refreshToken] = await Promise.all([
-        settingsService.getSecret({
-            scopeType: "USER",
-            scopeId: user.id,
-            domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-            secretKey: SETTINGS_SECRET_KEYS.GOOGLE_ACCESS_TOKEN,
-        }),
-        settingsService.getSecret({
-            scopeType: "USER",
-            scopeId: user.id,
-            domain: SETTINGS_DOMAINS.USER_GOOGLE_INTEGRATIONS,
-            secretKey: SETTINGS_SECRET_KEYS.GOOGLE_REFRESH_TOKEN,
-        }),
-    ]);
-
-    return refreshToken || accessToken || user.googleRefreshToken || user.googleAccessToken || null;
+async function readRevocationToken(userId: string) {
+    const { accessToken, refreshToken } = await getGoogleTokens(userId);
+    return refreshToken || accessToken || null;
 }
 
 export async function POST() {
@@ -39,7 +20,7 @@ export async function POST() {
 
     const user = await db.user.findUnique({
         where: { clerkId: clerkUserId },
-        select: { id: true, googleAccessToken: true, googleRefreshToken: true },
+        select: { id: true },
     });
     if (!user) {
         return NextResponse.json({ success: false, error: "User not found" }, { status: 404 });
@@ -48,7 +29,7 @@ export async function POST() {
     let revocationToken: string | null = null;
     let tokenReadFailed = false;
     try {
-        revocationToken = await readRevocationToken(user);
+        revocationToken = await readRevocationToken(user.id);
     } catch (error) {
         tokenReadFailed = true;
         console.error("[Google disconnect] Could not read token before local disconnect", {

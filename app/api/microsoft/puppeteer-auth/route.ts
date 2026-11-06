@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { currentUser } from '@clerk/nextjs/server';
 import db from '@/lib/db';
+import { getOutlookCredentialPresence } from "@/lib/microsoft/credentials";
 import { outlookPuppeteerService } from '@/lib/microsoft/outlook-puppeteer';
 import {
     getOutlookSessionRenewStatus,
@@ -99,10 +100,6 @@ export async function GET(req: NextRequest) {
                 outlookAuthMethod: true,
                 outlookEmail: true,
                 outlookSyncEnabled: true,
-                outlookAccessToken: true,
-                outlookRefreshToken: true,
-                outlookSessionCookies: true,
-                outlookPasswordEncrypted: true,
                 outlookSessionExpiry: true,
                 outlookSubscriptionExpiry: true,
                 outlookSyncState: {
@@ -118,16 +115,17 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ error: 'User not found' }, { status: 404 });
         }
 
+        const credentials = await getOutlookCredentialPresence(user.id);
         const inferredMethod =
             (user.outlookAuthMethod as 'oauth' | 'puppeteer' | null)
-            || (user.outlookSessionCookies ? 'puppeteer' : null)
-            || ((user.outlookAccessToken || user.outlookRefreshToken) ? 'oauth' : null);
+            || (credentials.sessionCookies ? 'puppeteer' : null)
+            || ((credentials.accessToken || credentials.refreshToken) ? 'oauth' : null);
 
         if (inferredMethod === 'puppeteer') {
             const sessionExpired = user.outlookSessionExpiry
                 ? new Date() > user.outlookSessionExpiry
                 : true;
-            const recoverableSession = !!user.outlookPasswordEncrypted;
+            const recoverableSession = credentials.password;
 
             if (sessionExpired && recoverableSession && user.outlookSyncEnabled) {
                 // Fire-and-forget auto-renew with throttling/single-flight. This keeps GET responsive.
@@ -137,7 +135,7 @@ export async function GET(req: NextRequest) {
             const renewStatus = getOutlookSessionRenewStatus(user.id);
 
             return NextResponse.json({
-                connected: user.outlookSyncEnabled && !!user.outlookSessionCookies && !sessionExpired,
+                connected: user.outlookSyncEnabled && credentials.sessionCookies && !sessionExpired,
                 method: 'puppeteer',
                 email: user.outlookEmail || user.outlookSyncState?.emailAddress || null,
                 sessionExpiry: user.outlookSessionExpiry,
@@ -157,7 +155,7 @@ export async function GET(req: NextRequest) {
         }
 
         if (inferredMethod === 'oauth') {
-            const connected = user.outlookSyncEnabled && !!(user.outlookAccessToken || user.outlookRefreshToken);
+            const connected = user.outlookSyncEnabled && (credentials.accessToken || credentials.refreshToken);
             const subscriptionExpired = user.outlookSubscriptionExpiry
                 ? new Date() > user.outlookSubscriptionExpiry
                 : false;

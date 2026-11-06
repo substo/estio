@@ -115,7 +115,7 @@ const aiSchema = z.object({
 const locationIntegrationsSchema = z.object({
     whatsappBusinessAccountId: nullableTrimmedString,
     whatsappPhoneNumberId: nullableTrimmedString,
-    whatsappWebhookSecret: nullableTrimmedString,
+    // The webhook verify token is an encrypted secret (whatsapp_webhook_secret), not a document field.
     twilioAccountSid: nullableTrimmedString,
     twilioWhatsAppFrom: nullableTrimmedString,
 }).passthrough();

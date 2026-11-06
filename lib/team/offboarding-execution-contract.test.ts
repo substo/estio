@@ -66,7 +66,9 @@ test("last-admin, other-membership, private-state, audit, and provider ordering 
   assert.match(execution, /hasOtherMembership = otherRoleCount > 0 \|\| otherConnectionCount > 0/);
   assert.match(execution, /shouldClearUserGlobalPrivateState\(otherRoleCount, otherConnectionCount\)/);
   assert.match(execution, /clearPrivateState \? \[/);
-  assert.match(execution, /googleAccessToken: null[\s\S]*outlookAccessToken: null[\s\S]*crmUsername: null/);
+  assert.match(execution, /settingsSecret\.deleteMany\(\{[\s\S]*scopeId: token\.sourceUserId[\s\S]*domain: \{ in: OFFBOARDING_CREDENTIAL_SECRET_DOMAINS \}/);
+  assert.match(execution, /settingsDocument\.deleteMany\([\s\S]*'user\.crm'/);
+  assert.match(source, /OFFBOARDING_CREDENTIAL_SECRET_DOMAINS = \[[\s\S]*USER_GOOGLE_INTEGRATIONS[\s\S]*USER_MICROSOFT_INTEGRATIONS[\s\S]*USER_CRM[\s\S]*\]/);
   assert.match(execution, /taskReminderJob\.updateMany[\s\S]*locationId: token\.locationId[\s\S]*userId: token\.sourceUserId[\s\S]*\['pending', 'processing', 'failed'\]/);
   assert.match(execution, /userOffboardingAudit\.create/);
   const transactionEnd = execution.indexOf("const externalErrors");

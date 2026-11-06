@@ -11,10 +11,14 @@ import { revalidatePath } from 'next/cache';
 import { pullLeadFromCrm, previewCrmLead } from '@/lib/crm/crm-lead-puller';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { settingsService } from '@/lib/settings/service';
+import { SETTINGS_DOMAINS } from '@/lib/settings/constants';
 import {
-    SETTINGS_DOMAINS,
-    SETTINGS_SECRET_KEYS,
-} from '@/lib/settings/constants';
+    clearUserCrmCredentials,
+    getUserCrmCredentials,
+    getUserCrmUsername,
+    hasUserCrmPassword,
+    setUserCrmCredentials,
+} from '@/lib/crm/credentials';
 import { SettingsVersionConflictError } from '@/lib/settings/errors';
 import {
     buildOldCrmSectionClearPlan,
@@ -76,13 +80,13 @@ async function resolveAdminContext(locationIdInput?: string | null) {
 
     const user = await db.user.findUnique({
         where: { clerkId: userId },
-        select: { id: true, crmUsername: true, crmPassword: true }
+        select: { id: true }
     });
     if (!user?.id) {
         throw new Error("User not found");
     }
 
-    return { clerkUserId: userId, localUserId: user.id, locationId, user };
+    return { clerkUserId: userId, localUserId: user.id, locationId };
 }
 
 async function resolveLeadSourceAdminAccess(id: string) {
@@ -109,14 +113,6 @@ function getLocationCrmDocument(locationId: string) {
         scopeType: "LOCATION",
         scopeId: locationId,
         domain: SETTINGS_DOMAINS.LOCATION_CRM,
-    });
-}
-
-function getUserCrmDocument(localUserId: string) {
-    return settingsService.getDocument<any>({
-        scopeType: "USER",
-        scopeId: localUserId,
-        domain: SETTINGS_DOMAINS.USER_CRM,
     });
 }
 
@@ -317,44 +313,14 @@ export async function saveCrmCredentials(data: any) {
             schemaVersion: 1,
         });
 
-        await settingsService.upsertDocument({
-            scopeType: "USER",
-            scopeId: context.localUserId,
-            domain: SETTINGS_DOMAINS.USER_CRM,
-            payload: { crmUsername: crmUsername || null },
+        await setUserCrmCredentials({
+            userId: context.localUserId,
+            username: crmUsername || null,
+            password: clearCrmPassword ? null : shouldUpdatePassword ? crmPasswordInput : undefined,
             actorUserId: context.localUserId,
-            schemaVersion: 1,
         });
 
-        if (clearCrmPassword) {
-            await settingsService.clearSecret({
-                scopeType: "USER",
-                scopeId: context.localUserId,
-                domain: SETTINGS_DOMAINS.USER_CRM,
-                secretKey: SETTINGS_SECRET_KEYS.CRM_PASSWORD,
-                actorUserId: context.localUserId,
-            });
-        } else if (shouldUpdatePassword) {
-            await settingsService.setSecret({
-                scopeType: "USER",
-                scopeId: context.localUserId,
-                domain: SETTINGS_DOMAINS.USER_CRM,
-                secretKey: SETTINGS_SECRET_KEYS.CRM_PASSWORD,
-                plaintext: crmPasswordInput,
-                actorUserId: context.localUserId,
-            });
-        }
-
         { // Legacy columns are still read directly elsewhere; kept in step until phase 6.
-            await db.user.update({
-                where: { id: context.localUserId },
-                data: {
-                    crmUsername: crmUsername || null,
-                    ...(shouldUpdatePassword ? { crmPassword: crmPasswordInput } : {}),
-                    ...(clearCrmPassword ? { crmPassword: null } : {}),
-                }
-            });
-
             await db.location.update({
                 where: { id: context.locationId },
                 data: {
@@ -386,10 +352,7 @@ export async function clearOldCrmSettingsSection(section: OldCrmSettingsSection)
         }
 
         const context = await resolveAdminContext();
-        const [locationDoc, userDoc] = await Promise.all([
-            getLocationCrmDocument(context.locationId),
-            section === "CONNECTION" ? getUserCrmDocument(context.localUserId) : Promise.resolve(null),
-        ]);
+        const locationDoc = await getLocationCrmDocument(context.locationId);
         const plan = buildOldCrmSectionClearPlan(locationDoc?.payload || {}, section);
 
         const saved = await db.$transaction(async (tx) => {
@@ -410,27 +373,10 @@ export async function clearOldCrmSettingsSection(section: OldCrmSettingsSection)
             });
 
             if (plan.clearUserCredentials) {
-                await settingsService.upsertDocument({
-                    scopeType: "USER",
-                    scopeId: context.localUserId,
-                    domain: SETTINGS_DOMAINS.USER_CRM,
-                    payload: { ...(userDoc?.payload || {}), crmUsername: null },
-                    actorUserId: context.localUserId,
-                    expectedVersion: userDoc?.version ?? 0,
-                    schemaVersion: 1,
-                    tx,
-                });
-                await settingsService.clearSecret({
-                    scopeType: "USER",
-                    scopeId: context.localUserId,
-                    domain: SETTINGS_DOMAINS.USER_CRM,
-                    secretKey: SETTINGS_SECRET_KEYS.CRM_PASSWORD,
+                await clearUserCrmCredentials({
+                    userId: context.localUserId,
                     actorUserId: context.localUserId,
                     tx,
-                });
-                await tx.user.update({
-                    where: { id: context.localUserId },
-                    data: { crmUsername: null, crmPassword: null },
                 });
             }
 
@@ -452,7 +398,7 @@ export async function getCrmSettings(locationId?: string | null) {
     await assertCrmActionAllowed("settings/crm/actions.ts", "getCrmSettings");
     try {
         const context = await resolveAdminContext(locationId || null);
-        const [location, locationDoc, userDoc, hasCrmPassword] = await Promise.all([
+        const [location, locationDoc, crmUsername, hasCrmPassword] = await Promise.all([
             db.location.findUnique({
                 where: { id: context.locationId },
                 select: {
@@ -474,17 +420,11 @@ export async function getCrmSettings(locationId?: string | null) {
                 } as any
             }),
             getLocationCrmDocument(context.locationId),
-            getUserCrmDocument(context.localUserId),
-            settingsService.hasSecret({
-                scopeType: "USER",
-                scopeId: context.localUserId,
-                domain: SETTINGS_DOMAINS.USER_CRM,
-                secretKey: SETTINGS_SECRET_KEYS.CRM_PASSWORD,
-            }).catch(() => false),
+            getUserCrmUsername(context.localUserId),
+            hasUserCrmPassword(context.localUserId).catch(() => false),
         ]);
 
         const locationPayload = locationDoc?.payload || {};
-        const userPayload = userDoc?.payload || {};
 
         return {
             // Location-level settings
@@ -505,9 +445,9 @@ export async function getCrmSettings(locationId?: string | null) {
             legacyCrmLeadEmailAutoProcess: locationPayload.legacyCrmLeadEmailAutoProcess ?? ((location as any)?.legacyCrmLeadEmailAutoProcess ?? false),
             legacyCrmLeadEmailAutoDraftFirstContact: locationPayload.legacyCrmLeadEmailAutoDraftFirstContact ?? ((location as any)?.legacyCrmLeadEmailAutoDraftFirstContact ?? false),
             // User-level credentials
-            crmUsername: userPayload.crmUsername ?? context.user.crmUsername ?? null,
+            crmUsername,
             crmPassword: null,
-            hasCrmPassword: hasCrmPassword || Boolean(context.user.crmPassword),
+            hasCrmPassword,
         };
     } catch (error) {
         console.error("Failed to fetch settings:", error);
@@ -558,15 +498,9 @@ export async function analyzeLeadSchema(testUrl: string, locationId?: string | n
         if (!userId) return { success: false, error: "Unauthorized" };
 
         const context = await resolveAdminContext(locationId || null);
-        const [locationDoc, userDoc, crmPasswordSecret, location] = await Promise.all([
+        const [locationDoc, credentials, location] = await Promise.all([
             getLocationCrmDocument(context.locationId),
-            getUserCrmDocument(context.localUserId),
-            settingsService.getSecret({
-                scopeType: "USER",
-                scopeId: context.localUserId,
-                domain: SETTINGS_DOMAINS.USER_CRM,
-                secretKey: SETTINGS_SECRET_KEYS.CRM_PASSWORD,
-            }).catch(() => null),
+            getUserCrmCredentials(context.localUserId).catch(() => ({ username: null, password: null })),
             db.location.findUnique({
                 where: { id: context.locationId },
                 select: { crmUrl: true },
@@ -574,8 +508,8 @@ export async function analyzeLeadSchema(testUrl: string, locationId?: string | n
         ]);
 
         const crmUrl = locationDoc?.payload?.crmUrl || location?.crmUrl || null;
-        const crmUsername = userDoc?.payload?.crmUsername || context.user.crmUsername || null;
-        const crmPassword = crmPasswordSecret || context.user.crmPassword || null;
+        const crmUsername = credentials.username;
+        const crmPassword = credentials.password;
 
         if (!crmUrl || !crmUsername || !crmPassword) {
             const missing = [];
