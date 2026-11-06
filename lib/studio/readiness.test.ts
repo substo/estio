@@ -87,3 +87,8 @@ test("readiness accepts the schema version emitted by the merged production migr
  assert.ok(Number.isSafeInteger(version));
  assert.equal(readReadinessSnapshot({ ...snapshot(), schema: version }).schema, version);
 });
+
+test("every required worker handler name satisfies the database's worker-report rule", () => {
+  // studio.studio_report_worker rejects handler names that don't match ^studio\.[a-z_]{1,50}$ (schema migration).
+  for (const kind of STUDIO_WORKER_HANDLERS) assert.match(kind, /^studio\.[a-z_]{1,50}$/, kind);
+});

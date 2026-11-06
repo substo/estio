@@ -10,12 +10,12 @@ product memory (2026-11-04/05).
 1. **Gate.** Research uses only the Location's own AI. Without a ready connection (`getAiConnections(locationId).available`,
    `lib/ai/connections.ts`) the screen opens locked on a "connect an AI" step; nothing is paid for by the platform.
 2. **Start.** The owner gives the business name and/or website. `startResearch` (`lib/onboarding/service.ts`) begins a
-   research batch and queues an `onboarding.fetch` job.
+   research batch and queues an `studio.onboarding_fetch` job.
 3. **Background research** runs on the Studio job queue (durable, leased, retried; the hosted Studio worker,
    `scripts/studio-worker.ts`):
-   - `onboarding.fetch` reads the website's home, about and contact pages with the safe page fetcher
-     (`lib/web/fetch-public-page.ts`), no AI, then queues one `onboarding.research` job per topic.
-   - Each `onboarding.research` job asks the Location's AI one structured question for its topic
+   - `studio.onboarding_fetch` reads the website's home, about and contact pages with the safe page fetcher
+     (`lib/web/fetch-public-page.ts`), no AI, then queues one `studio.onboarding_research` job per topic.
+   - Each `studio.onboarding_research` job asks the Location's AI one structured question for its topic
      (`lib/onboarding/research-contract.ts`), validates every value per field kind, and stores what it found as
      **unconfirmed facts with URL sources** in the Business profile. A confirmed fact is never replaced. A found business
      name or time zone waits in the onboarding state, because those live on Location.
@@ -45,7 +45,7 @@ product memory (2026-11-04/05).
 | ChatGPT subscription (Location) | Yes, first choice | Yes: Codex `web_search="live"`, enabled only for these calls |
 | OpenAI API key | Yes | Yes: Responses API `web_search` tool |
 | Gemini API key | Yes, last | No: reads the fetched pages only; Google Search grounding is deliberately not used |
-| Paired Mac (Codex / Claude on a subscription) | Not yet | Needs a companion handler for `onboarding.research` shipped with the Mac app; the companion currently runs only its own job kinds with web search disabled. Until then a ready Mac still opens the gate, and research uses the server connections above. |
+| Paired Mac (Codex / Claude on a subscription) | Not yet | Needs a companion handler for `studio.onboarding_research` shipped with the Mac app; the companion currently runs only its own job kinds with web search disabled. Until then a ready Mac still opens the gate, and research uses the server connections above. |
 
 No Google scraping and no browser automation.
 

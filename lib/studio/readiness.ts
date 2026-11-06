@@ -1,7 +1,7 @@
 import { hasStudioDatabaseConfig } from "./config";
 import { readStudioR2Config } from "./media-r2";
 import { decryptStudioSecret, encryptStudioSecret, hasStudioSecretKeyId, hasStudioSecretsKey } from "./secrets";
-export const STUDIO_WORKER_HANDLERS = ["studio.diagnostic", "studio.transcribe_upload", "studio.idea_review", "studio.script_brief", "studio.knowledge_extract", "studio.brand_profile", "studio.youtube_discovery", "onboarding.fetch", "onboarding.research"];
+export const STUDIO_WORKER_HANDLERS = ["studio.diagnostic", "studio.transcribe_upload", "studio.idea_review", "studio.script_brief", "studio.knowledge_extract", "studio.brand_profile", "studio.youtube_discovery", "studio.onboarding_fetch", "studio.onboarding_research"];
 export const STUDIO_SCHEMA_VERSION = 29;
 export type ReadinessMode = "dependencies" | "worker";
 export interface WorkerReport { release: string; instance_id: string; protocol: number; handlers: string[]; healthy: boolean; draining: boolean; seen_at: string; started_at: string }

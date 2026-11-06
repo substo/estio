@@ -14,12 +14,12 @@ import { chooseResearchProvider, providerSearchesWeb, runProvider } from "./prov
 
 /**
  * Background research for onboarding, on the Studio job queue (durable, leased, retried; run by the hosted Studio worker):
- * "onboarding.fetch" reads the business website (no AI), then queues one "onboarding.research" job per topic. Each topic
+ * "studio.onboarding_fetch" reads the business website (no AI), then queues one "studio.onboarding_research" job per topic. Each topic
  * job asks the Location's own AI and stores what it finds as unconfirmed suggestions in the Business profile.
  * Worker-safe: no "server-only" imports.
  */
-export const ONBOARDING_FETCH = "onboarding.fetch";
-export const ONBOARDING_RESEARCH = "onboarding.research";
+export const ONBOARDING_FETCH = "studio.onboarding_fetch";
+export const ONBOARDING_RESEARCH = "studio.onboarding_research";
 const scope = (locationId: string, domain: typeof SETTINGS_DOMAINS.LOCATION_ONBOARDING | typeof SETTINGS_DOMAINS.LOCATION_BUSINESS) => ({ scopeType: "LOCATION" as const, scopeId: locationId, domain });
 
 export async function loadOnboardingState(locationId: string) {
