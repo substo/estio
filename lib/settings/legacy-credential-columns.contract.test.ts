@@ -79,3 +79,11 @@ test("every Old CRM credential reader goes through lib/crm/credentials.ts", () =
         assert.match(readFileSync(`${root}/${file}`, "utf8"), /from ["']@\/lib\/crm\/credentials["']|from ["']\.\/credentials["']/, file);
     }
 });
+
+test("the Prisma schema no longer declares the retired columns", () => {
+    const schema = readFileSync(`${root}/prisma/schema.prisma`, "utf8");
+    const userModel = schema.slice(schema.indexOf("model User {"), schema.indexOf("\n}", schema.indexOf("model User {")));
+    for (const column of [...RETIRED_USER_COLUMNS, "crmUsername", "crmPassword"]) {
+        assert.doesNotMatch(userModel, new RegExp(`^\\s+${column}\\s`, "m"), column);
+    }
+});
