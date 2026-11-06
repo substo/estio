@@ -40,7 +40,7 @@ export async function getStudioLibraryRecord(locationId: string, recordId: strin
     select id, kind, title, version, updated_at, source_url, summary, approved, archived, payload from studio.studio_records
     where location_id = ${access.locationId} and id = ${recordId}::uuid and kind in ('reference', 'channel')`);
   if (!record) return null;
-  const { links, files, uploads } = await getStudioRecordRelations(access, recordId);
+  const { links, files, uploads } = await getStudioRecordRelations(access, recordId, true);
   return { access, record: exposeLibraryMetadata(record), links, files, uploads };
 }
 
