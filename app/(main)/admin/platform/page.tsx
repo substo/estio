@@ -4,9 +4,6 @@ import db from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DeleteLocationDialog } from "./_components/delete-location-dialog";
-import { LegacyCredentialsCard } from "./_components/legacy-credentials-card";
-import { summarizeLegacyCredentialsReport, type LegacyCredentialsSummary } from "@/lib/platform/legacy-credentials-http";
-import { runLegacyCredentialsMove } from "@/lib/settings/legacy-credentials-move-server";
 
 const PAGE_SIZE = 20;
 
@@ -70,10 +67,6 @@ export default async function AdminPlatformPage({ searchParams }: { searchParams
       },
     },
   });
-  // Dry run only (no writes). Shown while old credential copies remain; hidden once nothing is left.
-  const legacyCredentials: LegacyCredentialsSummary | null = await runLegacyCredentialsMove({ apply: false, actorUserId: null })
-    .then(summarizeLegacyCredentialsReport)
-    .catch((error) => { console.error("[legacy-credentials] dry run failed:", error instanceof Error ? error.message : "unknown error"); return null; });
   const locationIds = locations.map((location) => location.id);
   const activities = locationIds.length ? await db.locationSessionActivity.groupBy({
     by: ["locationId"],
@@ -109,12 +102,6 @@ export default async function AdminPlatformPage({ searchParams }: { searchParams
           </Card>
         ))}
       </section>
-
-      {legacyCredentials && (legacyCredentials.toMove > 0 || legacyCredentials.unreadable > 0) ? (
-        <section aria-label="Legacy credentials" className="max-w-xl">
-          <LegacyCredentialsCard summary={legacyCredentials} />
-        </section>
-      ) : null}
 
       <section className="space-y-4" aria-labelledby="location-breakdown-heading">
         <div>
