@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import type { ThreadAction } from "@/lib/build/thread-action";
 import type { z } from "zod";
 import { difficulty, type jobSpec, type Profile } from "@/lib/build/contract";
 import { richParts, type Story } from "@/lib/build/story";
@@ -8,16 +9,20 @@ import { mergeWords, type Release } from "@/lib/build/release";
 
 export type Merge = { state: "queued" | "merging" | "resolving" | "merged" | "failed"; at: string; sha?: string; reason?: string; local?: string; branch?: string };
 export type External = { threadId: string; status: string; note: string; at: string; evidence: string[]; history?: { at: string; status: string; note: string }[] };
-export type Checkpoint = { story?: Story; external?: External; merge?: Merge; evidence?: { ok?: boolean; files?: string[]; errors?: string[] }; reason?: string; nextStep?: string; result?: { text?: string; needsAnswer?: boolean; decisions?: string | null }; review?: { path: string; change: "added" | "modified" | "deleted"; size: number; truncated?: boolean }[]; t3?: { threadId?: string; branch?: string }; feedback?: { at: string; decision: string; note: string; sentAt?: string }[]; auto?: { wouldApprove: boolean; reasons: string[] }; proposalsCreated?: number };
+export type Checkpoint = { workflow?: ThreadAction; releaseCandidate?: string; story?: Story; external?: External; merge?: Merge; evidence?: { ok?: boolean; files?: string[]; errors?: string[] }; reason?: string; nextStep?: string; result?: { text?: string; needsAnswer?: boolean; decisions?: string | null }; review?: { path: string; change: "added" | "modified" | "deleted"; size: number; truncated?: boolean }[]; t3?: { threadId?: string; branch?: string }; feedback?: { at: string; decision: string; note: string; sentAt?: string }[]; auto?: { wouldApprove: boolean; reasons: string[] }; proposalsCreated?: number };
 export type Job = { id: string; key: string; revision: number; state: string; spec: z.infer<typeof jobSpec>; checkpoint: unknown; attempt: unknown; approval: unknown; createdAt: string; updatedAt: string };
 type Send = (command: unknown) => Promise<boolean>;
 
 export const btn = "rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50";
 export const cp = (j: Job) => (j.checkpoint ?? {}) as Checkpoint;
 export const ago = (iso: string) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : new Date(iso).toLocaleDateString(); };
-export const canMerge = (j: Job) => j.spec.taskType === "implementation" && !!cp(j).t3?.branch && cp(j).evidence?.ok === true && !!cp(j).evidence?.files?.length && !["queued", "merging", "resolving", "merged"].includes(cp(j).merge?.state ?? "");
+export const canMerge = (j: Job) => !["queued", "running"].includes(cp(j).workflow?.state ?? "") && !(cp(j).workflow?.state === "blocked" && cp(j).workflow?.stopped !== true) && j.spec.taskType === "implementation" && !!cp(j).t3?.branch && cp(j).evidence?.ok === true && !!cp(j).evidence?.files?.length && !["queued", "merging", "resolving", "merged"].includes(cp(j).merge?.state ?? "");
 const externalWords: Record<string, string> = { working: "being worked on", blocked: "blocked", review: "finished, waiting for review", done: "finished", failed: "stopped with a problem" };
 export function stateWord(j: Job) {
+  const action = cp(j).workflow;
+  if (action?.state === "queued" || action?.state === "running") return `${action.kind} ${action.state}`;
+  if (action?.state === "blocked") return `${action.kind} needs attention`;
+  if (action?.kind === "deploy" && action.state === "done") return "deployed";
   if (j.state.startsWith("external-")) return externalWords[j.state.slice(9)] ?? j.state.slice(9);
   return ({ proposed: "ready to start", approved: "queued", working: "running", stopping: "stopping", review: "ready for you", done: "done", failed: "failed", revoked: "dropped" } as Record<string, string>)[j.state] ?? "stuck";
 }
@@ -89,11 +94,25 @@ export function WorkItem({ job, sameStory, profiles, release, busy, send, talk, 
       {(c.t3?.threadId || c.external?.threadId) && openTalk && <button className={btn} onClick={() => openTalk(`job:${job.id}`)}>Open conversation</button>}
       {talk && openTalk && <p className="text-sm"><span className="text-muted-foreground">From conversation: </span><button className="underline underline-offset-2" onClick={() => openTalk(talk.id)}>{talk.title}</button></p>}
       {c.feedback?.map((f, i) => <p key={i} className="text-xs">{f.decision === "redo" ? "You asked" : "You noted"}: {f.note}</p>)}
-      {job.state === "done" && canMerge(job) && <button className={btn} disabled={busy} onClick={() => void send({ action: "merge", id: job.id, revision: job.revision })}>Merge</button>}
+      {job.state === "done" && canMerge(job) && <button className={btn} disabled={busy} onClick={() => void send({ action: "merge", id: job.id, revision: job.revision })}>Accept and merge</button>}
       {job.state === "proposed" && <button className={btn} disabled={busy} onClick={() => void send({ action: "approve", id: job.id, revision: job.revision })}>Start</button>}
+      <WorkflowControls job={job} busy={busy} send={send} />
       <Technical job={job} model={model} />
     </div>}
   </li>;
+}
+/** Buttons send approvals into the conversation; status comes back after evidence checks. */
+export function WorkflowControls({ job, busy, send }: { job: Job; busy: boolean; send: Send }) {
+  const [note, setNote] = useState("");
+  const c = cp(job), action = c.workflow, active = action && ["queued", "running"].includes(action.state);
+  const deploy = c.merge?.state === "merged" && c.releaseCandidate && !(action?.kind === "deploy" && action.state === "done" && action.sha === c.releaseCandidate);
+  return <div className="space-y-2 text-sm">
+    {action && <p role="status">{action.kind === "merge" ? "Merge" : "Deploy"}: {({ queued: "queued for this conversation", running: "running in this conversation", done: "verified complete", blocked: "needs attention" })[action.state]}{action.reason ? ` · ${action.reason}` : ""}</p>}
+    {action && ["running", "blocked"].includes(action.state) && <button className={btn} disabled={busy} onClick={() => void send({ action: "check-workflow", id: job.id, revision: job.revision })}>Check conversation status</button>}
+    {action?.state === "blocked" && action.stopped === true && <div className="space-y-1"><textarea aria-label="Feedback for the blocked action" rows={2} maxLength={2000} value={note} onChange={e => setNote(e.target.value)} placeholder="Explain what to resolve or ask the conversation to continue…" className="w-full rounded border bg-background p-2" /><button className={btn} disabled={busy || note.trim().length < 3} onClick={async () => { if (await send({ action: "continue-workflow", id: job.id, revision: job.revision, text: note.trim() })) setNote(""); }}>Send and retry {action.kind}</button><p className="text-xs text-muted-foreground">Authorizes another attempt of this same {action.kind} in the linked conversation.</p></div>}
+    {!active && deploy && !(action?.state === "blocked" && action.stopped !== true) && <button className={btn} disabled={busy} onClick={() => { if (window.confirm(`Deploy the current release (${c.releaseCandidate!.slice(0, 8)}), including all work merged into it?`)) void send({ action: "deploy", id: job.id, revision: job.revision, sha: c.releaseCandidate }); }}>Deploy current release</button>}
+    {c.merge?.state === "merged" && !active && action?.kind !== "deploy" && <p className="text-xs text-muted-foreground">Merged. Deployment needs your separate approval.</p>}
+  </div>;
 }
 export function Chevron({ open }: { open: boolean }) {
   return <svg aria-hidden viewBox="0 0 20 20" className={`mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}><path d="M5 7.5l5 5 5-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>;

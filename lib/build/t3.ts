@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { runCliProcess, capacity, type CliOutcome } from "./cli";
 import type { Profile } from "./contract";
@@ -5,7 +6,7 @@ import type { Profile } from "./contract";
 /** Visible T3 Code thread as the Build executor. Dispatch is a local CLI call, not a model turn. */
 export type T3Thread = { threadId: string; worktreePath: string; branch: string };
 export type T3Outcome = CliOutcome & { thread?: T3Thread; needsAnswer?: boolean };
-type Show = { thread?: { threadId?: string; status?: string; activeRunId?: string | null; latestRunId?: string | null; pendingRequestCount?: number; worktreePath?: string | null; branch?: string | null }; messages?: { role?: string; text?: string; runId?: string }[] };
+type Show = { thread?: { threadId?: string; model?: string; providerInstanceId?: string; status?: string; activeRunId?: string | null; latestRunId?: string | null; pendingRequestCount?: number; worktreePath?: string | null; branch?: string | null }; messages?: { role?: string; text?: string; runId?: string }[] };
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 export function t3Branch(jobId: string, title: string) {
@@ -35,6 +36,8 @@ export async function runT3Attempt(input: { command: string; checkout: string; p
     threadId = input.continueThreadId;
     if (!/^[a-zA-Z0-9:._-]{1,120}$/.test(threadId)) throw new Error("Invalid T3 thread id");
     const before = await showThread(input.command, input.checkout, threadId);
+    if (before.thread?.model && before.thread.model !== input.profile.model) throw new Error("Conversation model differs from the approved profile");
+    if (before.thread?.providerInstanceId && before.thread.providerInstanceId !== input.profile.provider) throw new Error("Conversation provider differs from the approved profile");
     if (before.thread?.activeRunId) throw new Error("T3 thread is still running; wait for it to finish before redoing");
     await t3(input.command, ["thread", "send", threadId, "-", "--json"], input.checkout, input.prompt);
     // Wait for the new run so the previous run's idle state is never mistaken for the result.
@@ -93,7 +96,7 @@ export function t3Catalog(manifest: Manifest, settings: Settings) {
   return out.slice(0, 200);
 }
 
-export type TalkSync = { messages: { role: string; text: string; runId?: string }[]; running: boolean; needsAnswer: boolean; historyLimit?: number; historyMore?: boolean; historyShortened?: boolean };
+export type TalkSync = { messages: { role: string; text: string; runId?: string }[]; running: boolean; needsAnswer: boolean; historyLimit?: number; historyMore?: boolean; historyShortened?: boolean; base?: string };
 /**
  * One conversation turn: relays the owner's unsent messages to the conversation's T3 thread (starting it, read-only by
  * instruction, in its own worktree at the latest scanned code), then reports the thread's messages until the run ends.
@@ -137,7 +140,9 @@ export async function talkTurn(input: { command: string; checkout: string; branc
     let historyMore = source.length > limit;
     const historyShortened = source.some(m => String(m.text).length > 20000);
     while (bytes > 3 * 1024 * 1024 && messages.length > 1) { bytes -= Buffer.byteLength(JSON.stringify(messages.shift())) + 1; historyMore = true; }
-    await input.report({ messages, running, needsAnswer, historyLimit: limit, historyMore, historyShortened });
+    let base: string | undefined;
+    if (t.worktreePath) try { base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: t.worktreePath, encoding: "utf8", timeout: 10000 }).trim(); } catch { /* no workspace yet */ }
+    await input.report({ messages, running, needsAnswer, ...(base && /^[a-f0-9]{40}$/.test(base) ? { base } : {}), historyLimit: limit, historyMore, historyShortened });
     if (!running || needsAnswer || Date.now() > deadline) return;
     await sleep(4000);
   }

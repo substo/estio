@@ -97,7 +97,7 @@ export async function talkOwner(input: z.infer<typeof talkOwnerCommand>, actor: 
 }
 
 /** Stable proposal identity shared by plan cards and owner approval. */
-async function proposePlan(tx: Prisma.TransactionClient, talk: { id: string; title: string; messages: unknown }, plan: TalkPlan) {
+async function proposePlan(tx: Prisma.TransactionClient, talk: { id: string; title: string; messages: unknown; base?: string | null }, plan: TalkPlan) {
   const control = await tx.buildControl.findUniqueOrThrow({ where: { id: "build" } });
   const head = (control.worker as { head?: string }).head;
   requireCondition(/^[a-f0-9]{40}$/.test(head ?? ""), "The Mac worker has not reported the code yet");
@@ -110,7 +110,7 @@ async function proposePlan(tx: Prisma.TransactionClient, talk: { id: string; tit
     item.scope.forEach(validateScopeEntry);
     const nodeIds = nodes.filter(n => { const s = n.spec as { kind?: string; sourceRefs?: string[] }; return (s.kind === "resource" || s.kind === "page") && s.sourceRefs?.some(path => item.scope.some(scope => scope.endsWith("/") ? path.startsWith(scope) : path === scope)); }).map(n => n.id);
     if (features.length === 1) nodeIds.unshift(features[0].id);
-    const spec = await routed(tx, control, jobSpec.parse({ ...item, reason: `From your conversation "${talk.title}": ${item.reason}`.slice(0, 4000), nodeIds: [...new Set(nodeIds)].slice(0, 30), baseRevision: head,
+    const spec = await routed(tx, control, jobSpec.parse({ ...item, reason: `From your conversation "${talk.title}": ${item.reason}`.slice(0, 4000), nodeIds: [...new Set(nodeIds)].slice(0, 30), baseRevision: talk.base ?? head,
       endpoint: "review", taskType: "implementation", profileId: "auto", quality: difficulty.routine, tools: ["git-read", "code-write"], owner: "estio-build" }));
     await tx.buildJob.upsert({ where: { key }, create: { key, spec: json(spec), checkpoint: json({ talkId: talk.id }) }, update: {} });
   }
@@ -158,7 +158,7 @@ const threadMessage = z.object({ role: z.string().max(40), text: z.string().max(
 export const talkWorkerCommand = z.discriminatedUnion("action", [
   z.object({ action: z.literal("talk-poll"), workerId: id }).strict(),
   z.object({ action: z.literal("talk-sent"), workerId: id, id, threadId: z.string().regex(/^[a-zA-Z0-9:._-]{1,120}$/), messageIds: z.array(z.string().max(40)).max(50) }).strict(),
-  z.object({ action: z.literal("talk-sync"), workerId: id, id, messages: z.array(threadMessage).max(maxMessages), running: z.boolean(), needsAnswer: z.boolean(), error: z.string().max(500).optional(), historyLimit: z.number().int().min(1).max(1000).optional(), historyMore: z.boolean().optional(), historyShortened: z.boolean().optional() }).strict(),
+  z.object({ action: z.literal("talk-sync"), workerId: id, id, messages: z.array(threadMessage).max(maxMessages), running: z.boolean(), needsAnswer: z.boolean(), error: z.string().max(500).optional(), base: z.string().regex(/^[a-f0-9]{40}$/).optional(), historyLimit: z.number().int().min(1).max(1000).optional(), historyMore: z.boolean().optional(), historyShortened: z.boolean().optional() }).strict(),
 ]);
 export async function talkWorker(input: z.infer<typeof talkWorkerCommand>) {
   if (input.action === "talk-poll") {
@@ -208,7 +208,7 @@ export async function talkWorker(input: z.infer<typeof talkWorkerCommand>) {
       }
     }
     if (plan?.items.length) {
-      await proposePlan(tx, talk, plan);
+      await proposePlan(tx, { ...talk, base: input.base ?? talk.base }, plan);
       const jobs = await tx.buildJob.findMany({ where: { key: { in: plan.items.map((_, i) => planKey(talk.id, plan!.runId, i)) }, state: { notIn: ["proposed", "revoked"] } }, select: { key: true } });
       plan = { ...plan, started: [...new Set([...plan.started, ...jobs.map(j => j.key)])] };
     }
@@ -231,6 +231,6 @@ export async function talkWorker(input: z.infer<typeof talkWorkerCommand>) {
     const state = input.error ? "error" : input.needsAnswer ? "waiting" : input.running ? "thinking" : unsent.length ? "queued" : "idle";
     // An error report carries no messages; keep the transcript as it was.
     const messages = input.error && !input.messages.length ? messagesOf(talk.messages) : [...fromThread, ...unsent];
-    return tx.buildTalk.update({ where: { id: talk.id }, data: { messages: json(messages.slice(-maxMessages)), plan: plan ? json(plan) : Prisma.DbNull, state, error: input.error ?? null } });
+    return tx.buildTalk.update({ where: { id: talk.id }, data: { base: input.base ?? talk.base, messages: json(messages.slice(-maxMessages)), plan: plan ? json(plan) : Prisma.DbNull, state, error: input.error ?? null } });
   });
 }

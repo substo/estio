@@ -5,7 +5,7 @@ import { withoutPlan } from "@/lib/build/playbook";
 import { jobsOfTalk, talkWords } from "@/lib/build/conversations";
 import { workStatus } from "@/lib/build/features";
 import type { TalkMessage, TalkPlan } from "@/lib/build/talk";
-import { cp, Dot, stateWord, type Job } from "./progress";
+import { cp, Dot, stateWord, WorkflowControls, type Job } from "./progress";
 
 export type Talk = { id: string; title: string; state: string; threadId: string | null; profile: { id?: string; model?: string } | null; messages: TalkMessage[]; plan: TalkPlan | null; error: string | null; updatedAt: string };
 export type PastTalk = Pick<Talk, "id" | "title" | "state" | "threadId" | "plan" | "updatedAt">;
@@ -139,6 +139,7 @@ function Conversation({ talk, jobs, busy, paused, blocker, models, post, reveal,
         : <button className={btn} disabled={busy} onClick={archive} title="Archive: it moves to Past conversations; you can reopen it">Done with this conversation</button>}
     </div>
     <div className="flex-1 space-y-2 overflow-y-auto px-5 py-4">
+      {execution && job && <WorkflowControls job={job} busy={busy} send={async command => !!await post(command as object)} />}
       {execution && job && <button className="text-sm underline" onClick={() => reveal(job.id)}>Back to task</button>}
       {talk.plan?.historyMore && <div className="text-xs text-muted-foreground">
         {(talk.plan.historyLimit ?? 60) < 1000 && !archived ? <button disabled={busy} className={btn} onClick={() => void post({ action: "talk-history", id: talk.id })}>Load earlier messages</button> : <p>Earlier messages are available in T3.</p>}

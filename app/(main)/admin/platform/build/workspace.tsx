@@ -8,10 +8,10 @@ import { loop } from "@/lib/build/factory-guide";
 import { TalkEntry, TalkSheet, type PastTalk, type Talk, type TalkView } from "./talk";
 import { talkIdOfJob } from "@/lib/build/conversations";
 import { Playbook } from "./playbook";
-import { ago, canMerge, cp, type Checkpoint, type Job } from "./progress";
+import { ago, canMerge, cp, WorkflowControls, type Checkpoint, type Job } from "./progress";
 import { AppMap, ProductList, type Focus } from "./product";
 import { productMap } from "@/lib/build/features";
-import type { Release } from "@/lib/build/release";
+import { deployed, type Release } from "@/lib/build/release";
 import type { PlaybookEdits } from "@/lib/build/playbook";
 import type { MemoryEntry } from "@/lib/build/memory";
 import type { Usage } from "@/lib/build/contract";
@@ -122,6 +122,8 @@ function NeedsYou({ data, busy, send, online, openSettings, openTalk }: { data: 
     rows.push(<Row key={j.id} icon="⏸️" title={`${j.spec.title} is stuck`} detail={plainBlock(j)}><button className={btn} disabled={busy} onClick={() => void retry(j)}>Try again</button><button className={btn} disabled={busy} onClick={() => send({ action: "revoke", id: j.id, revision: j.revision })}>Drop it</button></Row>);
   for (const j of data.jobs.filter(j => j.state === "proposed"))
     rows.push(<Row key={j.id} icon="💡" title={`Suggested: ${j.spec.title}`} detail={<>{j.spec.outcome}<br />{j.spec.reason}</>}><button className={solid} disabled={busy} onClick={() => send({ action: "approve", id: j.id, revision: j.revision })}>Start</button><button className={btn} disabled={busy} onClick={() => send({ action: "revoke", id: j.id, revision: j.revision })}>Not now</button></Row>);
+  for (const j of data.jobs.filter(j => j.state === "done" && (cp(j).workflow?.state === "blocked" || cp(j).workflow?.state === "running" || (cp(j).merge?.state === "merged" && deployed(cp(j).merge!, data.release) !== true))))
+    rows.push(<Row key={`flow-${j.id}`} icon="🚀" title={j.spec.title} detail={<WorkflowControls job={j} busy={busy} send={send} />}><button className={btn} onClick={() => openTalk(`job:${j.id}`)}>Open conversation</button></Row>);
   for (const j of data.jobs.filter(j => cp(j).merge?.state === "failed"))
     rows.push(<Row key={`m-${j.id}`} icon="🔀" title={`${j.spec.title} didn't merge`} detail={cp(j).merge!.reason}><button className={solid} disabled={busy} onClick={() => send({ action: "merge", id: j.id, revision: j.revision })}>Try again</button></Row>);
   for (const n of data.nodes.filter(n => n.spec.draft))
@@ -143,22 +145,24 @@ function plainBlock(j: Job) {
 function Result({ job, busy, send, failed, retry, openTalk }: { openTalk: (id: string) => void; job: Job; busy: boolean; send: Send; failed?: boolean; retry?: () => void }) {
   const [note, setNote] = useState(""), [redo, setRedo] = useState(false), [more, setMore] = useState(false);
   const c = cp(job), text = c.result?.text ?? c.reason ?? "";
+  const locked = !!c.workflow && (["queued", "running"].includes(c.workflow.state) || (c.workflow.state === "blocked" && c.workflow.stopped !== true));
   return <Row icon={failed ? "⚠️" : "✅"} title={failed ? `${job.spec.title}: ${c.evidence?.ok === false ? "verification blocked" : "attempt stopped"}` : `${job.spec.title} is ready`}
     detail={<div className="space-y-1">
       <p>{failed ? c.reason ?? "The task failed." : job.spec.outcome}{c.t3?.branch ? ` · branch ${c.t3.branch}` : ""}</p>
       {!failed && c.result?.decisions && c.result.decisions !== "none" && <div className="rounded-md border border-amber-400 bg-amber-50 p-2 text-foreground dark:bg-amber-950/30"><p className="font-medium">Decisions it made: check before merging</p><p className="whitespace-pre-wrap">{c.result.decisions}</p></div>}
       {!failed && c.result?.decisions === "none" && <p>It made no decisions beyond the task.</p>}
       {failed && c.evidence?.errors?.length ? <details className="text-xs"><summary className="cursor-pointer">Verification details</summary><ul className="list-disc pl-4">{c.evidence.errors.map((error, i) => <li key={i}>{error}</li>)}</ul></details> : null}
+      <WorkflowControls job={job} busy={busy} send={send} />
       {c.review?.length ? <ChangedFiles job={job} files={c.review} /> : null}
       {failed && <p className="text-xs">{c.evidence?.ok === false ? "Verification blocked this result. The changes are preserved; this is not a request for your answer. Review the conversation and verification details before retrying." : "The attempt stopped. Open the conversation to see what happened before requesting more work."}</p>}
       {text && <><button className="underline" onClick={() => setMore(!more)}>{more ? "Hide report" : "Full report"}</button>{more && <p className="max-h-64 overflow-auto whitespace-pre-wrap rounded border bg-background p-2 text-foreground">{text}</p>}</>}
       {redo && <div className="flex flex-wrap items-end gap-2 pt-1"><textarea autoFocus rows={3} className={`${field} min-w-60 flex-1`} placeholder="Add your comments: what should the agent change?" value={note} maxLength={2000} onChange={e => setNote(e.target.value)} /><button className={solid} disabled={busy || note.trim().length < 3} onClick={async () => { if (await send({ action: "redo", id: job.id, revision: job.revision, note: note.trim() })) { setNote(""); setRedo(false); } }}>Send</button></div>}
     </div>}>
-    {!failed && canMerge(job) && <button className={solid} disabled={busy} title="Accept and merge into the release branch" onClick={() => send({ action: "merge", id: job.id, revision: job.revision })}>Merge</button>}
-    {!failed && <button className={canMerge(job) ? btn : solid} disabled={busy} onClick={() => send({ action: "accept", id: job.id, revision: job.revision })}>{canMerge(job) ? "Accept, merge later" : "Accept"}</button>}
+    {!failed && canMerge(job) && <button className={solid} disabled={busy || locked} title="Accept and merge into the release branch" onClick={() => send({ action: "merge", id: job.id, revision: job.revision })}>Accept and merge</button>}
+    {!failed && <button className={canMerge(job) ? btn : solid} disabled={busy || locked} onClick={() => send({ action: "accept", id: job.id, revision: job.revision })}>{canMerge(job) ? "Accept, merge later" : "Accept"}</button>}
     {(c.t3?.threadId || c.external?.threadId) && <button className={btn} onClick={() => openTalk(`job:${job.id}`)}>Open conversation</button>}
-    {failed && retry && <button className={btn} disabled={busy} onClick={retry}>Restart attempt</button>}
-    <button className={btn} disabled={busy} onClick={() => setRedo(!redo)}>Request changes…</button>
+    {failed && retry && <button className={btn} disabled={busy || locked} onClick={retry}>Restart attempt</button>}
+    <button className={btn} disabled={busy || locked} onClick={() => setRedo(!redo)}>Request changes…</button>
   </Row>;
 }
 

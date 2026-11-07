@@ -1,3 +1,4 @@
+import type { ThreadAction } from "./thread-action";
 import { createHash } from "node:crypto";
 import db from "@/lib/db";
 import { Prisma } from "@prisma/client";
@@ -35,7 +36,7 @@ function summarizeCheckpoint(value: unknown) {
   const v = value as Record<string, any>;
   // Changed files are listed here; their text is fetched one at a time (jobFile) so the page refresh stays small.
   return { review: Array.isArray(v.review) ? v.review.map((f: { path: string; change: string; text?: string; truncated?: boolean }) => ({ path: f.path, change: f.change, size: f.text?.length ?? 0, truncated: f.truncated })) : undefined,
-    story: v.story, external: v.external, reason: v.reason, nextStep: v.nextStep, t3: v.t3, merge: v.merge, talkId: v.talkId, feedback: v.feedback, auto: v.auto, localCheckpoint: v.localCheckpoint, delivery: v.delivery, evidence: v.evidence, reviewedDiffDigest: v.reviewedDiffDigest, result: v.result ? { status: v.result.status, text: String(v.result.text ?? "").slice(0, 6000), decisions: decisionsOf(String(v.result.text ?? "")), usage: v.result.usage, needsAnswer: v.result.needsAnswer === true } : undefined, independentReview: v.independentReview ? { status: v.independentReview.status, text: String(v.independentReview.text ?? "").slice(0, 2000) } : undefined };
+    workflow: v.workflow, story: v.story, external: v.external, reason: v.reason, nextStep: v.nextStep, t3: v.t3, merge: v.merge, talkId: v.talkId, feedback: v.feedback, auto: v.auto, localCheckpoint: v.localCheckpoint, delivery: v.delivery, evidence: v.evidence, reviewedDiffDigest: v.reviewedDiffDigest, result: v.result ? { status: v.result.status, text: String(v.result.text ?? "").slice(0, 6000), decisions: decisionsOf(String(v.result.text ?? "")), usage: v.result.usage, needsAnswer: v.result.needsAnswer === true } : undefined, independentReview: v.independentReview ? { status: v.independentReview.status, text: String(v.independentReview.text ?? "").slice(0, 2000) } : undefined };
 }
 /** Routing inputs from the worker's reports: subscriptions that hit a limit, and fresh remaining allowance. */
 export function routing(worker: unknown) {
@@ -69,7 +70,7 @@ export async function snapshot() {
   // Guidance documents are listed here and fetched one at a time (see guidanceDoc).
   const { docs, ...worker } = (control?.worker ?? {}) as { docs?: { files?: { path: string; text: string }[]; at?: string } };
   const listed = control && { ...control, worker: { ...worker, docs: { at: docs?.at, files: (docs?.files ?? []).map(f => ({ path: f.path, size: f.text.length })) } } };
-  return { control: listed, release, nodes, edges, jobs: jobs.map(({ leaseToken, ...job }) => ({ ...job, checkpoint: summarizeCheckpoint(job.checkpoint) })), execution: "Inspection available. Subscription CLI review and isolated delivery require explicit Mac worker opt-in. No merge or deploy" };
+  return { control: listed, release, nodes, edges, jobs: jobs.map(({ leaseToken, ...job }) => ({ ...job, checkpoint: { ...((summarizeCheckpoint(job.checkpoint) ?? {}) as object), releaseCandidate: (control?.worker as { canonicalHead?: string } | null)?.canonicalHead } })), execution: "Inspection available. Subscription CLI review and isolated delivery require explicit Mac worker opt-in. No merge or deploy" };
 }
 export async function jobFile(jobId: string, path: string) {
   const job = await db.buildJob.findUnique({ where: { id: jobId } });
@@ -85,6 +86,9 @@ export async function guidanceDoc(path: string) {
 }
 export const operatorCommand = z.discriminatedUnion("action", [
   z.object({ action: z.literal("merge"), id, revision: z.number().int() }).strict(),
+  z.object({ action: z.literal("continue-workflow"), id, revision: z.number().int(), text: z.string().trim().min(3).max(2000) }).strict(),
+  z.object({ action: z.literal("check-workflow"), id, revision: z.number().int() }).strict(),
+  z.object({ action: z.literal("deploy"), id, revision: z.number().int(), sha: z.string().regex(/^[a-f0-9]{40}$/) }).strict(),
   z.object({ action: z.literal("memory-add"), text: z.string().trim().min(5).max(400), pinned: z.boolean().optional() }).strict(),
   z.object({ action: z.literal("memory-update"), memoryId: z.string().max(40), pinned: z.boolean().optional(), remove: z.literal(true).optional() }).strict(),
   z.object({ action: z.literal("playbook"), name: z.enum(playbookNames), text: z.string().trim().min(20).max(8000).optional(), reset: z.literal(true).optional() }).strict(),
@@ -131,15 +135,29 @@ export async function operator(input: z.infer<typeof operatorCommand>, actor: st
         else edits[input.name] = { text: input.text!, at: new Date().toISOString(), previous: playbookText(meta.playbook, input.name) };
         return tx.buildControl.update({ where: { id: "build" }, data: { worker: json({ ...meta, playbook: edits }) } });
       }
-      case "merge": {
-        // Merge implies accepting the result. The Mac merges into the release branch; an agent steps in only on conflict.
+      case "continue-workflow": {
+        const job = await tx.buildJob.findUniqueOrThrow({ where: { id: input.id } });
+        const c = job.checkpoint as { workflow?: ThreadAction };
+        requireCondition(job.revision === input.revision && c.workflow?.state === "blocked" && c.workflow.stopped === true, "Check that the previous conversation turn stopped before continuing");
+        return tx.buildJob.update({ where: { id: job.id }, data: { revision: { increment: 1 }, checkpoint: json({ ...c, workflow: { ...c.workflow, state: "queued", stopped: false, reconcile: false, resume: c.workflow.dispatched === true, comment: input.text, reason: undefined } }) } });
+      }
+      case "check-workflow": {
+        const job = await tx.buildJob.findUniqueOrThrow({ where: { id: input.id } });
+        const c = job.checkpoint as { workflow?: ThreadAction };
+        requireCondition(job.revision === input.revision && c.workflow && ["running", "blocked"].includes(c.workflow.state), "No interrupted action to check");
+        return tx.buildJob.update({ where: { id: job.id }, data: { revision: { increment: 1 }, checkpoint: json({ ...c, workflow: { ...c.workflow, state: "queued", reconcile: true, stopped: false } }) } });
+      }
+      case "merge":
+      case "deploy": {
         const job = await tx.buildJob.findUniqueOrThrow({ where: { id: input.id } });
         requireCondition(job.revision === input.revision, "Task changed; reload");
-        requireCondition(mergeable(job), "Only a finished, verified code change that isn't already merging can be merged");
-        const spec = jobSpec.parse(job.spec);
-        if (job.state === "review") await addMemory(tx, [{ kind: "done", text: `${spec.title}: ${spec.outcome}` }]);
-        const merge: Merge = { state: "queued", at: new Date().toISOString(), actor };
-        return tx.buildJob.update({ where: { id: job.id }, data: { state: "done", revision: { increment: 1 }, checkpoint: json({ ...(job.checkpoint as object), merge }) } });
+        const c = (job.checkpoint ?? {}) as { t3?: { threadId?: string }; merge?: Merge; workflow?: ThreadAction };
+        requireCondition(c.t3?.threadId, "Open the linked conversation before this action");
+        requireCondition(!c.workflow || c.workflow.state === "done" || (c.workflow.state === "blocked" && c.workflow.stopped === true), "This conversation already has an action in progress");
+        if (input.action === "merge") requireCondition(mergeable(job), "Only verified returned code can be merged");
+        else requireCondition(c.merge?.state === "merged" && (control.worker as { canonicalHead?: string }).canonicalHead === input.sha, "Approve the exact merged revision before deploying");
+        const workflow: ThreadAction = { id: randomUUID(), kind: input.action, state: "queued", at: new Date().toISOString(), ...(input.action === "deploy" ? { revision: input.sha } : {}) };
+        return tx.buildJob.update({ where: { id: job.id }, data: { revision: { increment: 1 }, checkpoint: json({ ...(job.checkpoint as object), workflow }) } });
       }
       case "memory-add": return addMemory(tx, [{ kind: "note", text: input.text, pinned: input.pinned ?? true }]);
       case "memory-update": {
@@ -214,6 +232,8 @@ export async function operator(input: z.infer<typeof operatorCommand>, actor: st
       default: {
         const job = await tx.buildJob.findUniqueOrThrow({ where: { id: input.id } });
         requireCondition(job.revision === input.revision, "Proposal changed; reload");
+        const workflow = (job.checkpoint as { workflow?: ThreadAction } | null)?.workflow;
+        requireCondition(!workflow || workflow.state === "done" || (workflow.state === "blocked" && workflow.stopped === true), "Conversation action owns this task; check its status first");
         if (input.action === "revise") {
           requireCondition(job.state === "proposed", "Recover to proposal before changing scope");
           input.spec = await routed(tx, control, input.spec);
@@ -369,6 +389,10 @@ export const workerCommand = z.discriminatedUnion("action", [
   z.object({ action: z.literal("poll"), workerId: id, catalog: catalogSpec.optional() }).strict(),
   z.object({ action: z.literal("usage"), workerId: id, usage: usageSpec }).strict(),
   z.object({ action: z.literal("merge-poll"), workerId: id }).strict(),
+  z.object({ action: z.literal("release-candidate"), workerId: id, sha: z.string().regex(/^[a-f0-9]{40}$/) }).strict(),
+  z.object({ action: z.literal("thread-action-claim"), workerId: id }).strict(),
+  z.object({ action: z.literal("thread-action-dispatched"), workerId: id, id, actionId: z.string().uuid() }).strict(),
+  z.object({ action: z.literal("thread-action-complete"), workerId: id, id, actionId: z.string().uuid(), ok: z.boolean(), stopped: z.boolean(), sha: z.string().regex(/^[a-f0-9]{40}$/).optional(), text: z.string().max(6000) }).strict(),
   z.object({ action: z.literal("merge-update"), workerId: id, id, merge: z.object({ state: z.enum(["merging", "resolving", "merged", "failed"]), sha: z.string().regex(/^[a-f0-9]{40}$/).optional(), reason: z.string().max(500).optional(), threadId: z.string().max(120).optional(), branch: z.string().max(200).optional(), local: z.string().max(300).optional(), targetSha: z.string().regex(/^[a-f0-9]{40}$/).optional(), taskSha: z.string().regex(/^[a-f0-9]{40}$/).optional() }).strict() }).strict(),
   z.object({ action: z.literal("docs"), workerId: id, files: z.array(z.object({ path: z.string().regex(/^[a-zA-Z0-9._/-]{1,200}$/), text: z.string().max(60000) }).strict()).max(20) }).strict(),
   z.object({ action: z.literal("watch-report"), workerId: id, results: z.array(z.object({ id, latest: z.string().max(200).optional(), summary: z.string().max(600) }).strict()).max(20) }).strict(),
@@ -384,12 +408,40 @@ export async function worker(input: z.infer<typeof workerCommand>) {
     // Expiry is not evidence the old writer stopped. Never automatically retry these jobs.
     await tx.buildJob.updateMany({ where: { state: { in: ["working", "stopping"] }, leaseUntil: { lte: now } }, data: { state: "blocked-lease-expired" } });
     if (input.action === "poll" && input.catalog) await tx.buildControl.update({ where: { id: "build" }, data: { worker: json({ ...(control.worker as object), id: input.workerId, lastSeenAt: now.toISOString(), execution: "inspection / opt-in T3 threads", quota: "unknown", catalog: input.catalog, catalogAt: now.toISOString() }) } });
-    if (input.action === "merge-poll") {
-      // In-progress merges are returned too, so a restarted worker picks them up again (each step is safe to repeat).
-      const done = await tx.buildJob.findMany({ where: { state: "done", OR: ["queued", "merging", "resolving"].map(state => ({ checkpoint: { path: ["merge", "state"], equals: state } })) }, orderBy: { updatedAt: "asc" }, take: 5 });
-      const resolver = selectProfile(profilesSpec.parse(control.profiles), { taskType: "implementation", tools: ["git-read", "code-write"], quality: difficulty.hard, profileId: "auto" } as import("./contract").JobSpec, routing(control.worker));
-      return { merges: done.map(j => { const c = j.checkpoint as { t3: { branch: string; worktreePath: string }; evidence: { files: string[]; diffDigest: string } };
-        return { id: j.id, spec: j.spec, merge: (j.checkpoint as { merge: Merge }).merge, branch: c.t3.branch, worktree: c.t3.worktreePath, files: c.evidence.files, diffDigest: c.evidence.diffDigest, resolver }; }) };
+    if (input.action === "release-candidate") {
+      await tx.buildControl.update({ where: { id: "build" }, data: { worker: json({ ...(control.worker as object), canonicalHead: input.sha }) } });
+      return { ok: true };
+    }
+    // Legacy direct-Git dispatch is deliberately disabled; every action is sent to its conversation.
+    if (input.action === "merge-poll") return { merges: [] };
+    if (input.action === "thread-action-claim") {
+      const active = await tx.buildJob.count({ where: { OR: [{ state: { in: ["working", "stopping", "blocked-lease-expired"] } }, { checkpoint: { path: ["workflow", "state"], equals: "running" } }, { AND: [{ checkpoint: { path: ["workflow", "state"], equals: "blocked" } }, { NOT: { checkpoint: { path: ["workflow", "stopped"], equals: true } } }] }] } });
+      if (active) return { job: null };
+      const job = await tx.buildJob.findFirst({ where: { checkpoint: { path: ["workflow", "state"], equals: "queued" } }, orderBy: { updatedAt: "asc" } });
+      if (!job) return { job: null };
+      const c = job.checkpoint as { workflow: ThreadAction; t3: { threadId: string; branch: string; worktreePath: string }; evidence: { ok: boolean; files: string[]; diffDigest: string } };
+      const profile = (job.attempt as { profile?: import("./contract").Profile } | null)?.profile;
+      const allowed = profilesSpec.parse(control.profiles).find(p => p.enabled && p.provider === profile?.provider && p.model === profile?.model && p.tools.includes("code-write"));
+      if (!c.workflow.reconcile && (!allowed || (routing(control.worker).remaining[allowed.quotaBucket] ?? 100) <= usageFloor)) {
+        await tx.buildJob.update({ where: { id: job.id }, data: { checkpoint: json({ ...c, workflow: { ...c.workflow, state: "blocked", stopped: true, reason: "The conversation model is unavailable or no longer approved; open the thread to resolve capacity" } }) } });
+        return { job: null };
+      }
+      await tx.buildJob.update({ where: { id: job.id }, data: { checkpoint: json({ ...c, workflow: { ...c.workflow, state: "running" } }) } });
+      return { job: { id: job.id, spec: job.spec, checkpoint: c, profile: allowed ?? profile } };
+    }
+    if (input.action === "thread-action-dispatched") {
+      const job = await tx.buildJob.findUniqueOrThrow({ where: { id: input.id } });
+      const c = job.checkpoint as { workflow: ThreadAction };
+      requireCondition(c.workflow?.id === input.actionId && c.workflow.state === "running", "Action superseded before dispatch");
+      return tx.buildJob.update({ where: { id: job.id }, data: { checkpoint: json({ ...c, workflow: { ...c.workflow, dispatched: true } }) } });
+    }
+    if (input.action === "thread-action-complete") {
+      const job = await tx.buildJob.findUniqueOrThrow({ where: { id: input.id } });
+      const c = job.checkpoint as { workflow: ThreadAction };
+      requireCondition(c.workflow?.id === input.actionId && c.workflow.state === "running", "Action already completed or superseded");
+      requireCondition(!input.ok || (input.sha && input.stopped), "Verified revision and stopped conversation required");
+      const workflow = { ...c.workflow, stopped: input.stopped, state: input.ok ? "done" : "blocked", text: input.text, ...(input.ok ? { sha: input.sha } : { reason: input.text }), at: now.toISOString() };
+      return tx.buildJob.update({ where: { id: job.id }, data: { state: input.ok && c.workflow.kind === "merge" ? "done" : job.state, checkpoint: json({ ...c, workflow, nextStep: input.ok ? (c.workflow.kind === "merge" ? "Merged; approve deployment when ready" : "Deployed and verified") : "Open the conversation to resolve the blocked action", ...(input.ok && c.workflow.kind === "merge" ? { merge: { state: "merged", sha: input.sha, at: now.toISOString() } } : {}) }) } });
     }
     if (input.action === "merge-update") {
       const job = await tx.buildJob.findUniqueOrThrow({ where: { id: input.id } });
@@ -430,7 +482,7 @@ export async function worker(input: z.infer<typeof workerCommand>) {
       return { paused: control.paused, execution: "inspect-only", policyRevision: control.revision, watch };
     }
     if (input.action === "claim") {
-      if (control.paused || await tx.buildJob.count({ where: { state: { in: ["working", "stopping", "blocked-lease-expired"] } } })) return { job: null };
+      if (control.paused || await tx.buildJob.count({ where: { OR: [{ checkpoint: { path: ["workflow", "state"], equals: "queued" } }, { state: { in: ["working", "stopping", "blocked-lease-expired"] } }, { checkpoint: { path: ["workflow", "state"], equals: "running" } }, { AND: [{ checkpoint: { path: ["workflow", "state"], equals: "blocked" } }, { NOT: { checkpoint: { path: ["workflow", "stopped"], equals: true } } }] }] } })) return { job: null };
       if (input.review) await admitDaily(tx, control, now);
       const jobs = await tx.buildJob.findMany({ where: { state: "approved" }, orderBy: { createdAt: "asc" }, take: 100 });
       for (const job of jobs) {
@@ -443,7 +495,10 @@ export async function worker(input: z.infer<typeof workerCommand>) {
         const profiles = profilesSpec.parse(control.profiles);
         const prior = job.attempt as { nextProfileId?: string; exhaustedBuckets?: string[]; count?: number; history?: unknown[] } | null;
         const exhausted = Object.keys((control.worker as { quotaBuckets?: object }).quotaBuckets ?? {});
-        const profile = prior?.nextProfileId ? profiles.find(p => p.id === prior.nextProfileId && !exhausted.includes(p.quotaBucket)) : selectProfile(profiles, spec, routing(control.worker));
+        const conversation = (job.checkpoint as { talkId?: string } | null)?.talkId ? await tx.buildTalk.findUnique({ where: { id: (job.checkpoint as { talkId: string }).talkId } }) : null;
+        const pinned = conversation?.profile as { provider?: string; model?: string } | null;
+        const candidate = pinned ? profiles.find(p => p.enabled && p.provider === pinned.provider && p.model === pinned.model && p.quality >= spec.quality && p.taskTypes.includes(spec.taskType) && spec.tools.every(t => p.tools.includes(t)) && !exhausted.includes(p.quotaBucket)) : undefined;
+        const profile = pinned ? candidate : prior?.nextProfileId ? profiles.find(p => p.id === prior.nextProfileId && !exhausted.includes(p.quotaBucket)) : selectProfile(profiles, spec, routing(control.worker));
         if (!profile || (spec.taskType !== "inspect" && !((spec.taskType === "review" && input.review && spec.tools.every(t => t === "git-read")) || (spec.taskType === "implementation" && input.implementation && spec.tools.includes("code-write"))))) {
           await tx.buildJob.update({ where: { id: job.id }, data: { state: profile ? "blocked-configuration" : "waiting-for-capacity", checkpoint: json(keepStory(job.checkpoint, { reason: profile ? "Worker lacks this execution capability; implementation writes disabled" : "No eligible approved profile", stopped: true })) } }); continue;
         }
@@ -453,7 +508,7 @@ export async function worker(input: z.infer<typeof workerCommand>) {
         } });
         const edits = (control.worker as { playbook?: PlaybookEdits }).playbook;
         const memory = memoryText((control.worker as { memory?: MemoryEntry[] }).memory, 1500);
-        return { job: { ...claimed, context: await contextFor(tx, spec.nodeIds) }, playbook: { task: playbookText(edits, "task"), review: playbookText(edits, "review"), memory: memory ? `${memoryHeading}\n${memory}` : "" } };
+        return { job: { ...claimed, context: await contextFor(tx, spec.nodeIds), conversation: (job.checkpoint as { talkId?: string } | null)?.talkId ? await tx.buildTalk.findUnique({ where: { id: (job.checkpoint as { talkId: string }).talkId }, select: { threadId: true, base: true, profile: true } }) : null }, playbook: { task: playbookText(edits, "task"), review: playbookText(edits, "review"), memory: memory ? `${memoryHeading}\n${memory}` : "" } };
       }
       return { job: null };
     }

@@ -75,7 +75,9 @@ const sectionArea: Record<string, Area> = { CRM: "CRM", Studio: "Studio", "Publi
 
 /** Status of one work record, or null for dropped work. */
 export function workStatus(job: Pick<JobLike, "state" | "checkpoint">): Status | null {
-  const merge = (job.checkpoint as { merge?: { state?: string } } | null)?.merge?.state;
+  const checkpoint = job.checkpoint as { merge?: { state?: string }; workflow?: { state?: string } } | null;
+  const merge = checkpoint?.merge?.state;
+  if (["queued", "running", "blocked"].includes(checkpoint?.workflow?.state ?? "")) return "doing";
   if (job.state === "revoked") return null;
   if (job.state === "proposed") return "idea";
   if (["queued", "merging", "resolving"].includes(merge ?? "")) return "doing";

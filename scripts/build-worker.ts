@@ -1,8 +1,8 @@
+import { runThreadAction } from "../lib/build/thread-action";
 /** Outbound Build queue owner. Local configuration enables subscription CLI execution. */
 import { runCliAttempt, type CliOutcome } from "../lib/build/cli";
 import { adoptDelivery, prepareDelivery, verifyDelivery, type DeliveryCheckpoint } from "../lib/build/delivery";
 import { runT3Attempt, showThread, t3Branch, t3Catalog, talkTurn } from "../lib/build/t3";
-import { mergeTask, pushResolution, resolvePrompt, verifyResolution } from "../lib/build/merge";
 import { readUsage } from "../lib/build/usage";
 import { describeChanges } from "../lib/build/review";
 import { execFileSync } from "node:child_process";
@@ -82,7 +82,7 @@ async function main() {
     const compact = (result: CliOutcome) => ({ ...result, text: result.text.length > 12000 ? `${result.text.slice(0, 7000)}\n…\n${result.text.slice(-5000)}` : result.text, textTruncated: result.text.length > 12000 });
     try {
       // The checkout may be ahead of the approved base (another task merged); the task still starts from its base.
-      try { execFileSync("git", ["merge-base", "--is-ancestor", job.spec.baseRevision, "HEAD"], { cwd: checkout }); } catch { throw new Error("Approved base is not in the checkout's history"); }
+      try { execFileSync("git", ["merge-base", "--is-ancestor", job.spec.baseRevision, "HEAD"], { cwd: checkout }); } catch { try { execFileSync("git", ["merge-base", "--is-ancestor", job.spec.baseRevision, "refs/remotes/origin/release/studio-go-live"], { cwd: checkout }); } catch { throw new Error("Approved base is not in the checkout or canonical history"); } }
       if (job.spec.taskType === "inspect") {
         checkpoint.checks = ["Tracked source/import reconciliation; no code tests or provider call"];
         outcome = "review";
@@ -101,14 +101,26 @@ async function main() {
         let delivery: DeliveryCheckpoint;
         let result: CliOutcome & { needsAnswer?: boolean; thread?: { threadId: string; branch: string } };
         if (executor === "t3") {
-          // Retries get a fresh thread/branch; the prior worktree stays preserved for the owner.
-          stopped = false; // A started thread is a live writer until T3 reports it idle.
-          const prior = checkpoint.t3 as { threadId?: string; branch?: string } | undefined;
-          const continuing = !!(pending.length && prior?.threadId && prior.branch);
+          // Linked plans and retries retain their existing conversation and workspace.
+          let prior = checkpoint.t3 as { threadId?: string; branch?: string; worktreePath?: string } | undefined;
+          if (!prior?.threadId && job.conversation?.threadId) {
+            const show = await showThread(t3Command, checkout, job.conversation.threadId);
+            if (show.thread?.activeRunId || show.thread?.pendingRequestCount) throw new Error("Planning conversation is busy; wait before starting work");
+            prior = { threadId: job.conversation.threadId, branch: show.thread?.branch ?? undefined, worktreePath: show.thread?.worktreePath ?? undefined };
+          }
+          const continuing = !!prior?.threadId;
+          if (continuing && (!prior?.branch || !prior.worktreePath)) throw new Error("Conversation workspace unavailable; no replacement thread will be created");
           const branch = continuing ? prior!.branch! : t3Branch(`${job.id}:${job.attempt.count ?? 1}`, job.spec.title);
+          if (continuing) {
+            if (job.conversation?.profile && (job.conversation.profile.provider !== job.attempt.profile.provider || job.conversation.profile.model !== job.attempt.profile.model)) throw new Error("The conversation model differs from the approved model; resolve routing before continuing");
+            // Claim the existing workspace before authorizing the thread to write.
+            delivery = await adoptDelivery({ ...input, worktree: { cwd: prior!.worktreePath!, branch } });
+            checkpoint.delivery = delivery; save();
+          }
           if (pending.length) { const sentAt = new Date().toISOString(); pending.forEach(f => { f.sentAt = sentAt; }); save(); }
+          stopped = false; // A dispatched turn remains fenced until stop is confirmed.
           result = await runT3Attempt({ command: t3Command, checkout, profile: job.attempt.profile, base: job.spec.baseRevision, branch, title: `Build: ${job.spec.title}`,
-            prompt: continuing ? feedbackText : `${prompt}${feedbackText ? `\n${feedbackText}` : ""}`, continueThreadId: continuing ? prior!.threadId : undefined, signal: controller.signal,
+            prompt: `${prompt}${feedbackText ? `\n${feedbackText}` : ""}\nThis explicit approved assignment supersedes earlier planning-only restrictions for the listed scope. Continue in this conversation; do not create another thread.`, continueThreadId: continuing ? prior!.threadId : undefined, signal: controller.signal,
             onThread: async thread => {
               checkpoint.t3 = { ...thread, options: "T3 thread default (CLI cannot set effort/fast mode)" };
               checkpoint.nextStep = `Running in T3 thread "Build: ${job.spec.title}" on ${thread.branch}`; save();
@@ -179,49 +191,33 @@ async function main() {
       await new Promise(resolve => setTimeout(resolve, 5 * 60_000));
     }
   };
-  // Merges run one at a time beside the queue. Clean merges need no model; a conflict goes to an agent in its own T3 thread.
-  const target = process.env.BUILD_MERGE_BRANCH ?? "release/studio-go-live";
-  type MergeJob = { id: string; spec: any; branch: string; worktree: string; files: string[]; diffDigest: string; resolver: any;
-    merge: { state: string; threadId?: string; targetSha?: string; taskSha?: string } };
-  const handleMerge = async (m: MergeJob) => {
-    const report = (merge: object) => call({ action: "merge-update", workerId, id: m.id, merge });
-    const input = { checkout, target, title: m.spec.title, branch: m.branch, worktree: m.worktree, files: m.files };
-    try {
-      let resolved: { cwd: string; targetSha: string; taskSha: string } | null = null;
-      if (m.merge.state === "resolving" && m.merge.threadId && m.merge.targetSha && m.merge.taskSha) {
-        // Restarted while an agent was resolving: follow that thread instead of starting another.
-        let show = await showThread(t3Command, checkout, m.merge.threadId);
-        while (show.thread?.activeRunId || show.thread?.status === "running") { await new Promise(r => setTimeout(r, 10_000)); show = await showThread(t3Command, checkout, m.merge.threadId); }
-        resolved = { cwd: String(show.thread?.worktreePath ?? ""), targetSha: m.merge.targetSha, taskSha: m.merge.taskSha };
-      } else {
-        await report({ state: "merging" });
-        // The files must be exactly what was reviewed (checked while the change is still uncommitted).
-        if (execFileSync("git", ["rev-parse", "HEAD"], { cwd: m.worktree, encoding: "utf8" }).trim() === m.spec.baseRevision) {
-          const evidence = await verifyDelivery({ checkout, root: deliveryRoot, jobId: m.id, spec: m.spec, worktree: { cwd: m.worktree, branch: m.branch }, cwd: m.worktree });
-          if (!evidence.ok || evidence.diffDigest !== m.diffDigest) throw new Error("The task's files changed after you reviewed them; redo it or review again");
-        }
-        const result = await mergeTask(input);
-        if (result.status === "merged") { await report({ state: "merged", sha: result.sha, local: result.local }); return; }
-        if (!m.resolver) throw new Error(`Conflicts in ${result.conflicts.join(", ")} and no allowed Hard model can resolve them`);
-        const branch = t3Branch(`merge:${m.id}:${result.targetSha}`, `merge ${m.spec.title}`);
-        await report({ state: "resolving", reason: `Conflicts in ${result.conflicts.slice(0, 5).join(", ")}; an agent is resolving them`, branch, targetSha: result.targetSha, taskSha: result.taskSha });
-        const run = await runT3Attempt({ command: t3Command, checkout, profile: m.resolver, base: result.targetSha, branch, title: `Merge: ${m.spec.title}`,
-          prompt: resolvePrompt({ ...input, outcome: m.spec.outcome, targetSha: result.targetSha, taskSha: result.taskSha, conflicts: result.conflicts }), signal: new AbortController().signal,
-          onThread: async thread => { await report({ state: "resolving", threadId: thread.threadId, branch: thread.branch }); } });
-        if (run.needsAnswer) throw new Error(`The merge agent asked a question in T3 ("Merge: ${m.spec.title}"); answer it there, then try the merge again`);
-        if (run.status !== "completed" || !run.thread) throw new Error(`The merge agent did not finish (${run.status})`);
-        resolved = { cwd: run.thread.worktreePath, targetSha: result.targetSha, taskSha: result.taskSha };
-      }
-      const sha = await verifyResolution({ ...input, ...resolved });
-      try { await report({ state: "merged", sha, local: await pushResolution({ ...input, cwd: resolved.cwd, sha }) }); }
-      catch { throw new Error(`${target} moved while the conflict was being resolved; try the merge again`); }
-    } catch (error) { await report({ state: "failed", reason: (error instanceof Error ? error.message : "Merge failed").slice(0, 500) }).catch(() => undefined); }
-  };
+  // The worker relays approvals and verifies evidence; the conversation executes every command.
   const mergeLoop = async () => {
     for (;;) {
-      try { const { merges } = await call({ action: "merge-poll", workerId }); for (const m of merges as MergeJob[]) await handleMerge(m); }
-      catch (error) { console.error("Build merge poll failed", error instanceof Error ? error.message : ""); }
-      await new Promise(resolve => setTimeout(resolve, 10_000));
+      try {
+        const sha = execFileSync("git", ["ls-remote", "--exit-code", "origin", "refs/heads/release/studio-go-live"], { cwd: checkout, encoding: "utf8", timeout: 30000 }).split(/\s/)[0];
+        await call({ action: "release-candidate", workerId, sha });
+        const { job } = await call({ action: "thread-action-claim", workerId });
+        if (job) {
+          const c = job.checkpoint, action = c.workflow;
+          try {
+            if (process.env.BUILD_CLI_IMPLEMENTATION !== "1") throw new Error("Conversation execution is not enabled on this Mac");
+            if (action.kind === "merge" && !action.reconcile && !action.resume) {
+              const evidence = await verifyDelivery({ checkout, root: deliveryRoot, jobId: job.id, spec: job.spec, worktree: { cwd: c.t3.worktreePath, branch: c.t3.branch }, cwd: c.t3.worktreePath });
+              if (!evidence.ok || evidence.diffDigest !== c.evidence.diffDigest) throw new Error("Reviewed files changed; review them again before merging");
+            }
+            if (action.kind === "deploy") execFileSync("git", ["merge-base", "--is-ancestor", c.merge.sha, action.revision], { cwd: checkout });
+            const result = await runThreadAction({ action, command: t3Command, checkout, canonical: process.env.BUILD_CANONICAL_CHECKOUT ?? "/tmp/estio-combined-release-20261105", target: "release/studio-go-live",
+              worktree: c.t3.worktreePath, threadId: c.t3.threadId, branch: c.t3.branch, title: job.spec.title, base: job.spec.baseRevision, files: c.evidence.files, profile: job.profile, dispatched: async () => { await call({ action: "thread-action-dispatched", workerId, id: job.id, actionId: action.id }); } });
+            await call({ action: "thread-action-complete", workerId, id: job.id, actionId: action.id, ok: true, stopped: true, ...result });
+          } catch (error) {
+            const state = await showThread(t3Command, checkout, c.t3.threadId).catch(() => null);
+            const stopped = !!state?.thread && !state.thread.activeRunId && !state.thread.pendingRequestCount && ["completed", "failed", "interrupted", "cancelled", "idle"].includes(state.thread.status ?? "");
+            await call({ action: "thread-action-complete", workerId, id: job.id, actionId: action.id, ok: false, stopped, text: (error instanceof Error ? error.message : "Conversation action failed").slice(0, 6000) });
+          }
+        }
+      } catch (error) { console.error("Build conversation action failed", error instanceof Error ? error.message : ""); }
+      await new Promise(resolve => setTimeout(resolve, 10000));
     }
   };
   if (process.argv.includes("--once")) { await cycle(); return; }
