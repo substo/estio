@@ -18,6 +18,7 @@ export const researchPayloadSchema = z.object({
   batch: z.string().min(1).max(40), topic: z.string().min(1).max(40), actorId: z.string().max(200).nullable().optional(),
   app: z.enum(["estio", "substo"]),
   input: z.object({ name: z.string().max(200).optional(), website: z.string().max(2048).optional() }).strict(),
+  context: z.object({ stage: z.string().nullable().optional(), kind: z.string().nullable().optional(), presence: z.string().nullable().optional(), summary: z.string().max(4000).nullable().optional(), excluded: z.array(z.string().max(60)).max(40).optional() }).strict().optional(),
   pages: z.array(pageExcerptSchema).max(6),
 });
 /** Room for the provider/model keys inside the device result bound. */
@@ -37,7 +38,7 @@ export function createOnboardingResearchHandler(deps: { adapter: (p: LocalProvid
     const topic = parsed.success ? findTopic(parsed.data.topic) : undefined;
     if (!parsed.success || !topic) throw new StudioJobError("invalid_research", "This research request is not valid for this companion version.", false);
     const data = parsed.data;
-    const prompt = `${researchPrompt(topic, { ...data.input, app: data.app, webSearch: true })}\n\n${researchInput({ ...data.input, pages: data.pages })}`;
+    const prompt = `${researchPrompt(topic, { ...data.input, ...data.context, app: data.app, webSearch: true })}\n\n${researchInput({ ...data.input, pages: data.pages })}`;
     for (const provider of summaryProviders(await deps.usage())) {
       const adapter = deps.adapter(provider), ready = await adapter.readiness(context.signal);
       // Subscription logins only: an API-key login would bill a different account.

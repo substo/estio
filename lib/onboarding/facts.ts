@@ -7,7 +7,7 @@ import type { FieldKind, FieldStatus, FieldValue } from "./topics";
  * fact. A confirmed fact is never replaced by a suggestion.
  */
 export type Source = { kind: "url"; url: string; retrievedAt: string | null } | { kind: "owner"; ownerId: string; suppliedAt: string | null };
-type Fact = { status: "known" | "unknown" | "not_applicable"; value?: unknown; reason?: string; sources: Source[]; confirmedAt: string | null };
+type Fact = { status: "known" | "unknown" | "not_applicable" | "not_yet"; value?: unknown; reason?: string; sources: Source[]; confirmedAt: string | null };
 type Profile = Record<string, unknown>;
 const isFact = (v: unknown): v is Fact => !!v && typeof v === "object" && "status" in (v as object) && "sources" in (v as object);
 const logoVariants = ["primary", "light", "icon", "favicon", "other"];
@@ -99,7 +99,7 @@ export function fromFact(kind: FieldKind, fact: Fact | undefined): FieldValue | 
 
 export function fieldStatus(fact: Fact | undefined): FieldStatus {
   if (!fact || fact.status === "unknown") return "empty";
-  if (fact.status === "not_applicable") return "not_applicable";
+  if (fact.status === "not_applicable" || fact.status === "not_yet") return fact.status;
   return fact.confirmedAt ? "confirmed" : "suggested";
 }
 const sourcesOf = (fact: Fact | undefined) => (fact?.sources ?? []).flatMap(s => s.kind === "url" ? [s.url] : []);
@@ -122,7 +122,7 @@ export function applySuggestions(profile: BusinessProfile | null | undefined, it
   const applied: string[] = [], rejected: string[] = [];
   for (const item of items) {
     const existing = factAt(current as BusinessProfile, item.path);
-    if (existing?.confirmedAt || existing?.status === "not_applicable") { rejected.push(`${item.path}: already confirmed`); continue; }
+    if (existing?.confirmedAt || existing?.status === "not_applicable" || existing?.status === "not_yet") { rejected.push(`${item.path}: already confirmed`); continue; }
     const sources: Source[] = item.sources.filter(u => /^https?:\/\//.test(u)).slice(0, 10).map(url => ({ kind: "url", url, retrievedAt }));
     const fact = toFact(item.kind, item.path, item.value, sources, null);
     if (!fact) continue;
@@ -155,5 +155,13 @@ export function markNotApplicable(profile: BusinessProfile | null | undefined, p
   const current = clone(profile), at = now.toISOString();
   const sources: Source[] = [{ kind: "owner", ownerId, suppliedAt: at }];
   setAt(current, path, { status: "not_applicable", reason: "Owner said this does not apply", sources, confirmedAt: at }, { sources, confirmedAt: at });
+  return parse(current);
+}
+
+export function setFieldState(profile: BusinessProfile | null | undefined, path: string, status: "not_applicable" | "not_yet" | "empty", ownerId: string, now = new Date()) {
+  if (status === "empty") return setOwnerField(profile, "text", path, null, ownerId, now);
+  const current = clone(profile), at = now.toISOString();
+  const sources: Source[] = [{ kind: "owner", ownerId, suppliedAt: at }];
+  setAt(current, path, { status, reason: status === "not_yet" ? "Owner said not yet" : "Owner said this does not apply", sources, confirmedAt: at }, { sources, confirmedAt: at });
   return parse(current);
 }

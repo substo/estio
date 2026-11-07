@@ -4,6 +4,7 @@ import db from "@/lib/db";
 import { studioDb } from "@/lib/studio/studio-db";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
+import { businessView } from "@/lib/business-profile/view";
 import { businessProfileSchema, type BusinessProfile } from "@/lib/business-profile/schema";
 import { getAiConnections as getAllAiConnections } from "@/lib/ai/connections";
 import type { AiConnections, AiConnectionSource } from "@/lib/ai/connections-model";
@@ -24,7 +25,7 @@ async function getAiConnections(locationId: string) {
   return { connections, devices };
 }
 import { findTopic, topicsFor, type FieldValue } from "./topics";
-import { confirmField, setOwnerField } from "./facts";
+import { confirmField, setOwnerField, setFieldState } from "./facts";
 import { answerPrompt, isValidFieldValue, parseResearchOutput } from "./research-contract";
 import { finish, reopen, say, skipTopic, startBatch, type OnboardingState } from "./state";
 import { buildOnboardingView } from "./view";
@@ -65,18 +66,31 @@ const normalizeName = (v: unknown) => typeof v === "string" ? v.trim().replace(/
 const validTimeZone = (v: string) => { try { new Intl.DateTimeFormat("en", { timeZone: v }); return true; } catch { return false; } };
 
 /** Starts (or restarts) background research from the business name and/or website. */
-export async function startResearch(actor: Actor, input: { name?: string; website?: string }) {
+export async function startResearch(actor: Actor, input: { name?: string; website?: string; stage?: string; kind?: string; presence?: string; summary?: string }) {
   requireEditor(actor);
-  const website = input.website?.trim() ? (/^https?:\/\//i.test(input.website.trim()) ? input.website.trim() : `https://${input.website.trim()}`) : undefined;
+  const saved = await settingsService.getDocument<BusinessProfile>({ scopeType: "LOCATION", scopeId: actor.locationId, domain: SETTINGS_DOMAINS.LOCATION_BUSINESS });
+  const location = await db.location.findUnique({ where: { id: actor.locationId }, select: { name: true } });
+  const savedView = businessView(saved ? businessProfileSchema.parse(saved.payload) : null, location ?? {});
+  const requestedWebsite = input.website ?? savedView.website ?? "";
+  const website = requestedWebsite?.trim() ? (/^https?:\/\//i.test(requestedWebsite.trim()) ? requestedWebsite.trim() : `https://${requestedWebsite.trim()}`) : undefined;
   if (website) { try { const u = new URL(website); if (!["http:", "https:"].includes(u.protocol) || u.username || u.password) throw new Error(); } catch { throw new OnboardingError("That website address doesn't look right."); } }
-  const name = normalizeName(input.name) || undefined;
-  if (!name && !website) throw new OnboardingError("Give me your business name or website to start.");
+  const name = normalizeName(input.name ?? savedView.name) || undefined;
+  if (!name && !website && !input.summary?.trim() && !savedView.summary) throw new OnboardingError("Describe your business or personal brand to start.");
   if (!(await getAiConnections(actor.locationId)).connections.available)
     throw new OnboardingError("Connect an AI first: a ChatGPT subscription, an API key, or a paired Mac running the Studio companion with processing on.");
+  const opening = (["stage", "kind", "presence", "summary"] as const).flatMap(key => {
+    if (!input[key]) return [];
+    const f = field("business", key).field;
+    if ((f.choices && !f.choices.includes(input[key]!)) || !isValidFieldValue(f.kind, input[key])) throw new OnboardingError(`Check the ${f.label.toLowerCase()}.`);
+    return [{ kind: f.kind, path: (f.target as { profile: string }).profile, value: input[key]! }];
+  });
+  if (input.website?.trim() && website) opening.push({ kind: "url", path: "onlinePresence.website", value: website });
+  if (opening.length) await updateBusinessProfile(actor.locationId, profile => opening.reduce((p, f) => setOwnerField(p, f.kind, f.path, f.value, owner(actor)), profile ?? { schemaVersion: 1 }), owner(actor));
+  if (input.name?.trim() && name) await db.location.update({ where: { id: actor.locationId }, data: { name } });
   const batch = randomUUID().slice(0, 18);
   const topics = topicsFor(actor.app).map(t => t.id);
-  await updateOnboardingState(actor.locationId, s => say(say(startBatch(s, batch, topics, { ...(name ? { name } : {}), ...(website ? { website } : {}) }), "owner",
-    [name, website].filter(Boolean).join(" · ")), "agent", "Thanks. I'm looking your business up now, one topic at a time. Suggestions appear in your profile as I find them; confirm or edit each one."), owner(actor));
+  await updateOnboardingState(actor.locationId, s => say(say(startBatch({ ...s, ...(input.name?.trim() ? { suggestedName: null } : {}) }, batch, topics, { ...(name ? { name } : {}), ...(website ? { website } : {}) }), "owner",
+    [name, website].filter(Boolean).join(" · ")), "agent", "Thanks. I'm researching your business and market using your setup choices, one topic at a time. Confirm or edit each suggestion in your profile."), owner(actor));
   await studioDb.call("studio_enqueue_job", { p_location_id: actor.locationId, p_kind: ONBOARDING_FETCH, p_payload: { batch, topics, ...(website ? { website } : {}), actorId: actor.dbUserId, createdBy: actor.clerkUserId },
     p_idempotency_key: `onboarding:${batch}:fetch`, p_created_by: actor.clerkUserId, p_max_attempts: 3 });
   return getOnboardingView(actor);
@@ -109,6 +123,7 @@ export async function confirmTopic(actor: Actor, topicId: string) {
 export async function edit(actor: Actor, topicId: string, key: string, value: FieldValue | null) {
   requireEditor(actor);
   const { field: f } = field(topicId, key);
+  if (f.choices && value !== null && !f.choices.includes(String(value))) throw new OnboardingError("Choose one of the listed options.");
   if (value !== null && !(Array.isArray(value) && !value.length) && !(typeof value === "string" && !value.trim()) && !isValidFieldValue(f.kind, value))
     throw new OnboardingError(`Check the ${f.label.toLowerCase()} and try again.`);
   if ("location" in f.target) {
@@ -167,4 +182,13 @@ export async function onboardingOpenModeFor(actor: Actor) {
   const [{ state }, ai] = await Promise.all([loadOnboardingState(actor.locationId), getAiConnections(actor.locationId)]);
   const { onboardingOpenMode } = await import("./state");
   return onboardingOpenMode({ role: actor.role, impersonating: actor.impersonating, status: state.status, aiAvailable: ai.connections.available });
+}
+
+export async function changeFieldState(actor: Actor, topicId: string, key: string, status: "not_applicable" | "not_yet" | "empty") {
+  requireEditor(actor);
+  const { field: f } = field(topicId, key);
+  if (!("profile" in f.target) || f.target.profile.startsWith("setup.")) throw new OnboardingError("Enter a value for this field.");
+  const path = f.target.profile;
+  await updateBusinessProfile(actor.locationId, p => setFieldState(p, path, status, owner(actor)), owner(actor));
+  return getOnboardingView(actor);
 }

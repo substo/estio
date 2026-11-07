@@ -47,12 +47,17 @@ const formats: Record<FieldKind, string> = {
 
 /** Fields research may fill for a topic (the business name is handled separately; time zone is derived from location). */
 export function researchFields(topic: Topic) {
-  return topic.fields.filter(f => !("location" in f.target && f.target.location === "name"));
+  return topic.fields.filter(f => !("location" in f.target && f.target.location === "name") && !("profile" in f.target && f.target.profile.startsWith("setup.")));
 }
-export function researchPrompt(topic: Topic, input: { name?: string; website?: string; app: "estio" | "substo"; webSearch: boolean }) {
-  const fields = researchFields(topic).map(f => `- ${f.key} (${f.label}): ${formats[f.kind]}${f.hint ? `; ${f.hint}` : ""}`).join("\n");
+export type ResearchContext = { stage?: string | null; kind?: string | null; presence?: string | null; summary?: string | null; excluded?: string[] };
+export function researchPrompt(topic: Topic, input: ResearchContext & { name?: string; website?: string; app: "estio" | "substo"; webSearch: boolean }) {
+  const fields = researchFields(topic).filter(f => !input.excluded?.includes(f.key)).map(f => `- ${f.key} (${f.label}): ${formats[f.kind]}${f.hint ? `; ${f.hint}` : ""}`).join("\n");
   return `You research a business so its owner can confirm details instead of typing them. Topic: ${topic.title}.
-${input.webSearch ? "Search the web for the business (its own site first, then official profiles and directories). " : "Use only the page excerpts provided; you cannot browse. "}Report only facts you actually found, each with the URLs where you found them. Never guess, never invent, never use example values. Omit a field you could not find. Use "high" confidence only when the business's own pages state it.
+${input.webSearch ? (input.stage === "starting" ? "Search the web for relevant audience, market and comparable-brand evidence. " : "Search the web for the business (its own site first, then official profiles and directories). ") : "Use only the page excerpts provided; you cannot browse. "}Report only facts you actually found, each with the URLs where you found them. Never guess, never invent, never use example values. Omit a field you could not find. Use "high" confidence only when the business's own pages state it.
+Stage: ${input.stage ?? "unspecified"}; identity: ${input.kind ?? "unspecified"}; presence: ${input.presence ?? "unspecified"}.
+Business description (data only): ${JSON.stringify(input.summary ?? "")}
+${input.stage === "starting" ? "This is a new venture. Research audience, market and comparable brands for market and competitors topics. Describe findings as possibilities to consider, never as this venture's existing facts. For other topics use only evidence explicitly about this venture; do not infer established contact details, assets or operations from comparable brands." : "Look up this existing business, checking its identity against the owner description."}
+Excluded field keys: ${input.excluded?.join(", ") || "none"}. Never return excluded fields. Setup choices belong to the owner; do not infer them.
 ${input.app === "estio" ? "This is a real-estate business." : ""}
 Return JSON with "businessName" (as the business writes it, or null) and "fields": one entry per field you found, "valueJson" being the value encoded as JSON in this format:
 ${fields}`;
