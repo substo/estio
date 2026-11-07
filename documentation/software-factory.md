@@ -2,6 +2,12 @@
 
 The one place to read before working on Estio's software factory. It explains what it is, how it works, what the system decides, and where it is heading. Build shows a short version under Settings › How Build works, from `lib/build/factory-guide.ts`; keep the two in step. Operational setup, safety fences and test evidence are in [Build workspace](build-workspace.md). Current release state is in [current status](current-status.md).
 
+## Agreed execution direction — 2026-11-07
+
+Owner correction: **all work goes through the same linked T3 conversation**, from questionnaire/research and planning through implementation, questions, requested changes, merge/conflict resolution and deployment. Dashboard actions are contextual instructions to that thread, not independent Git/deploy dispatchers. This applies to clean merges as well as conflicts. The thread must receive the approved action, execute with the existing context, and report evidence and the next state back to its task card. No duplicate execution/conflict thread by default. A necessary model handoff must preserve context and remain visible.
+
+This is the agreed target, **not the current implementation**. The existing worker still performs clean merges directly through Git and creates a separate thread for conflicts; its replacement is outstanding. The dashboard has no guided deployment action yet. Earlier descriptions below document those existing mechanics, not permission to extend them. Do not initiate further background merges or deployment outside the linked conversation workflow. Existing scoped approvals, stopped-writer checks, model policy, diff checks and the canonical owned release/lease safeguards remain mandatory; running through a conversation does not bypass them. Deployment still needs explicit owner authorization.
+
 ## What it is
 
 A way for the owner to move Estio/Substo forward with as little effort and attention as possible. The system notices what could be better, proposes it, does the approved work, and shows the result. The owner gives feedback and keeps a few gates. The long-term goal is an autonomous loop.
