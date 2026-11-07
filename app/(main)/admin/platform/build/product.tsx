@@ -26,8 +26,10 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
  * The product, one list: features, pages with work, background processes and technologies, each once, with its status.
  * Done is hidden until asked for. A row opens to its story, its work and what it is linked to. See lib/build/features.ts.
  */
-export function ProductList({ map, jobs, nodes, release, profiles, busy, send, ask, focus }: { map: ProductMap; jobs: Job[]; nodes: MapNode[]; release: Release | null; profiles: Profile[]; busy: boolean; send: Send; ask: (text: string) => void; focus: Focus }) {
+type TalkLink = { talkOf: (job: Job) => { id: string; title: string } | null; openTalk: (id: string) => void };
+export function ProductList({ map, jobs, nodes, release, profiles, busy, send, ask, focus, talkOf, openTalk }: { map: ProductMap; jobs: Job[]; nodes: MapNode[]; release: Release | null; profiles: Profile[]; busy: boolean; send: Send; ask: (text: string) => void; focus: Focus } & TalkLink) {
   const [filters, setFilters] = useState<Filters>(defaultFilters), [open, setOpen] = useState<Set<string>>(new Set());
+  const [openJob, setOpenJob] = useState<{ id: string; n: number } | null>(null);
   const { shown, counts } = useMemo(() => applyFilters(map.features, filters), [map, filters]);
   const set = (patch: Partial<Filters>) => setFilters(f => ({ ...f, ...patch }));
   const toggle = (id: string) => setOpen(o => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -40,6 +42,7 @@ export function ProductList({ map, jobs, nodes, release, profiles, busy, send, a
     if (!f) return;
     setFilters({ statuses: [...new Set([...defaultFilters.statuses, f.status])] });
     setOpen(o => new Set(o).add(f.id));
+    if (map.byJob.has(id)) setOpenJob({ id, n: Date.now() });
     setTimeout(() => document.getElementById(map.byJob.has(id) ? id : `item-${f.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
   useEffect(() => { if (focus) reveal(focus.id); }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -92,7 +95,7 @@ export function ProductList({ map, jobs, nodes, release, profiles, busy, send, a
           <span className="sr-only sm:hidden">{statusWords[f.status]}</span>
           <Chevron open={open.has(f.id)} />
         </button>
-        {open.has(f.id) && <div id={`detail-${f.id}`}><Detail f={f} map={map} jobById={jobById} nodeById={nodeById} release={release} profiles={profiles} busy={busy} send={send} ask={ask}
+        {open.has(f.id) && <div id={`detail-${f.id}`}><Detail f={f} map={map} jobById={jobById} nodeById={nodeById} release={release} profiles={profiles} busy={busy} send={send} ask={ask} talkOf={talkOf} openTalk={openTalk} openJob={openJob}
           reveal={reveal} byTech={t => { setFilters({ ...defaultFilters, tech: t }); document.getElementById("product-heading")?.scrollIntoView({ behavior: "smooth" }); }} /></div>}
       </li>)}</ul>}
     {!!shown.length && doneHidden && counts.done > 0 && <button className="text-sm text-muted-foreground underline underline-offset-2" onClick={() => set({ statuses: [...filters.statuses, "done"] })}>Show done · {counts.done}</button>}
@@ -113,7 +116,7 @@ function Links({ items, reveal }: { items: Feature[]; reveal: (id: string) => vo
 }
 
 /** An opened entry: its story, then its work, pages, processes, related features and technologies; files last. */
-function Detail({ f, map, jobById, nodeById, release, profiles, busy, send, ask, reveal, byTech }: { f: Feature; map: ProductMap; jobById: Map<string, Job>; nodeById: Map<string, MapNode>; release: Release | null; profiles: Profile[]; busy: boolean; send: Send; ask: (text: string) => void; reveal: (id: string) => void; byTech: (t: string) => void }) {
+function Detail({ f, map, jobById, nodeById, release, profiles, busy, send, ask, reveal, byTech, talkOf, openTalk, openJob }: { f: Feature; map: ProductMap; jobById: Map<string, Job>; nodeById: Map<string, MapNode>; release: Release | null; profiles: Profile[]; busy: boolean; send: Send; ask: (text: string) => void; reveal: (id: string) => void; byTech: (t: string) => void } & TalkLink & { openJob?: { id: string; n: number } | null }) {
   const node = f.nodeId ? nodeById.get(f.nodeId) : undefined;
   const work = f.jobIds.map(id => jobById.get(id)).filter((j): j is Job => !!j);
   const pages = f.pageIds.map(id => nodeById.get(id)).filter((n): n is MapNode => !!n);
@@ -125,8 +128,8 @@ function Detail({ f, map, jobById, nodeById, release, profiles, busy, send, ask,
     {f.tech.length > 0 && f.kind !== "technology" && <div className="flex flex-wrap items-center gap-1.5 text-sm"><span className="text-xs text-muted-foreground">Uses</span>
       {f.tech.map(t => <button key={t} onClick={() => byTech(t)} className="rounded-full bg-muted px-2.5 py-0.5 text-xs hover:bg-muted/70" title={`Show everything that uses ${t}`}>{t}</button>)}</div>}
     <div className="space-y-2.5">
-      {work.length > 0 && <Group title="Work" count={work.length} open={work.length <= 4}>
-        <ul className="-ml-2 space-y-0.5">{work.map(j => <WorkItem key={j.id} job={j} sameStory={!!f.story && (j.checkpoint as { story?: { updatedAt?: string } } | null)?.story?.updatedAt === f.story.updatedAt} profiles={profiles} release={release} busy={busy} send={send} />)}</ul></Group>}
+      {work.length > 0 && <Group title="Work" count={work.length} open={work.length <= 4 || work.some(j => j.id === openJob?.id)}>
+        <ul className="-ml-2 space-y-0.5">{work.map(j => <WorkItem key={j.id} job={j} sameStory={!!f.story && (j.checkpoint as { story?: { updatedAt?: string } } | null)?.story?.updatedAt === f.story.updatedAt} profiles={profiles} release={release} busy={busy} send={send} talk={talkOf(j)} openTalk={openTalk} opened={openJob?.id === j.id ? openJob.n : undefined} />)}</ul></Group>}
       {f.relatedIds.length > 0 && <Group title={f.kind === "feature" && f.nodeId ? "Other features on these pages" : "Features here"} count={f.relatedIds.length}><Links items={get(f.relatedIds)} reveal={reveal} /></Group>}
       {usedBy.length > 0 && <Group title="Used by" count={usedBy.length}><Links items={usedBy} reveal={reveal} /></Group>}
       {pages.length > 0 && f.kind !== "page" && <Group title="Pages" count={pages.length}><ul className="space-y-1 text-sm">{pages.map(p => <li key={p.id}>{p.spec.section} › {p.spec.name}<span className="ml-2 font-mono text-xs text-muted-foreground">{p.spec.route}</span></li>)}</ul></Group>}

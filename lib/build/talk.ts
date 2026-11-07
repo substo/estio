@@ -7,6 +7,7 @@ import { validateScopeEntry } from "./delivery";
 import { addMemory, approveJob, json, mutate, requireCondition, routed, routing } from "./store";
 import { extractRemember, memoryHeading, memoryText, type MemoryEntry } from "./memory";
 import { ownerDelimiter, talkPrompt, type PlaybookEdits } from "./playbook";
+import { archivedPlan, autoArchive, reopenedPlan, type PlanLike, type TalkArchive } from "./conversations";
 
 /**
  * Build conversations. The owner writes on the Build page; the Mac worker relays each turn to one T3 thread and syncs the
@@ -15,7 +16,7 @@ import { ownerDelimiter, talkPrompt, type PlaybookEdits } from "./playbook";
  * question only answerable in T3) · error.
  */
 export type TalkMessage = { id: string; role: "owner" | "agent"; text: string; at?: string; sent?: boolean };
-export type TalkPlan = { runId: string; items: z.infer<typeof proposalDraft>[]; started: string[]; at: string };
+export type TalkPlan = { runId: string; items: z.infer<typeof proposalDraft>[]; started: string[]; at: string; archived?: TalkArchive; reopened?: string };
 const maxMessages = 80, maxText = 20000;
 // Talks can't change state while a job transaction holds the global lock, so each talk is locked on its own row.
 async function lockTalk(tx: Prisma.TransactionClient, talkId: string) {
@@ -33,6 +34,7 @@ export const talkOwnerCommand = z.discriminatedUnion("action", [
   z.object({ action: z.literal("talk"), talkId: id.optional(), text: z.string().trim().min(1).max(8000), profileId: id.optional() }).strict(),
   z.object({ action: z.literal("talk-start"), id, runId: z.string().max(200) }).strict(),
   z.object({ action: z.literal("talk-archive"), id }).strict(),
+  z.object({ action: z.literal("talk-reopen"), id }).strict(),
 ]);
 export async function talkOwner(input: z.infer<typeof talkOwnerCommand>, actor: string) {
   if (input.action === "talk") {
@@ -54,7 +56,14 @@ export async function talkOwner(input: z.infer<typeof talkOwnerCommand>, actor: 
       return tx.buildTalk.update({ where: { id: talk.id }, data: { messages: json([...messagesOf(talk.messages), message].slice(-maxMessages)), state: talk.state === "thinking" ? "thinking" : "queued", error: null } });
     });
   }
-  if (input.action === "talk-archive") return db.buildTalk.update({ where: { id: input.id }, data: { state: "archived" } });
+  // Archiving records when and why on the plan JSON; reopening clears it (see conversations.ts).
+  if (input.action === "talk-archive" || input.action === "talk-reopen") return db.$transaction(async tx => {
+    const talk = await lockTalk(tx, input.id), plan = talk.plan as PlanLike | null;
+    if (input.action === "talk-archive") return tx.buildTalk.update({ where: { id: talk.id }, data: { state: "archived", plan: json(archivedPlan(plan, { at: new Date().toISOString(), by: "owner", reason: "Closed by you." })) } });
+    requireCondition(talk.state === "archived", "This conversation is open");
+    const reopened = reopenedPlan(plan);
+    return tx.buildTalk.update({ where: { id: talk.id }, data: { state: "idle", plan: reopened ? json(reopened) : Prisma.DbNull } });
+  });
   // Start = owner approval of the plan's tasks: each becomes an approved Build task with server-decided difficulty and model.
   return mutate(async tx => {
     const talk = await lockTalk(tx, input.id);
@@ -83,8 +92,30 @@ export async function talkOwner(input: z.infer<typeof talkOwnerCommand>, actor: 
   });
 }
 
+/**
+ * Open conversations, after archiving those whose started work is all finished (autoArchive). Runs when the Build page
+ * loads, so it needs no schedule; it is idempotent and only touches conversations that qualify.
+ */
 export async function talks() {
-  return db.buildTalk.findMany({ where: { state: { not: "archived" } }, orderBy: { updatedAt: "desc" }, take: 20 });
+  const open = await db.buildTalk.findMany({ where: { state: { not: "archived" } }, orderBy: { updatedAt: "desc" }, take: 20 });
+  const keys = open.flatMap(t => (t.plan as PlanLike | null)?.started ?? []);
+  const jobs = keys.length ? await db.buildJob.findMany({ where: { key: { in: keys } }, select: { id: true, key: true, state: true, checkpoint: true } }) : [];
+  const settled = new Set<string>();
+  for (const t of open) {
+    const archived = autoArchive({ state: t.state, plan: t.plan as PlanLike | null }, jobs);
+    if (!archived) continue;
+    // Only if nothing changed since it was read (a new message or plan wins).
+    const r = await db.buildTalk.updateMany({ where: { id: t.id, updatedAt: t.updatedAt, state: t.state }, data: { state: "archived", plan: json(archivedPlan(t.plan as PlanLike, archived)) } });
+    if (r.count) settled.add(t.id);
+  }
+  return open.filter(t => !settled.has(t.id));
+}
+/** Archived conversations, newest first, without their transcripts (fetched one at a time with talk()). */
+export async function pastTalks() {
+  return db.buildTalk.findMany({ where: { state: "archived" }, orderBy: { updatedAt: "desc" }, take: 50, select: { id: true, title: true, state: true, threadId: true, plan: true, updatedAt: true } });
+}
+export async function talk(id: string) {
+  return db.buildTalk.findUniqueOrThrow({ where: { id } });
 }
 
 const threadMessage = z.object({ role: z.string().max(40), text: z.string().max(maxText), runId: z.string().max(200).optional() });

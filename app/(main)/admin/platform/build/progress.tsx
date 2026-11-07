@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { z } from "zod";
 import { difficulty, type jobSpec, type Profile } from "@/lib/build/contract";
 import { richParts, type Story } from "@/lib/build/story";
@@ -71,8 +71,10 @@ function Technical({ job, model }: { job: Job; model?: string }) {
 }
 
 /** One piece of work inside a feature: a single line; opened, its own story or outcome, merge, feedback and details. */
-export function WorkItem({ job, sameStory, profiles, release, busy, send }: { job: Job; sameStory: boolean; profiles: Profile[]; release: Release | null; busy: boolean; send: Send }) {
-  const [open, setOpen] = useState(false);
+export function WorkItem({ job, sameStory, profiles, release, busy, send, talk, openTalk, opened }: { job: Job; sameStory: boolean; profiles: Profile[]; release: Release | null; busy: boolean; send: Send;
+  talk?: { id: string; title: string } | null; openTalk?: (id: string) => void; opened?: number }) {
+  const [open, setOpen] = useState(!!opened);
+  useEffect(() => { if (opened) setOpen(true); }, [opened]);
   const c = cp(job), status = workStatus(job) ?? "idea";
   const model = (job.attempt as { profile?: Profile } | null)?.profile?.model ?? profiles.find(p => p.id === job.spec.profileId)?.model;
   return <li id={job.id} className="scroll-mt-24">
@@ -84,6 +86,7 @@ export function WorkItem({ job, sameStory, profiles, release, busy, send }: { jo
     </button>
     {open && <div className="space-y-2 pb-3 pl-7 pr-2">
       {c.story && !sameStory ? <StoryView story={c.story} /> : <div className="space-y-1 text-sm"><p>{job.spec.outcome}</p><p className="text-xs text-muted-foreground">{statusLine(job, release)}</p></div>}
+      {talk && openTalk && <p className="text-sm"><span className="text-muted-foreground">From conversation: </span><button className="underline underline-offset-2" onClick={() => openTalk(talk.id)}>{talk.title}</button></p>}
       {c.feedback?.map((f, i) => <p key={i} className="text-xs">{f.decision === "redo" ? "You asked" : "You noted"}: {f.note}</p>)}
       {job.state === "done" && canMerge(job) && <button className={btn} disabled={busy} onClick={() => void send({ action: "merge", id: job.id, revision: job.revision })}>Merge</button>}
       <Technical job={job} model={model} />

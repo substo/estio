@@ -5,7 +5,8 @@ import type { z } from "zod";
 import { difficulty, type nodeSpec, type Profile } from "@/lib/build/contract";
 import { modelGuidance, unknownGuidance } from "@/lib/build/model-guidance";
 import { loop } from "@/lib/build/factory-guide";
-import { TalkPanel, type Talk } from "./talk";
+import { TalkEntry, TalkSheet, type PastTalk, type Talk, type TalkView } from "./talk";
+import { talkIdOfJob } from "@/lib/build/conversations";
 import { Playbook } from "./playbook";
 import { ago, canMerge, cp, type Checkpoint, type Job } from "./progress";
 import { AppMap, ProductList, type Focus } from "./product";
@@ -17,7 +18,7 @@ import type { Usage } from "@/lib/build/contract";
 
 type Node = { id: string; revision: number; spec: z.infer<typeof nodeSpec>; updatedAt: string };
 type Worker = { daily?: { enabled: boolean; profileId: string; lastRunDate?: string }; quotaBuckets?: Record<string, { observedAt: string; reset: string }>; catalog?: CatalogModel[]; catalogAt?: string; autoApprove?: { mode: "off" | "record" | "on" }; head?: string; id?: string; lastSeenAt?: string; playbook?: PlaybookEdits; usage?: Usage; memory?: MemoryEntry[]; docs?: { at?: string; files: { path: string; size: number }[] } };
-type Data = { control: { paused: boolean; revision: number; profiles: Profile[]; worker: Worker } | null; release?: Release | null; nodes: Node[]; edges: { fromId: string; toId: string; kind: string }[]; jobs: Job[]; talks?: Talk[] };
+type Data = { control: { paused: boolean; revision: number; profiles: Profile[]; worker: Worker } | null; release?: Release | null; nodes: Node[]; edges: { fromId: string; toId: string; kind: string }[]; jobs: Job[]; talks?: Talk[]; pastTalks?: PastTalk[] };
 type Send = (command: unknown) => Promise<boolean>;
 type CatalogModel = { provider: string; model: string; name: string };
 type Tier = "off" | "routine" | "hard";
@@ -33,7 +34,7 @@ const blockedStates = ["blocked-lease-expired", "waiting-for-capacity", "blocked
 /** Build: talk, what needs you, the product with its status, and the app by section. Settings sit behind one button. */
 export default function BuildWorkspace() {
   const [data, setData] = useState<Data | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState(false);
-  const [settings, setSettings] = useState(false), [seed, setSeed] = useState<{ text: string; n: number } | null>(null);
+  const [settings, setSettings] = useState(false), [talkView, setTalkView] = useState<TalkView>(null);
   // Background refreshes retry quietly (a phone dropping signal or a deploy restarting the server); only a repeated
   // failure is shown, in plain words, and it clears itself when the connection returns.
   const [offline, setOffline] = useState(0);
@@ -46,8 +47,13 @@ export default function BuildWorkspace() {
   const w = data?.control?.worker, paused = data?.control?.paused ?? true;
   const online = !!w?.lastSeenAt && Date.now() - Date.parse(w.lastSeenAt) < 120_000;
   const models = data?.control?.profiles.filter(p => p.enabled) ?? [];
-  const ask = (text: string) => { setSeed({ text, n: Date.now() }); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  // "Ask about this" opens a new conversation in the side sheet, with the subject filled in.
+  const ask = (text: string) => setTalkView({ mode: "new", seed: text, n: Date.now() });
   const [focus, setFocus] = useState<Focus>(null);
+  const talkModels = models.filter(p => p.taskTypes.includes("review")).map(p => ({ id: p.id, name: w?.catalog?.find(c => c.provider === p.provider && c.model === p.model)?.name ?? p.model }));
+  // Work ↔ conversation: a task started from a conversation links back to it.
+  const allTalks = useMemo(() => new Map([...(data?.pastTalks ?? []), ...(data?.talks ?? [])].map(t => [t.id, t])), [data?.talks, data?.pastTalks]);
+  const talkOf = (j: Job) => { const id = talkIdOfJob(j), t = id ? allTalks.get(id) : undefined; return t ? { id: t.id, title: t.title } : null; };
   const map = useMemo(() => productMap({ nodes: data?.nodes ?? [], edges: data?.edges ?? [], jobs: data?.jobs ?? [] }), [data?.nodes, data?.edges, data?.jobs]);
   return <main className="mx-auto max-w-6xl space-y-6 p-3 sm:p-6">
     <Link href="/admin/platform" className="text-sm underline">← Platform</Link>
@@ -62,10 +68,13 @@ export default function BuildWorkspace() {
     {error && <p role="alert" className="rounded-md border border-red-400 p-3 text-sm">{error}</p>}
     {!data && <p className="text-sm text-muted-foreground">Loading Build…</p>}
     {data && settings && <Settings data={data} busy={busy} send={send} close={() => setSettings(false)} />}
-    {data && <TalkPanel talks={data.talks ?? []} paused={paused} seed={seed} reload={load} models={models.filter(p => p.taskTypes.includes("review")).map(p => ({ id: p.id, name: w?.catalog?.find(c => c.provider === p.provider && c.model === p.model)?.name ?? p.model }))}
+    {data && <TalkEntry talks={data.talks ?? []} past={data.pastTalks?.length ?? 0} open={setTalkView} />}
+    {data && <TalkSheet view={talkView} setView={setTalkView} talks={data.talks ?? []} past={data.pastTalks ?? []} jobs={data.jobs} paused={paused} reload={load} models={talkModels}
+      reveal={id => { setTalkView(null); setFocus({ id, n: Date.now() }); }}
       blocker={!online ? "The Mac is offline; it relays the conversation." : models.some(p => p.tools.includes("code-write")) ? null : "Allow a model that may write code first (Settings)."} />}
-    {data && <NeedsYou data={data} busy={busy} send={send} online={online} openSettings={() => setSettings(true)} />}
-    {data && <ProductList map={map} jobs={data.jobs} nodes={data.nodes} release={data.release ?? null} profiles={data.control?.profiles ?? []} busy={busy} send={send} ask={ask} focus={focus} />}
+    {data && <NeedsYou data={data} busy={busy} send={send} online={online} openSettings={() => setSettings(true)} openTalk={id => setTalkView({ mode: "talk", id })} />}
+    {data && <ProductList map={map} jobs={data.jobs} nodes={data.nodes} release={data.release ?? null} profiles={data.control?.profiles ?? []} busy={busy} send={send} ask={ask} focus={focus}
+      talkOf={talkOf} openTalk={id => setTalkView({ mode: "talk", id })} />}
     {data && <AppMap map={map} nodes={data.nodes} edges={data.edges} busy={busy} send={send} ask={ask} reveal={id => setFocus({ id, n: Date.now() })} />}
     {data && <Playbook memory={w?.memory ?? []} edits={w?.playbook} docs={w?.docs?.files ?? []} busy={busy} send={send} ask={ask} />}
   </main>;
@@ -90,7 +99,7 @@ function Row({ icon, title, detail, children }: { icon: string; title: ReactNode
 }
 
 /** Only what needs the owner, in plain words, with the one decision inline. Empty means nothing is waiting. */
-function NeedsYou({ data, busy, send, online, openSettings }: { data: Data; busy: boolean; send: Send; online: boolean; openSettings: () => void }) {
+function NeedsYou({ data, busy, send, online, openSettings, openTalk }: { data: Data; busy: boolean; send: Send; online: boolean; openSettings: () => void; openTalk: (id: string) => void }) {
   const rows: ReactNode[] = [];
   const retry = async (j: Job) => {
     if (j.state === "blocked-lease-expired" && !window.confirm(`Is the T3 thread "Build: ${j.spec.title}" stopped? Only try again once it is.`)) return;
@@ -98,6 +107,12 @@ function NeedsYou({ data, busy, send, online, openSettings }: { data: Data; busy
       await send({ action: "approve", id: j.id, revision: j.revision + 1 });
   };
   if (!data.control?.profiles.some(p => p.enabled)) rows.push(<Row key="models" icon="⚙️" title="Allow at least one model" detail="Nothing can run until you choose which models Build may use."><button className={solid} onClick={openSettings}>Choose models</button></Row>);
+  // Conversations waiting on the owner: a plan to start, or a question asked in T3.
+  for (const t of data.talks ?? []) {
+    const plan = t.plan?.items.length ? t.plan : null;
+    if (plan && plan.started.length < plan.items.length) rows.push(<Row key={`t-${t.id}`} icon="💬" title={`Plan ready: ${t.title}`} detail={`${plan.items.length} task${plan.items.length === 1 ? "" : "s"} to start.`}><button className={solid} onClick={() => openTalk(t.id)}>Open</button></Row>);
+    else if (t.state === "waiting") rows.push(<Row key={`t-${t.id}`} icon="💬" title={`${t.title} is asking you something`} detail="Answer it in T3, in its Talk thread."><button className={btn} onClick={() => openTalk(t.id)}>Open</button></Row>);
+  }
   if (!online) rows.push(<Row key="mac" icon="💤" title="The Mac is offline" detail="Wake it and keep T3 Code open. Conversations and tasks continue automatically." />);
   for (const j of data.jobs.filter(j => j.state === "review" && cp(j).result?.needsAnswer))
     rows.push(<Row key={j.id} icon="❓" title={`${j.spec.title} is asking you something`} detail={`Answer in T3, in the thread "Build: ${j.spec.title}".`} />);

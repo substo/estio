@@ -157,3 +157,10 @@ The owner found the Next · Now · Done board unreadable and unable to scale. Th
 
 - Code: `lib/build/features.ts` (model, client-safe, ~60 entries from the live data in about 30 ms), `lib/build/release.ts` (live release and merge wording), `app/(main)/admin/platform/build/product.tsx` (Product, The app, Watching), `progress.tsx` (shared work item, story view, helpers). `snapshot()` adds `release` from the deploy manifest when readable. The external-work API and `scripts/build-external.ts` are unchanged; their `#<record id>` links open the entry holding the record.
 - Verified: `npx tsx --test lib/build/*.test.ts` (51 tests, including `features.test.ts`), no type errors in touched files, and headless Chrome screenshots of the real page components against a read-only snapshot of production Build data at 1180 and 820 wide, light and dark (list, opened feature, filters, Show done, The app, empty filter result).
+
+## Talk out of the way, linked to Product (2026-11-07)
+
+The owner found the open transcript at the top confusing: it didn't go away and didn't connect to the work. Talk is now one "Talk to Build" line with open conversations as chips and Past conversations beside it; conversations open in a side sheet (Radix dialog: focus contained, Escape and Close, no keyboard pop-up when reading). Archive ("Done with this conversation"), reopen (`talk-reopen`) and self-archiving when every started task is finished are described in [software factory](software-factory.md#talk). `GET /api/build` adds `pastTalks` (archived, without transcripts) and `?talk=<id>` returns one conversation; existing actions, the worker relay and T3 threads are unchanged.
+
+- Code: `lib/build/conversations.ts` (links, auto-archive rule, archive record), `lib/build/talk.ts` (archive/reopen, settle on load, past list), `talk.tsx` (entry and sheet), links in `product.tsx`/`progress.tsx`, Needs you rows in `workspace.tsx`.
+- Verified: 54 `lib/build` tests (including `conversations.test.ts`), no type errors in touched files, and headless screenshots against a read-only production snapshot at 1180 and 820, light and dark.
