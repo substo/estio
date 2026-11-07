@@ -159,7 +159,12 @@ export async function verifyDelivery(input: Input & { cwd: string }): Promise<De
       digest.update(await git(input.cwd, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--binary", ...args, "--"));
       try { await git(input.cwd, "diff", "--no-ext-diff", "--no-textconv", "--check", ...args, "--"); } catch { errors.push("git diff --check failed"); }
     }
-    (await git(input.cwd, "ls-files", "--others", "-z")).split("\0").filter(Boolean).forEach(f => files.add(f));
+    // Keep ignored source/secrets in the fence, but not ordinary compiler output.
+    // Tracked changes are always checked, even under these generated paths.
+    const visible = new Set((await git(input.cwd, "ls-files", "--others", "--exclude-standard", "-z")).split("\0").filter(Boolean));
+    (await git(input.cwd, "ls-files", "--others", "-z")).split("\0").filter(Boolean).forEach(f => {
+      if (visible.has(f) || !(f.startsWith(".next/") || f === "tsconfig.tsbuildinfo")) files.add(f);
+    });
     evidence.files = [...files].sort();
     let total = 0;
     for (const file of evidence.files) {

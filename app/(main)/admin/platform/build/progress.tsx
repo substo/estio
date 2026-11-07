@@ -8,7 +8,7 @@ import { mergeWords, type Release } from "@/lib/build/release";
 
 export type Merge = { state: "queued" | "merging" | "resolving" | "merged" | "failed"; at: string; sha?: string; reason?: string; local?: string; branch?: string };
 export type External = { threadId: string; status: string; note: string; at: string; evidence: string[]; history?: { at: string; status: string; note: string }[] };
-export type Checkpoint = { story?: Story; external?: External; merge?: Merge; evidence?: { ok?: boolean; files?: string[] }; reason?: string; nextStep?: string; result?: { text?: string; needsAnswer?: boolean; decisions?: string | null }; review?: { path: string; change: "added" | "modified" | "deleted"; size: number; truncated?: boolean }[]; t3?: { threadId?: string; branch?: string }; feedback?: { at: string; decision: string; note: string; sentAt?: string }[]; auto?: { wouldApprove: boolean; reasons: string[] }; proposalsCreated?: number };
+export type Checkpoint = { story?: Story; external?: External; merge?: Merge; evidence?: { ok?: boolean; files?: string[]; errors?: string[] }; reason?: string; nextStep?: string; result?: { text?: string; needsAnswer?: boolean; decisions?: string | null }; review?: { path: string; change: "added" | "modified" | "deleted"; size: number; truncated?: boolean }[]; t3?: { threadId?: string; branch?: string }; feedback?: { at: string; decision: string; note: string; sentAt?: string }[]; auto?: { wouldApprove: boolean; reasons: string[] }; proposalsCreated?: number };
 export type Job = { id: string; key: string; revision: number; state: string; spec: z.infer<typeof jobSpec>; checkpoint: unknown; attempt: unknown; approval: unknown; createdAt: string; updatedAt: string };
 type Send = (command: unknown) => Promise<boolean>;
 

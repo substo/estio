@@ -116,8 +116,8 @@ function NeedsYou({ data, busy, send, online, openSettings, openTalk }: { data: 
   if (!online) rows.push(<Row key="mac" icon="💤" title="The Mac is offline" detail="Wake it and keep T3 Code open. Conversations and tasks continue automatically." />);
   for (const j of data.jobs.filter(j => j.state === "review" && cp(j).result?.needsAnswer))
     rows.push(<Row key={j.id} icon="❓" title={`${j.spec.title} is asking you something`} detail={`Answer in T3, in the thread "Build: ${j.spec.title}".`} />);
-  for (const j of data.jobs.filter(j => j.state === "review" && !cp(j).result?.needsAnswer)) rows.push(<Result key={j.id} job={j} busy={busy} send={send} />);
-  for (const j of data.jobs.filter(j => j.state === "failed")) rows.push(<Result key={j.id} job={j} busy={busy} send={send} failed retry={() => void retry(j)} />);
+  for (const j of data.jobs.filter(j => j.state === "review" && !cp(j).result?.needsAnswer)) rows.push(<Result key={j.id} job={j} busy={busy} send={send} openTalk={openTalk} />);
+  for (const j of data.jobs.filter(j => j.state === "failed")) rows.push(<Result key={j.id} job={j} busy={busy} send={send} openTalk={openTalk} failed retry={() => void retry(j)} />);
   for (const j of data.jobs.filter(j => blockedStates.includes(j.state)))
     rows.push(<Row key={j.id} icon="⏸️" title={`${j.spec.title} is stuck`} detail={plainBlock(j)}><button className={btn} disabled={busy} onClick={() => void retry(j)}>Try again</button><button className={btn} disabled={busy} onClick={() => send({ action: "revoke", id: j.id, revision: j.revision })}>Drop it</button></Row>);
   for (const j of data.jobs.filter(j => j.state === "proposed"))
@@ -140,22 +140,25 @@ function plainBlock(j: Job) {
     : cp(j).reason ?? "It can't run as configured.";
 }
 /** A finished task: what it says, where the work is, and accept or redo with a note (same T3 thread). */
-function Result({ job, busy, send, failed, retry }: { job: Job; busy: boolean; send: Send; failed?: boolean; retry?: () => void }) {
+function Result({ job, busy, send, failed, retry, openTalk }: { openTalk: (id: string) => void; job: Job; busy: boolean; send: Send; failed?: boolean; retry?: () => void }) {
   const [note, setNote] = useState(""), [redo, setRedo] = useState(false), [more, setMore] = useState(false);
   const c = cp(job), text = c.result?.text ?? c.reason ?? "";
-  return <Row icon={failed ? "⚠️" : "✅"} title={failed ? `${job.spec.title} didn't finish` : `${job.spec.title} is ready`}
+  return <Row icon={failed ? "⚠️" : "✅"} title={failed ? `${job.spec.title}: ${c.evidence?.ok === false ? "verification blocked" : "attempt stopped"}` : `${job.spec.title} is ready`}
     detail={<div className="space-y-1">
       <p>{failed ? c.reason ?? "The task failed." : job.spec.outcome}{c.t3?.branch ? ` · branch ${c.t3.branch}` : ""}</p>
       {!failed && c.result?.decisions && c.result.decisions !== "none" && <div className="rounded-md border border-amber-400 bg-amber-50 p-2 text-foreground dark:bg-amber-950/30"><p className="font-medium">Decisions it made: check before merging</p><p className="whitespace-pre-wrap">{c.result.decisions}</p></div>}
       {!failed && c.result?.decisions === "none" && <p>It made no decisions beyond the task.</p>}
+      {failed && c.evidence?.errors?.length ? <details className="text-xs"><summary className="cursor-pointer">Verification details</summary><ul className="list-disc pl-4">{c.evidence.errors.map((error, i) => <li key={i}>{error}</li>)}</ul></details> : null}
       {c.review?.length ? <ChangedFiles job={job} files={c.review} /> : null}
+      {failed && <p className="text-xs">{c.evidence?.ok === false ? "Verification blocked this result. The changes are preserved; this is not a request for your answer. Review the conversation and verification details before retrying." : "The attempt stopped. Open the conversation to see what happened before requesting more work."}</p>}
       {text && <><button className="underline" onClick={() => setMore(!more)}>{more ? "Hide report" : "Full report"}</button>{more && <p className="max-h-64 overflow-auto whitespace-pre-wrap rounded border bg-background p-2 text-foreground">{text}</p>}</>}
-      {redo && <div className="flex flex-wrap items-end gap-2 pt-1"><textarea autoFocus rows={3} className={`${field} min-w-60 flex-1`} placeholder="What should change?" value={note} maxLength={2000} onChange={e => setNote(e.target.value)} /><button className={solid} disabled={busy || note.trim().length < 3} onClick={async () => { if (await send({ action: "redo", id: job.id, revision: job.revision, note: note.trim() })) { setNote(""); setRedo(false); } }}>Send</button></div>}
+      {redo && <div className="flex flex-wrap items-end gap-2 pt-1"><textarea autoFocus rows={3} className={`${field} min-w-60 flex-1`} placeholder="Add your comments: what should the agent change?" value={note} maxLength={2000} onChange={e => setNote(e.target.value)} /><button className={solid} disabled={busy || note.trim().length < 3} onClick={async () => { if (await send({ action: "redo", id: job.id, revision: job.revision, note: note.trim() })) { setNote(""); setRedo(false); } }}>Send</button></div>}
     </div>}>
     {!failed && canMerge(job) && <button className={solid} disabled={busy} title="Accept and merge into the release branch" onClick={() => send({ action: "merge", id: job.id, revision: job.revision })}>Merge</button>}
     {!failed && <button className={canMerge(job) ? btn : solid} disabled={busy} onClick={() => send({ action: "accept", id: job.id, revision: job.revision })}>{canMerge(job) ? "Accept, merge later" : "Accept"}</button>}
-    {failed && retry && <button className={btn} disabled={busy} onClick={retry}>Try again</button>}
-    <button className={btn} disabled={busy} onClick={() => setRedo(!redo)}>Redo…</button>
+    {(c.t3?.threadId || c.external?.threadId) && <button className={btn} onClick={() => openTalk(`job:${job.id}`)}>Open conversation</button>}
+    {failed && retry && <button className={btn} disabled={busy} onClick={retry}>Restart attempt</button>}
+    <button className={btn} disabled={busy} onClick={() => setRedo(!redo)}>Request changes…</button>
   </Row>;
 }
 
@@ -211,6 +214,6 @@ function Settings({ data, busy, send, close }: { data: Data; busy: boolean; send
     </div>
     <details><summary className="cursor-pointer text-sm font-medium">How Build works</summary>
       <ol className="mt-2 grid gap-2 sm:grid-cols-3">{loop.map((l, i) => <li key={l.step} className="rounded-md border p-2 text-xs"><span className="text-muted-foreground">{i + 1} · {l.who}</span><span className="block text-sm font-medium">{l.step}</span>{l.text}</li>)}</ol>
-      <p className="mt-2 text-xs text-muted-foreground">Build never merges or deploys. The full explainer is documentation/software-factory.md.</p></details>
+      <p className="mt-2 text-xs text-muted-foreground">Build can merge a reviewed result; deployment is a separate release step. The full explainer is documentation/software-factory.md.</p></details>
   </section>;
 }

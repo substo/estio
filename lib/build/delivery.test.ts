@@ -145,3 +145,29 @@ test("a result lists its changes readably: new files in full, edits as diffs", a
     assert.equal(files[2].text, "# New\n");
   } finally { await rm(temp, { recursive: true, force: true }); }
 });
+
+test("ignored compiler output is excluded, but ignored source and tracked artifacts remain fenced", async () => {
+  const temp = await mkdtemp(path.join(await realpath(os.tmpdir()), "delivery-artifacts-"));
+  const checkout = path.join(temp, "source"), root = path.join(temp, "private");
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=F", "-c", "user.email=f@localhost", ...args], { cwd, encoding: "utf8" }).trim();
+  try {
+    await mkdir(checkout); git(checkout, "init", "-q");
+    await writeFile(path.join(checkout, ".gitignore"), ".next/\n*.tsbuildinfo\nignored.ts\n");
+    await writeFile(path.join(checkout, "source.ts"), "original\n");
+    git(checkout, "add", "."); git(checkout, "commit", "-qm", "base");
+    const input = { checkout, root, jobId: "artifacts", spec: { baseRevision: git(checkout, "rev-parse", "HEAD"), scope: ["source.ts"] } };
+    const cp = await prepareDelivery(input);
+    await mkdir(path.join(cp.cwd, ".next/cache"), { recursive: true });
+    await writeFile(path.join(cp.cwd, ".next/cache/output"), "generated");
+    await writeFile(path.join(cp.cwd, "tsconfig.tsbuildinfo"), "generated");
+    await writeFile(path.join(cp.cwd, "source.ts"), "changed\n");
+    const good = await verifyDelivery({ ...input, cwd: cp.cwd });
+    assert.equal(good.ok, true, good.errors.join("; "));
+    assert.deepEqual(good.files, ["source.ts"]);
+    await writeFile(path.join(cp.cwd, "ignored.ts"), "out of scope\n");
+    assert.equal((await verifyDelivery({ ...input, cwd: cp.cwd })).ok, false);
+    await rm(path.join(cp.cwd, "ignored.ts"));
+    git(cp.cwd, "add", "-f", ".next/cache/output");
+    assert.equal((await verifyDelivery({ ...input, cwd: cp.cwd })).ok, false);
+  } finally { await rm(temp, { recursive: true, force: true }); }
+});
