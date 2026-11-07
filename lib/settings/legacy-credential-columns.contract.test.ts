@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+const MIGRATION_GUARD_TEST = "scripts/test-credential-migrations-db.sh"; // builds a throwaway schema with the old columns
 
 /**
  * Credentials live in encrypted settings secrets (documentation/credentials.md). This contract keeps code from
@@ -39,14 +40,14 @@ const isThisTest = (file: string) => /\.test\.ts$/.test(file); // tests may name
 
 test("retired Google/Outlook token columns are never named in code", () => {
     for (const column of RETIRED_USER_COLUMNS) {
-        const hits = safeFilesNaming(column).filter(file => !isThisTest(file));
+        const hits = safeFilesNaming(column).filter(file => file !== MIGRATION_GUARD_TEST && !isThisTest(file));
         assert.deepEqual(hits, [], `${column} is still referenced`);
     }
 });
 
 test("transition columns are only named by their fallback/cleanup code and the move script", () => {
     for (const [column, allowed] of Object.entries(TRANSITION_COLUMNS)) {
-        const hits = safeFilesNaming(column).filter(file => !isThisTest(file) && !allowed.includes(file));
+        const hits = safeFilesNaming(column).filter(file => file !== MIGRATION_GUARD_TEST && !isThisTest(file) && !allowed.includes(file));
         assert.deepEqual(hits, [], `${column} is referenced outside ${allowed.join(", ")}`);
     }
 });
@@ -56,7 +57,7 @@ test("no Prisma query selects or filters User.crmUsername / User.crmPassword", (
     const prismaShaped = /\bcrm(?:Username|Password):\s*(?:true\b|\{\s*not\b)|\b(?:user|dbUser|privateUser|context\.user)\??\.crm(?:Username|Password)\b/;
     for (const column of ["crmUsername", "crmPassword"]) {
         for (const file of safeFilesNaming(column)) {
-            if (isThisTest(file)) continue;
+            if (file === MIGRATION_GUARD_TEST || isThisTest(file)) continue;
             const source = readFileSync(`${root}/${file}`, "utf8");
             assert.doesNotMatch(source, prismaShaped, `${file} uses a ${column} column`);
         }
