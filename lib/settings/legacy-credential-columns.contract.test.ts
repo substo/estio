@@ -11,8 +11,6 @@ import { readFileSync } from "node:fs";
  * - TRANSITION: awaiting a copy before its drop; only the listed fallback/cleanup files may name it.
  */
 const root = process.cwd();
-const MOVE_SCRIPT = "scripts/settings/move-legacy-credentials.ts";
-const MOVE_LIBRARY = "lib/settings/legacy-credentials-move.ts"; // the move itself (script and Platform admin control)
 
 const RETIRED_USER_COLUMNS = [
     "googleAccessToken",
@@ -41,14 +39,14 @@ const isThisTest = (file: string) => /\.test\.ts$/.test(file); // tests may name
 
 test("retired Google/Outlook token columns are never named in code", () => {
     for (const column of RETIRED_USER_COLUMNS) {
-        const hits = safeFilesNaming(column).filter(file => file !== MOVE_SCRIPT && file !== MOVE_LIBRARY && !isThisTest(file));
+        const hits = safeFilesNaming(column).filter(file => !isThisTest(file));
         assert.deepEqual(hits, [], `${column} is still referenced`);
     }
 });
 
 test("transition columns are only named by their fallback/cleanup code and the move script", () => {
     for (const [column, allowed] of Object.entries(TRANSITION_COLUMNS)) {
-        const hits = safeFilesNaming(column).filter(file => file !== MOVE_SCRIPT && file !== MOVE_LIBRARY && !isThisTest(file) && !allowed.includes(file));
+        const hits = safeFilesNaming(column).filter(file => !isThisTest(file) && !allowed.includes(file));
         assert.deepEqual(hits, [], `${column} is referenced outside ${allowed.join(", ")}`);
     }
 });
@@ -58,7 +56,7 @@ test("no Prisma query selects or filters User.crmUsername / User.crmPassword", (
     const prismaShaped = /\bcrm(?:Username|Password):\s*(?:true\b|\{\s*not\b)|\b(?:user|dbUser|privateUser|context\.user)\??\.crm(?:Username|Password)\b/;
     for (const column of ["crmUsername", "crmPassword"]) {
         for (const file of safeFilesNaming(column)) {
-            if (file === MOVE_SCRIPT || file === MOVE_LIBRARY || isThisTest(file)) continue;
+            if (isThisTest(file)) continue;
             const source = readFileSync(`${root}/${file}`, "utf8");
             assert.doesNotMatch(source, prismaShaped, `${file} uses a ${column} column`);
         }
