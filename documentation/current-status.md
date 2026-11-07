@@ -1,8 +1,12 @@
 # Current release and work
 
-Updated 2026-11-06. This is the task/status source of truth; [architecture and decisions](how-the-app-works.md) owns product rules. Historical checkpoints do not override this page.
+Updated 2026-11-07. This is the task/status source of truth; [architecture and decisions](how-the-app-works.md) owns product rules. Historical checkpoints do not override this page.
 
 ## Release
+
+Latest serving verification, 2026-11-07 10:34 UTC: production remains healthy at canonical revision `e780413dc2dee2ce59267ab13b335485b2c30815`, build `lhRd-y7IaywWA6yYK6WCf`, blue. The Build conversation fix `251fc4bf` is committed and integrated on `release/studio-go-live`, but its owned migrate-only deployment failed during local compilation in the existing Next Google font loader (`lib/website/fonts.ts`, extension regex received no match). No upload, schema mutation or traffic cutover occurred. A read-only re-fetch currently returns supported font URLs for both website fonts; the failing URL was not captured, so a transient response is an inference. Retry awaits the deployment skill's post-failure approval. The Mac relay was not restarted against the older serving API. Earlier release entries below are historical evidence.
+
+The fix adds idle T3 sync, visible proposed work/Start, and execution conversations opened from Work subcards with planning/task/T3 links. Returned-result replies reuse scoped Redo; history loading cannot replay historical Start. Verified with 60 focused tests, final changed relay/policy checks, strict Build-slice compilation, disposable PostgreSQL onboarding replay and an actual read-only CLI mirror. Signed-in mobile/keyboard acceptance remains open (T3 preview server tab limit). No onboarding execution was started by this maintenance work. Deployment log: `/tmp/estio-build-conversations-20261107-deploy.log`.
 
 Resume verification 2026-11-07: a later canonical descendant `4b488e6404454d63284971929ce12a252f83813e` is now serving build `Gs8LWZGQRrreEn5_t1VOI`, blue. Its manifest and public version agree; both Library commits `e3563b75` and `b80fe410` remain ancestors and the import route is unchanged from the verified Library release. Required web/Studio/scrape/relay services are online with zero restarts. Fresh non-mutating origin checks on both domains again return tenant-guard 409 for valid public Origins and verification 403 for missing/cross-site/unrelated Origins. No duplicate deployment was run. Existing Build entry revision 8 preserves the story/spec/history and records this reconciliation. Authenticated import, production creator linking and companion generation remain unverified. The Library rollout below is historical release evidence, not the current serving build.
 
