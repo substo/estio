@@ -7,13 +7,16 @@ export type FieldKind = "text" | "longtext" | "url" | "email" | "list" | "addres
   | "competitors" | "areas" | "hours" | "countryCode" | "currencyCode" | "timezone";
 /** Where a field lives: a dotted Business profile path, or a Location column. */
 export type FieldTarget = { profile: string } | { location: "name" | "timeZone" };
-export type TopicField = { key: string; label: string; kind: FieldKind; target: FieldTarget; hint?: string };
+export type TopicField = { key: string; label: string; kind: FieldKind; target: FieldTarget; hint?: string; choices?: string[] };
 export type TopicId = "business" | "contact" | "online" | "offer" | "market" | "voice" | "look" | "competitors" | "realEstate";
 export type Topic = { id: TopicId; title: string; question: string; fields: TopicField[]; apps?: ("estio" | "substo")[] };
 
 const p = (profile: string): FieldTarget => ({ profile });
 export const onboardingTopics: Topic[] = [
   { id: "business", title: "Your business", question: "What is your business called, and how would you describe it in a sentence or two?", fields: [
+    { key: "stage", label: "Business stage", kind: "text", target: p("setup.stage"), choices: ["starting", "operating"] },
+    { key: "kind", label: "Business or personal brand", kind: "text", target: p("setup.kind"), choices: ["business", "personal_brand"] },
+    { key: "presence", label: "Where you operate", kind: "text", target: p("setup.presence"), choices: ["online", "physical", "both"] },
     { key: "name", label: "Business name", kind: "text", target: { location: "name" } },
     { key: "summary", label: "Short description", kind: "longtext", target: p("identity.summary") },
     { key: "tagline", label: "Tagline", kind: "text", target: p("identity.tagline") },
@@ -70,11 +73,11 @@ export const findTopic = (id: string) => onboardingTopics.find(t => t.id === id)
 export type FieldValue = string | string[] | { label?: string; number: string }[] | { url: string; title?: string }[] | { platform: string; url: string }[]
   | { variant: string; url: string }[] | { role: string; hex: string }[] | { name: string; website?: string; notes?: string }[]
   | { day: string; closed: boolean; opens?: string; closes?: string }[];
-export type FieldStatus = "empty" | "suggested" | "confirmed" | "not_applicable";
+export type FieldStatus = "empty" | "suggested" | "confirmed" | "not_applicable" | "not_yet";
 export type TopicStatus = "empty" | "suggested" | "confirmed" | "skipped";
 /** A topic is confirmed when something is filled and nothing waits for confirmation; skipped topics stay skipped. */
 export function topicStatus(fieldStatuses: FieldStatus[], skipped: boolean): TopicStatus {
   if (fieldStatuses.includes("suggested")) return "suggested";
-  if (fieldStatuses.some(s => s === "confirmed" || s === "not_applicable")) return "confirmed";
+  if (fieldStatuses.some(s => s === "confirmed" || s === "not_applicable" || s === "not_yet")) return "confirmed";
   return skipped ? "skipped" : "empty";
 }

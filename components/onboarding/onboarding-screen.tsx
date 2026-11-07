@@ -57,7 +57,7 @@ export function OnboardingScreen({ initialView, locationId, connect, homeHref, u
 
   const timeline = <Timeline view={view} active={active} editing={editing} busy={busy} canEdit={view.canEdit}
     onSelect={id => setSelected(id)} onEdit={edit} onCancel={() => setEditing(null)}
-    onSave={(topic, field, value) => command({ action: "edit", topic, field, value }, () => setEditing(null))}
+    onSave={(topic, field, value) => command(typeof value === "object" && value && "fieldState" in value ? { action: "field-state", topic, field, status: value.fieldState } : { action: "edit", topic, field, value }, () => setEditing(null))}
     onConfirm={(topic, field) => command({ action: "confirm", topic, field })} />;
 
   const chat = <section aria-label="Onboarding chat" className="flex min-h-0 flex-1 flex-col rounded-xl border bg-card">
@@ -65,11 +65,11 @@ export function OnboardingScreen({ initialView, locationId, connect, homeHref, u
       {view.messages.map(m => <Message key={m.id} role={m.role} text={m.text} />)}
       {locked ? <ConnectCard links={connect} canEdit={view.canEdit} />
         : !view.canEdit ? <p className="rounded-lg border bg-muted/40 p-3 text-sm">Only an admin of this {view.app === "substo" ? "brand" : "location"}, signed in as themselves, can fill in the business profile.</p>
-        : !started ? <StartCard busy={busy} defaultName={String(view.topics.find(t => t.id === "business")?.fields.find(f => f.key === "name")?.value ?? "")} onStart={(name, website) => command({ action: "start", name, website }, () => chatInput.current?.focus())} />
+        : !started ? <StartCard busy={busy} defaultName={String(view.topics.find(t => t.id === "business")?.fields.find(f => f.key === "name")?.value ?? "")} onStart={(values) => command({ action: "start", ...values }, () => chatInput.current?.focus())} />
         : current ? <TopicPrompt topic={current} busy={busy}
             onConfirmAll={() => command({ action: "confirm-topic", topic: current.id }, () => chatInput.current?.focus())}
             onEdit={field => edit(current.id, field)} onSkip={() => command({ action: "skip", topic: current.id }, () => chatInput.current?.focus())} />
-        : <Summary view={view} busy={busy} onFinish={() => command({ action: "finish" })} onResearch={() => command({ action: "start", ...view.input })} />}
+        : <Summary view={view} busy={busy} onFinish={() => command({ action: "finish" })} onResearch={() => command({ action: "start" })} />}
       {started && !locked && <ResearchProgress topics={view.topics} researching={view.researching} note={view.researchNote} />}
       <div ref={chatEnd} />
     </div>
@@ -124,13 +124,17 @@ function ConnectCard({ links, canEdit }: { links: ConnectLink[]; canEdit: boolea
   </div>;
 }
 
-function StartCard({ busy, defaultName, onStart }: { busy: boolean; defaultName: string; onStart: (name: string, website: string) => void }) {
-  const name = useRef<HTMLInputElement>(null);
-  useEffect(() => { name.current?.focus(); }, []);
-  return <form className="space-y-3 rounded-xl border bg-background p-4" onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); onStart(String(f.get("name") ?? "").trim(), String(f.get("website") ?? "").trim()); }}>
-    <p className="text-sm">Hi! Tell me your business name or website and I&apos;ll look you up, then you only confirm what I find.</p>
+function StartCard({ busy, defaultName, onStart }: { busy: boolean; defaultName: string; onStart: (values: Record<string, string>) => void }) {
+  return <form className="space-y-3 rounded-xl border bg-background p-4" onSubmit={e => { e.preventDefault(); const f = new FormData(e.currentTarget); onStart(Object.fromEntries(Array.from(f.entries()).map(([k, v]) => [k, String(v).trim()]))); }}>
+    <p className="text-sm">Tell me what you are building. Research follows your stage and setup; you confirm every suggestion.</p>
+    <div className="grid gap-2 sm:grid-cols-3">
+      <label className="text-sm">Stage<select name="stage" autoFocus required className="mt-1 block w-full rounded-md border bg-background p-2"><option value="">Choose stage</option><option value="starting">Starting from scratch</option><option value="operating">Already operating</option></select></label>
+      <label className="text-sm">Identity<select name="kind" required className="mt-1 block w-full rounded-md border bg-background p-2"><option value="">Choose identity</option><option value="business">Business</option><option value="personal_brand">Personal brand</option></select></label>
+      <label className="text-sm">Presence<select name="presence" required className="mt-1 block w-full rounded-md border bg-background p-2"><option value="">Choose presence</option><option value="online">Online</option><option value="physical">Physical</option><option value="both">Both</option></select></label>
+    </div>
+    <label className="block space-y-1 text-sm"><span>Describe your business or personal brand</span><Textarea name="summary" required maxLength={2000} rows={3} /></label>
     <div className="grid gap-2 sm:grid-cols-2">
-      <label className="space-y-1 text-sm"><span className="font-medium">Business name</span><Input ref={name} name="name" defaultValue={defaultName} maxLength={200} autoComplete="organization" /></label>
+      <label className="space-y-1 text-sm"><span className="font-medium">Business name</span><Input name="name" defaultValue={defaultName} maxLength={200} autoComplete="organization" /></label>
       <label className="space-y-1 text-sm"><span className="font-medium">Website</span><Input name="website" maxLength={2048} inputMode="url" placeholder="example.com" autoComplete="url" /></label>
     </div>
     <Button type="submit" disabled={busy}>{busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : <Sparkles className="mr-2 h-4 w-4" aria-hidden />}Start research</Button>
@@ -181,7 +185,7 @@ function Summary({ view, busy, onFinish, onResearch }: { view: OnboardingView; b
     {missing.length > 0 && <p className="text-sm"><span className="font-medium">Still missing:</span> {missing.map(t => t.title).join(", ")}. You can add these any time.</p>}
     <div className="flex flex-wrap gap-2">
       {view.status !== "done" && <Button disabled={busy} onClick={onFinish}><Check className="mr-1 h-4 w-4" aria-hidden />Finish</Button>}
-      {(view.input.name || view.input.website) && <Button variant="outline" disabled={busy} onClick={onResearch}><Sparkles className="mr-1 h-4 w-4" aria-hidden />Research again</Button>}
+      <Button variant="outline" disabled={busy} onClick={onResearch}><Sparkles className="mr-1 h-4 w-4" aria-hidden />Research again</Button>
     </div>
   </div>;
 }
@@ -224,7 +228,7 @@ function FieldRow({ topic, field, busy, canEdit, editing, onEdit, onCancel, onSa
   return <div className="group text-sm">
     <dt className="text-xs text-muted-foreground">{field.label}</dt>
     <dd className="flex flex-wrap items-baseline gap-x-2">
-      <span className={field.status === "empty" ? "text-muted-foreground" : ""}>{shown || "Not set"}</span>
+      <span className={field.status === "empty" ? "text-muted-foreground" : ""}>{field.status === "not_applicable" ? "Not applicable" : field.status === "not_yet" ? "Not yet" : shown || "Unanswered"}</span>
       {field.status === "suggested" && <span className="text-xs text-amber-600">suggested<Sources urls={field.suggestion?.sources ?? field.sources} /></span>}
       {field.status === "confirmed" && field.sources.length > 0 && <Sources urls={field.sources} />}
       {canEdit && field.status === "suggested" && <button type="button" disabled={busy} onClick={onConfirm} className="text-xs font-medium text-primary underline">Confirm</button>}
@@ -242,9 +246,10 @@ function EditField({ id, field, busy, onCancel, onSave }: { id: string; field: F
   return <form className="space-y-1.5 rounded-lg border bg-background p-2" onSubmit={e => { e.preventDefault(); onSave(fromText(field.kind, text)); }}
     onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); cancel(); } }}>
     <label htmlFor={id} className="text-xs font-medium">{field.label}</label>
-    {multiline(field.kind) ? <Textarea id={id} ref={ref} rows={Math.min(8, Math.max(3, text.split("\n").length + 1))} value={text} onChange={e => setText(e.target.value)} />
+    {field.choices ? <select id={id} autoFocus value={text} onChange={e => setText(e.target.value)} className="block w-full rounded-md border bg-background p-2"><option value="">Choose</option>{field.choices.map(c => <option key={c} value={c}>{c === "starting" ? "Starting from scratch" : c === "operating" ? "Already operating" : c.replaceAll("_", " ")}</option>)}</select> : multiline(field.kind) ? <Textarea id={id} ref={ref} rows={Math.min(8, Math.max(3, text.split("\n").length + 1))} value={text} onChange={e => setText(e.target.value)} />
       : <Input id={id} ref={ref} value={text} onChange={e => setText(e.target.value)} type={field.kind === "email" ? "email" : "text"} inputMode={field.kind === "url" ? "url" : undefined} />}
     {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-    <div className="flex gap-2"><Button type="submit" size="sm" disabled={busy}>Save</Button><Button type="button" size="sm" variant="ghost" onClick={cancel}>Cancel</Button></div>
+    <div className="flex flex-wrap gap-2"><Button type="submit" size="sm" disabled={busy}>Save</Button>
+      {field.excludable && <>{([['not_applicable', 'Not applicable'], ['not_yet', 'Not yet'], ['empty', 'Leave unanswered']] as const).map(([status, label]) => <Button key={status} type="button" size="sm" variant="outline" disabled={busy} onClick={() => onSave({ fieldState: status })}>{label}</Button>)}</>}<Button type="button" size="sm" variant="ghost" onClick={cancel}>Cancel</Button></div>
   </form>;
 }

@@ -8,6 +8,8 @@ import type { StudioDb } from "@/lib/studio/db";
 import type { StudioJobHandler } from "@/lib/studio/worker/handlers";
 import { onboardingStateSchema, say, updateRun, type OnboardingState } from "./state";
 import { findTopic } from "./topics";
+import { businessView } from "@/lib/business-profile/view";
+import { factAt } from "./facts";
 import { applySuggestions } from "./facts";
 import { parseResearchOutput, researchInput, researchPrompt } from "./research-contract";
 import { chooseResearchProvider, providerSearchesWeb, runProvider } from "./providers";
@@ -65,6 +67,19 @@ type ResearchPayload = { batch: string; topic: string; actorId: string | null };
 type ApplyPayload = { jobId: string; batch: string; topic: string; actorId: string | null; status: "succeeded" | "failed" | "cancelled";
   result?: { research: unknown; provider: string; model: string }; error?: string };
 
+/** Read canonical choices at execution time, so research never relies on stale onboarding copies. */
+async function researchContext(locationId: string, topicId: string) {
+  const doc = await settingsService.getDocument<BusinessProfile>(scope(locationId, SETTINGS_DOMAINS.LOCATION_BUSINESS));
+  const profile = doc ? businessProfileSchema.parse(doc.payload) : null;
+  const view = businessView(profile, {});
+  const excluded = (findTopic(topicId)?.fields ?? []).filter(f => {
+    if (!("profile" in f.target)) return false;
+    const fact = factAt(profile, f.target.profile);
+    return !!fact?.confirmedAt || fact?.status === "not_applicable" || fact?.status === "not_yet";
+  }).map(f => f.key);
+  return { ...view.setup, summary: view.summary, excluded };
+}
+
 /** Same parse, mapping and confirmed-fact protection for every provider, server or Mac. */
 async function applyResearchReply(locationId: string, topic: NonNullable<ReturnType<typeof findTopic>>, runId: string, text: string, provider: string) {
   const location = await db.location.findUnique({ where: { id: locationId }, select: { name: true, timeZone: true } });
@@ -78,7 +93,7 @@ async function applyResearchReply(locationId: string, topic: NonNullable<ReturnT
   await updateOnboardingState(locationId, s => {
     let next = updateRun(s, runId, { status: "done", provider, finishedAt: new Date().toISOString(), applied, sources });
     // Name and time zone live on Location: they wait in the state until the owner confirms them.
-    if (parsed.businessName && parsed.businessName !== location?.name && !next.suggestedName) next = { ...next, suggestedName: { value: parsed.businessName, sources } };
+    if (!location?.name && parsed.businessName && parsed.businessName !== location?.name && !next.suggestedName) next = { ...next, suggestedName: { value: parsed.businessName, sources } };
     if (timeZone && !location?.timeZone && typeof timeZone.value === "string") next = { ...next, suggestedTimeZone: { value: timeZone.value, sources: timeZone.sources } };
     const found = applied.length + (timeZone ? 1 : 0);
     return found ? say(next, "agent", `${topic.title}: I found ${found} detail${found === 1 ? "" : "s"} to check.`, topic.id) : next;
@@ -117,7 +132,7 @@ export function createOnboardingHandlers(studio: StudioDb, deps: { fetchPage?: t
       if (device) {
         try {
           await studio.call("studio_enqueue_device_onboarding_research", { p_location_id: job.location_id, p_device_id: device.id,
-            p_payload: { batch: payload.batch, topic, actorId: payload.actorId, app: location?.authRealm === "substo" ? "substo" : "estio", input: state.input, pages },
+            p_payload: { batch: payload.batch, topic, actorId: payload.actorId, app: location?.authRealm === "substo" ? "substo" : "estio", input: state.input, context: await researchContext(job.location_id, topic), pages },
             p_idempotency_key: `onboarding:${payload.batch}:${topic}:mac`, p_created_by: payload.createdBy });
           onMac++; continue;
         } catch { /* The Mac stopped accepting research meanwhile: this topic uses the server connections. */
@@ -147,7 +162,7 @@ export function createOnboardingHandlers(studio: StudioDb, deps: { fetchPage?: t
       const app = location?.authRealm === "substo" ? "substo" : "estio";
       const webSearch = providerSearchesWeb(provider);
       const reply = await runProvider({ provider, locationId: job.location_id, userId: payload.actorId, webSearch, action: `research_${topic.id}`,
-        system: researchPrompt(topic, { ...state.input, app, webSearch }), user: researchInput({ ...state.input, pages: state.pages }), signal: undefined });
+        system: researchPrompt(topic, { ...state.input, ...await researchContext(job.location_id, topic.id), app, webSearch }), user: researchInput({ ...state.input, pages: state.pages }), signal: undefined });
       return await applyResearchReply(job.location_id, topic, runId, reply.text, reply.provider);
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 300) : "Research failed";

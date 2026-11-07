@@ -96,7 +96,7 @@ test("view: timeline with statuses, name suggestion beside the Location's name, 
   const view = buildOnboardingView({ app: "substo", profile, location: { name: "Example", timeZone: null }, state, ai, role: "ADMIN", impersonating: false });
   const business = view.topics.find(t => t.id === "business")!;
   assert.equal(business.status, "suggested");
-  assert.deepEqual(business.fields[0].suggestion, { value: "Example Ltd", sources: ["https://b.com"] });
+  assert.deepEqual(business.fields.find(f => f.key === "name")!.suggestion, { value: "Example Ltd", sources: ["https://b.com"] });
   assert.equal(view.topics.find(t => t.id === "contact")!.status, "suggested");
   assert.match(view.nextPrompt, /^Your business: here is what I found\. Business name: Example Ltd/);
   assert.equal(view.canEdit, true); assert.equal(view.openMode, "open");
