@@ -39,7 +39,16 @@ Each drop migration runs in a transaction and first refuses (`RAISE EXCEPTION`) 
 ## Deploy order
 
 1. **Code** (commit "Read and write legacy credentials only through the encrypted settings store"). Deploy it. Writers store secrets and clear legacy copies. Readers use secrets. Only the Outlook browser and verify-token readers still fall back to the old copies.
-2. **Run the copy**: `npx tsx scripts/settings/move-legacy-credentials.ts` (dry run), then `--apply`. It stores each Outlook browser value and verify token as a secret (never overwriting one), reads it back, then clears the old copy. It prints ids and counts only. It also reports the columns the first drop guards. Production dry run, 2026-11-06:
+2. **Run the copy on the server.** Storing a secret needs the server's KMS key file, so a Mac run fails before writing anything (seen 2026-11-07).
+   - **Where:** the platform admin opens **Platform overview** (`/admin/platform`), finds the **Move remaining legacy credentials** card and clicks **Apply**.
+   - **What the card shows:** counts per credential from a dry run (no ids, no values). After Apply it shows the result. Once nothing is left it reads "Nothing left to move", and on the next visit it is gone.
+   - **Access:** `POST /api/platform/legacy-credentials` accepts only the platform admin, never while impersonating, and only same-origin requests.
+   - **Shared logic:** `moveLegacyCredentials` in `lib/settings/legacy-credentials-move.ts` serves both the card and `npx tsx scripts/settings/move-legacy-credentials.ts [--apply]`, for anywhere the keys exist.
+   - **Behaviour:** it stores each Outlook browser value and verify token as a secret (never overwriting one), reads it back, then clears the old copy.
+   - **Audit:** every write is in the settings audit log under the admin's user and one request id: secret UPSERTs, column-clear DELETEs and the document UPSERT. The removed verify token is shown as `[redacted]`.
+   - **Output:** ids and counts only.
+
+   Production dry run, 2026-11-06 (the same five items on 2026-11-07):
    ```
    DRY RUN
    Outlook browser credentials: 1 user(s) with an in-column copy
@@ -54,7 +63,7 @@ Each drop migration runs in a transaction and first refuses (`RAISE EXCEPTION`) 
      - User.crmUsername without a user.crm document: 0
    ```
 3. **Immediate drop** (commit "Drop plain-text CRM password, username and OAuth token columns"). Safe as soon as step 1 is live, because no deployed code reads these columns. It is a separate deploy so that the old slot never queries a dropped column during cutover.
-4. **Drop after copy** (commit "Drop Outlook browser and webhook verify-token columns after the copy"). Deploy only after step 2's `--apply` has run. It removes the fallbacks and the columns; its guard refuses if the copy has not run.
+4. **Drop after copy** (commit "Drop Outlook browser and webhook verify-token columns after the copy"). Deploy only after step 2's Apply has run and the card says "Nothing left to move". It removes the fallbacks and the columns; its guard refuses if the copy has not run.
 
 Steps 3 and 4 may go out in one deploy once step 2 is done.
 
