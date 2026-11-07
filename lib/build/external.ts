@@ -13,7 +13,7 @@ export const externalCommand = z.object({
   status: z.enum(["working", "blocked", "review", "done", "failed"]),
   note: z.string().trim().min(1).max(6000),
   evidence: z.array(z.string().trim().min(1).max(1000)).max(30).default([]),
-  // Plain-language story shown first on the Progress card; omitted keeps the current one.
+  // Plain-language story shown first on the Build page; omitted keeps the current one.
   story: storyInput.optional(),
 }).strict().superRefine((v, ctx) => {
   if (!v.revision && !v.spec) ctx.addIssue({ code: "custom", message: "Registration requires scope" });

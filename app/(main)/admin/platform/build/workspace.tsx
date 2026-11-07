@@ -1,21 +1,23 @@
 "use client";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import type { z } from "zod";
-import { difficulty, undescribed, type nodeSpec, type jobSpec, type Profile } from "@/lib/build/contract";
+import { difficulty, type nodeSpec, type Profile } from "@/lib/build/contract";
 import { modelGuidance, unknownGuidance } from "@/lib/build/model-guidance";
-import { suggestedReferences } from "@/lib/build/watch-suggestions";
 import { loop } from "@/lib/build/factory-guide";
 import { TalkPanel, type Talk } from "./talk";
 import { Playbook } from "./playbook";
-import { Progress, ago, canMerge, cp, stateWord, type Checkpoint, type Job } from "./progress";
+import { ago, canMerge, cp, type Checkpoint, type Job } from "./progress";
+import { AppMap, ProductList, type Focus } from "./product";
+import { productMap } from "@/lib/build/features";
+import type { Release } from "@/lib/build/release";
 import type { PlaybookEdits } from "@/lib/build/playbook";
 import type { MemoryEntry } from "@/lib/build/memory";
 import type { Usage } from "@/lib/build/contract";
 
 type Node = { id: string; revision: number; spec: z.infer<typeof nodeSpec>; updatedAt: string };
 type Worker = { daily?: { enabled: boolean; profileId: string; lastRunDate?: string }; quotaBuckets?: Record<string, { observedAt: string; reset: string }>; catalog?: CatalogModel[]; catalogAt?: string; autoApprove?: { mode: "off" | "record" | "on" }; head?: string; id?: string; lastSeenAt?: string; playbook?: PlaybookEdits; usage?: Usage; memory?: MemoryEntry[]; docs?: { at?: string; files: { path: string; size: number }[] } };
-type Data = { control: { paused: boolean; revision: number; profiles: Profile[]; worker: Worker } | null; nodes: Node[]; edges: { fromId: string; toId: string; kind: string }[]; jobs: Job[]; talks?: Talk[] };
+type Data = { control: { paused: boolean; revision: number; profiles: Profile[]; worker: Worker } | null; release?: Release | null; nodes: Node[]; edges: { fromId: string; toId: string; kind: string }[]; jobs: Job[]; talks?: Talk[] };
 type Send = (command: unknown) => Promise<boolean>;
 type CatalogModel = { provider: string; model: string; name: string };
 type Tier = "off" | "routine" | "hard";
@@ -24,12 +26,11 @@ const btn = "rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted di
 const solid = "rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50";
 const field = "rounded-md border bg-background p-2 text-sm";
 const label = "text-xs font-medium uppercase tracking-wide text-muted-foreground";
-const sections = ["CRM", "Studio", "Public website", "Platform admin", "Account & onboarding"];
 // Profiles are generated from catalog choices, never typed. One quota bucket per provider subscription.
 const makeProfile = (m: CatalogModel, tier: "routine" | "hard", write: boolean): Profile => ({ id: `${m.provider}.${m.model}`, enabled: true, provider: m.provider, account: "default", billing: "subscription", model: m.model, options: {}, quotaBucket: m.provider, taskTypes: write ? ["inspect", "implementation", "review"] : ["inspect", "review"], tools: write ? ["git-read", "code-write"] : ["git-read"], dataScope: "estio-repository", quality: difficulty[tier], concurrency: 1, maxAttempts: 2, fallbacks: [] });
 const blockedStates = ["blocked-lease-expired", "waiting-for-capacity", "blocked-configuration", "blocked-stale-approval"];
 
-/** Build: talk, what needs you, the app's progress by section, and the work board. Settings sit behind one button. */
+/** Build: talk, what needs you, the product with its status, and the app by section. Settings sit behind one button. */
 export default function BuildWorkspace() {
   const [data, setData] = useState<Data | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState(false);
   const [settings, setSettings] = useState(false), [seed, setSeed] = useState<{ text: string; n: number } | null>(null);
@@ -45,16 +46,15 @@ export default function BuildWorkspace() {
   const w = data?.control?.worker, paused = data?.control?.paused ?? true;
   const online = !!w?.lastSeenAt && Date.now() - Date.parse(w.lastSeenAt) < 120_000;
   const models = data?.control?.profiles.filter(p => p.enabled) ?? [];
-  const mode = w?.autoApprove?.mode ?? "off";
   const ask = (text: string) => { setSeed({ text, n: Date.now() }); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const [focus, setFocus] = useState<Focus>(null);
+  const map = useMemo(() => productMap({ nodes: data?.nodes ?? [], edges: data?.edges ?? [], jobs: data?.jobs ?? [] }), [data?.nodes, data?.edges, data?.jobs]);
   return <main className="mx-auto max-w-6xl space-y-6 p-3 sm:p-6">
     <Link href="/admin/platform" className="text-sm underline">← Platform</Link>
     <header className="flex flex-wrap items-center gap-2">
       <h1 className="mr-2 text-3xl font-semibold">Build</h1>
       <Pill ok={online}>{online ? "Mac connected" : "Mac offline"}</Pill>
       <button className="contents" disabled={busy || !data} onClick={() => send({ action: "pause", paused: !paused })} title={paused ? "Resume: approved tasks start" : "Pause: nothing new starts"}><Pill ok={!paused}>{paused ? "Paused · resume" : "Running · pause"}</Pill></button>
-      <Pill ok={mode !== "off"}>Autopilot {mode === "on" ? "on" : mode === "record" ? "watching" : "off"}</Pill>
-      <Pill ok={models.length > 0}>{models.length} model{models.length === 1 ? "" : "s"} allowed</Pill>
       {Object.entries(w?.usage ?? {}).map(([bucket, u]) => <UsageGauge key={bucket} name={bucket === "claudeAgent" ? "Claude" : bucket === "codex" ? "Codex" : bucket} usage={u} />)}
       <button className={`${btn} ml-auto`} onClick={() => setSettings(!settings)} aria-expanded={settings}>⚙ Settings</button>
     </header>
@@ -65,8 +65,8 @@ export default function BuildWorkspace() {
     {data && <TalkPanel talks={data.talks ?? []} paused={paused} seed={seed} reload={load} models={models.filter(p => p.taskTypes.includes("review")).map(p => ({ id: p.id, name: w?.catalog?.find(c => c.provider === p.provider && c.model === p.model)?.name ?? p.model }))}
       blocker={!online ? "The Mac is offline; it relays the conversation." : models.some(p => p.tools.includes("code-write")) ? null : "Allow a model that may write code first (Settings)."} />}
     {data && <NeedsYou data={data} busy={busy} send={send} online={online} openSettings={() => setSettings(true)} />}
-    {data && <AppMap data={data} busy={busy} send={send} ask={ask} />}
-    {data && <Progress jobs={data.jobs} nodes={data.nodes} profiles={data.control?.profiles ?? []} busy={busy} send={send} />}
+    {data && <ProductList map={map} jobs={data.jobs} nodes={data.nodes} release={data.release ?? null} profiles={data.control?.profiles ?? []} busy={busy} send={send} ask={ask} focus={focus} />}
+    {data && <AppMap map={map} nodes={data.nodes} edges={data.edges} busy={busy} send={send} ask={ask} reveal={id => setFocus({ id, n: Date.now() })} />}
     {data && <Playbook memory={w?.memory ?? []} edits={w?.playbook} docs={w?.docs?.files ?? []} busy={busy} send={send} ask={ask} />}
   </main>;
 }
@@ -164,80 +164,6 @@ function ChangedFiles({ job, files }: { job: Job; files: NonNullable<Checkpoint[
       {files.find(f => f.path === open)?.truncated && <p className="mt-1 text-muted-foreground">Shortened here; the full file is on the branch.</p>}
     </div>}
   </div>;
-}
-
-/** The app by section: how much is described, what is in work, and drill-down to screens. Changes go through Talk. */
-function AppMap({ data, busy, send, ask }: { data: Data; busy: boolean; send: Send; ask: (text: string) => void }) {
-  const [open, setOpen] = useState<string | null>(null), [screen, setScreen] = useState<string | null>(null);
-  const pages = data.nodes.filter(n => n.spec.kind === "page");
-  // A task belongs to a screen when it names the screen or a file the screen imports directly.
-  const importers = new Map<string, string[]>();
-  for (const e of data.edges) if (e.kind === "uses") importers.set(e.toId, [...(importers.get(e.toId) ?? []), e.fromId]);
-  const screensOf = (j: Job) => new Set(j.spec.nodeIds.flatMap(id => [id, ...(importers.get(id) ?? [])]));
-  const active = data.jobs.filter(j => !["done", "revoked"].includes(j.state));
-  const stats = sections.map(name => {
-    const list = pages.filter(p => p.spec.section === name), ids = new Set(list.map(p => p.id));
-    return { name, list, described: list.filter(p => p.spec.purpose !== undescribed).length, working: active.filter(j => [...screensOf(j)].some(id => ids.has(id))).length };
-  });
-  const current = stats.find(s => s.name === open);
-  return <section className="space-y-2">
-    <h2 className={label}>The app</h2>
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">{stats.map(s => <button key={s.name} onClick={() => { setOpen(open === s.name ? null : s.name); setScreen(null); }}
-      className={`rounded-lg border p-3 text-left hover:bg-muted/50 ${open === s.name ? "ring-2 ring-primary" : ""}`}>
-      <p className="text-sm font-semibold">{s.name}</p>
-      <div className="my-2 flex h-1.5 overflow-hidden rounded-full bg-muted"><span className="bg-primary" style={{ width: `${s.list.length ? (s.described / s.list.length) * 100 : 0}%` }} />{s.working > 0 && <span className="w-2 bg-amber-500" />}</div>
-      <p className="text-xs text-muted-foreground">{s.list.length} screen{s.list.length === 1 ? "" : "s"} · {s.described} described{s.working ? ` · ${s.working} in work` : ""}</p>
-    </button>)}</div>
-    <p className="text-xs text-muted-foreground">The bar fills as screens get described; the daily review describes one a day. Tap a section to see its screens.</p>
-    {current && <div className="space-y-3 rounded-lg border p-3">
-      {[...new Set(current.list.map(p => p.spec.area ?? "Other"))].sort().map(area => <div key={area} className="space-y-1">
-        <p className="text-sm font-semibold">{area}</p>
-        <div className="grid gap-1 sm:grid-cols-2">{current.list.filter(p => (p.spec.area ?? "Other") === area).sort((a, b) => a.spec.name.localeCompare(b.spec.name)).map(p => {
-          const tasks = data.jobs.filter(j => screensOf(j).has(p.id)), open = tasks.filter(j => !["done", "revoked"].includes(j.state)).length;
-          return <button key={p.id} onClick={() => setScreen(screen === p.id ? null : p.id)} className={`rounded-md border px-2.5 py-1.5 text-left text-sm hover:bg-muted/50 ${screen === p.id ? "bg-muted" : ""}`}>
-            <span className="font-medium">{p.spec.name}</span>{open > 0 && <span className="ml-1 text-xs text-amber-600">· {open} in work</span>}{p.spec.draft && <span className="ml-1 text-xs text-primary">· description to confirm</span>}
-            <span className="block truncate text-xs text-muted-foreground">{p.spec.purpose === undescribed ? p.spec.route : p.spec.purpose}</span>
-          </button>;
-        })}</div>
-        {current.list.some(p => p.id === screen && (p.spec.area ?? "Other") === area) && <Screen node={current.list.find(p => p.id === screen)!} data={data} tasks={data.jobs.filter(j => screensOf(j).has(screen!))} ask={ask} />}
-      </div>)}
-    </div>}
-    <Watching data={data} busy={busy} send={send} />
-  </section>;
-}
-function Screen({ node, data, tasks, ask }: { node: Node; data: Data; tasks: Job[]; ask: (text: string) => void }) {
-  const features = data.edges.filter(e => e.fromId === node.id && e.kind === "contains").map(e => data.nodes.find(n => n.id === e.toId)).filter(Boolean) as Node[];
-  const refs = data.edges.filter(e => e.toId === node.id && e.kind === "inspires").map(e => data.nodes.find(n => n.id === e.fromId)).filter(Boolean) as Node[];
-  const described = node.spec.purpose !== undescribed;
-  return <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-sm">
-    <p className="text-xs text-muted-foreground">{node.spec.route}</p>
-    <p>{described ? node.spec.purpose : "Not described yet. The daily review will describe it, or ask about it below."}</p>
-    {described && node.spec.journey && !/^Not /.test(node.spec.journey) && <p className="text-muted-foreground">{node.spec.journey}</p>}
-    {features.length > 0 && <ul className="list-disc pl-5">{features.map(f => <li key={f.id}><span className="font-medium">{f.spec.name}</span>: {f.spec.purpose}</li>)}</ul>}
-    {tasks.length > 0 && <div><p className="text-xs font-medium">History</p>{tasks.slice(0, 8).map(j => <p key={j.id} className="text-xs">{j.state === "done" ? "✓" : "•"} {j.spec.title} <span className="text-muted-foreground">· {stateWord(j)} · {ago(j.updatedAt)}</span></p>)}</div>}
-    {refs.length > 0 && <p className="text-xs">Watching for ideas: {refs.map(r => r.spec.name).join(", ")}</p>}
-    <button className={btn} onClick={() => ask(`About the ${node.spec.section} screen "${node.spec.name}" (${node.spec.route}): `)}>Ask or change something here</button>
-  </div>;
-}
-/** Links worth learning from, each with why it's here and the screens it could improve. */
-function Watching({ data, busy, send }: { data: Data; busy: boolean; send: Send }) {
-  const [adding, setAdding] = useState(false);
-  const refs = data.nodes.filter(n => n.spec.kind === "reference" && n.spec.watch?.status !== "rejected");
-  const linked = (id: string) => data.edges.filter(e => e.fromId === id && e.kind === "inspires").map(e => data.nodes.find(n => n.id === e.toId)?.spec.name).filter(Boolean);
-  const suggestions = suggestedReferences.filter(r => !data.nodes.some(n => n.spec.watch?.url === r.url));
-  return <details className="rounded-lg border p-3">
-    <summary className="cursor-pointer text-sm font-medium">Watching for ideas · {refs.length}</summary>
-    <p className="mt-2 text-xs text-muted-foreground">Repos, apps and videos to learn from. GitHub repos are checked daily without using AI; when one changes, the daily review looks at its linked screen with that in mind.</p>
-    <div className="mt-2 space-y-1.5">{refs.map(n => { const updated = !!n.spec.watch?.latest && n.spec.watch.latest !== n.spec.watch.seen, screens = linked(n.id);
-      return <div key={n.id} className="flex flex-wrap items-start gap-2 rounded-md border p-2 text-sm"><div className="min-w-0 flex-1">
-        <a href={n.spec.watch?.url} target="_blank" rel="noreferrer" className="font-medium underline">{n.spec.name}</a>{updated && <span className="ml-1 text-xs text-amber-600">· updated</span>}
-        <p className="text-xs">Why: {n.spec.intent}</p><p className="text-xs text-muted-foreground">{screens.length ? `For: ${screens.join(", ")}` : "Not linked to a screen yet; ask in Talk which screen it fits"}</p></div>
-        <select aria-label="Status" className={`${field} !p-1 text-xs`} value={n.spec.watch?.status} disabled={busy} onChange={e => send({ action: "watch-update", id: n.id, status: e.target.value })}><option value="watching">Watching</option><option value="adopted">Adopted</option><option value="rejected">Not for us</option></select></div>; })}</div>
-    {adding ? <form className="mt-2 flex flex-wrap gap-2" onSubmit={async e => { e.preventDefault(); const f = new FormData(e.currentTarget); if (await send({ action: "watch", url: String(f.get("url")).trim(), note: String(f.get("note") ?? "").trim() || undefined, screenIds: [] })) setAdding(false); }}>
-      <input name="url" type="url" required placeholder="Link" className={`${field} min-w-52 flex-1`} /><input name="note" placeholder="What could we take from it?" className={`${field} min-w-52 flex-[2]`} maxLength={1000} /><button className={solid} disabled={busy}>Add</button></form>
-      : <button className={`${btn} mt-2`} onClick={() => setAdding(true)}>+ Watch a link</button>}
-    {suggestions.length > 0 && <div className="mt-2 space-y-1"><p className="text-xs text-muted-foreground">Mentioned before, not added:</p>{suggestions.map(r => <div key={r.url} className="flex items-start gap-2 text-xs"><button className={btn} disabled={busy} onClick={() => send({ action: "watch", url: r.url, note: r.note, screenIds: [] })}>Add</button><span><span className="break-all">{r.url}</span><br /><span className="text-muted-foreground">{r.note}</span></span></div>)}</div>}
-  </details>;
 }
 
 /** One-time choices: models, autopilot, daily review, the queue switch, and a short how-it-works. */

@@ -9,6 +9,8 @@ import { validateScopeEntry } from "./delivery";
 import { screenDraft, screenInstruction, undescribed } from "./contract";
 import { keepStory, makeStory, storyFrom, storyInput, storyOf } from "./story";
 import { setStory } from "./external";
+import { releaseFrom } from "./release";
+import { readFile } from "node:fs/promises";
 import { decisionsOf, playbookNames, playbookText, type PlaybookEdits } from "./playbook";
 import { memoryHeading, memoryText, remember, type MemoryEntry, type MemoryKind } from "./memory";
 import { remainingByBucket, usageFloor, usageLow, usageSpec } from "./contract";
@@ -53,17 +55,21 @@ function mergeable(job: { state: string; spec: unknown; checkpoint: unknown }) {
   return spec.taskType === "implementation" && ["review", "done"].includes(job.state) && !!c.t3?.branch && !!c.t3.worktreePath && c.evidence?.ok === true && !!c.evidence.files?.length
     && !["queued", "merging", "resolving", "merged"].includes(c.merge?.state ?? "");
 }
+/** The live release, from the manifest the owned deploy writes on this server; null when it can't be read. */
+async function liveRelease() {
+  try { return releaseFrom(JSON.parse(await readFile(process.env.BUILD_RELEASE_MANIFEST ?? "/home/martin/.deploy-state/current-release.json", "utf8"))); } catch { return null; }
+}
 export async function snapshot() {
-  const [control, nodes, edges, jobs] = await Promise.all([
+  const [control, nodes, edges, jobs, release] = await Promise.all([
     db.buildControl.findUnique({ where: { id: "build" } }),
     db.buildNode.findMany({ orderBy: { id: "asc" } }), db.buildEdge.findMany(),
-    db.buildJob.findMany({ orderBy: { createdAt: "desc" }, take: 200 }),
+    db.buildJob.findMany({ orderBy: { createdAt: "desc" }, take: 200 }), liveRelease(),
   ]);
   // Lease tokens are only delivered to authenticated workers, never the browser.
   // Guidance documents are listed here and fetched one at a time (see guidanceDoc).
   const { docs, ...worker } = (control?.worker ?? {}) as { docs?: { files?: { path: string; text: string }[]; at?: string } };
   const listed = control && { ...control, worker: { ...worker, docs: { at: docs?.at, files: (docs?.files ?? []).map(f => ({ path: f.path, size: f.text.length })) } } };
-  return { control: listed, nodes, edges, jobs: jobs.map(({ leaseToken, ...job }) => ({ ...job, checkpoint: summarizeCheckpoint(job.checkpoint) })), execution: "Inspection available. Subscription CLI review and isolated delivery require explicit Mac worker opt-in. No merge or deploy" };
+  return { control: listed, release, nodes, edges, jobs: jobs.map(({ leaseToken, ...job }) => ({ ...job, checkpoint: summarizeCheckpoint(job.checkpoint) })), execution: "Inspection available. Subscription CLI review and isolated delivery require explicit Mac worker opt-in. No merge or deploy" };
 }
 export async function jobFile(jobId: string, path: string) {
   const job = await db.buildJob.findUnique({ where: { id: jobId } });

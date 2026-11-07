@@ -5,7 +5,8 @@
 export type Experience = { route: string; section: string; area: string; name: string; product: "crm" | "studio" | "shared" };
 
 const words: Record<string, string> = { ai: "AI", crm: "CRM", seo: "SEO", sms: "SMS", api: "API", ghl: "GHL", sso: "SSO", url: "URL", ui: "UI", faq: "FAQ", whatsapp: "WhatsApp", oauth: "OAuth" };
-const label = (segment: string) => {
+/** A route or file-name segment as words, e.g. "whatsapp-outbound" → "WhatsApp Outbound". */
+export const label = (segment: string) => {
   if (/^\[\.\.\./.test(segment)) return "All";
   if (/^\[/.test(segment)) return "Detail";
   return segment.split(/[-_]/).filter(Boolean).map(w => words[w.toLowerCase()] ?? w[0].toUpperCase() + w.slice(1)).join(" ");

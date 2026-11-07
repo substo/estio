@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * A plain-language story of a piece of work, shown first on its Progress card: what it is (concept), what was achieved,
+ * A plain-language story of a piece of work, shown first when its feature is opened on the Build page: what it is (concept), what was achieved,
  * how it works, and what's next, plus the product area it belongs to. Client-safe (zod only).
  *
  * Stored on the BuildJob's checkpoint as `checkpoint.story`, not on the spec: the spec is the approved, immutable scope

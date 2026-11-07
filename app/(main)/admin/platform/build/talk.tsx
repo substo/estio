@@ -47,7 +47,7 @@ export function TalkPanel({ talks, paused, blocker, reload, seed, models }: Prop
         {plan && <div className="space-y-2 rounded-lg border bg-background p-3">
           <p className="text-sm font-medium">Plan · {plan.items.length} task{plan.items.length === 1 ? "" : "s"}</p>
           <ol className="space-y-1.5">{plan.items.map((item, i) => <li key={i} className="text-sm"><span className="font-medium">{i + 1}. {item.title}</span><span className="block text-xs text-muted-foreground">{item.outcome} · {item.scope.length} file{item.scope.length === 1 ? "" : "s"}</span></li>)}</ol>
-          {allStarted ? <p className="text-sm text-emerald-700 dark:text-emerald-400">Started. Follow it under Progress.</p>
+          {allStarted ? <p className="text-sm text-emerald-700 dark:text-emerald-400">Started. Follow it under Product.</p>
             : <div className="flex flex-wrap items-center gap-2"><button disabled={busy || !!blocker} className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50" onClick={() => void post({ action: "talk-start", id: active.id, runId: plan.runId })}>Start {plan.items.length === 1 ? "it" : `all ${plan.items.length}`}</button>
               <span className="text-xs text-muted-foreground">{blocker ?? (paused ? "Starting also resumes the paused queue." : "Each task runs in its own T3 thread and branch. Nothing is merged or deployed.")}</span></div>}
         </div>}

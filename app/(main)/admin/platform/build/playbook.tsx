@@ -21,9 +21,12 @@ export function Playbook({ memory, edits, docs, busy, send, ask }: { memory: Mem
     try { const res = await fetch(`/api/build?doc=${encodeURIComponent(path)}`, { cache: "no-store" }); const value = await res.json(); if (!res.ok) throw new Error(value.error); setDoc(value); }
     catch (e) { setError(e instanceof TypeError ? "Couldn't reach the server. Check your connection and try again." : e instanceof Error ? e.message : String(e)); }
   }
-  return <section className="space-y-2">
-    <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Playbook: how the agents work</h2>
-    <div className="grid gap-2 md:grid-cols-3">{playbookNames.map(name => { const d = playbookDefaults[name], edit = edits?.[name];
+  // Collapsed: it is reference, read now and then, not part of the daily glance.
+  return <details className="group space-y-2">
+    <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground [&::-webkit-details-marker]:hidden">
+      <svg aria-hidden viewBox="0 0 20 20" className="h-3.5 w-3.5 transition-transform group-open:rotate-90"><path d="M7.5 5l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      Playbook: how the agents work</summary>
+    <div className="mt-2 grid gap-2 md:grid-cols-3">{playbookNames.map(name => { const d = playbookDefaults[name], edit = edits?.[name];
       return <div key={name} className={`space-y-2 rounded-lg border p-3 ${editing === name ? "md:col-span-3" : ""}`}>
         <div className="flex items-start gap-2"><span aria-hidden className="text-lg">{icons[name]}</span><div className="min-w-0 flex-1"><p className="text-sm font-medium">{d.title}</p>
           <p className="text-xs text-muted-foreground">{d.about} · {edit ? `edited ${new Date(edit.at).toLocaleDateString()}` : "default"}</p></div>
@@ -48,7 +51,7 @@ export function Playbook({ memory, edits, docs, busy, send, ask }: { memory: Mem
       {doc && <div className="mt-2 space-y-2"><pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-xs">{doc.text}</pre>
         <button className={btn} onClick={() => ask(`Change ${doc.path}: `)}>Ask for a change to this file</button></div>}
     </div>
-  </section>;
+  </details>;
 }
 
 const kindWord: Record<MemoryEntry["kind"], string> = { note: "Note", decision: "Decided", feedback: "Feedback", done: "Done", merged: "Merged" };
