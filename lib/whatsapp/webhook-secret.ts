@@ -7,12 +7,8 @@ import { settingsService } from "@/lib/settings/service";
 /**
  * The Location's WhatsApp Cloud webhook verify token lives only in the encrypted settings secret
  * whatsapp_webhook_secret (LOCATION scope, domain location.integrations). Admins copy it into Meta's
- * webhook form; Meta echoes it as hub.verify_token when subscribing.
- *
- * Transition: it used to be plain text in Location.whatsappWebhookSecret and in the location.integrations
- * document. Until scripts/settings/move-legacy-credentials.ts --apply has run and the drop migration is
- * deployed, the reader falls back to those copies; the writer stores the secret and clears both.
- * Server-only.
+ * webhook form; Meta echoes it as hub.verify_token when subscribing. The former plain-text Location column
+ * and document key are gone. Server-only.
  */
 
 const scope = (locationId: string) => ({
@@ -31,17 +27,10 @@ export function tokensMatch(supplied: string, expected: string): boolean {
 }
 
 export async function getLocationWhatsAppWebhookSecret(locationId: string): Promise<string | null> {
-    const secret = await settingsService.getSecret(scope(locationId));
-    if (secret) return secret;
-    const [doc, location] = await Promise.all([
-        settingsService.getDocument<{ whatsappWebhookSecret?: unknown }>({ scopeType: "LOCATION", scopeId: locationId, domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS }),
-        db.location.findUnique({ where: { id: locationId }, select: { whatsappWebhookSecret: true } }),
-    ]);
-    const legacy = typeof doc?.payload?.whatsappWebhookSecret === "string" ? doc.payload.whatsappWebhookSecret.trim() : "";
-    return legacy || location?.whatsappWebhookSecret?.trim() || null;
+    return (await settingsService.getSecret(scope(locationId))) || null;
 }
 
-/** Stores (or with null, removes) the verify token and clears the former plain-text copies. */
+/** Stores (or with null, removes) the verify token. */
 export async function setLocationWhatsAppWebhookSecret(locationId: string, value: string | null, actorUserId: string | null) {
     const token = value?.trim() || null;
     if (token) {
@@ -49,7 +38,6 @@ export async function setLocationWhatsAppWebhookSecret(locationId: string, value
     } else {
         await settingsService.clearSecret({ ...scope(locationId), actorUserId });
     }
-    await clearLegacyWebhookSecretCopies(locationId, actorUserId);
 }
 
 /**
@@ -77,23 +65,4 @@ export async function isAcceptedWhatsAppVerifyToken(supplied: string, platformTo
         accepted = tokensMatch(supplied, expected) || accepted;
     }
     return accepted;
-}
-
-// --- Transition only: plain-text copies (removed with the drop migration) ---
-
-async function clearLegacyWebhookSecretCopies(locationId: string, actorUserId: string | null) {
-    const doc = await settingsService.getDocument<Record<string, unknown>>({ scopeType: "LOCATION", scopeId: locationId, domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS });
-    if (doc && "whatsappWebhookSecret" in doc.payload) {
-        const { whatsappWebhookSecret: _removed, ...payload } = doc.payload;
-        await settingsService.upsertDocument({
-            scopeType: "LOCATION",
-            scopeId: locationId,
-            domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS,
-            payload,
-            actorUserId,
-            expectedVersion: doc.version,
-            schemaVersion: doc.schemaVersion,
-        });
-    }
-    await db.location.updateMany({ where: { id: locationId, whatsappWebhookSecret: { not: null } }, data: { whatsappWebhookSecret: null } });
 }

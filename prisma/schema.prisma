@@ -118,7 +118,6 @@ model Location {
   whatsappBusinessAccountId String?
   whatsappPhoneNumberId     String?
   whatsappAccessToken       String? @db.Text // Long-lived system user token
-  whatsappWebhookSecret     String?
   whatsappProviderMode      String  @default("web_bridge") // cloud_primary | twilio_fallback | web_bridge
 
   // Twilio Integration
@@ -333,8 +332,6 @@ model User {
   // Outlook Puppeteer Auth (Alternative when OAuth blocked)
   outlookAuthMethod        String? // 'oauth' | 'puppeteer'
   outlookEmail             String? // User's Outlook email
-  outlookPasswordEncrypted String?   @db.Text // AES-256 encrypted password
-  outlookSessionCookies    String?   @db.Text // Encrypted JSON of session cookies
   outlookSessionExpiry     DateTime? // When session cookies expire
 
   @@unique([authRealm, email])

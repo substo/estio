@@ -8,8 +8,7 @@ import { readFileSync } from "node:fs";
  * reading or writing the legacy credential columns again.
  *
  * - RETIRED: no code names the column at all (the one-time move script may, through raw SQL).
- * - TRANSITION: still dropped later, after scripts/settings/move-legacy-credentials.ts --apply; only the listed
- *   fallback/cleanup files may name them until then.
+ * - TRANSITION: awaiting a copy before its drop; only the listed fallback/cleanup files may name it.
  */
 const root = process.cwd();
 const MOVE_SCRIPT = "scripts/settings/move-legacy-credentials.ts";
@@ -21,13 +20,13 @@ const RETIRED_USER_COLUMNS = [
     "googleSyncToken",
     "outlookAccessToken",
     "outlookRefreshToken",
+    "outlookPasswordEncrypted",
+    "outlookSessionCookies",
+    "whatsappWebhookSecret",
 ];
 
-const TRANSITION_COLUMNS: Record<string, string[]> = {
-    outlookPasswordEncrypted: ["lib/microsoft/credentials.ts", "app/(main)/admin/team/actions.ts"],
-    outlookSessionCookies: ["lib/microsoft/credentials.ts", "app/(main)/admin/team/actions.ts"],
-    whatsappWebhookSecret: ["lib/whatsapp/webhook-secret.ts"],
-};
+// Nothing is in transition any more; add entries here only for a column awaiting a copy.
+const TRANSITION_COLUMNS: Record<string, string[]> = {};
 
 function filesNaming(name: string): string[] {
     const out = execFileSync("git", ["grep", "-l", "--untracked", "-w", name, "--", "app", "lib", "scripts", "components"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).toString();
@@ -84,7 +83,9 @@ test("every Old CRM credential reader goes through lib/crm/credentials.ts", () =
 test("the Prisma schema no longer declares the retired columns", () => {
     const schema = readFileSync(`${root}/prisma/schema.prisma`, "utf8");
     const userModel = schema.slice(schema.indexOf("model User {"), schema.indexOf("\n}", schema.indexOf("model User {")));
+    const locationModel = schema.slice(schema.indexOf("model Location {"), schema.indexOf("\n}", schema.indexOf("model Location {")));
     for (const column of [...RETIRED_USER_COLUMNS, "crmUsername", "crmPassword"]) {
         assert.doesNotMatch(userModel, new RegExp(`^\\s+${column}\\s`, "m"), column);
+        assert.doesNotMatch(locationModel, new RegExp(`^\\s+${column}\\s`, "m"), column);
     }
 });
