@@ -9,7 +9,7 @@ product memory (2026-11-04/05).
 
 1. **Gate.** Research uses only the Location's own AI. Without a ready connection (`getAiConnections(locationId).available`,
    `lib/ai/connections.ts`) the screen opens locked on a "connect an AI" step; nothing is paid for by the platform.
-2. **Start.** The owner gives the business name and/or website. `startResearch` (`lib/onboarding/service.ts`) begins a
+2. **Start.** The owner chooses Starting from scratch or Already operating, Business or Personal brand, and Online, Physical or Both, describes the venture, and optionally supplies a name and website. Choices are owner-confirmed facts in `location.business.setup`; description is `identity.summary`, name stays on Location. Existing saved profiles remain editable without repeating startup. `startResearch` (`lib/onboarding/service.ts`) begins a
    research batch and queues an `studio.onboarding_fetch` job.
 3. **Background research** runs on the Studio job queue (durable, leased, retried; the hosted Studio worker,
    `scripts/studio-worker.ts`):
@@ -77,8 +77,8 @@ No Google scraping and no browser automation.
 `/api/onboarding` (same-origin JSON with `X-Studio-Tenant`, like other Location commands). `GET` returns `{ view }`
 (`OnboardingView`: topics with field values, statuses, sources and suggestions; research progress; transcript; AI
 connections; `openMode`; `nextPrompt`; completeness). `POST` actions, each returning the updated `view`: `start`
-`{name?, website?}`, `confirm {topic, field}`, `confirm-topic {topic}`, `edit {topic, field, value}`, `skip {topic}`,
-`say {text, topic?}`, `finish`, `reopen`. Members can read; changes need an admin signed in as themselves.
+`{name?, website?, stage?, kind?, presence?, summary?}`, `confirm {topic, field}`, `confirm-topic {topic}`, `edit {topic, field, value}`, `skip {topic}`,
+`field-state {topic, field, status}` (empty / not_applicable / not_yet), `say {text, topic?}`, `finish`, `reopen`. Members can read; changes need an admin signed in as themselves.
 
 ## Next steps
 
@@ -94,7 +94,7 @@ One shared client component, `components/onboarding/onboarding-screen.tsx`, rend
 
 Layout: the profile **timeline** (topics in order, each with a status icon: not started, researching, suggestions to confirm, done, skipped) beside the **chat**. Topics open as they fill; every value shows its status and source links, with inline Confirm and Edit (one editor for all kinds: lists one per line, structured entries as `a | b` columns, see `lib/onboarding/field-text.ts`; Escape cancels and returns focus). The chat shows the transcript, then one card at a time:
 - **Locked** (no AI connection): a "Connect an AI" card linking to that app's connection screens (`connectLinks` in `lib/onboarding/entry.ts`: Estio CRM ChatGPT subscription and OpenAI key; Substo Studio AI settings; both a paired Mac running the companion with processing on). The answer box is disabled.
-- **Start:** business name (pre-filled with the Location's name) and website, then research starts in the background.
+- **Start:** stage, identity, presence and description; optional business name (pre-filled with the Location's name) and website, then research starts in the background.
 - **Topic:** research findings for the current topic ("Is this right?") with Confirm all, Edit, Skip; or the topic's question with "Fill in directly" and Skip. Research progress and failures show under it.
 - **Summary:** everything that will be saved and what's still missing, then Finish (and Research again).
 Free answers go through the `say` command for the current topic. The view is polled every 3 seconds while research runs. Below the `lg` breakpoint (phones, portrait iPad) the two panes become Chat / Profile tabs; choosing Edit from the chat switches to the profile.
@@ -104,3 +104,11 @@ Entry points:
 - **Manual:** Settings → Business profile (`/admin/onboarding?update=1`, both apps) and Substo's Brand settings (`/studio/onboarding?update=1`). A finished profile stays fully editable; reopening it doesn't make it auto-open again.
 
 Verified with a local harness (mocked view, Tailwind) at 1280 and 820 px wide for the locked, start, researching, mostly confirmed and summary states. Not verified: the real app shell, live research and keyboard behaviour in a real browser session.
+
+## Stage and individual field choices
+
+The shared opening form and profile timeline expose setup choices for both apps/products. Setup can be changed later through the timeline. Each profile detail's Edit form offers **Not applicable**, **Not yet**, and **Leave unanswered**, alongside Save. These respectively persist a sourced, owner-confirmed `not_applicable` or `not_yet` fact, or remove the fact. Location name/time zone require values rather than profile-state copies. Changing a choice back to a value replaces the state with the owner's confirmed fact.
+
+Research reads setup and description from the canonical profile, passing a bounded execution context to the Mac. Starting ventures receive audience/market/comparable-brand research; other topics require evidence about the venture itself. Operating businesses receive existing-business lookup. Confirmed, Not applicable and Not yet fields are excluded from prompt field lists, and application rechecks current profile facts so late replies cannot replace owner decisions. All suggestions still require confirmation. Location names already present are never replaced by research suggestions.
+
+Verification for this assignment uses mocked provider tests, with no production data changes or paid calls. Real desktop/mobile/keyboard acceptance must be recorded separately; a blocked browser is not acceptance evidence.

@@ -7,6 +7,7 @@ import type { BusinessProfile } from './schema';
  */
 export type BusinessView = {
     name: string | null; timeZone: string | null; domain: string | null;
+    setup: { stage: string | null; kind: string | null; presence: string | null };
     website: string | null; tagline: string | null; summary: string | null;
     address: string | null; phones: { label: string | null; number: string }[]; email: string | null;
     maps: { url: string; title: string | null }[]; socialLinks: { platform: string; url: string }[];
@@ -60,6 +61,7 @@ export function businessView(profile: BusinessProfile | null | undefined, locati
     const realEstate = known<Record<string, Fact>>(p.realEstate);
     const view: BusinessView = {
         name: location.name?.trim() || null, timeZone: location.timeZone?.trim() || null, domain: location.domain?.trim() || null,
+        setup: { stage: text(p.setup?.stage), kind: text(p.setup?.kind), presence: text(p.setup?.presence) },
         website: text(p.onlinePresence?.website), tagline: text(p.identity?.tagline), summary: text(p.identity?.summary),
         address: addressText,
         phones: items<Record<string, Fact>>(p.contact?.phones).flatMap(ph => { const number = text(ph.number); return number ? [{ label: text(ph.label), number }] : []; }),

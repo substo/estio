@@ -8,7 +8,7 @@ import { onboardingOpenMode, researching, type OnboardingState } from "./state";
  * Everything the onboarding screen shows, as plain data: topics (timeline) with each field's value, status and sources,
  * research progress, the transcript and AI availability. Pure: the API loads the inputs and returns this.
  */
-export type FieldView = { key: string; label: string; kind: FieldKind; hint?: string; status: FieldStatus; value: FieldValue | null; sources: string[]; suggestion?: { value: string; sources: string[] } };
+export type FieldView = { key: string; label: string; kind: FieldKind; hint?: string; choices?: string[]; excludable?: boolean; status: FieldStatus; value: FieldValue | null; sources: string[]; suggestion?: { value: string; sources: string[] } };
 export type TopicView = { id: TopicId; title: string; question: string; status: TopicStatus; fields: FieldView[]; researching: boolean; researchError?: string };
 export type OnboardingView = {
   app: "estio" | "substo"; status: OnboardingState["status"]; openMode: "none" | "open" | "locked"; canEdit: boolean;
@@ -23,7 +23,7 @@ export function buildOnboardingView(input: { app: "estio" | "substo"; profile: B
   const { state } = input;
   const topics: TopicView[] = topicsFor(input.app).map(topic => {
     const fields: FieldView[] = topic.fields.map(field => {
-      const base = { key: field.key, label: field.label, kind: field.kind, ...(field.hint ? { hint: field.hint } : {}) };
+      const base = { key: field.key, label: field.label, kind: field.kind, ...(field.hint ? { hint: field.hint } : {}), choices: field.choices, excludable: "profile" in field.target && !field.target.profile.startsWith("setup.") };
       if ("location" in field.target) {
         const current = field.target.location === "name" ? input.location.name : input.location.timeZone;
         const pending = field.target.location === "name" ? state.suggestedName : state.suggestedTimeZone;

@@ -3,7 +3,7 @@ import { studioRouteParams, withStudioRoute } from "@/lib/studio/route-context";
 import { getPlatformProfile } from "@/lib/platform/profile";
 import { studioCommandResponse } from "@/lib/studio/command-http";
 import { StudioCommandError } from "@/lib/studio/command-error";
-import { answer, confirm, confirmTopic, edit, getOnboardingView, OnboardingError, setStatus, skip, startResearch } from "@/lib/onboarding/service";
+import { answer, changeFieldState, confirm, confirmTopic, edit, getOnboardingView, OnboardingError, setStatus, skip, startResearch } from "@/lib/onboarding/service";
 import { onboardingActor as actorFor } from "@/lib/onboarding/actor";
 
 /**
@@ -13,10 +13,11 @@ import { onboardingActor as actorFor } from "@/lib/onboarding/actor";
 const id = z.string().regex(/^[a-zA-Z]{1,40}$/);
 const value = z.union([z.string().max(4000), z.array(z.union([z.string().max(300), z.record(z.union([z.string().max(2048), z.boolean()]))])).max(20), z.null()]);
 const commandSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("start"), name: z.string().max(200).optional(), website: z.string().max(2048).optional() }).strict(),
+  z.object({ action: z.literal("start"), name: z.string().max(200).optional(), website: z.string().max(2048).optional(), stage: z.enum(["starting", "operating"]).optional(), kind: z.enum(["business", "personal_brand"]).optional(), presence: z.enum(["online", "physical", "both"]).optional(), summary: z.string().max(2000).optional() }).strict(),
   z.object({ action: z.literal("confirm"), topic: id, field: id }).strict(),
   z.object({ action: z.literal("confirm-topic"), topic: id }).strict(),
   z.object({ action: z.literal("edit"), topic: id, field: id, value }).strict(),
+  z.object({ action: z.literal("field-state"), topic: id, field: id, status: z.enum(["empty", "not_applicable", "not_yet"]) }).strict(),
   z.object({ action: z.literal("skip"), topic: id }).strict(),
   z.object({ action: z.literal("say"), text: z.string().min(1).max(2000), topic: id.optional() }).strict(),
   z.object({ action: z.literal("finish") }).strict(),
@@ -45,6 +46,7 @@ export const POST = withStudioRoute(async (request, { params }) => {
           case "confirm": return { view: await confirm(actor, command.topic, command.field) };
           case "confirm-topic": return { view: await confirmTopic(actor, command.topic) };
           case "edit": return { view: await edit(actor, command.topic, command.field, command.value as never) };
+          case "field-state": return { view: await changeFieldState(actor, command.topic, command.field, command.status) };
           case "skip": return { view: await skip(actor, command.topic) };
           case "say": return { view: await answer(actor, command.text, command.topic) };
           case "finish": case "reopen": return { view: await setStatus(actor, command.action) };

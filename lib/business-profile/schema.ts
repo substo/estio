@@ -18,6 +18,7 @@ export function businessFactSchema<T extends z.ZodTypeAny>(value: T) {
     return z.discriminatedUnion('status', [
         z.object({ status: z.literal('known'), value, ...evidence }).strict(),
         z.object({ status: z.literal('unknown'), ...evidence }).strict(),
+        z.object({ status: z.literal('not_yet'), reason: text, ...evidence }).strict(),
         z.object({ status: z.literal('not_applicable'), reason: text, ...evidence }).strict(),
     ]);
 }
@@ -49,6 +50,7 @@ const priceSegment = section({ label: stringFact, currency: fact(z.string().rege
 });
 export const businessProfileSchema = z.object({
     schemaVersion: z.literal(1),
+    setup: section({ stage: fact(z.enum(['starting', 'operating'])), kind: fact(z.enum(['business', 'personal_brand'])), presence: fact(z.enum(['online', 'physical', 'both'])) }).optional(),
     identity: section({ legalName: stringFact, tagline: stringFact, summary: stringFact, registrationNumber: stringFact }).optional(),
     contact: section({ address: fact(address), phones: list(phone), email: fact(z.string().email()), maps: list(section({ url: fact(businessUrlSchema), title: stringFact })), openingHours: list(hours) }).optional(),
     onlinePresence: section({ website: fact(businessUrlSchema), profiles: list(section({ platform: stringFact, url: fact(businessUrlSchema), handle: stringFact })) }).optional(),

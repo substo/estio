@@ -79,3 +79,13 @@ test("native CLIs get live web search only when a request asks for it", async ()
     assert.equal(seen[0].timeoutMs, 90_000); assert.equal(seen[1].timeoutMs, 300_000);
   }
 });
+
+test("Mac research receives canonical stage and excluded fields without paid calls", async () => {
+  let prompt = "";
+  const adapter = (p: LocalProvider): LocalTextAdapter => ({ provider: p, readiness: ready(p), generate: async <T>(req: TextRequest<T>) => { prompt = req.prompt; return req.validate(reply); } });
+  const handler = createOnboardingResearchHandler({ adapter, enabled: () => true, usage: async () => ({ codex: reading(80) }) });
+  await handler({ ...job, payload: { ...payload, context: { stage: "starting", kind: "personal_brand", presence: "online", summary: "Teach gardeners", excluded: ["phones"] } } }, context);
+  assert.match(prompt, /new venture/);
+  assert.match(prompt, /Teach gardeners/);
+  assert.doesNotMatch(prompt, /- phones \(/);
+});
