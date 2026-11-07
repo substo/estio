@@ -19,14 +19,14 @@ export const canMerge = (j: Job) => j.spec.taskType === "implementation" && !!cp
 const externalWords: Record<string, string> = { working: "being worked on", blocked: "blocked", review: "finished, waiting for review", done: "finished", failed: "stopped with a problem" };
 export function stateWord(j: Job) {
   if (j.state.startsWith("external-")) return externalWords[j.state.slice(9)] ?? j.state.slice(9);
-  return ({ proposed: "suggested", approved: "queued", working: "running", stopping: "stopping", review: "ready for you", done: "done", failed: "failed", revoked: "dropped" } as Record<string, string>)[j.state] ?? "stuck";
+  return ({ proposed: "ready to start", approved: "queued", working: "running", stopping: "stopping", review: "ready for you", done: "done", failed: "failed", revoked: "dropped" } as Record<string, string>)[j.state] ?? "stuck";
 }
 /** One plain line saying where the work stands, for work without a story. */
 function statusLine(j: Job, release: Release | null) {
   const c = cp(j);
   if (c.external) return `Worked on outside Build, in T3: ${externalWords[c.external.status] ?? c.external.status} (reported ${ago(c.external.at)}).`;
   if (c.merge?.state === "merged") return `Done. ${mergeWords(c.merge, release)}.`;
-  return ({ proposed: "Suggested; not started yet.", approved: "Queued; it starts when the Mac picks it up.", working: "Running now in its own T3 thread.", stopping: "Stopping.", review: "Finished; waiting for you to review it.", done: "Done.", failed: "It didn't finish." } as Record<string, string>)[j.state] ?? "Stuck; see Needs you.";
+  return ({ proposed: "Ready to start; waiting for your approval.", approved: "Queued; it starts when the Mac picks it up.", working: "Running now in its own T3 thread.", stopping: "Stopping.", review: "Finished; waiting for you to review it.", done: "Done.", failed: "It didn't finish." } as Record<string, string>)[j.state] ?? "Stuck; see Needs you.";
 }
 
 /** Status colours: the only colours in the list. */
@@ -86,9 +86,11 @@ export function WorkItem({ job, sameStory, profiles, release, busy, send, talk, 
     </button>
     {open && <div className="space-y-2 pb-3 pl-7 pr-2">
       {c.story && !sameStory ? <StoryView story={c.story} /> : <div className="space-y-1 text-sm"><p>{job.spec.outcome}</p><p className="text-xs text-muted-foreground">{statusLine(job, release)}</p></div>}
+      {(c.t3?.threadId || c.external?.threadId) && openTalk && <button className={btn} onClick={() => openTalk(`job:${job.id}`)}>Open conversation</button>}
       {talk && openTalk && <p className="text-sm"><span className="text-muted-foreground">From conversation: </span><button className="underline underline-offset-2" onClick={() => openTalk(talk.id)}>{talk.title}</button></p>}
       {c.feedback?.map((f, i) => <p key={i} className="text-xs">{f.decision === "redo" ? "You asked" : "You noted"}: {f.note}</p>)}
       {job.state === "done" && canMerge(job) && <button className={btn} disabled={busy} onClick={() => void send({ action: "merge", id: job.id, revision: job.revision })}>Merge</button>}
+      {job.state === "proposed" && <button className={btn} disabled={busy} onClick={() => void send({ action: "approve", id: job.id, revision: job.revision })}>Start</button>}
       <Technical job={job} model={model} />
     </div>}
   </li>;

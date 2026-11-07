@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { backgroundTalkWhere, freshStarts, startDigest, planKey } from "./talk-policy";
 import db from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -16,8 +16,8 @@ import { archivedPlan, autoArchive, reopenedPlan, type PlanLike, type TalkArchiv
  * question only answerable in T3) · error.
  */
 export type TalkMessage = { id: string; role: "owner" | "agent"; text: string; at?: string; sent?: boolean };
-export type TalkPlan = { runId: string; items: z.infer<typeof proposalDraft>[]; started: string[]; at: string; archived?: TalkArchive; reopened?: string };
-const maxMessages = 80, maxText = 20000;
+export type TalkPlan = { runId: string; items: z.infer<typeof proposalDraft>[]; started: string[]; at: string; archived?: TalkArchive; reopened?: string; approvals?: string[]; executionJobId?: string; historyLimit?: number; historyBaseline?: number; historyMore?: boolean; historyShortened?: boolean };
+const maxMessages = 1000, maxText = 20000;
 // Talks can't change state while a job transaction holds the global lock, so each talk is locked on its own row.
 async function lockTalk(tx: Prisma.TransactionClient, talkId: string) {
   const rows = await tx.$queryRaw<{ id: string }[]>`SELECT "id" FROM "BuildTalk" WHERE "id" = ${talkId} FOR UPDATE`;
@@ -32,11 +32,32 @@ function talkProfile(profiles: unknown, worker: unknown) {
 
 export const talkOwnerCommand = z.discriminatedUnion("action", [
   z.object({ action: z.literal("talk"), talkId: id.optional(), text: z.string().trim().min(1).max(8000), profileId: id.optional() }).strict(),
+  z.object({ action: z.literal("talk-job"), id }).strict(),
+  z.object({ action: z.literal("talk-history"), id }).strict(),
   z.object({ action: z.literal("talk-start"), id, runId: z.string().max(200) }).strict(),
   z.object({ action: z.literal("talk-archive"), id }).strict(),
   z.object({ action: z.literal("talk-reopen"), id }).strict(),
 ]);
 export async function talkOwner(input: z.infer<typeof talkOwnerCommand>, actor: string) {
+  if (input.action === "talk-job") return mutate(async tx => {
+    const job = await tx.buildJob.findUniqueOrThrow({ where: { id: input.id } });
+    const checkpoint = job.checkpoint as { t3?: { threadId?: string }; external?: { threadId?: string } } | null;
+    const threadId = checkpoint?.t3?.threadId ?? checkpoint?.external?.threadId;
+    requireCondition(threadId && /^[a-zA-Z0-9:._-]{1,120}$/.test(threadId), "This task has not opened its execution thread yet");
+    const spec = jobSpec.parse(job.spec);
+    // A read-only mirror uses the existing relay, never the task dispatcher.
+    return tx.buildTalk.upsert({ where: { id: `execution-${job.id}` }, update: { threadId }, create: {
+      id: `execution-${job.id}`, title: spec.title, state: "execution", threadId, base: spec.baseRevision,
+      messages: json([]), plan: json({ runId: "", items: [], started: [], at: new Date().toISOString(), executionJobId: job.id }),
+    } });
+  });
+  if (input.action === "talk-history") return db.$transaction(async tx => {
+    const talk = await lockTalk(tx, input.id);
+    requireCondition(talk.state !== "archived", "Reopen this conversation to load more history");
+    const plan = talk.plan as TalkPlan | null;
+    const limit = Math.min(1000, (plan?.historyLimit ?? 60) + 60);
+    return tx.buildTalk.update({ where: { id: talk.id }, data: { plan: json({ runId: "", items: [], started: [], at: new Date().toISOString(), ...plan, historyLimit: limit, historyBaseline: limit }) } });
+  });
   if (input.action === "talk") {
     const message: TalkMessage = { id: `o-${Date.now().toString(36)}`, role: "owner", text: input.text, at: new Date().toISOString(), sent: false };
     if (!input.talkId) {
@@ -52,13 +73,14 @@ export async function talkOwner(input: z.infer<typeof talkOwnerCommand>, actor: 
     }
     return db.$transaction(async tx => {
       const talk = await lockTalk(tx, input.talkId!);
-      requireCondition(talk.state !== "archived", "This conversation is archived");
+      requireCondition(!["archived", "execution"].includes(talk.state), "Use task feedback to continue an execution conversation");
       return tx.buildTalk.update({ where: { id: talk.id }, data: { messages: json([...messagesOf(talk.messages), message].slice(-maxMessages)), state: talk.state === "thinking" ? "thinking" : "queued", error: null } });
     });
   }
   // Archiving records when and why on the plan JSON; reopening clears it (see conversations.ts).
   if (input.action === "talk-archive" || input.action === "talk-reopen") return db.$transaction(async tx => {
     const talk = await lockTalk(tx, input.id), plan = talk.plan as PlanLike | null;
+    requireCondition(talk.state !== "execution", "Execution conversations stay attached to their task");
     if (input.action === "talk-archive") return tx.buildTalk.update({ where: { id: talk.id }, data: { state: "archived", plan: json(archivedPlan(plan, { at: new Date().toISOString(), by: "owner", reason: "Closed by you." })) } });
     requireCondition(talk.state === "archived", "This conversation is open");
     const reopened = reopenedPlan(plan);
@@ -68,28 +90,42 @@ export async function talkOwner(input: z.infer<typeof talkOwnerCommand>, actor: 
   return mutate(async tx => {
     const talk = await lockTalk(tx, input.id);
     const plan = talk.plan as TalkPlan | null;
-    requireCondition(plan && plan.runId === input.runId, "The plan changed; reload");
-    const control = await tx.buildControl.findUniqueOrThrow({ where: { id: "build" } });
-    const head = (control.worker as { head?: string }).head;
-    requireCondition(/^[a-f0-9]{40}$/.test(head ?? ""), "The Mac worker has not reported the code yet");
-    const started = [...plan.started];
-    for (const [i, item] of plan.items.entries()) {
-      const key = `talk-${talk.id}-${createHash("sha256").update(plan.runId).digest("hex").slice(0, 8)}-${i}`;
-      if (started.includes(key)) continue;
-      item.scope.forEach(f => validateScopeEntry(f));
-      // Tie the task to mapped files it changes; new files have no map record yet.
-      const fileIds = item.scope.map(p => `file-${createHash("sha256").update(p).digest("hex").slice(0, 24)}`);
-      const nodeIds = (await tx.buildNode.findMany({ where: { id: { in: fileIds } }, select: { id: true } })).map(n => n.id);
-      const spec = await routed(tx, control, jobSpec.parse({ ...item, reason: `From your conversation "${talk.title}": ${item.reason}`.slice(0, 4000), nodeIds, baseRevision: head,
-        endpoint: "review", taskType: "implementation", profileId: "auto", quality: difficulty.routine, tools: ["git-read", "code-write"], owner: "estio-build" }));
-      const job = await tx.buildJob.upsert({ where: { key }, create: { key, spec: json(spec), checkpoint: json({ talkId: talk.id }) }, update: {} });
-      if (job.state === "proposed") await approveJob(tx, control, job, actor);
-      started.push(key);
-    }
-    // Starting work is an explicit owner decision, so it also resumes a paused queue.
-    if (control.paused) await tx.buildControl.update({ where: { id: "build" }, data: { paused: false } });
-    return tx.buildTalk.update({ where: { id: talk.id }, data: { plan: json({ ...plan, started }) } });
+    requireCondition(talk.state !== "archived" && talk.state !== "execution" && plan?.items.length && plan.runId === input.runId, "The plan changed or is closed; reload");
+    await proposePlan(tx, talk, plan);
+    return startPlan(tx, talk, plan, actor);
   });
+}
+
+/** Stable proposal identity shared by plan cards and owner approval. */
+async function proposePlan(tx: Prisma.TransactionClient, talk: { id: string; title: string; messages: unknown }, plan: TalkPlan) {
+  const control = await tx.buildControl.findUniqueOrThrow({ where: { id: "build" } });
+  const head = (control.worker as { head?: string }).head;
+  requireCondition(/^[a-f0-9]{40}$/.test(head ?? ""), "The Mac worker has not reported the code yet");
+  const nodes = await tx.buildNode.findMany({ select: { id: true, spec: true } });
+  const about = /^About "([^"\n]+)" \(feature\):/.exec(messagesOf(talk.messages).find(m => m.role === "owner")?.text ?? talk.title)?.[1];
+  const features = nodes.filter(n => { const s = n.spec as { kind?: string; name?: string }; return s.kind === "feature" && s.name === about; });
+  for (const [i, item] of plan.items.entries()) {
+    const key = planKey(talk.id, plan.runId, i);
+    if (await tx.buildJob.findUnique({ where: { key } })) continue;
+    item.scope.forEach(validateScopeEntry);
+    const nodeIds = nodes.filter(n => { const s = n.spec as { kind?: string; sourceRefs?: string[] }; return (s.kind === "resource" || s.kind === "page") && s.sourceRefs?.some(path => item.scope.some(scope => scope.endsWith("/") ? path.startsWith(scope) : path === scope)); }).map(n => n.id);
+    if (features.length === 1) nodeIds.unshift(features[0].id);
+    const spec = await routed(tx, control, jobSpec.parse({ ...item, reason: `From your conversation "${talk.title}": ${item.reason}`.slice(0, 4000), nodeIds: [...new Set(nodeIds)].slice(0, 30), baseRevision: head,
+      endpoint: "review", taskType: "implementation", profileId: "auto", quality: difficulty.routine, tools: ["git-read", "code-write"], owner: "estio-build" }));
+    await tx.buildJob.upsert({ where: { key }, create: { key, spec: json(spec), checkpoint: json({ talkId: talk.id }) }, update: {} });
+  }
+}
+async function startPlan(tx: Prisma.TransactionClient, talk: { id: string }, plan: TalkPlan, actor: string) {
+  const control = await tx.buildControl.findUniqueOrThrow({ where: { id: "build" } });
+  const started = [...plan.started];
+  for (const [i] of plan.items.entries()) {
+    const key = planKey(talk.id, plan.runId, i);
+    const job = await tx.buildJob.findUniqueOrThrow({ where: { key } });
+    if (job.state === "proposed") await approveJob(tx, control, job, actor);
+    if (job.state !== "revoked" && !started.includes(key)) started.push(key);
+  }
+  if (control.paused) await tx.buildControl.update({ where: { id: "build" }, data: { paused: false } });
+  return tx.buildTalk.update({ where: { id: talk.id }, data: { plan: json({ ...plan, started }) } });
 }
 
 /**
@@ -97,7 +133,7 @@ export async function talkOwner(input: z.infer<typeof talkOwnerCommand>, actor: 
  * loads, so it needs no schedule; it is idempotent and only touches conversations that qualify.
  */
 export async function talks() {
-  const open = await db.buildTalk.findMany({ where: { state: { not: "archived" } }, orderBy: { updatedAt: "desc" }, take: 20 });
+  const open = await db.buildTalk.findMany({ where: { state: { notIn: ["archived", "execution"] } }, orderBy: { updatedAt: "desc" }, take: 20 });
   const keys = open.flatMap(t => (t.plan as PlanLike | null)?.started ?? []);
   const jobs = keys.length ? await db.buildJob.findMany({ where: { key: { in: keys } }, select: { id: true, key: true, state: true, checkpoint: true } }) : [];
   const settled = new Set<string>();
@@ -122,24 +158,37 @@ const threadMessage = z.object({ role: z.string().max(40), text: z.string().max(
 export const talkWorkerCommand = z.discriminatedUnion("action", [
   z.object({ action: z.literal("talk-poll"), workerId: id }).strict(),
   z.object({ action: z.literal("talk-sent"), workerId: id, id, threadId: z.string().regex(/^[a-zA-Z0-9:._-]{1,120}$/), messageIds: z.array(z.string().max(40)).max(50) }).strict(),
-  z.object({ action: z.literal("talk-sync"), workerId: id, id, messages: z.array(threadMessage).max(maxMessages), running: z.boolean(), needsAnswer: z.boolean(), error: z.string().max(500).optional() }).strict(),
+  z.object({ action: z.literal("talk-sync"), workerId: id, id, messages: z.array(threadMessage).max(maxMessages), running: z.boolean(), needsAnswer: z.boolean(), error: z.string().max(500).optional(), historyLimit: z.number().int().min(1).max(1000).optional(), historyMore: z.boolean().optional(), historyShortened: z.boolean().optional() }).strict(),
 ]);
 export async function talkWorker(input: z.infer<typeof talkWorkerCommand>) {
   if (input.action === "talk-poll") {
-    const open = await db.buildTalk.findMany({ where: { state: { in: ["queued", "thinking"] } }, orderBy: { updatedAt: "asc" }, take: 10 });
+    const [active, background] = await Promise.all([
+      db.buildTalk.findMany({ where: { state: { in: ["queued", "thinking"] } }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }], take: 5 }),
+      db.buildTalk.findMany({ where: { OR: [backgroundTalkWhere, { state: "execution", threadId: { not: null } }] }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }], take: 5 }),
+    ]);
+    const open = [...active, ...background];
     const meta = open.length ? (await db.buildControl.findUnique({ where: { id: "build" } }))?.worker as { playbook?: PlaybookEdits; memory?: MemoryEntry[] } | undefined : undefined;
     const memory = memoryText(meta?.memory, 4000);
-    return { talks: open.map(t => ({ id: t.id, title: t.title, threadId: t.threadId, base: t.base, profile: t.profile, playbook: talkPrompt(meta?.playbook, memory ? `${memoryHeading}\n${memory}` : ""), delimiter: ownerDelimiter,
-      unsent: messagesOf(t.messages).filter(m => m.role === "owner" && m.sent === false).map(m => ({ id: m.id, text: m.text })) })) };
+    return { talks: open.map(t => ({ id: t.id, title: t.title, threadId: t.threadId, base: t.base, profile: t.profile, playbook: talkPrompt(meta?.playbook, memory ? `${memoryHeading}\n${memory}` : ""), delimiter: ownerDelimiter, messageLimit: (t.plan as TalkPlan | null)?.historyLimit ?? 60,
+      unsent: (t.state === "execution" ? [] : messagesOf(t.messages)).filter(m => m.role === "owner" && m.sent === false).map(m => ({ id: m.id, text: m.text })) })) };
   }
-  // Decisions the agent marked to remember go into product memory once its run has finished.
-  if (input.action === "talk-sync" && !input.running) {
-    const last = [...input.messages].reverse().find(m => m.role === "assistant");
-    const notes = last ? extractRemember(last.text) : [];
-    if (notes.length) await mutate(tx => addMemory(tx, notes.map(text => ({ kind: "decision" as const, text }))));
-  }
-  return db.$transaction(async tx => {
+  return mutate(async tx => {
     const talk = await lockTalk(tx, input.id);
+    if (talk.state === "archived") return talk;
+    if (talk.state === "execution") {
+      requireCondition(input.action === "talk-sync", "Execution mirrors cannot dispatch messages");
+      const messages = input.messages.filter(m => m.role === "user" || m.role === "assistant").map((m, i) => ({ id: `t-${i}-${m.runId ?? ""}`, role: m.role === "user" ? "owner" : "agent", text: m.text }));
+      return tx.buildTalk.update({ where: { id: talk.id }, data: {
+        ...(!input.error ? { messages: json(messages), plan: json({ ...(talk.plan as object), historyMore: input.historyMore, historyShortened: input.historyShortened }) } : {}), error: input.error ?? null,
+      } });
+    }
+    // Decisions the agent marked to remember go into product memory once its run has finished.
+    if (input.action === "talk-sync" && !input.running) {
+      const last = [...input.messages].reverse().find(m => m.role === "assistant");
+      const notes = last ? extractRemember(last.text) : [];
+      if (notes.length) await addMemory(tx, notes.map(text => ({ kind: "decision" as const, text })));
+    }
+
     if (input.action === "talk-sent") {
       requireCondition(!talk.threadId || talk.threadId === input.threadId, "Conversation is bound to another thread");
       const messages = messagesOf(talk.messages).map(m => input.messageIds.includes(m.id) ? { ...m, sent: true } : m);
@@ -153,8 +202,32 @@ export async function talkWorker(input: z.infer<typeof talkWorkerCommand>) {
     const last = [...input.messages].reverse().find(m => m.role === "assistant");
     if (!input.running && last?.runId && plan?.runId !== last.runId) {
       const found = extractPlan(last.text);
-      if (found.found && found.items.length) plan = { runId: last.runId, items: found.items, started: [], at: new Date().toISOString() };
+      if (found.found && found.items.length) {
+        if (plan) await tx.buildJob.updateMany({ where: { key: { in: plan.items.map((_, i) => planKey(talk.id, plan!.runId, i)) }, state: "proposed" }, data: { state: "revoked" } });
+        plan = { runId: last.runId, items: found.items, started: [], at: new Date().toISOString(), historyLimit: plan?.historyLimit, historyBaseline: plan?.historyBaseline };
+      }
     }
+    if (plan?.items.length) {
+      await proposePlan(tx, talk, plan);
+      const jobs = await tx.buildJob.findMany({ where: { key: { in: plan.items.map((_, i) => planKey(talk.id, plan!.runId, i)) }, state: { notIn: ["proposed", "revoked"] } }, select: { key: true } });
+      plan = { ...plan, started: [...new Set([...plan.started, ...jobs.map(j => j.key)])] };
+    }
+    // Only a new, provenance-bearing user message following the already saved plan may approve it.
+    // A plan discovered in this snapshot is deliberately ineligible (no retroactive Start).
+    const previous = talk.plan as TalkPlan | null;
+    if (plan && !plan.historyBaseline && previous?.runId === plan.runId) {
+      for (const m of freshStarts(talk.threadId, plan, input.messages, plan.approvals ?? [])) {
+        const provenance = startDigest(talk.threadId, m);
+        plan = { ...plan, approvals: [...(plan.approvals ?? []), provenance] };
+        const result = await startPlan(tx, talk, plan, `t3:${provenance}`);
+        plan = result.plan as TalkPlan;
+      }
+    }
+    // Baseline every observed message, including historical Starts before this plan was saved.
+    if (plan) plan = { ...plan, approvals: [...new Set([...(plan.approvals ?? []), ...input.messages.filter(m => m.role === "user").map(m => startDigest(talk.threadId, m))])].slice(-2000) };
+
+    if (plan?.historyBaseline && (input.historyLimit ?? 0) >= plan.historyBaseline) plan = { ...plan, historyBaseline: undefined };
+    if (!input.error && (plan || input.historyMore || input.historyShortened)) plan = { runId: "", items: [], started: [], at: new Date().toISOString(), ...plan, historyMore: input.historyMore, historyShortened: input.historyShortened };
     const state = input.error ? "error" : input.needsAnswer ? "waiting" : input.running ? "thinking" : unsent.length ? "queued" : "idle";
     // An error report carries no messages; keep the transcript as it was.
     const messages = input.error && !input.messages.length ? messagesOf(talk.messages) : [...fromThread, ...unsent];

@@ -262,10 +262,22 @@ export async function approveJob(tx: Prisma.TransactionClient, control: { revisi
   const profile = selectProfile(profilesSpec.parse(control.profiles), spec, routing(control.worker));
   requireCondition(profile, "No enabled, qualified approved profile");
   const nodes = await tx.buildNode.findMany({ where: { id: { in: spec.nodeIds } } });
-  return tx.buildJob.update({ where: { id: job.id }, data: {
+  const approved = await tx.buildJob.update({ where: { id: job.id }, data: {
     state: "approved", approval: json({ actor, at: new Date().toISOString(), revision: job.revision, spec, policyRevision: control.revision, profile,
       nodes: nodes.map(n => ({ id: n.id, revision: n.revision })) }),
   } });
+  const record = await tx.buildJob.findUniqueOrThrow({ where: { id: job.id }, select: { key: true, checkpoint: true } });
+  const talkId = (record.checkpoint as { talkId?: string } | null)?.talkId;
+  if (talkId) {
+    await tx.$queryRaw`SELECT "id" FROM "BuildTalk" WHERE "id" = ${talkId} FOR UPDATE`;
+    const talk = await tx.buildTalk.findUnique({ where: { id: talkId } });
+    const plan = talk?.plan as { runId?: string; started?: string[] } | null;
+    await tx.buildControl.update({ where: { id: "build" }, data: { paused: false } });
+    if (plan?.runId && record.key.startsWith(`talk-${talkId}-${createHash("sha256").update(plan.runId).digest("hex").slice(0, 8)}-`)) {
+      await tx.buildTalk.update({ where: { id: talkId }, data: { plan: json({ ...plan, started: [...new Set([...(plan.started ?? []), record.key])] }) } });
+    }
+  }
+  return approved;
 }
 
 async function contextFor(tx: Prisma.TransactionClient, nodeIds: string[]) {

@@ -5,7 +5,7 @@ import { withoutPlan } from "@/lib/build/playbook";
 import { jobsOfTalk, talkWords } from "@/lib/build/conversations";
 import { workStatus } from "@/lib/build/features";
 import type { TalkMessage, TalkPlan } from "@/lib/build/talk";
-import { Dot, stateWord, type Job } from "./progress";
+import { cp, Dot, stateWord, type Job } from "./progress";
 
 export type Talk = { id: string; title: string; state: string; threadId: string | null; profile: { id?: string; model?: string } | null; messages: TalkMessage[]; plan: TalkPlan | null; error: string | null; updatedAt: string };
 export type PastTalk = Pick<Talk, "id" | "title" | "state" | "threadId" | "plan" | "updatedAt">;
@@ -48,12 +48,25 @@ export function TalkSheet({ view, setView, talks, past, jobs, paused, blocker, r
   const [loaded, setLoaded] = useState<Talk | null>(null);
   const id = view?.mode === "talk" ? view.id : null;
   const talk = id ? talks.find(t => t.id === id) ?? (loaded?.id === id ? loaded : null) : null;
-  // Archived conversations aren't in the page data; fetch the one being opened.
+  // A task opens a read-only mirror of its execution thread; archived talks load on demand.
   useEffect(() => {
     setError("");
-    if (!id || talks.some(t => t.id === id) || loaded?.id === id) return;
-    void fetch(`/api/build?talk=${encodeURIComponent(id)}`, { cache: "no-store" }).then(r => r.json()).then(v => v?.id ? setLoaded(v) : setError(v?.error ?? "Couldn't open it.")).catch(() => setError("Couldn't reach the server."));
-  }, [id, talks, loaded?.id]);
+    if (!id || talks.some(t => t.id === id)) return;
+    let cancelled = false;
+    const fetchTalk = async () => {
+      try {
+        const res = id.startsWith("job:")
+          ? await fetch("/api/build", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "talk-job", id: id.slice(4) }) })
+          : await fetch(`/api/build?talk=${encodeURIComponent(id)}`, { cache: "no-store" });
+        const value = await res.json();
+        if (!res.ok) throw new Error(value.error);
+        if (!cancelled) { setLoaded(value); if (id.startsWith("job:")) setView({ mode: "talk", id: value.id }); }
+      } catch (e) { if (!cancelled) setError(e instanceof Error ? e.message : "Couldn't open it."); }
+    };
+    void fetchTalk();
+    const timer = setInterval(() => void fetchTalk(), 4000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [id, talks, setView]);
   // Poll faster while a reply is on its way; the page's normal refresh is slower.
   const working = talks.some(live);
   useEffect(() => { if (!working) return; const timer = setInterval(() => void reload(), 3000); return () => clearInterval(timer); }, [working, reload]);
@@ -62,6 +75,7 @@ export function TalkSheet({ view, setView, talks, past, jobs, paused, blocker, r
     try {
       const res = await fetch("/api/build", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command) });
       const value = await res.json(); if (!res.ok) throw new Error(value.error);
+      if (value?.id === id && Array.isArray(value.messages)) setLoaded(value);
       await reload(); return value as { id?: string } & Partial<Talk>;
     } catch (e) { setError(e instanceof TypeError ? "Couldn't reach the server. Check your connection and try again." : e instanceof Error ? e.message : String(e)); return null; } finally { setBusy(false); }
   }
@@ -73,11 +87,11 @@ export function TalkSheet({ view, setView, talks, past, jobs, paused, blocker, r
       <div className="space-y-1 border-b px-5 pb-3 pr-12 pt-5">
         <SheetTitle className="text-base font-semibold leading-snug">{title}</SheetTitle>
         <SheetDescription className="text-xs">{view?.mode === "past" ? "Archived when their work was done, or when you closed them. Open one to read it or reopen it."
-          : view?.mode === "new" ? "Build asks questions, checks the code, then proposes small tasks you start with one tap." : talk ? talkWords(talk) : "Loading…"}</SheetDescription>
+          : view?.mode === "new" ? "Build asks questions, checks the code, then proposes small tasks you start with one tap." : talk?.state === "execution" ? "Execution conversation · synced from T3 on the Mac." : talk ? talkWords(talk) : "Loading…"}</SheetDescription>
       </div>
       {view?.mode === "past" && <PastList past={past} open={id => setView({ mode: "talk", id })} />}
       {view?.mode === "new" && <Composer key={view.n} seed={view.seed} busy={busy} models={models} onSend={async (text, profileId) => { const r = await post({ action: "talk", text, ...(profileId ? { profileId } : {}) }); if (r?.id) setView({ mode: "talk", id: r.id }); return !!r; }} />}
-      {view?.mode === "talk" && talk && <Conversation talk={talk} jobs={jobs} busy={busy} paused={paused} blocker={blocker} models={models} post={post} reveal={reveal}
+      {view?.mode === "talk" && talk && <Conversation talk={talk} jobs={jobs} busy={busy} paused={paused} blocker={blocker} models={models} post={post} reveal={reveal} openTalk={id => setView({ mode: "talk", id })}
         archive={async () => { if (await post({ action: "talk-archive", id: talk.id })) setView(null); }}
         reopen={async () => { const r = await post({ action: "talk-reopen", id: talk.id }); if (r) setLoaded({ ...talk, ...r } as Talk); }} />}
       {error && <p role="alert" className="border-t px-5 py-2 text-sm text-red-600">{error}</p>}
@@ -93,51 +107,63 @@ function PastList({ past, open }: { past: PastTalk[]; open: (id: string) => void
   </button></li>)}</ul>;
 }
 
-function Composer({ seed, busy, models, onSend, reply }: { seed?: string; busy: boolean; models: { id: string; name: string }[]; onSend: (text: string, profileId?: string) => Promise<boolean>; reply?: boolean }) {
+function Composer({ seed, busy, models, onSend, reply, maxLength = 8000, minLength = 1 }: { seed?: string; busy: boolean; models: { id: string; name: string }[]; onSend: (text: string, profileId?: string) => Promise<boolean>; reply?: boolean; maxLength?: number; minLength?: number }) {
   const [text, setText] = useState(seed ?? ""), [model, setModel] = useState("auto"), input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { if (!reply) input.current?.focus(); }, [reply]);
-  const send = async () => { const v = text.trim(); if (v && await onSend(v, model === "auto" ? undefined : model)) setText(""); };
+  const send = async () => { const v = text.trim(); if (v.length >= minLength && await onSend(v, model === "auto" ? undefined : model)) setText(""); };
   return <div className={`space-y-2 px-5 py-4 ${reply ? "border-t" : ""}`}>
     <div className="flex items-end gap-2">
-      <textarea ref={input} aria-label="Message" rows={reply ? 2 : 4} value={text} maxLength={8000} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send(); } }}
+      <textarea ref={input} aria-label="Message" rows={reply ? 2 : 4} value={text} maxLength={maxLength} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send(); } }}
         placeholder={reply ? "Reply…" : "What do you want to build or change?"} className="min-h-[2.75rem] flex-1 resize-y rounded-lg border bg-background p-2.5 text-sm" />
-      <button disabled={busy || !text.trim()} onClick={() => void send()} className="rounded-lg bg-foreground px-4 py-2.5 text-sm font-medium text-background disabled:opacity-40">Send</button>
+      <button disabled={busy || text.trim().length < minLength} onClick={() => void send()} className="rounded-lg bg-foreground px-4 py-2.5 text-sm font-medium text-background disabled:opacity-40">Send</button>
     </div>
     {!reply && models.length > 1 && <select aria-label="Model for this conversation" className="rounded-full border bg-background px-2 py-1 text-xs" value={model} onChange={e => setModel(e.target.value)}><option value="auto">Model: Auto</option>{models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select>}
   </div>;
 }
 
-function Conversation({ talk, jobs, busy, paused, blocker, models, post, reveal, archive, reopen }: { talk: Talk; jobs: Job[]; busy: boolean; paused: boolean; blocker: string | null; models: { id: string; name: string }[];
-  post: (command: object) => Promise<unknown>; reveal: (jobId: string) => void; archive: () => void; reopen: () => void }) {
+function Conversation({ talk, jobs, busy, paused, blocker, models, post, reveal, openTalk, archive, reopen }: { talk: Talk; jobs: Job[]; busy: boolean; paused: boolean; blocker: string | null; models: { id: string; name: string }[];
+  post: (command: object) => Promise<unknown>; reveal: (jobId: string) => void; openTalk: (id: string) => void; archive: () => void; reopen: () => void }) {
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => { end.current?.scrollIntoView({ block: "nearest" }); }, [talk.messages.length, talk.state]);
+  useEffect(() => { if (!talk.plan?.historyMore) end.current?.scrollIntoView({ block: "nearest" }); }, [talk.id, talk.messages.length, talk.state, talk.plan?.historyMore]);
   const archived = talk.state === "archived", plan = talk.plan?.items.length ? talk.plan : null;
+  const execution = talk.state === "execution", job = jobs.find(j => j.id === talk.plan?.executionJobId);
+  const planningId = (job?.checkpoint as { talkId?: string } | null)?.talkId;
   const started = jobsOfTalk(talk, jobs), allStarted = !!plan && plan.started.length >= plan.items.length;
   return <>
     <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5 text-xs text-muted-foreground">
       {talk.profile && <span>Talking with {models.find(m => m.id === talk.profile!.id)?.name ?? talk.profile.model}</span>}
-      {talk.threadId && <span>· also in T3 as &quot;Talk: {talk.title.slice(0, 40)}{talk.title.length > 40 ? "…" : ""}&quot;</span>}
+      {talk.threadId && <a className="underline" href={`t3-thread://v1/${talk.threadId}`}>Open in T3</a>}
+      {execution && planningId && <button className="underline" onClick={() => openTalk(planningId)}>Planning conversation</button>}
       <span className="ml-auto" />
-      {archived ? <button className={btn} disabled={busy} onClick={reopen}>Reopen</button>
+      {execution ? <span className="font-medium text-foreground">{job ? stateWord(job) : "Task conversation"}</span> : archived ? <button className={btn} disabled={busy} onClick={reopen}>Reopen</button>
         : <button className={btn} disabled={busy} onClick={archive} title="Archive: it moves to Past conversations; you can reopen it">Done with this conversation</button>}
     </div>
     <div className="flex-1 space-y-2 overflow-y-auto px-5 py-4">
-      {talk.messages.map(m => { const shown = m.role === "agent" ? withoutPlan(m.text) : m.text; return shown && <div key={m.id} className={`max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${m.role === "owner" ? "ml-auto bg-foreground text-background" : "border bg-background"}`}>{shown}</div>; })}
-      {!talk.messages.length && <p className="text-sm text-muted-foreground">This conversation continued in T3; nothing was synced here.</p>}
+      {execution && job && <button className="text-sm underline" onClick={() => reveal(job.id)}>Back to task</button>}
+      {talk.plan?.historyMore && <div className="text-xs text-muted-foreground">
+        {(talk.plan.historyLimit ?? 60) < 1000 && !archived ? <button disabled={busy} className={btn} onClick={() => void post({ action: "talk-history", id: talk.id })}>Load earlier messages</button> : <p>Earlier messages are available in T3.</p>}
+      </div>}
+      {talk.plan?.historyShortened && <p className="text-xs text-muted-foreground">Very long messages are shortened here. Open in T3 to read them in full.</p>}
+      {talk.messages.map(m => { const shown = m.role === "agent" && !execution ? withoutPlan(m.text) : m.text; return shown && <div key={m.id} className={`max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-sm ${m.role === "owner" ? "ml-auto bg-foreground text-background" : "border bg-background"}`}>{shown}</div>; })}
+      {!talk.messages.length && <p className="text-sm text-muted-foreground">Waiting for the Mac to sync this conversation…</p>}
       {(plan || started.length > 0) && <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
         <p className="text-sm font-medium">{plan ? `Plan · ${plan.items.length} task${plan.items.length === 1 ? "" : "s"}` : "Work it started"}</p>
-        {allStarted || !plan ? <ul className="space-y-1">{started.map(j => <li key={j.id} className="flex items-start gap-2.5 text-sm">
+        {started.length > 0 || !plan ? <ul className="space-y-1">{started.map(j => <li key={j.id} className="flex items-start gap-2.5 text-sm">
           <Dot status={workStatus(j) ?? "idea"} className="mt-1.5" />
           <span className="min-w-0 flex-1"><span className="font-medium">{j.spec.title}</span><span className="block text-xs text-muted-foreground">{stateWord(j).replace(/^./, c => c.toUpperCase())}</span></span>
           <button className="shrink-0 text-sm underline underline-offset-2" onClick={() => reveal(j.id)}>Open in Product</button></li>)}
           {plan && started.length < plan.started.length && <li className="text-xs text-muted-foreground">Older tasks are no longer listed on the page.</li>}</ul>
-          : <><ol className="space-y-1.5">{plan.items.map((item, i) => { const it = item as { title: string; outcome: string; scope: string[] }; return <li key={i} className="text-sm"><span className="font-medium">{i + 1}. {it.title}</span><span className="block text-xs text-muted-foreground">{it.outcome}</span></li>; })}</ol>
-            {!archived && <div className="flex flex-wrap items-center gap-2"><button disabled={busy || !!blocker} className={solid} onClick={() => void post({ action: "talk-start", id: talk.id, runId: plan.runId })}>Start {plan.items.length === 1 ? "it" : `all ${plan.items.length}`}</button>
-              <span className="text-xs text-muted-foreground">{blocker ?? (paused ? "Starting also resumes the paused queue." : "Each task runs in its own T3 thread and branch. Nothing is merged or deployed.")}</span></div>}</>}
+          : <><ol className="space-y-1.5">{plan.items.map((item, i) => { const it = item as { title: string; outcome: string; scope: string[] }; return <li key={i} className="text-sm"><span className="font-medium">{i + 1}. {it.title}</span><span className="block text-xs text-muted-foreground">{it.outcome}</span></li>; })}</ol></>}
+            {plan && !allStarted && !archived && <div className="flex flex-wrap items-center gap-2"><button disabled={busy || !!blocker} className={solid} onClick={() => void post({ action: "talk-start", id: talk.id, runId: plan.runId })}>Start {plan.items.length === 1 ? "it" : `all ${plan.items.length}`}</button>
+              <span className="text-xs text-muted-foreground">{blocker ?? (paused ? "Starting also resumes the paused queue." : "Each task runs in its own T3 thread and branch. Nothing is merged or deployed.")}</span></div>}
         {allStarted && !archived && <p className="text-xs text-muted-foreground">This conversation archives itself when all its tasks are done.</p>}
       </div>}
       <div ref={end} />
     </div>
-    {!archived && <Composer reply busy={busy} models={models} onSend={async text => !!await post({ action: "talk", talkId: talk.id, text })} />}
+    {execution && (job && !cp(job).result?.needsAnswer && ["review", "failed"].includes(job.state) ? <div>
+      <p className="border-t px-5 pt-3 text-xs text-muted-foreground">Reply to continue this task in the same scope. Sending queues another attempt{paused ? " while the queue is paused" : ""}.</p>
+      <Composer key={job.id} minLength={3} maxLength={2000} reply busy={busy} models={models} onSend={async text => text.trim().length >= 3 && !!await post({ action: "redo", id: job.id, revision: job.revision, note: text })} />
+    </div> : <p className="border-t px-5 py-3 text-xs text-muted-foreground">{job?.state === "working" ? "Work is running. Reply here when its result is ready, or open T3 to follow the live thread." : "Open in T3 to continue the conversation. Changes to a completed task need a new approved task."}</p>)}
+    {!execution && !archived && <Composer reply busy={busy} models={models} onSend={async text => !!await post({ action: "talk", talkId: talk.id, text })} />}
   </>;
 }

@@ -164,3 +164,11 @@ The owner found the open transcript at the top confusing: it didn't go away and 
 
 - Code: `lib/build/conversations.ts` (links, auto-archive rule, archive record), `lib/build/talk.ts` (archive/reopen, settle on load, past list), `talk.tsx` (entry and sheet), links in `product.tsx`/`progress.tsx`, Needs you rows in `workspace.tsx`.
 - Verified: 54 `lib/build` tests (including `conversations.test.ts`), no type errors in touched files, and headless screenshots against a read-only production snapshot at 1180 and 820, light and dark.
+
+## T3 sync, actionable plans and task conversations (2026-11-07)
+
+Open idle/waiting conversations now receive bounded fair background reads, so direct replies in T3 appear in Build. Concrete plans create stable proposed jobs linked to their subject feature; Product shows Ready to start and Start. Start from either entry point updates the saved plan and resumes the queue. Only a fresh provenance-bearing exact Start after the already saved concrete plan can approve it; historical commands and history expansion cannot backdate approval. Archived conversations remain untouched.
+
+Work subcards open their execution conversation in the existing sheet, including external T3 work. Read-only execution mirrors reuse BuildTalk and never parse proposals or dispatch messages. Returned-result replies use the existing scoped Redo action. The viewer links to planning, the task and the exact T3 thread, and discloses bounded/shortened history. No schema migration or new dependency.
+
+Validation: 60 focused Build tests, strict Build-slice TypeScript and diff checks passed. Disposable PostgreSQL replay of the actual eight-message onboarding conversation verifies proposal/feature linkage, idempotency, historical Start rejection, active-reply Start approval, legacy-plan Start, Product approval/unpause, execution mirrors, history expansion, feedback and archive guards. CLI read accepts the expanded history window without a model turn. Signed-in/mobile/keyboard acceptance remains unverified: the T3 preview refused a new tab because its server tab limit was reached; existing tabs belong to another agent.

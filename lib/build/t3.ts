@@ -93,13 +93,13 @@ export function t3Catalog(manifest: Manifest, settings: Settings) {
   return out.slice(0, 200);
 }
 
-export type TalkSync = { messages: { role: string; text: string; runId?: string }[]; running: boolean; needsAnswer: boolean };
+export type TalkSync = { messages: { role: string; text: string; runId?: string }[]; running: boolean; needsAnswer: boolean; historyLimit?: number; historyMore?: boolean; historyShortened?: boolean };
 /**
  * One conversation turn: relays the owner's unsent messages to the conversation's T3 thread (starting it, read-only by
  * instruction, in its own worktree at the latest scanned code), then reports the thread's messages until the run ends.
  */
 export async function talkTurn(input: { command: string; checkout: string; branch: string;
-  talk: { title: string; threadId: string | null; base: string | null; profile: { provider?: string; model?: string } | null; playbook: string; delimiter: string; unsent: { id: string; text: string }[] };
+  talk: { title: string; threadId: string | null; base: string | null; profile: { provider?: string; model?: string } | null; playbook: string; delimiter: string; messageLimit?: number; unsent: { id: string; text: string }[] };
   sent: (threadId: string, ids: string[]) => Promise<void>; report: (sync: TalkSync) => Promise<void>; timeoutMs?: number }) {
   const { talk } = input;
   let threadId = talk.threadId ?? "";
@@ -127,11 +127,17 @@ export async function talkTurn(input: { command: string; checkout: string; branc
   if (!threadId) return;
   const deadline = Date.now() + (input.timeoutMs ?? 2 * 60 * 60_000);
   for (;;) {
-    const show = await showThread(input.command, input.checkout, threadId, 60);
+    const limit = Math.max(1, Math.min(1000, talk.messageLimit ?? 60));
+    const show = await showThread(input.command, input.checkout, threadId, limit + 1);
     const t = show.thread ?? {};
     const running = !!t.activeRunId || t.status === "running", needsAnswer = (t.pendingRequestCount ?? 0) > 0;
-    const messages = (show.messages ?? []).filter(m => m.text).map(m => ({ role: String(m.role ?? "assistant").slice(0, 40), text: String(m.text).slice(0, 20000), runId: m.runId?.slice(0, 200) }));
-    await input.report({ messages, running, needsAnswer });
+    const source = (show.messages ?? []).filter(m => m.text);
+    const messages = source.slice(-limit).map(m => ({ role: String(m.role ?? "assistant").slice(0, 40), text: String(m.text).slice(0, 20000), runId: m.runId?.slice(0, 200) }));
+    let bytes = Buffer.byteLength(JSON.stringify(messages));
+    let historyMore = source.length > limit;
+    const historyShortened = source.some(m => String(m.text).length > 20000);
+    while (bytes > 3 * 1024 * 1024 && messages.length > 1) { bytes -= Buffer.byteLength(JSON.stringify(messages.shift())) + 1; historyMore = true; }
+    await input.report({ messages, running, needsAnswer, historyLimit: limit, historyMore, historyShortened });
     if (!running || needsAnswer || Date.now() > deadline) return;
     await sleep(4000);
   }
