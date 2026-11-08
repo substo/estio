@@ -1,8 +1,12 @@
 # Current release and work
 
-Updated 2026-11-07. This is the task/status source of truth; [architecture and decisions](how-the-app-works.md) owns product rules. Historical checkpoints do not override this page.
+Updated 2026-11-08. This is the task/status source of truth; [architecture and decisions](how-the-app-works.md) owns product rules. Historical checkpoints do not override this page.
 
 ## Release
+
+Live release, 2026-11-08 17:57 UTC: `c557b3cc4353dc2437454fda12784e744259aa1e`, blue, build `5Kniv9sNQz5VlzVjCQu0K`, fingerprint `61b6010b1199a0845230002c3cdf5e17bc66da2d2ebbbdd028631aa1c129bdf0`. Explicit owner-approved combined release includes the conversation-owned Build workflow, onboarding merge `f599c8fd`, and the lease-heartbeat fix. Owned migrate-only deployment exited 0; fresh build, upload, no-pending-migrations check, Caddy validation and soak passed. Public health/version and serving manifest match; required services are online with zero restarts; no rollback. Existing build/dependency warnings remain. Log: `/tmp/estio-thread-workflow-lease-fixed-20261108-deploy.log`.
+
+The idle Mac relay was refreshed and reports this release as both scanned head and canonical head. Shared-root SIMRelay changes and concurrent untracked audit work were preserved. Onboarding is now merged and deployed. Build Start/feedback/Merge/Deploy use linked conversations; legacy direct merge dispatch is disabled. Existing split tasks retain their execution conversation. Verification includes 63 Build tests, 15 deployment tests, targeted strict compilation and the fresh production build; no artificial live model/merge/deploy action was submitted for acceptance. Signed-in mobile and real subscription execution acceptance remain open. Earlier prepared/failed-release entries below are historical evidence.
 
 Prepared conversation-owned workflow (2026-11-07, not deployed): Start reuses the planning conversation; Merge and Deploy relay explicit approvals into the existing execution thread, with guarded pre-push verification and exact-revision deployment approval. Direct background merge polling is disabled. Interrupted actions are reconciled without resending; stopped actions accept scoped feedback and explicit retry. Verification: 63 focused Build tests, strict Build-slice compilation, disposable PostgreSQL queue checks and disposable Git remotes. Live provider execution and signed-in mobile acceptance remain unverified (shared preview tab limit). The candidate includes the owner-merged onboarding implementation `f599c8fd`; deployment needs approval of that combined release.
 
