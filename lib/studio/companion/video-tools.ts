@@ -50,6 +50,6 @@ export async function discoverVideoTools(run: ProcessRunner = runNativeProcess, 
   return { report: summarizeVideoTools(found), paths, home };
 }
 /** Fixed environment for transcription subprocesses: offline model, private cache, no credentials. */
-export function videoProcessEnvironment(tools: VideoTools): NodeJS.ProcessEnv {
+export function videoProcessEnvironment(tools: VideoTools): Record<string, string | undefined> {
   return { HF_HOME: join(tools.home, "hf-cache"), HF_HUB_OFFLINE: "1", HF_HUB_DISABLE_XET: "1", STUDIO_FFMPEG: tools.paths.ffmpeg, STUDIO_FFPROBE: tools.paths.ffprobe, STUDIO_TESSERACT: tools.paths.tesseract };
 }

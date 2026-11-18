@@ -127,7 +127,7 @@ function VideoSetupGuide({ device }: { device: StudioDeviceSummary }) {
   const handles = Array.isArray(device.capabilities.handlers) && (device.capabilities.handlers as string[]).includes("studio.video_transcribe");
   if (!handles) return <p><span className="font-medium">Video transcription:</span> Update the Studio companion on this Mac to enable it.</p>;
   const missing = (video?.missing ?? []).filter((name): name is VideoToolName => (VIDEO_TOOL_NAMES as readonly string[]).includes(name));
-  const optional = missing.filter(name => name === "ffprobe" || name === "tesseract");
+  const optional: VideoToolName[] = missing.filter(name => name === "ffprobe" || name === "tesseract");
   const required = missing.filter(name => !optional.includes(name));
   return <div className="space-y-1">
     <p><span className="font-medium">Video transcription:</span> {video?.ready ? "Ready (local Parakeet, YouTube captions fallback)" : "Not ready"}{device.config.value.features.transcription ? "" : " · turn on Video transcription in Setup below"}</p>
