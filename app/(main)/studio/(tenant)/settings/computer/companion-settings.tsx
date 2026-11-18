@@ -7,6 +7,7 @@ import { useStudioCommand } from "@/app/(main)/studio/_components/use-studio-com
 import type { StudioDeviceCommandSummary, StudioDeviceSummary } from "@/lib/studio/devices";
 import { DeviceSetupForm } from "./device-setup-form";
 import { buttonClass, endpoint, inputClass, providerReport, record, type Provider } from "./shared";
+import { videoSetupCommand, videoSetupGuide, videoToolLabels, VIDEO_TOOL_NAMES, type VideoToolName } from "@/lib/studio/video-transcription-policy";
 import { companionRefreshDelay, DEVICE_WORK_KINDS, deviceWorkLabels, type DeviceWorkKind } from "@/lib/studio/devices-policy";
 
 const when = (value: string) => new Date(value).toLocaleString("en-GB", { timeZone: "Asia/Nicosia", dateStyle: "medium", timeStyle: "short" });
@@ -116,6 +117,24 @@ function Capabilities({ device }: { device: StudioDeviceSummary }) {
     <p><span className="font-medium">Subscriptions:</span> {(["codex", "claude"] as const).map(p => `${providerName(p)} ${ready(p) ? "ready" : "not ready"}`).join(" · ")}</p>
     <p><span className="font-medium">Allowed work:</span> {allowed.join(", ")}{device.processingEnabled ? "" : " (turn processing on to allow research and summaries)"}</p>
     <p><span className="font-medium">Business research:</span> {device.research.ready ? `Ready on ${device.research.providers.map(providerName).join(" and ")}` : `Not available: ${device.research.reason}`}</p>
+    <VideoSetupGuide device={device} />
+  </div>;
+}
+
+/** Guided Setup: what the Mac reported for video transcription, and the exact step for anything missing. Nothing is installed automatically. */
+function VideoSetupGuide({ device }: { device: StudioDeviceSummary }) {
+  const video = (device.capabilities as { video?: { ready?: boolean; missing?: string[]; tools?: Record<string, string> } }).video;
+  const handles = Array.isArray(device.capabilities.handlers) && (device.capabilities.handlers as string[]).includes("studio.video_transcribe");
+  if (!handles) return <p><span className="font-medium">Video transcription:</span> Update the Studio companion on this Mac to enable it.</p>;
+  const missing = (video?.missing ?? []).filter((name): name is VideoToolName => (VIDEO_TOOL_NAMES as readonly string[]).includes(name));
+  const optional: VideoToolName[] = missing.filter(name => name === "ffprobe" || name === "tesseract");
+  const required = missing.filter(name => !optional.includes(name));
+  return <div className="space-y-1">
+    <p><span className="font-medium">Video transcription:</span> {video?.ready ? "Ready (local Parakeet, YouTube captions fallback)" : "Not ready"}{device.config.value.features.transcription ? "" : " · turn on Video transcription in Setup below"}</p>
+    {required.length ? <div role="note" className="space-y-1 text-muted-foreground"><p>Missing on this Mac:</p>
+      <ul className="list-disc pl-5">{required.map(name => <li key={name}>{videoToolLabels[name]} — <code>{videoSetupGuide[name]}</code></li>)}</ul>
+      <p>Guided install of the isolated environment and model: <code>{videoSetupCommand} install</code> (check anytime with <code>{videoSetupCommand} check</code>). Then wait a minute for the Mac to report again.</p></div> : null}
+    {optional.length ? <p className="text-muted-foreground">Slides need {optional.map(name => videoToolLabels[name]).join(" and ")} (<code>{videoSetupGuide[optional[0]]}</code>); without them you still get a transcript.</p> : null}
   </div>;
 }
 

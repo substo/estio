@@ -13,7 +13,8 @@ const runId = "c2400000-0000-4000-8000-000000000001";
 const channel = "UC" + "a".repeat(22);
 const input: YoutubeDiscoveryContext = { outcome: "ready", brand: "substo", userId: "profile-owner", connectionVersion: "grant-version", source: "subscription", channelId: channel, query: "Saved query" };
 const job = { id: "j", location_id: "w", kind: "studio.youtube_discovery", payload: { discoveryRunId: runId }, lease_token: "lease", attempts: 1, max_attempts: 3 };
-function fixture(options: { lostFinish?: boolean; blockedFinish?: boolean; providerError?: Error; abort?: boolean; denied?: boolean; outage?: boolean; quota?: boolean } = {}) {
+function fixture(options: { lostFinish?: boolean; blockedFinish?: boolean; providerError?: Error; abort?: boolean; denied?: boolean; outage?: boolean; quota?: boolean; videoFails?: Error } = {}) {
+ const videoCalls: any[] = [];
  const calls: Array<{ path: string; body: any }> = []; let saved = false; let reads = 0;
  const controller = new AbortController();
  const deps: YoutubeDiscoveryDeps = {
@@ -28,9 +29,10 @@ function fixture(options: { lostFinish?: boolean; blockedFinish?: boolean; provi
    return {} as T;
   }),
   authorize: async (locationId, userId) => { assert.equal(locationId, "w"); assert.equal(userId, "profile-owner"); if (options.outage) throw Error("Authority unavailable"); return !options.denied; },
-  discover: async context => { assert.equal(context.userId, "profile-owner"); reads++; if (options.abort) controller.abort(); if (options.providerError) throw options.providerError; return ["aaaaaaaaaaa"]; },
+  videos: async (_db, fence) => { videoCalls.push(fence); if (options.videoFails) throw options.videoFails; },
+ discover: async context => { assert.equal(context.userId, "profile-owner"); reads++; if (options.abort) controller.abort(); if (options.providerError) throw options.providerError; return ["aaaaaaaaaaa"]; },
  };
- return { deps, calls, controller, count: () => reads };
+ return { deps, calls, controller, videoCalls, count: () => reads };
 }
 test("manual and recurring discovery require explicit sharing, bounded sources and current versions", () => {
  const command = { action: "enable_youtube", scheduleId: runId, version: 1, stateVersion: 0, requestId: runId, connectionVersion: runId, source: "subscription", channelId: channel, titlePrefix: "My label", confirmShare: true };
@@ -97,4 +99,16 @@ test("profile tokens are selected by realm/user/version; one subscribed source, 
   const count = calls; await assert.rejects(discoverScheduledYoutube({ ...input, connectionVersion: "other-version" }, fixtureDb(rest), fetcher)); assert.equal(calls, count);
   allowSubscription = false; await assert.rejects(discoverScheduledYoutube(input, fixtureDb(rest), fetcher), (error: YoutubeError) => error.code === "not_subscribed");
  } finally { for (const name of names) { if (before[name] === undefined) delete process.env[name]; else process.env[name] = before[name]; } }
+});
+
+test("a saved discovery result then queues Mac transcription work under the same lease fence, and a replay retries only that step", async () => {
+ const f = fixture();
+ await createYoutubeDiscoveryHandler(f.deps)(job, { workerId: "w1", signal: f.controller.signal });
+ assert.deepEqual(f.videoCalls, [{ location: "w", run: runId, job: "j", worker: "w1", lease: "lease" }]);
+ const again = await createYoutubeDiscoveryHandler(f.deps)(job, { workerId: "w1", signal: f.controller.signal }) as { alreadySaved?: boolean };
+ assert.equal(again.alreadySaved, true); assert.equal(f.videoCalls.length, 2); assert.equal(f.count(), 1, "the YouTube read is not repeated");
+ const failing = fixture({ videoFails: Error("db down") });
+ await assert.rejects(createYoutubeDiscoveryHandler(failing.deps)(job, { workerId: "w1", signal: failing.controller.signal }), (e: any) => e instanceof StudioJobError && e.code === "video_enqueue_unavailable" && e.retryable);
+ const revoked = fixture({ videoFails: new StudioRestError(403, "42501") });
+ assert.deepEqual(await createYoutubeDiscoveryHandler(revoked.deps)(job, { workerId: "w1", signal: revoked.controller.signal }), { discoveryRunId: runId });
 });

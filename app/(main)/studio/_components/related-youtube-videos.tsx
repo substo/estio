@@ -1,0 +1,154 @@
+"use client";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import type { YoutubeVideo } from "@/lib/google/youtube-api";
+import type { VideoQueueResult } from "@/lib/studio/video-transcription";
+import { useStudioTenantHeaders } from "./studio-tenant-context";
+
+type Candidate = YoutubeVideo & { ticket: string };
+type SearchResult = { query: string; alternateQuery: string | null; videos: Candidate[] };
+type Saved = { recordId: string; transcription: VideoQueueResult };
+
+export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
+  const router = useRouter();
+  const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
+  const section = useRef<HTMLElement>(null);
+  const started = useRef(false);
+  const previewTrigger = useRef<HTMLButtonElement | null>(null);
+  const [result, setResult] = useState<SearchResult | null>(null);
+  const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState("");
+  const [dismissed, setDismissed] = useState(() => new Map<string, string[]>());
+  const [saved, setSaved] = useState(() => new Map<string, Saved>());
+  const [preview, setPreview] = useState<Candidate | null>(null);
+
+  const request = useCallback(async <T,>(body: Record<string, unknown>) => {
+    const response = await fetch("/studio/youtube/api", {
+      method: "POST",
+      headers: { "X-Studio-Tenant": tenant, "Content-Type": "application/json" },
+      body: JSON.stringify({ ...body, anchorId }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "YouTube discovery could not complete.");
+    return data as T;
+  }, [anchorId, tenant]);
+
+  const search = useCallback(async (showMore: boolean, phrase?: string) => {
+    setLoading(true);
+    setError("");
+    try {
+      const next = await request<SearchResult>({ action: "related", expanded: showMore, query: phrase || undefined });
+      setResult(next);
+      setQuery(next.query);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "YouTube discovery could not complete.");
+    } finally {
+      setLoading(false);
+    }
+  }, [request]);
+
+  useEffect(() => {
+    if (started.current || !section.current) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting || started.current) return;
+      started.current = true;
+      observer.disconnect();
+      void search(false);
+    }, { rootMargin: "240px" });
+    observer.observe(section.current);
+    return () => observer.disconnect();
+  }, [search]);
+
+  function explore() {
+    started.current = true;
+    setExpanded(true);
+    void search(true, result?.query);
+  }
+
+  async function save(video: Candidate) {
+    setSaving(video.id);
+    setSaveError("");
+    try {
+      const value = await request<Saved>({ action: "saveRelated", ticket: video.ticket, title: video.title.trim().slice(0, 180) });
+      setSaved(previous => new Map(previous).set(video.id, value));
+      router.refresh();
+    } catch (cause) {
+      setSaveError(cause instanceof Error ? cause.message : "This reference could not be saved.");
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  const currentQuery = result?.query ?? "";
+  const videos = result?.videos.filter(video => !dismissed.get(currentQuery)?.includes(video.id)) ?? [];
+  return (
+    <section ref={section} aria-label="Related YouTube videos" className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-medium">Related YouTube videos</h2>
+        {!expanded && <button type="button" className="text-sm text-primary underline disabled:opacity-50" onClick={explore} disabled={loading}>Explore more</button>}
+      </div>
+      {expanded && <form className="space-y-2" onSubmit={event => { event.preventDefault(); void search(true, query); }}>
+        <label htmlFor={`related-query-${anchorId}`} className="text-sm font-medium">Search YouTube</label>
+        <div className="flex flex-wrap gap-2">
+          <input id={`related-query-${anchorId}`} className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm" value={query} onChange={event => setQuery(event.target.value)} maxLength={160} required />
+          <button type="submit" className="rounded-md border px-3 py-2 text-sm disabled:opacity-50" disabled={loading}>Search</button>
+        </div>
+        {result?.alternateQuery && <button type="button" className="text-left text-sm text-primary underline disabled:opacity-50" disabled={loading} onClick={() => void search(true, result.alternateQuery ?? undefined)}>Try “{result.alternateQuery}”</button>}
+      </form>}
+      {loading ? <p role="status" className="text-sm text-muted-foreground">Searching YouTube…</p> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+      {saveError ? <p role="alert" className="text-sm text-destructive">{saveError}</p> : null}
+      {result && <p className="text-xs text-muted-foreground">YouTube results for “{result.query}”</p>}
+      {result && !videos.length && !loading ? <p className="text-sm text-muted-foreground">
+        {result.videos.length ? "You skipped all results for this search." : "No other public videos found. Try a different search."}
+      </p> : null}
+      <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {videos.map(video => {
+          const counts = [[video.statistics?.views, "views"], [video.statistics?.likes, "likes"], [video.statistics?.comments, "comments"]]
+            .flatMap(([value, label]) => value ? [`${BigInt(value).toLocaleString()} ${label}`] : []);
+          const selection = saved.get(video.id);
+          return <article key={video.id} className="min-w-0 overflow-hidden rounded-lg border">
+            <button type="button" aria-label={`Preview ${video.title}`} className="block w-full focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary" onClick={event => { previewTrigger.current = event.currentTarget; setPreview(video); }}>
+              {/* YouTube thumbnails are served by its video CDN. */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`} alt="" width={480} height={360} loading="lazy" className="aspect-video w-full bg-muted object-cover" />
+              <span className="sr-only">Preview</span>
+            </button>
+            <div className="space-y-2 p-3 text-sm">
+              <h3 className="break-words font-medium">{video.title}</h3>
+              <p className="break-words text-xs text-muted-foreground">
+                <a className="hover:underline" href={`https://www.youtube.com/channel/${video.channelId}`} target="_blank" rel="noreferrer">{video.channelTitle}</a>
+                {/^\d{4}-\d{2}-\d{2}/.test(video.publishedAt) && <> · {video.publishedAt.slice(0, 10)}</>}
+              </p>
+              {counts.length > 0 && <p className="text-xs tabular-nums">{counts.join(" · ")}</p>}
+              {video.description && <p className="break-words text-xs text-muted-foreground"><span className="sr-only">Publisher description. </span>{video.description}</p>}
+              {selection ? <div role="status" className="space-y-1">
+                <Link className="font-medium text-primary underline" href={`/studio/library/${selection.recordId}`}>Open linked reference</Link>
+                {selection.transcription.status === "not_queued" && <p className="text-xs text-muted-foreground">{selection.transcription.message}</p>}
+                {["queued", "reused"].includes(selection.transcription.status) && <p className="text-xs text-muted-foreground">Mac transcription queued.</p>}
+              </div> : <div className="flex flex-wrap items-center gap-3">
+                <button type="button" disabled={saving !== null} onClick={() => void save(video)} className="rounded-md border px-3 py-1.5 text-xs font-medium disabled:opacity-50">{saving === video.id ? "Adding…" : "Add as reference"}</button>
+                <button type="button" disabled={saving === video.id} onClick={() => setDismissed(previous => new Map(previous).set(currentQuery, [...(previous.get(currentQuery) ?? []), video.id]))} className="text-xs text-muted-foreground underline">Skip</button>
+              </div>}
+            </div>
+          </article>;
+        })}
+      </div>
+      <Dialog open={Boolean(preview)} onOpenChange={open => { if (!open) setPreview(null); }}>
+        {preview && <DialogContent className="max-h-[90dvh] max-w-2xl overflow-y-auto" onCloseAutoFocus={event => { event.preventDefault(); previewTrigger.current?.focus(); }}>
+          <DialogTitle className="break-words pr-7">{preview.title}</DialogTitle>
+          <DialogDescription>{preview.channelTitle}</DialogDescription>
+          <iframe title={`YouTube player for ${preview.title}`} className="aspect-video w-full rounded-md bg-black" src={`https://www.youtube-nocookie.com/embed/${preview.id}`} allow="encrypted-media; picture-in-picture" allowFullScreen />
+          <a className="text-sm text-primary underline" href={`https://www.youtube.com/watch?v=${preview.id}`} target="_blank" rel="noreferrer">Open on YouTube</a>
+        </DialogContent>}
+      </Dialog>
+    </section>
+  );
+}

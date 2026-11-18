@@ -18,7 +18,7 @@ mkdir "$studio_test_dir/socket"
 pg_ctl -D "$studio_test_dir/db" -l "$studio_test_dir/server.log" -o "-k $studio_test_dir/socket -h '' -p 55439" -w start >/dev/null
 studio_psql=(env -u PGSERVICE -u PGHOSTADDR -u PGOPTIONS psql --no-psqlrc --host="$studio_test_dir/socket" --port=55439 --username=studio_test --dbname=postgres --set=ON_ERROR_STOP=1)
 "${studio_psql[@]}" --file=studio/tests/crm-fixture.sql --file="$studio_migration" --file=studio/tests/crm-fixture-writes.sql >"$studio_test_dir/setup.log"
-"${studio_psql[@]}" --file=prisma/migrations/20261118130000_studio_script_templates/migration.sql >>"$studio_test_dir/setup.log"
+"${studio_psql[@]}" --file=prisma/migrations/20261118170000_studio_script_templates/migration.sql >>"$studio_test_dir/setup.log"
 for suite in assertions import knowledge knowledge-import knowledge-review schedule schedule-import record-link \
   media-reconciliation knowledge-media ai-credentials jobs uploads youtube-discovery paid-attempt-reliability \
   transcription-reconciliation idea-review script-brief knowledge-extraction schedule-execution recurring-schedule \

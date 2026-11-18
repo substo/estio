@@ -8,6 +8,7 @@ import { channelIdPattern, readDiscoveryRequest, youtubeClientConfig, youtubePro
 import { readProfileYoutubeState } from "./profile-youtube-state";
 import { encryptStudioSecret } from "../studio/secrets";
 import { openYoutubeSelection, sealYoutubeSelection } from "../studio/youtube-selection";
+import { relatedYoutubeQueries, relatedYoutubeSourceId, youtubeDescriptionPreview } from "../studio/youtube-related-policy";
 const channel = `UC${"a".repeat(22)}`; const video = "aB_cD-eF123";
 const client = { clientId: "fixture-client", clientSecret: "fixture-secret" };
 const reply = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
@@ -70,6 +71,38 @@ test("Google failures surface safe errors without tokens/provider bodies", async
   const api = createYoutubeApi({ accessToken: "secret" }, (async () => reply({ error: "PRIVATE_TOKEN secret" }, 403)) as typeof fetch);
   await assert.rejects(api.search("query"), error => error instanceof Error && !error.message.includes("secret") && error.message.includes("quota"));
 });
+test("related search keeps YouTube relevance order and shows only returned public counts", async () => {
+  const other = "Zyx9876abcd";
+  const privateId = "private1234";
+  const calls: URL[] = [];
+  const api = createYoutubeApi({ apiKey: "fixture-key" }, (async input => {
+    const url = new URL(String(input));
+    calls.push(url);
+    if (url.pathname.endsWith("/search")) {
+      return reply({ items: [video, other, privateId, video].map(videoId => ({ id: { videoId } })) });
+    }
+    return reply({ items: [privateId, other, video].map(id => ({
+      id, status: { privacyStatus: id === privateId ? "private" : "public" },
+      snippet: { title: id, channelId: channel, description: "A description shared on YouTube." },
+      statistics: { viewCount: "12345", likeCount: id === video ? "0" : undefined, commentCount: "not a count" },
+    })) });
+  }) as typeof fetch);
+  const result = await api.search("growing a YouTube channel", "", { limit: 5, includeStatistics: true });
+  assert.equal(calls[0].searchParams.get("maxResults"), "5");
+  assert.equal(calls[1].searchParams.get("part"), "snippet,status,statistics");
+  assert.deepEqual(result.videos.map(item => item.id), [video, other]);
+  assert.deepEqual(result.videos[0].statistics, { views: "12345", likes: "0", comments: undefined });
+  assert.equal(result.videos[1].statistics?.likes, undefined);
+});
+
+test("related search derives a second phrase, excludes the seed URL and previews publisher text", () => {
+  const queries = relatedYoutubeQueries("MrBeast explains how to grow a YouTube channel", "Thumbnails, retention and editing. Thumbnails matter.");
+  assert.match(queries[0], /MrBeast.*grow.*YouTube.*Thumbnails/);
+  assert.equal(queries[1], "MrBeast explains how to grow a YouTube channel");
+  assert.ok(!relatedYoutubeQueries("AI services", "Reach person@example.test or https://example.test/private now").join(" ").includes("example"));
+  assert.equal(relatedYoutubeSourceId("https://youtu.be/9DBJXRy5dvk"), "9DBJXRy5dvk");
+  assert.equal(youtubeDescriptionPreview("https://example.test/ref\nLearn how to grow a new channel. More detail follows."), "Learn how to grow a new channel.");
+});
 test("profile OAuth state binds realm, user, session, origin and expiry; selections bind explicit workspace sharing", () => {
   const previousKey = process.env.STUDIO_SECRETS_KEY; process.env.STUDIO_SECRETS_KEY = Buffer.alloc(32, 7).toString("base64");
   try {
@@ -85,13 +118,19 @@ test("profile OAuth state binds realm, user, session, origin and expiry; selecti
     assert.equal(readProfileYoutubeState(raw, profile, params, now + 600_001), null);
     params.append("state", oauth.state); assert.equal(readProfileYoutubeState(raw, profile, params, now), null);
     const principal = { locationId: "workspace_fixture", brand: profile.brand, userId: profile.userId };
-    const ticket = sealYoutubeSelection(principal, video, { kind: "subscription", observedAt: new Date(now).toISOString(), provider: "youtube_data_api", rights: "research_link_only", channelId: channel }, now);
-    const opened = openYoutubeSelection(ticket, principal, now)!; assert.equal(opened.videoId, video); assert.equal("title" in opened, false);
-    assert.equal(openYoutubeSelection(ticket, { ...principal, locationId: "other" }, now), null);
-    assert.equal(openYoutubeSelection(ticket, { ...principal, userId: "other" }, now), null);
-    assert.equal(openYoutubeSelection(ticket, { ...principal, brand: "estio" }, now), null);
-    assert.equal(openYoutubeSelection(ticket, principal, now + 1_200_001), null);
-    assert.equal(openYoutubeSelection("tampered" + ticket.slice(8), principal, now), null);
+    const ticket = sealYoutubeSelection(principal, video, { kind: "subscription", observedAt: new Date(now).toISOString(), provider: "youtube_data_api", rights: "research_link_only", channelId: channel }, { now });
+    const opened = openYoutubeSelection(ticket, principal, { now })!; assert.equal(opened.videoId, video); assert.equal("title" in opened, false);
+    const anchor = "ab000000-0000-4000-8000-0000000000a1";
+    const relatedTicket = sealYoutubeSelection(principal, video, opened.provenance, { now, anchorId: anchor });
+    assert.equal(openYoutubeSelection(relatedTicket, principal, { now, anchorId: anchor })?.videoId, video);
+    assert.equal(openYoutubeSelection(relatedTicket, principal, { now, anchorId: "different-anchor" }), null);
+    assert.equal(openYoutubeSelection(relatedTicket, principal, { now }), null);
+    assert.equal(openYoutubeSelection(ticket, principal, { now, anchorId: anchor }), null);
+    assert.equal(openYoutubeSelection(ticket, { ...principal, locationId: "other" }, { now }), null);
+    assert.equal(openYoutubeSelection(ticket, { ...principal, userId: "other" }, { now }), null);
+    assert.equal(openYoutubeSelection(ticket, { ...principal, brand: "estio" }, { now }), null);
+    assert.equal(openYoutubeSelection(ticket, principal, { now: now + 1_200_001 }), null);
+    assert.equal(openYoutubeSelection("tampered" + ticket.slice(8), principal, { now }), null);
   } finally { if (previousKey === undefined) delete process.env.STUDIO_SECRETS_KEY; else process.env.STUDIO_SECRETS_KEY = previousKey; }
 });
 

@@ -9,6 +9,7 @@ import { StudioUploads } from "../../../_components/studio-uploads";
 import { getStudioContentRecord } from "@/lib/studio/content";
 import { ContentRecordForm } from "../../../_components/content-record-form";
 import { getStudioScriptTemplateChoices } from "@/lib/studio/script-templates";
+import { RelatedYoutubeVideos } from "../../../_components/related-youtube-videos";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,7 @@ export default async function StudioContentRecordPage({ params }: { params: Prom
       <ContentRecordForm key={`${recordId}:${record.version}`} locationId={locationId} recordId={recordId} version={record.version} title={record.title} payload={record.payload}
         templateOptions={templates.options} pinnedTemplateId={record.script_template_version_id}
         templateSelectionSaved={record.script_template_selected} canSelectTemplate={templates.canSelect && !record.archived} />
+      {!record.archived && record.payload.stage === "idea" ? <RelatedYoutubeVideos key={`${locationId}:${recordId}`} anchorId={recordId} /> : null}
       {!record.archived ? <Link href={`/studio/records/${recordId}/extract`} className="mr-4 inline-block text-sm text-primary hover:underline">Extract knowledge from saved text</Link> : null}
       <Link href={`/studio/records/${recordId}/links`} className="inline-block text-sm text-primary hover:underline">Manage linked records</Link>
       {links.length ? <section className="space-y-2"><h2 className="font-medium">Linked research and content</h2><ul className="space-y-2 text-sm">{links.map((linked) => <li key={linked.id}><Link className="text-primary hover:underline" href={`/studio/${linked.kind === "content" ? "content" : "library"}/${linked.id}`}>{linked.title}</Link><span className="ml-2 text-muted-foreground">{linked.kind}</span></li>)}</ul></section> : null}

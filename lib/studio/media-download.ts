@@ -36,6 +36,17 @@ export async function studioKnowledgeMediaRedirectResponse(locationId: string, r
   return mediaObjectRedirect(location, link.media_object_id, true);
 }
 
+/** Private scene frame saved by Mac video transcription (verified bytes only). */
+export async function studioVideoFrameRedirectResponse(locationId: string, transcriptionId: string, frameIndex: string): Promise<Response> {
+  const access = await getStudioAccess(locationId);
+  if (!access || !uuid.test(transcriptionId) || !/^[0-9]{1,3}$/.test(frameIndex)) return notFound();
+  const frame = await studioDb.one<{ media_object_id: string | null }>(Prisma.sql`
+    select media_object_id from studio.studio_video_frames
+    where location_id = ${access.locationId} and transcription_id = ${transcriptionId}::uuid and frame_index = ${Number(frameIndex)} and status = 'verified'`);
+  if (!frame?.media_object_id) return notFound();
+  return mediaObjectRedirect(access.locationId, frame.media_object_id, true);
+}
+
 /** A customer upload registered through direct-to-R2 intake. */
 export async function studioUploadRedirectResponse(locationId: string, uploadId: string, wantInline: boolean): Promise<Response> {
   const access = await getStudioAccess(locationId);

@@ -80,3 +80,20 @@ test("HTTP device boundary retains textReady and permits only bounded subscripti
  assert.deepEqual(readDeviceCommand("complete", body).result, body.result);
  for (const result of [{ ...body.result, provider: "gemini" }, { ...body.result, secret: "raw" }, { ...body.result, output: { text: "a".repeat(25000) } }]) assert.throws(() => readDeviceCommand("complete", { ...body, result }));
 });
+
+test("outline batches use the new prompt on the same subscription transport", async () => {
+ const outline = { ...snapshot, mode: "outline", units: [{ ...snapshot.units[0], evidenceType: "ocr", startSeconds: 120, endSeconds: null }] };
+ const output = { findings: [{ ...extraction.findings[0], topicPath: ["Evidence", "Screens"] }] };
+ let executions = 0;
+ const run = handler(() => adapter(async request => {
+  executions++;
+  assert.match(request.prompt, /on-screen words/);
+  assert.match(request.prompt, /"startSeconds":120/);
+  assert.equal(request.webSearch, undefined);
+  return request.validate(output);
+ }));
+ await assert.rejects(run({ ...job, payload: { ...job.payload, snapshot: outline } }, context), /Update the companion/);
+ assert.deepEqual(await run({ ...job, payload: { ...job.payload, snapshot: outline, promptVersion: "studio.knowledge-extract.v2" } }, context),
+  { output, model: "test-model", provider: "codex" });
+ assert.equal(executions, 1);
+});

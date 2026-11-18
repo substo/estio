@@ -86,3 +86,23 @@ test("source-backed ideas commit both operations and roll back a failed link", a
   await assert.rejects(failingService(location, record, failedId, "Rollback idea", "Must not remain"));
   assert.equal(await db.one(Prisma.sql`select id from studio.studio_records where location_id=${location} and id=${failedId}::uuid`), null);
 });
+
+test("related YouTube selection saves and links atomically, reuses bookmarks and rejects a missing anchor", async () => {
+  const { saveLinkedYoutubeSelection } = await import("./youtube-bookmark");
+  const access = { locationId: location, app: "substo" as const, userId: "db-owner" };
+  const selection = {
+    recordId: "ab000000-0000-4000-8000-0000000000c1", videoId: "9DBJXRy5dvk",
+    provenance: { kind: "public_search", observedAt: "2026-11-18T00:00:00Z", provider: "youtube_data_api", rights: "research_link_only" } as const,
+  };
+  const save = (anchorId: string, candidate = selection) => client.$transaction(tx =>
+    saveLinkedYoutubeSelection(createStudioDb(tx), access, anchorId, candidate, "Think Media reference"));
+  assert.equal(await save(record), selection.recordId);
+  assert.equal(await save(record, { ...selection, recordId: "ab000000-0000-4000-8000-0000000000c2" }), selection.recordId);
+  assert.equal((await db.one<{ count: number }>(Prisma.sql`
+    select count(*)::int as count from studio.studio_record_link_events where location_id = ${location}
+      and source_id = ${record}::uuid and target_id = ${selection.recordId}::uuid`))?.count, 1);
+  const missing = "ab000000-0000-4000-8000-0000000000c3";
+  await assert.rejects(save(missing, { ...selection, recordId: "ab000000-0000-4000-8000-0000000000c4", videoId: "Zyx9876abcd" }), /active source or idea/);
+  assert.equal(await db.one(Prisma.sql`select record_id from studio.studio_youtube_bookmarks where location_id = ${location} and video_id = 'Zyx9876abcd'`), null);
+  await assert.rejects(save(selection.recordId), /already the starting source/);
+});
