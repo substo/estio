@@ -3,7 +3,7 @@ import { readYoutubeRequestText } from "@/lib/google/youtube-request";
 import { NextRequest } from "next/server";
 import { getPlatformProfile } from "@/lib/platform/profile";
 import { YoutubeError } from "@/lib/google/youtube-api";
-import { browseStudioYoutube, manageStudioYoutubeChannel, saveStudioYoutubeLink } from "@/lib/studio/youtube";
+import { browseStudioRelatedYoutube, browseStudioYoutube, manageStudioYoutubeChannel, saveStudioRelatedYoutube, saveStudioYoutubeLink } from "@/lib/studio/youtube";
 import { enqueueVideoTranscription, videoRequestKey } from "@/lib/studio/video-transcription";
 export const dynamic = "force-dynamic";
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
@@ -15,8 +15,9 @@ async function POSTHandler(request: NextRequest, { params }: { params: Promise<{
     const text = await readYoutubeRequestText(request);
     const body = JSON.parse(text); if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "Invalid request." }, 400);
     if (body.action === "browse") return json(await browseStudioYoutube(locationId, body));
-    if (body.action === "save") {
-      const recordId = await saveStudioYoutubeLink(locationId, body);
+    if (body.action === "related") return json(await browseStudioRelatedYoutube(locationId, body));
+    if (body.action === "save" || body.action === "saveRelated") {
+      const recordId = body.action === "saveRelated" ? await saveStudioRelatedYoutube(locationId, body) : await saveStudioYoutubeLink(locationId, body);
       // Choosing a result is explicit: the same paired-Mac transcription job as a pasted link. Never a paid fallback.
       const transcription = await enqueueVideoTranscription(locationId, { recordId, origin: "search", requestKey: videoRequestKey("search", recordId, String(body.ticket ?? "")) })
         .catch(() => ({ status: "not_queued" as const, reason: "no_authority" as const, message: "Transcription could not be requested. Use Transcribe on your Mac from the source page." }));

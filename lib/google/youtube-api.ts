@@ -33,7 +33,10 @@ export async function revokeYoutubeToken(token: string, fetcher: typeof fetch = 
   try { await fetcher("https://oauth2.googleapis.com/revoke", { method: "POST", body: new URLSearchParams({ token }), redirect: "error", signal: AbortSignal.timeout(10_000) }); } catch { /* Local deletion must still succeed when Google is offline. */ }
 }
 export interface YoutubeAuth { accessToken?: string; apiKey?: string; }
-export interface YoutubeVideo { id: string; title: string; channelId: string; channelTitle: string; publishedAt: string; description?: string; thumbnailUrl?: string; }
+export interface YoutubeVideo {
+  id: string; title: string; channelId: string; channelTitle: string; publishedAt: string; description?: string; thumbnailUrl?: string;
+  statistics?: { views?: string; likes?: string; comments?: string };
+}
 export interface YoutubeChannel { id: string; title: string; }
 export function createYoutubeApi(auth: YoutubeAuth, fetcher: typeof fetch = fetch) {
   async function get(resource: string, params: Record<string, string>) {
@@ -48,11 +51,18 @@ export function createYoutubeApi(auth: YoutubeAuth, fetcher: typeof fetch = fetc
     if (!body || !Array.isArray(body.items) || body.items.length > 50) throw new YoutubeError("youtube_response_invalid", "YouTube returned an invalid result.");
     return body as { items: any[]; nextPageToken?: string };
   }
-  async function videos(ids: string[]): Promise<YoutubeVideo[]> {
+  async function videos(ids: string[], includeStatistics = false): Promise<YoutubeVideo[]> {
     if (!ids.length) return [];
-    const body = await get("videos", { part: "snippet,status", id: ids.slice(0, 20).join(","), maxResults: "20" });
+    const body = await get("videos", { part: includeStatistics ? "snippet,status,statistics" : "snippet,status", id: ids.slice(0, 20).join(","), maxResults: "20" });
     return body.items.filter(v => v && ids.includes(v.id) && /^[A-Za-z0-9_-]{11}$/.test(v.id) && v.status?.privacyStatus === "public" && typeof v.snippet?.title === "string" && /^UC[A-Za-z0-9_-]{22}$/.test(v.snippet.channelId))
-      .map(v => ({ id: v.id, title: v.snippet.title, channelId: v.snippet.channelId, channelTitle: String(v.snippet.channelTitle ?? ""), publishedAt: String(v.snippet.publishedAt ?? ""), ...(typeof v.snippet.description === "string" ? { description: v.snippet.description.slice(0,20000) } : {}), ...(v.snippet.thumbnails ? { thumbnailUrl: String(v.snippet.thumbnails?.high?.url ?? v.snippet.thumbnails?.default?.url ?? "").slice(0,2048) } : {}) }));
+      .map(v => ({
+        id: v.id, title: v.snippet.title, channelId: v.snippet.channelId, channelTitle: String(v.snippet.channelTitle ?? ""), publishedAt: String(v.snippet.publishedAt ?? ""),
+        ...(typeof v.snippet.description === "string" ? { description: v.snippet.description.slice(0,20000) } : {}),
+        ...(v.snippet.thumbnails ? { thumbnailUrl: String(v.snippet.thumbnails?.high?.url ?? v.snippet.thumbnails?.default?.url ?? "").slice(0,2048) } : {}),
+        ...(includeStatistics ? { statistics: {
+          views: publicCount(v.statistics?.viewCount), likes: publicCount(v.statistics?.likeCount), comments: publicCount(v.statistics?.commentCount),
+        } } : {}),
+      }));
   }
   return {
     async subscriptions(pageToken = "", channelId = "") {
@@ -76,10 +86,16 @@ export function createYoutubeApi(auth: YoutubeAuth, fetcher: typeof fetch = fetc
       const rows = await videos(body.items.map(i => i?.contentDetails?.videoId).filter(i => typeof i === "string" && /^[A-Za-z0-9_-]{11}$/.test(i)));
       return { videos: rows.filter(v => v.channelId === channelId), nextPageToken: body.nextPageToken ?? null };
     },
-    async search(query: string, pageToken = "") {
-      const body = await get("search", { part: "snippet", type: "video", q: query, maxResults: "20", ...(pageToken ? { pageToken } : {}) });
-      return { videos: await videos(body.items.map(i => i?.id?.videoId).filter(i => typeof i === "string" && /^[A-Za-z0-9_-]{11}$/.test(i))), nextPageToken: body.nextPageToken ?? null };
+    async search(query: string, pageToken = "", options?: { limit: 5 | 11; includeStatistics: true }) {
+      const body = await get("search", { part: "snippet", type: "video", q: query, maxResults: String(options?.limit ?? 20), ...(pageToken ? { pageToken } : {}) });
+      const ids = [...new Set(body.items.map(i => i?.id?.videoId).filter((id): id is string => typeof id === "string" && /^[A-Za-z0-9_-]{11}$/.test(id)))];
+      const byId = new Map((await videos(ids, options?.includeStatistics)).map(video => [video.id, video]));
+      return { videos: ids.flatMap(id => byId.get(id) ?? []), nextPageToken: body.nextPageToken ?? null };
     },
     videos,
   };
+}
+
+function publicCount(value: unknown) {
+  return typeof value === "string" && /^\d{1,20}$/.test(value) ? value : undefined;
 }

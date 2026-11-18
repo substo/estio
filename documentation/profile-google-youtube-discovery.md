@@ -86,6 +86,23 @@ implement the applicable refresh/deletion policy and review the production
 consent/privacy presentation. The current slice does not claim production API
 policy approval or live OAuth verification.
 
+## Related videos on a saved source or idea
+
+The Related YouTube videos section runs one bounded public search as it comes
+near the viewport. It uses the record title and available saved topic text to
+prepare search phrases. Explore more opens an editable search and can offer an
+alternate phrase. Only the phrase goes to YouTube. The section shows up to
+three results initially and ten on request, in YouTube search order, excluding
+the starting video. Counts come from YouTube and description previews quote the
+publisher. The same public search quota and connection rules apply.
+
+Preview opens an embedded player on demand. Skip hides a result for that
+search during the visit. Add as reference saves or reuses the public Library
+bookmark and creates an audited outgoing link from the starting record in one
+transaction. After the save succeeds, Studio requests the existing paired Mac
+transcription. Unapproved public channels are eligible for search and manual
+selection. Channel approvals and scheduled tracking use the existing workflow.
+
 ## Runtime setup and activation
 
 Apply the new additive migration after the existing Studio migrations:

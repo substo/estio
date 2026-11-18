@@ -8,6 +8,7 @@ import { StudioUploadForm } from "../../../_components/studio-upload-form";
 import { StudioUploads } from "../../../_components/studio-uploads";
 import { getStudioContentRecord } from "@/lib/studio/content";
 import { ContentRecordForm } from "../../../_components/content-record-form";
+import { RelatedYoutubeVideos } from "../../../_components/related-youtube-videos";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,7 @@ export default async function StudioContentRecordPage({ params }: { params: Prom
         <p className="text-muted-foreground">Template choice is manual: record the template and its review decision in Production notes. Studio does not enforce an approved template here. For filming, include the final script, shot instructions, on-screen examples and any claims still needing verification.</p>
       </section>
       <ContentRecordForm locationId={locationId} recordId={recordId} version={record.version} title={record.title} payload={record.payload} />
+      {!record.archived && record.payload.stage === "idea" ? <RelatedYoutubeVideos key={`${locationId}:${recordId}`} anchorId={recordId} /> : null}
       {!record.archived ? <Link href={`/studio/records/${recordId}/extract`} className="mr-4 inline-block text-sm text-primary hover:underline">Extract knowledge from saved text</Link> : null}
       <Link href={`/studio/records/${recordId}/links`} className="inline-block text-sm text-primary hover:underline">Manage linked records</Link>
       {links.length ? <section className="space-y-2"><h2 className="font-medium">Linked research and content</h2><ul className="space-y-2 text-sm">{links.map((linked) => <li key={linked.id}><Link className="text-primary hover:underline" href={`/studio/${linked.kind === "content" ? "content" : "library"}/${linked.id}`}>{linked.title}</Link><span className="ml-2 text-muted-foreground">{linked.kind}</span></li>)}</ul></section> : null}

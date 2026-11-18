@@ -10,6 +10,11 @@ import { getStudioAccess } from "./access";
 import { canManageStudioAi } from "./ai-settings-policy";
 import { openYoutubeSelection, sealYoutubeSelection, type YoutubeProvenance } from "./youtube-selection";
 import { hasStudioSecretsKey } from "./secrets";
+import db from "@/lib/db";
+import { createStudioDb } from "./db";
+import { relatedAnchor, saveLinkedYoutubeSelection, saveYoutubeSelection } from "./youtube-bookmark";
+import { recordLinkId } from "./record-link-policy";
+import { relatedYoutubeQueries, relatedYoutubeSourceId, youtubeDescriptionPreview } from "./youtube-related-policy";
 
 export interface ApprovedYoutubeChannel { channel_id: string; label: string; }
 async function context(locationId: string, manager = false) {
@@ -25,7 +30,11 @@ export async function getStudioYoutubeSettings(locationId: string) {
   return { access, channels, connected: Boolean(connection), canManage: canManageStudioAi(access), publicConfigured: Boolean(process.env.YOUTUBE_DATA_API_KEY?.trim()) || Boolean(connection) };
 }
 export async function browseStudioYoutube(locationId: string, input: unknown) {
-  const { access, profile } = await context(locationId);
+  return browseYoutube(await context(locationId), input);
+}
+
+type YoutubeContext = Awaited<ReturnType<typeof context>>;
+async function browseYoutube({ access, profile }: YoutubeContext, input: unknown, related?: { anchorId: string; expanded: boolean }) {
   if (!hasStudioSecretsKey()) throw new YoutubeError("profile_key_unavailable", "Secure profile and discovery storage is not configured on this server yet.");
   let request;
   try { request = readDiscoveryRequest(input); } catch (error) { throw new YoutubeError("invalid_request", (error as Error).message); }
@@ -54,28 +63,59 @@ export async function browseStudioYoutube(locationId: string, input: unknown) {
     const subscribed = await api.subscriptions("", request.channelId);
     if (!subscribed.channels.some(c => c.id === request.channelId)) throw new YoutubeError("not_subscribed", "This channel is not in your connected account’s subscriptions.");
   }
-  const result = request.mode === "search" ? await api.search(request.query, request.pageToken)
+  const result = request.mode === "search" ? await api.search(request.query, request.pageToken,
+    related ? { limit: related.expanded ? 11 : 5, includeStatistics: true } : undefined)
     : request.mode === "url" ? { videos: await api.videos([request.videoId!]), nextPageToken: null }
     : await api.channelVideos(request.channelId, request.pageToken);
   await stillConnected();
   const kind = ({ search: "public_search", url: "saved_url", subscription: "subscription", channel: "approved_channel" } as const)[request.mode];
   const observedAt = new Date().toISOString();
   const videos = result.videos.map(video => {
-    // Persist no API title/description/statistics in the bookmark ticket. The
-    // user supplies their own research title when explicitly sharing a link.
+    // The bookmark ticket carries identity and provenance. The chosen title
+    // arrives separately when the user saves a reference.
     const provenance: YoutubeProvenance = { kind, observedAt, provider: "youtube_data_api", rights: "research_link_only",
       ...(request.mode === "search" ? { query: request.query } : {}), ...(request.mode === "channel" || request.mode === "subscription" ? { channelId: request.channelId } : {}) };
-    return { ...video, ticket: sealYoutubeSelection({ locationId: access.locationId, brand: access.app, userId: access.userId }, video.id, provenance) };
+    return { ...video, ticket: sealYoutubeSelection({ locationId: access.locationId, brand: access.app, userId: access.userId }, video.id, provenance, { anchorId: related?.anchorId }) };
   });
   return { kind: "videos" as const, videos, nextPageToken: result.nextPageToken, identity, provenance: kind, observedAt };
 }
 export async function saveStudioYoutubeLink(locationId: string, input: { ticket?: unknown; title?: unknown }) {
-  const { profile, access } = await context(locationId);
-  if (typeof input.title !== "string" || !input.title.trim() || input.title.trim().length > 180) throw new YoutubeError("invalid_title", "Enter your own research title, up to 180 characters.");
-  const selection = openYoutubeSelection(input.ticket, { locationId: access.locationId, brand: profile.brand, userId: profile.userId });
-  if (!selection) throw new YoutubeError("invalid_selection", "This selection expired or belongs to another profile. Run discovery again.");
-  return studioDb.call<string>("studio_save_youtube_bookmark", { p_location: access.locationId, p_app: access.app, p_user: access.userId,
-    p_record: selection.recordId, p_video: selection.videoId, p_title: input.title.trim(), p_provenance: selection.provenance });
+  const authority = await context(locationId);
+  return saveYoutubeSelection(studioDb, authority.access, youtubeSelection(authority, input.ticket), input.title);
+}
+
+function youtubeSelection({ profile, access }: YoutubeContext, ticket: unknown, anchorId?: string) {
+  const selection = openYoutubeSelection(ticket, { locationId: access.locationId, brand: profile.brand, userId: profile.userId }, { anchorId });
+  if (!selection) throw new YoutubeError("invalid_selection", "This selection expired or is unavailable here. Run discovery again.");
+  return selection;
+}
+
+export async function browseStudioRelatedYoutube(locationId: string, input: { anchorId?: unknown; query?: unknown; expanded?: unknown }) {
+  const authority = await context(locationId);
+  const anchor = await relatedAnchor(studioDb, authority.access.locationId, input.anchorId);
+  const queries = relatedYoutubeQueries(anchor.title, anchor.topic ?? "");
+  const query = input.query ?? queries[0];
+  if (!query) throw new YoutubeError("invalid_request", "Enter a YouTube search for this topic.");
+  const expanded = input.expanded === true;
+  const result = await browseYoutube(authority, { mode: "search", query }, { anchorId: anchor.id, expanded });
+  if (result.kind !== "videos") throw new Error("Related search must return videos.");
+  const seedVideo = relatedYoutubeSourceId(anchor.source_url);
+  return {
+    query: String(query).trim(),
+    alternateQuery: queries.find(phrase => phrase !== String(query).trim()) ?? null,
+    videos: result.videos.filter(video => video.id !== seedVideo).slice(0, expanded ? 10 : 3).map(video => ({
+      ...video, description: youtubeDescriptionPreview(video.description),
+    })),
+  };
+}
+
+export async function saveStudioRelatedYoutube(locationId: string, input: { anchorId?: unknown; ticket?: unknown; title?: unknown }) {
+  const authority = await context(locationId);
+  const { access } = authority;
+  if (typeof input.anchorId !== "string" || !recordLinkId(input.anchorId)) throw new YoutubeError("invalid_anchor", "Choose a saved source or idea.");
+  const anchorId = input.anchorId.toLowerCase();
+  const selection = youtubeSelection(authority, input.ticket, anchorId);
+  return db.$transaction(tx => saveLinkedYoutubeSelection(createStudioDb(tx), access, anchorId, selection, input.title));
 }
 export async function manageStudioYoutubeChannel(locationId: string, input: { channelId?: unknown; label?: unknown; remove?: unknown }) {
   const { access, profile } = await context(locationId, true);

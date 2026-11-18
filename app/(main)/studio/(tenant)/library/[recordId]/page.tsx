@@ -16,6 +16,7 @@ import { getVideoStatus } from "@/lib/studio/video-transcription";
 import { canonicalYoutubeVideo } from "@/lib/studio/video-transcription-policy";
 import { VideoTranscriptionPanel } from "../../../_components/video-transcription-panel";
 import { LibraryRecordForm } from "../../../_components/library-record-form";
+import { RelatedYoutubeVideos } from "../../../_components/related-youtube-videos";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +60,7 @@ export default async function StudioLibraryRecordPage({ params }: { params: Prom
         {creator && !links.some(link => link.kind === 'channel') ? <LibrarySourceAction locationId={locationId} url={creator.channelUrl} sourceId={recordId} sourceVersion={record.version} /> : null}
         {view.url ? <LibrarySourceAction locationId={locationId} url={view.url} /> : null}
       </> : <p className="text-sm text-muted-foreground">Saved videos linked to this channel appear below. Watching in Studio does not subscribe on YouTube or enable recurring discovery. Discovery approval remains manager controlled.</p>}
+      {record.kind === "reference" && !record.archived ? <RelatedYoutubeVideos key={`${locationId}:${recordId}`} anchorId={recordId} /> : null}
       <details id="edit-source"><summary className="cursor-pointer font-medium">Edit source and research notes</summary><div className="mt-4"><LibraryRecordForm locationId={locationId} recordId={recordId} version={record.version} kind={record.kind} title={record.title} payload={record.payload} /></div></details>
       {record.payload.discovery ? <section className="space-y-2"><h2 className="font-medium">Recorded discovery provenance</h2><p className="text-sm text-muted-foreground">Historical source information, preserved for review.</p><pre className="overflow-auto whitespace-pre-wrap rounded-lg border p-4 text-xs">{JSON.stringify(record.payload.discovery, null, 2)}</pre></section> : null}
       {!record.archived && record.kind !== "channel" && record.kind !== "reference" ? <Link href={`/studio/records/${recordId}/extract`} className="mr-4 inline-block text-sm text-primary hover:underline">Extract knowledge from saved text</Link> : null}
