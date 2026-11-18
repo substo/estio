@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Real SQL for Mac video transcription in a disposable PostgreSQL 17 cluster. No credentials, network or providers.
+set -euo pipefail
+export LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+cd "$(dirname "$0")/.."
+for pg in /opt/homebrew/opt/postgresql@17/bin /usr/lib/postgresql/17/bin; do [ -x "$pg/initdb" ] && PATH="$pg:$PATH"; done
+for binary in initdb pg_ctl psql; do command -v "$binary" >/dev/null; done
+[[ "$(pg_ctl --version)" == *" 17."* ]] || { echo "PostgreSQL 17 is required" >&2; exit 1; }
+test_dir=$(mktemp -d "${TMPDIR:-/tmp}/estio-studio-video.XXXXXX")
+cleanup() { pg_ctl -D "$test_dir/db" -m immediate -w stop >/dev/null 2>&1 || true; rm -rf "$test_dir"; }
+trap cleanup EXIT # log: $test_dir/server.log
+initdb -D "$test_dir/db" --username=studio_test --no-locale --encoding=UTF8 --auth=trust >"$test_dir/init.log"
+mkdir "$test_dir/socket"
+pg_ctl -D "$test_dir/db" -l "$test_dir/server.log" -o "-k $test_dir/socket -h '' -p 55441" -w start >/dev/null
+run=(env -u PGSERVICE -u PGHOSTADDR -u PGOPTIONS psql --no-psqlrc --host="$test_dir/socket" --port=55441 --username=studio_test --dbname=postgres --set=ON_ERROR_STOP=1)
+"${run[@]}" --file=studio/tests/crm-fixture.sql --file=prisma/migrations/20261028100000_studio_schema/migration.sql --file=studio/tests/crm-fixture-writes.sql >"$test_dir/setup.log"
+for migration in 20261028190000_brand_profile 20261105100000_studio_ai_key_from_settings 20261105140000_studio_library_summary 20261106120000_studio_device_onboarding_research 20261118120000_studio_text_subscription 20261118130000_studio_video_transcription; do
+ "${run[@]}" --file="prisma/migrations/$migration/migration.sql" >>"$test_dir/setup.log"
+done
+"${run[@]}" --file=studio/tests/video-transcription-assertions.sql
+echo 'Studio video transcription disposable PostgreSQL 17 tests passed.'

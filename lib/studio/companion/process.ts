@@ -25,7 +25,9 @@ export type ProcessRunner = (request: ProcessRequest) => Promise<{ stdout: strin
  * NODE_OPTIONS, proxy, cloud or Studio credentials can select another billing/auth path. */
 export function nativeLoginEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { NODE_ENV: "production" };
-  for (const key of ["HOME", "PATH", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "CODEX_HOME", "CLAUDE_CONFIG_DIR"])
+  for (const key of ["HOME", "PATH", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "CODEX_HOME", "CLAUDE_CONFIG_DIR",
+    // Local transcription only: private model cache, offline switches and the resolved tool paths. No credentials.
+    "HF_HOME", "HF_HUB_OFFLINE", "HF_HUB_DISABLE_XET", "STUDIO_FFMPEG", "STUDIO_FFPROBE", "STUDIO_TESSERACT"])
     if (source[key]) env[key] = source[key];
   env.NO_COLOR = "1";
   return env;

@@ -5,6 +5,7 @@ import { authorizeEstioSchedule, type ScheduleRest } from "../schedule-authority
 import { readProfileYoutubeAccess } from "../../google/profile-youtube-credentials";
 import { createYoutubeApi, YoutubeError } from "../../google/youtube-api";
 import { StudioJobError, type StudioJobHandler } from "./handlers";
+import { enqueueDiscoveredVideos } from "../video-discovery";
 export interface YoutubeDiscoveryContext {
   outcome: "ready"; brand: "estio" | "substo"; userId: string; connectionVersion: string;
   source: "approved_channel" | "search" | "subscription"; channelId: string; query: string;
@@ -13,6 +14,8 @@ export interface YoutubeDiscoveryDeps {
   db: StudioDb;
   authorize(locationId: string, userId: string): Promise<boolean>;
   discover(context: YoutubeDiscoveryContext): Promise<string[]>;
+  /** After the result is saved. Defaults to Mac transcription gating/suggestions; a failure retries the job (the saved result is reused). */
+  videos?(db: StudioDb, fence: { location: string; run: string; job: string; worker: string; lease: string }): Promise<unknown>;
 }
 export function createYoutubeDiscoveryHandler(deps: YoutubeDiscoveryDeps): StudioJobHandler {
   return async (job, context) => {
@@ -20,7 +23,12 @@ export function createYoutubeDiscoveryHandler(deps: YoutubeDiscoveryDeps): Studi
     if (!/^[0-9a-f-]{36}$/i.test(id)) throw new StudioJobError("invalid_job_payload", "This discovery job is invalid.", false);
     const [run] = await deps.db.rows<{ result: Record<string, unknown> | null; actor_app: string; created_by_clerk_user_id: string }>(Prisma.sql`select result,actor_app,created_by_clerk_user_id from studio.studio_youtube_schedule_runs t where location_id = ${job.location_id} and id = ${id}::uuid and job_id = ${job.id}::uuid limit 1`);
     if (!run) throw new StudioJobError("discovery_missing", "This discovery run is unavailable.", false);
-    if (run.result) return { discoveryRunId: id, alreadySaved: true };
+    const afterSaved = async () => {
+      // Approved channels: gated Mac transcription. Others: suggestions only. Never fails the saved discovery result.
+      try { await (deps.videos ?? enqueueDiscoveredVideos)(deps.db, { location: job.location_id, run: id, job: job.id, worker: context.workerId, lease: job.lease_token }); }
+      catch (error) { if (error instanceof StudioDbError && error.code === "42501") return; throw new StudioJobError("video_enqueue_unavailable", "Saved discovery; Mac transcription queueing will retry.", true, 300); }
+    };
+    if (run.result) { await afterSaved(); return { discoveryRunId: id, alreadySaved: true }; }
     const fence = { p_location: job.location_id, p_run: id, p_job: job.id, p_worker: context.workerId, p_lease: job.lease_token };
     const rpc = <T>(name: string, body: Record<string, unknown> = {}) => deps.db.call<T>(name, { ...fence, ...body });
     const active = () => { if (context.signal.aborted) throw new StudioJobError("worker_lease_lost", "The worker lost its lease.", true); };
@@ -34,13 +42,14 @@ export function createYoutubeDiscoveryHandler(deps: YoutubeDiscoveryDeps): Studi
     try {
       await authority();
       const input = await rpc<YoutubeDiscoveryContext | { outcome: "saved"; result: unknown } | { outcome: "quota" }>("studio_begin_youtube_discovery");
-      if (input.outcome === "saved") return { discoveryRunId: id, alreadySaved: true };
+      if (input.outcome === "saved") { await afterSaved(); return { discoveryRunId: id, alreadySaved: true }; }
       if (input.outcome === "quota") throw new StudioJobError("discovery_daily_limit", "This workspace reached its daily discovery limit.", true, 3600);
       active();
       const videos = await deps.discover(input);
       if (videos.length > 10 || new Set(videos).size !== videos.length || videos.some(v => !/^[A-Za-z0-9_-]{11}$/.test(v))) throw new Error("Invalid discovery result");
       await authority(); active();
       await rpc("studio_finish_youtube_discovery", { p_videos: videos });
+      await afterSaved();
       return { discoveryRunId: id };
     } catch (error) {
       if (error instanceof YoutubeError && ["google_reconnect", "youtube_not_connected", "profile_key_unavailable"].includes(error.code)) stop = "profile_grant_changed";

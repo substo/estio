@@ -4,7 +4,6 @@ import type { Hardware } from "./discovery";
 
 export const unsupportedReasons = {
   launchAtLogin: "Needs the installed Mac app (not built yet)",
-  localWorkflow: "Local workflow not built yet; settings saved for later",
 } as const;
 /** Validate desired config with the shared server validator and list keys this companion can't honour yet. */
 export function applyDesiredConfig(desired: { version: number; value?: unknown }): { config: StudioDeviceConfig | null; ack: ConfigAck } {
@@ -13,7 +12,6 @@ export function applyDesiredConfig(desired: { version: number; value?: unknown }
   catch { return { config: null, ack: { version: desired.version, status: "error", error: "This setup is not valid for this companion version. Update the companion or save the setup again." } }; }
   const unsupported: Record<string, string> = {};
   if (config.resources.launchAtLogin) unsupported["resources.launchAtLogin"] = unsupportedReasons.launchAtLogin;
-  if (config.features.transcription) unsupported["features.transcription"] = unsupportedReasons.localWorkflow;
   return { config, ack: { version: desired.version, status: "applied", ...(Object.keys(unsupported).length ? { unsupported } : {}) } };
 }
 /** Tracks server device state, the applied config and the acknowledgement still to be sent. */
