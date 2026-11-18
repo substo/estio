@@ -58,7 +58,7 @@ function returnsOf(row: CatalogRow): Returns {
   return "scalar";
 }
 
-export function createStudioDb(client: PrismaClient): StudioDb {
+export function createStudioDb(client: Pick<PrismaClient, "$queryRaw">): StudioDb {
   let catalog: Promise<Map<string, Signature[]>> | null = null;
   const signatures = () => catalog ??= client.$queryRaw<CatalogRow[]>`
     select p.proname as name,

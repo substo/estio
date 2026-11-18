@@ -1,3 +1,4 @@
+import { withAiWorkflowInstructions } from "./workflow-capabilities";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import {
     OPENAI_MODEL_VALUE_PREFIX,
@@ -210,6 +211,7 @@ export async function callLLM(
     userContent?: string,
     options: CallLLMOptions = {}
 ): Promise<string> {
+    systemPrompt = withAiWorkflowInstructions(systemPrompt, "crm_shared_text");
     const authenticatedUserId = options.executionMode === "interactive"
         ? await resolveAuthenticatedDbUserId() || undefined
         : undefined;
@@ -276,6 +278,7 @@ export async function callLLMWithMetadata(
     userContent?: string,
     options: CallLLMOptions = {}
 ): Promise<LLMResultWithMetadata> {
+    systemPrompt = withAiWorkflowInstructions(systemPrompt, "crm_shared_text");
     const authenticatedUserId = options.executionMode === "interactive"
         ? await resolveAuthenticatedDbUserId() || undefined
         : undefined;

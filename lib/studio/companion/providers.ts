@@ -1,3 +1,4 @@
+import { withAiWorkflowInstructions } from "../../ai/workflow-capabilities";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +20,7 @@ export function claudeLoginMethod(status: Record<string, unknown>): LoginMethod 
   return method === "claude.ai" ? "claudeai" : method === "console" ? "console" : /api.?key/i.test(method) ? "api_key" : "unknown";
 }
 export interface TextRequest<T> {
+  workflowContext?: "knowledge_extract" | "idea_review" | "script_brief" | "library_summary" | "onboarding_research";
   model?: string; prompt: string; jsonSchema: Record<string, unknown>; validate: (value: unknown) => T; signal: AbortSignal;
   /** Live web search (Codex `web_search="live"`, Claude WebSearch/WebFetch). Only onboarding research sets this; it is off for everything else. */
   webSearch?: boolean;
@@ -86,7 +88,7 @@ export function createLocalTextAdapter(provider: LocalProvider, run: ProcessRunn
             "--disable-slash-commands", "--no-chrome", "--json-schema", JSON.stringify(request.jsonSchema)];
         }
         // Web search adds tool events to the stream, so research allows a larger (still bounded) output.
-        const { stdout } = await run({ command: provider, args, cwd, input: request.prompt, signal: request.signal, timeoutMs, maxOutputBytes: webSearch ? 4 * 1024 * 1024 : 256 * 1024 });
+        const { stdout } = await run({ command: provider, args, cwd, input: request.workflowContext ? withAiWorkflowInstructions(request.prompt, request.workflowContext) : request.prompt, signal: request.signal, timeoutMs, maxOutputBytes: webSearch ? 4 * 1024 * 1024 : 256 * 1024 });
         try {
           const events = stdout.trim().split("\n").filter(Boolean).map(line => object.parse(JSON.parse(line)));
           let value: unknown;

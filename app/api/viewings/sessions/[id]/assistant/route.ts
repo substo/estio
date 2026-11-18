@@ -11,6 +11,7 @@ import { resolveViewingSessionRequestContext } from "@/lib/viewings/sessions/aut
 
 import { quickAssistModelOptions, selectQuickAssistModel } from "@/lib/viewings/sessions/quick-assist-models";
 import { estimateQuickAssistCost, googleUsageCounts } from "@/lib/viewings/sessions/quick-assist-cost";
+import { buildLiveAssistantPrompt } from "@/lib/viewings/sessions/assistant-prompt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,13 +55,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     try {
         const selected = selectQuickAssistModel(quickAssistModelOptions({ google: !!apiKey, openai: !!openaiKey, codex: codexAvailable }).assistant, parsed.data.model);
         const recent = session.messages.reverse().map((message) => `${message.speaker}: ${message.originalText}`).join("\n");
-        const prompt = [
-            "You assist a real estate agent during a live conversation. Answer the agent's latest request clearly and briefly. Do not invent property or contact facts. Reply in the configured AI reply language.",
-            `AI reply language: ${session.agentLanguage || "en"}.`,
-            `Contact: ${session.contact?.name || "not attached"}. Property: ${session.primaryProperty?.title || "not attached"} (${session.primaryProperty?.reference || "no reference"}).`,
-            `Recent conversation:\n${recent}`,
-            `Latest agent request: ${parsed.data.prompt}`,
-        ].join("\n\n");
+        const prompt = buildLiveAssistantPrompt({
+            language: session.agentLanguage || "en", contact: session.contact?.name || "not attached",
+            property: session.primaryProperty?.title || "not attached", reference: session.primaryProperty?.reference || "no reference",
+            recentConversation: recent, request: parsed.data.prompt,
+        });
         const result = selected.provider === "Google" && apiKey
             ? await new GoogleGenerativeAI(apiKey).getGenerativeModel({ model: selected.model }).generateContent(prompt)
             : null;

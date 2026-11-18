@@ -1,0 +1,66 @@
+# AI workflows: capability and execution contract
+
+Shared by Estio and Substo. **2026-11-18 local candidate, not deployed.** The serving release remains owned by [current status](current-status.md). No app-wide provider parity or new live acceptance is claimed here. Each app has separate Accounts; each Location owns its settings, content and recorded usage.
+
+## Supported routes
+
+| Operation | Subscription route | Paid API route | Boundaries |
+| --- | --- | --- | --- |
+| Library summary | Requesting Account's paired Mac, Codex/ChatGPT or Claude/claude.ai | **Unsupported** | Saved description/transcript only; no automatic captions, video watching, vision or browsing. Candidate honors Setup's selected provider/model and records actual result metadata. |
+| Knowledge extraction | **Candidate:** requesting Account's paired Mac, selected Codex or Claude | Location OpenAI key, existing structured Responses adapter | Explicit source range; exact quotes and supplied unit IDs; proposed findings; separate selection/apply creates pending knowledge. |
+| Idea review | **Candidate:** same Mac text route | Location OpenAI key | Selected ideas and bounded linked-source excerpts; advisory scores/recommendation; no edits/approval/publishing. |
+| Script brief | **Candidate:** same Mac text route | Location OpenAI key | Exactly one idea with saved evidence; citations/verification flags; separate version-fenced apply replaces the reviewed draft. |
+| Business onboarding research | Existing paired-Mac Codex/Claude capacity selection; existing eligible hosted Location ChatGPT route | Existing OpenAI search route; Gemini reads fetched pages without search | Mac research is separate from Setup's text-provider preference. Research suggestions still need owner confirmation. |
+| Onboarding typed-answer mapping | Existing **hosted Location ChatGPT** only; **paired Mac unsupported** | Existing OpenAI/Gemini server routes | With Mac only, single text fields can save typed text; structured/multiple fields need direct profile editing. No new asynchronous answer/apply contract is added. |
+| CRM drafts, translation, website text | Operation-specific eligible hosted ChatGPT text where adapted; **no generic paired-Mac CRM executor** | Operation-specific Gemini/OpenAI adapters | Manual CRM drafts carry the requested model and interactive context through classifier, sentiment, skill planning, tool-result synthesis and critic. Website helpers record actual provider/model/funding. Personal subscription preference is interactive only; background cannot use personal credentials. This does not unify the legacy Gemini coordinator early-key gate. |
+| Audio, realtime, image/vision | **Unsupported through text subscriptions** | Only actual operation-specific OpenAI/Google adapters | A text model, connected subscription, image URL or generic availability flag does not establish modality/tool support. Edition restrictions still apply. |
+| Studio transcription, brand-profile runs and recurring text schedules | No new subscription route in this candidate | Existing operation-specific API routes | Do not infer support from the three newly adapted manual workflows. New idea/brief snapshots now stamp the prompt versions expected by the current worker; older jobs remain immutable and may require their matching worker/version. |
+
+No Gemini subscription, arbitrary third-party subscription, Claude API or new paid provider is implemented by this candidate. Library paid-API execution needs a reviewed summary spec plus the existing paid attempt/hold/settlement and evidence/application fences; calling the shared LLM without those would bypass its durable contract, so it remains unsupported. Paired-Mac typed-answer mapping needs durable owner-answer and field-version semantics; research suggestions cannot safely be reused as confirmed owner answers. A connected knowledge graph remains future work.
+
+## Manual Studio text execution
+
+The shared selector offers **My paired Mac subscription** or **Location OpenAI API key (paid)** for extraction, reviews and briefs. The readiness endpoint reads only the authorized active Location and requesting Account's Macs; it returns reasons and key presence, never secrets. Both apps use these same components/services/functions.
+
+Subscription admission requires the requesting Account's own paired Mac in that app/Location, AI-manager authority, fresh heartbeat, processing On, unpaused, Text work On, selected Codex/Claude, applied Setup, matching advertised handler, correct subscription login, fresh capacity and no reported local block. SQL rechecks admission atomically; local execution rechecks settings, auth and capacity. The subscription auth stays on the Mac, in the native CLI. API-key/Console CLI logins are rejected.
+
+The durable job pins the device, provider, model, config version, workflow, prompt version and immutable snapshot. Changing a request's provider with the same request ID conflicts. Changing Setup, disabling processing or revoking the device cancels queued text jobs. Pausing holds queued work. Once running, a valid result can finish under its original route/lease even if settings subsequently change; revocation/membership removal stops completion. No other Account's device can claim/finish the job. Freshly claimed work is serialized per device.
+
+API admission requires explicit paid consent and a saved Location OpenAI key **before enqueue**; execution decrypts that key and uses the existing budget reservation and metered settlement. No key is copied into a job, prompt, log or browser response. Key presence is not entitlement/quota proof. An unreadable key, insufficient budget or provider rejection remains an explicit execution failure. No subscription selection falls back to paid API, and no selected CLI silently becomes another CLI.
+
+Both routes reuse the domain snapshot/result contracts and SQL validators. Stale results are preserved and marked stale; original application/approval protections remain. Subscription results record the actual CLI/model and create no platform-paid API usage row or hold. They are still limited by the user's subscription plan and current capacity. Paid API results retain existing usage/hold/reconciliation behavior. Header totals are recorded estimates, not invoices.
+
+Capacity/local-policy waits happen before generation and can retry. Failed/uncertain native execution, lost completion, or expired execution never resends the same job; repeated Jobs retry attempts are fenced. Start a **new explicitly authorized request** after reviewing uncertainty. Paid uncertain outcomes retain their hold and require the existing manager reconciliation/replacement process. Reusing a request ID finds its existing job, including after response loss; it does not change its provider or generate again.
+
+## Runtime instructions: what actually reaches the AI
+
+The executable source is [`lib/ai/workflow-capabilities.ts`](../lib/ai/workflow-capabilities.ts), contract version `ai-workflows.2026-11-18.v1`. It is imported into the build; production does not need `documentation/`, which deployment excludes. This document is for people/contributors and is **not automatically read by a model**.
+
+Bounded operation-relevant instructions are explicitly prepended at:
+
+- shared CRM `callLLM` / `callLLMWithMetadata` (including primary skill execution and shared text consumers);
+- the direct Gemini conversation coordinator;
+- the hosted subscription CLI prompt builder;
+- onboarding's direct provider prompt boundary;
+- Studio structured OpenAI request instructions;
+- native Mac generation for summaries, onboarding research and the three text workflows (diagnostics remain their fixed check prompt).
+
+The Mac CLI still ignores repository rules and has tools/file execution disabled for ordinary text work. Onboarding research alone requests its restricted web tools. A runtime guide describes supported adapters and known limits; it does not grant tools, authorize a mutation, select a funding source, reveal keys or assert live readiness. Runtime tools, tenant/edition checks, validated input and the actual workflow admission remain authoritative. No reliance on a registry skill being selected or on a model independently reading this file.
+
+## CRM interactive routing boundary
+
+The routing context exists only on the authenticated call stack. Immediate manual jobs persist a boolean `interactiveTextOnly` fence and one-attempt limit, never a personal account, model preference or credential. A background claimant or failed interactive attempt stops without converting to a default/API route; the owner must start a fresh request. The two manual draft actions also stop after an unsuccessful/empty skill attempt rather than invoking the legacy generator a second time. This also prevents automatic replay after uncertain generation. Interactive orchestration reads existing contact insights without invoking the legacy global-key embedding route. Background memory retrieval retains that existing embedding behavior; it is not subscription-backed.
+
+The selected model reaches classification, sentiment, skill planning, post-tool synthesis and high-risk critique. Skill traces retain actual model/provider/funding for the planning and synthesis calls. Existing trace cost estimates do not establish invoice reconciliation or complete metering of every legacy classifier/critic/embedding path. Workflow-specific CRM readiness respects edition and modality; subscription-only eligibility cannot enable transcription, realtime, property images or replay speech. Live Assist's direct Gemini assistant prompt also imports the bundled contract. Undeclared skill tools are blocked before handlers execute, including synthetic availability calls.
+
+## Evidence and release prerequisites
+
+Local verification uses mocked native/API transports and actual SQL in a disposable PostgreSQL 17 cluster via `scripts/test-studio-ai-routing.sh`. It tests all three subscription workflows through validated completion, separate script/pending-knowledge application, cross-account/Location/app denial, config changes, stale evidence, replay fencing, subscription/no-hold and explicit API/reservation/settlement. Prompt-capture tests assert the contract is present in the actual native input and API instructions; CRM wrapper/hosted CLI tests capture their prompt consumption. These checks are not live provider acceptance or browser/keyboard acceptance.
+
+Parent-reported live baseline evidence: Martin Mac applied Setup v2 (Text work, Codex) and a Library summary completed from saved transcript for source `327b7d30-af49-4605-9fda-c8505a6011cb`. That occurred before this candidate; prior summary selection used capacity order, so selected Codex alone does not prove which CLI executed. The missing-key extraction `de27d543-16c2-470d-99b4-bca541977abd` remains retained failure evidence; it was not retried/mutated by this implementation.
+
+Before release: complete the combined build/checks; apply additive migration `20261118120000_studio_text_subscription` through the canonical migrate-only release workflow; update/restart the Node companion to advertise `studio.text_run` (`studio-companion-4`); verify fresh heartbeat, applied Setup and Account authority. Then obtain authorized real provider and signed-in desktop/mobile/keyboard acceptance for each new route. Native Swift companion parity is not implemented. No production mutation, device-setting change, provider call, commit or deployment was performed by this task.
+
+## Contributor contract
+
+Add a route only with its actual modality/tool adapter, credential scope and explicit funding/consent semantics. Extend the shared selector/readiness **and** atomic SQL admission/allowlists, native handler/version, bounded snapshot/output validation, completion/application and replay fences together. Test the real SQL in isolation. Keep requested versus actual provider/model clear. Never replace a durable paid path with an unmetered LLM call or turn research suggestions into confirmed facts. Update the bundled contract, outbound prompt-capture tests and this matrix together. Report implemented, device-reported, key-present and live-verified evidence distinctly; unknown stays unknown.

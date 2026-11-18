@@ -40,8 +40,14 @@ export async function getStudioLibraryRecord(locationId: string, recordId: strin
     select id, kind, title, version, updated_at, source_url, summary, approved, archived, payload from studio.studio_records
     where location_id = ${access.locationId} and id = ${recordId}::uuid and kind in ('reference', 'channel')`);
   if (!record) return null;
-  const { links, files, uploads } = await getStudioRecordRelations(access, recordId, true);
-  return { access, record: exposeLibraryMetadata(record), links, files, uploads };
+  const [{ links, files, uploads }, findings] = await Promise.all([
+    getStudioRecordRelations(access, recordId, true),
+    studioDb.rows<{ id: string; statement: string; status: string }>(Prisma.sql`
+      select id, statement, status from studio.studio_knowledge_insights
+      where location_id=${access.locationId} and source_id=${recordId}::uuid
+      order by case when status='pending' then 0 else 1 end, id asc limit 6`),
+  ]);
+  return { access, record: exposeLibraryMetadata(record), links, files, uploads, findings: findings.slice(0, 5), hasMoreFindings: findings.length > 5 };
 }
 
 export async function saveStudioLibraryRecord(locationId: string, recordId: string, draft: LibraryDraft, version: number) {

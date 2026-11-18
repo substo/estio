@@ -1,0 +1,82 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createSubscriptionTextRunHandler } from "./text-run";
+import { createLocalTextAdapter, type LocalProvider, type LocalTextAdapter } from "./providers";
+import { readDeviceCommand, defaultDeviceConfig } from "../devices-policy";
+import { readIdeaReviewRequest } from "../idea-review-policy";
+import { readKnowledgeExtractionCommand } from "../knowledge-extraction-policy";
+import { createLibrarySummaryHandler } from "./library-summary";
+import { AI_WORKFLOW_CONTRACT_VERSION } from "../../ai/workflow-capabilities";
+const id = "ac000000-0000-4000-8000-000000000001";
+const config = { ...defaultDeviceConfig, features: { text: true, transcription: false }, textProvider: "codex" as const, textModel: "test-model" };
+const context = { workerId: "test", signal: new AbortController().signal };
+const usage = async () => ({ codex: { remaining: 80, windows: [], at: new Date().toISOString() }, claudeAgent: { remaining: 90, windows: [], at: new Date().toISOString() } });
+const snapshot = { source: { id, version: 1, title: "Evidence", url: null }, mode: "record_text", inputId: "transcript", startUnit: 0, unitCount: 1, focus: "", fingerprint: "test", coverage: { totalUnits: 1, selectedUnits: 1, totalCharacters: 20 }, units: [{ id: "u1", unitIndex: 0, text: "An exact quote.", startChar: 0, endChar: 15, startSeconds: null, endSeconds: null }] };
+const extraction = { findings: [{ kind: "claim", unitId: "u1", statement: "Source claims this", suggestedTopic: "Evidence", quote: "exact quote" }] };
+const job = { id, location_id: "tenant", kind: "studio.text_run", payload: { reviewId: id, workflow: "knowledge_extract", promptVersion: "studio.knowledge-extract.v1", snapshot, provider: "codex", model: "test-model", configVersion: 2 }, lease_token: id, attempts: 1, max_attempts: 1 };
+function handler(adapter: (p: LocalProvider) => LocalTextAdapter, overrides = {}) {
+ return createSubscriptionTextRunHandler({ adapter, usage, enabled: () => true, config: () => config, configVersion: () => 2, ...overrides });
+}
+function adapter(generate: LocalTextAdapter["generate"]): LocalTextAdapter {
+ return { provider: "codex", readiness: async () => ({ installed: true, authenticated: true, ready: true, loginMethod: "chatgpt", models: [] }), generate };
+}
+test("subscription consent is separate from paid authorization and unsupported providers fail closed", () => {
+ const selection = { requestId: id, ideas: [{ id, version: 1 }], focus: "", provider: "subscription", confirmSubscription: true };
+ assert.equal(readIdeaReviewRequest(selection).confirmPaid, false);
+ assert.throws(() => readIdeaReviewRequest({ ...selection, confirmSubscription: false, confirmPaid: true }));
+ assert.throws(() => readIdeaReviewRequest({ ...selection, provider: "gemini" }));
+ assert.throws(() => readIdeaReviewRequest({ ...selection, provider: "openai" }));
+ assert.equal(readKnowledgeExtractionCommand({ action: "enqueue", requestId: id, sourceId: id, expectedVersion: 1, mode: "record_text", inputId: "transcript", startUnit: 0, unitCount: 1, focus: "", provider: "subscription", confirmSubscription: true }).action, "enqueue");
+});
+test("selected CLI receives exact schema, bounded evidence, model and no tools, and validates quotes", async () => {
+ let calls = 0;
+ const run = handler(p => { assert.equal(p, "codex"); return adapter(async request => {
+  calls++; assert.equal(request.model, "test-model"); assert.equal(request.webSearch, undefined);
+  assert.match(request.prompt, /untrusted/); assert.match(request.prompt, /An exact quote/);
+  return request.validate(extraction);
+ }); });
+ assert.deepEqual(await run(job, context), { output: extraction, provider: "codex", model: "test-model" });assert.equal(calls, 1);
+ const bad = handler(() => adapter(async request => request.validate({ findings: [{ ...extraction.findings[0], quote: "invented quote" }] })));
+ await assert.rejects(bad(job, context), /Automatic replay stopped/);
+});
+test("provider/model/config changes, missing capacity, API login and unsupported versions stop before execution", async () => {
+ let calls = 0; const get = () => adapter(async () => { calls++; throw Error(); });
+ for (const patch of [{ provider: "claude" }, { configVersion: 1 }, { model: "other" }, { promptVersion: "old" }, { workflow: "image_generation" }])
+  await assert.rejects(handler(get)({ ...job, payload: { ...job.payload, ...patch } }, context));
+ await assert.rejects(handler(get, { usage: async () => ({}) })(job, context), /fresh capacity/);
+ await assert.rejects(handler(() => ({ ...get(), readiness: async () => ({ installed: true, authenticated: true, ready: true, loginMethod: "api_key", models: [] }) }))(job, context));
+ assert.equal(calls, 0);
+});
+test("uncertain subscription execution never tries the other subscription", async () => {
+ const calls: string[] = [];
+ await assert.rejects(handler(p => { calls.push(p); return adapter(async () => { throw Error("timeout"); }); })(job, context), /Automatic replay stopped/);
+ assert.deepEqual(calls, ["codex"]);
+});
+test("Library summaries honour selected provider/model even when another subscription has more capacity", async () => {
+ const calls: string[] = [];
+ const run = createLibrarySummaryHandler({ config: () => config, enabled: () => true, usage, adapter: p => { calls.push(p);return adapter(async request => { assert.equal(request.model, "test-model");return request.validate({ summary: "Summary" }); }); } });
+ assert.deepEqual(await run({ ...job, payload: { description: "Evidence" } }, context), { summary: "Summary", provider: "codex", model: "test-model" });
+ assert.deepEqual(calls, ["codex"]);
+});
+test("actual native CLI outbound input contains the bundled capability contract with repository rules disabled", async () => {
+ let input = "";
+ const native = createLocalTextAdapter("codex", async request => {
+  if (request.args[0] === "--version") return { stdout: "1.2.3", stderr: "" };
+  if (request.args.includes("--help")) return { stdout: "--ignore-user-config --ignore-rules --ephemeral --output-schema --json", stderr: "" };
+  if (request.args[0] === "login") return { stdout: "Logged in using ChatGPT", stderr: "" };
+  input = request.input!;assert.ok(request.args.includes("--ignore-rules"));assert.ok(request.args.includes('web_search="disabled"'));
+  return { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(extraction) } }) + '\n' + JSON.stringify({ type: "turn.completed" }), stderr: "" };
+ });
+ await handler(() => native)(job, context);
+ assert.ok(input.includes(AI_WORKFLOW_CONTRACT_VERSION));assert.match(input, /Subscriptions do not unlock audio, realtime, vision/);
+ assert.match(input, /onboarding typed answers require a server connection/);
+ assert.ok(!input.includes("api_key_secret"));
+});
+
+test("HTTP device boundary retains textReady and permits only bounded subscription result envelopes", () => {
+ const claim = readDeviceCommand("claim", { workerId: "mac", limit: 1, leaseSeconds: 60, textReady: true });
+ assert.equal(claim.textReady, true);
+ const body = { workerId: "mac", jobId: id, leaseToken: id, result: { output: extraction, provider: "codex", model: "test-model" } };
+ assert.deepEqual(readDeviceCommand("complete", body).result, body.result);
+ for (const result of [{ ...body.result, provider: "gemini" }, { ...body.result, secret: "raw" }, { ...body.result, output: { text: "a".repeat(25000) } }]) assert.throws(() => readDeviceCommand("complete", { ...body, result }));
+});

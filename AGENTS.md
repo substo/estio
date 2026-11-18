@@ -15,6 +15,10 @@ Provider-neutral Next.js route exports such as `maxDuration` are execution hints
 
 Read [architecture and decisions](documentation/how-the-app-works.md) and [current status and tasks](documentation/current-status.md) first. For the software factory (Build at `/admin/platform/build`), read [software factory](documentation/software-factory.md). Historical checkpoints are evidence, not current instructions. Studio has no legacy URL compatibility requirement; preserve data/media and recovery safeguards.
 
+## AI workflow capabilities
+
+Read [AI workflows](documentation/ai-workflows.md) before changing providers, AI routing or agent instructions. The bundled runtime contract is `lib/ai/workflow-capabilities.ts`; documentation alone is not model context. Keep operation-specific adapters, authority, funding, readiness, validation and prompt-capture tests aligned.
+
 ## Video editor
 
 - `video-editor/` is the native macOS video editor (Swift, SwiftPM) used by both apps. It is not part of the Next.js build or the server deploy. Follow `video-editor/AGENTS.md` when working there.

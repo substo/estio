@@ -1,3 +1,4 @@
+import type { TextExecutionContext } from "../runtime/text-execution";
 import fs from 'fs';
 import path from 'path';
 import matter from 'gray-matter';
@@ -139,6 +140,7 @@ import {
 } from "../prompts/communication-policy";
 
 export interface SkillExecutionContext {
+    textExecution?: TextExecutionContext;
     conversationId: string;
     contactId: string;
     locationId?: string;
@@ -164,6 +166,8 @@ export interface SkillExecutionContext {
 
 export interface SkillExecutionResult {
     modelUsed: string;
+    provider?: string;
+    fundingScope?: string;
     thoughtSummary: string;
     thoughtSteps: any[];
     toolCalls: any[];
@@ -172,6 +176,7 @@ export interface SkillExecutionResult {
     completionTokens: number;
     cost: number;
     llmCall?: {
+        executions?: Array<{ requestedModel: string; model: string; provider: string; fundingScope: string; executionMode: string }>;
         request: {
             model: string;
             systemPrompt: string;
@@ -524,7 +529,7 @@ async function synthesizeReplyFromToolResults(params: {
     initialDraft: string | null;
     thoughtSummary: string;
     toolCalls: any[];
-}): Promise<{ draft: string | null; usage?: { promptTokens: number; completionTokens: number; totalTokens: number; thoughtsTokens: number; toolUsePromptTokens: number; cachedContentTokens: number; raw: string; } }> {
+}): Promise<{ draft: string | null; result?: Awaited<ReturnType<typeof callLLMWithMetadata>>; usage?: { promptTokens: number; completionTokens: number; totalTokens: number; thoughtsTokens: number; toolUsePromptTokens: number; cachedContentTokens: number; raw: string; } }> {
     const successfulToolCalls = params.toolCalls.filter((c: any) => c?.result && !c?.error);
     if (successfulToolCalls.length === 0) {
         return { draft: params.initialDraft ?? null };
@@ -605,13 +610,13 @@ ${toolResultsTrimmed}
 Write the final message the agent should send now.`;
 
     try {
-        const { text, usage } = await callLLMWithMetadata(
+        const result = await callLLMWithMetadata(
             params.modelId,
             synthesisSystemPrompt,
             synthesisUserPrompt,
-            { jsonMode: false, locationId: params.context.locationId }
+            { jsonMode: false, locationId: params.context.locationId, executionMode: params.context.textExecution?.executionMode }
         );
-        return { draft: text?.trim() || params.initialDraft || null, usage };
+        return { draft: result.text?.trim() || params.initialDraft || null, usage: result.usage, result };
     } catch (e) {
         console.warn(`[SKILL:${params.skillName}] Post-tool synthesis failed, falling back to initial draft`, e);
         return { draft: params.initialDraft ?? null };
@@ -686,7 +691,7 @@ export async function executeSkill(
     skill: LoadedSkill & { tools?: string[] },
     context: SkillExecutionContext
 ): Promise<SkillExecutionResult> {
-    const modelId = getModelForTask(
+    const modelId = context.textExecution?.model || getModelForTask(
         context.intent === "PRICE_NEGOTIATION" ? "negotiation" :
             context.intent === "QUALIFICATION" ? "qualification" : "draft_reply"
     );
@@ -770,13 +775,14 @@ You must respond with valid JSON:
     // 3. Call LLM
     try {
         const userPrompt = `Conversation History:\n${context.conversationHistory}\n\nLatest User Message: "${context.message}"`;
-        const { text: response, usage, provider } = await callLLMWithMetadata(
+        const primaryResult = await callLLMWithMetadata(
             modelId,
             systemPrompt,
             userPrompt,
-            { jsonMode: true, locationId: context.locationId }
+            { jsonMode: true, locationId: context.locationId, executionMode: context.textExecution?.executionMode }
         );
 
+        const { text: response, usage } = primaryResult;
         const parsed = JSON.parse(response);
         const isViewingSkill = skill.name === "coordinating-viewings";
         let plannedToolCalls = Array.isArray(parsed.tool_calls) ? [...parsed.tool_calls] : [];
@@ -818,8 +824,18 @@ You must respond with valid JSON:
         let viewingPrecheck: any = null;
         if (plannedToolCalls.length > 0) {
             for (const call of plannedToolCalls) {
-                const tool = toolRegistry.find(t => t.name === call.name);
+                // Execute only capabilities exposed to this skill, including injected preflights.
+                const tool = allowedTools.find(t => t.name === call.name);
                 const resolvedArgs = resolveToolArguments(call.arguments ?? {}, context);
+
+                if (!tool) {
+                    results.push({
+                        name: call.name,
+                        args: resolvedArgs,
+                        error: "Blocked: tool is not declared for this skill or is unavailable."
+                    });
+                    continue;
+                }
 
                 if (isViewingSkill && (call.name === "check_availability" || call.name === "propose_slots")) {
                     if (!viewingPrecheck || viewingPrecheck.resolutionStatus !== "resolved") {
@@ -886,7 +902,7 @@ You must respond with valid JSON:
             viewingPrecheck?.selectedProperty?.schedulePath?.mode === "DIRECT_SCHEDULE";
 
         if (canAutoCheckRequestedTime) {
-            const checkAvailabilityTool = toolRegistry.find(t => t.name === "check_availability");
+            const checkAvailabilityTool = allowedTools.find(t => t.name === "check_availability");
             if (checkAvailabilityTool) {
                 const dayStart = new Date(requestedViewingTime.requestedAt);
                 dayStart.setHours(9, 0, 0, 0);
@@ -933,6 +949,12 @@ You must respond with valid JSON:
                         synthetic: true
                     });
                 }
+            } else {
+                results.push({
+                    name: "check_availability",
+                    error: "Blocked: tool is not declared for this skill or is unavailable.",
+                    synthetic: true
+                });
             }
         }
 
@@ -959,26 +981,26 @@ You must respond with valid JSON:
             toolUsePromptTokens: (usage.toolUsePromptTokens || 0) + (synthesized.usage?.toolUsePromptTokens || 0)
         };
 
-        const costEstimate = provider === "openai" || provider === "chatgpt_subscription"
-            ? buildUnavailableProviderCostEstimate(provider, {
-                promptTokens: aggregatedUsage.promptTokens,
-                completionTokens: aggregatedUsage.completionTokens,
-                totalTokens: aggregatedUsage.totalTokens,
-                thoughtsTokens: aggregatedUsage.thoughtsTokens,
-                toolUsePromptTokens: aggregatedUsage.toolUsePromptTokens
-            })
-            : calculateRunCostFromUsage(modelId, {
-                promptTokens: aggregatedUsage.promptTokens,
-                completionTokens: aggregatedUsage.completionTokens,
-                totalTokens: aggregatedUsage.totalTokens,
-                thoughtsTokens: aggregatedUsage.thoughtsTokens,
-                toolUsePromptTokens: aggregatedUsage.toolUsePromptTokens
-            });
-        const cost = costEstimate.amount;
+        // Price each call against its actual route, rather than pricing aggregate
+        // subscription/OpenAI tokens under the requested Gemini model.
+        const executions = [primaryResult, ...(synthesized.result ? [synthesized.result] : [])];
+        const estimates = executions.map(result => result.provider === "openai" || result.provider === "chatgpt_subscription"
+            ? buildUnavailableProviderCostEstimate(result.provider, result.usage)
+            : calculateRunCostFromUsage(result.model || modelId, result.usage));
+        const costEstimate = estimates[0];
+        const cost = estimates.reduce((sum, estimate) => sum + estimate.amount, 0);
+        const finalExecution = synthesized.result || primaryResult;
         const reqSystem = truncateForTrace(systemPrompt);
         const reqUser = truncateForTrace(userPrompt);
         const resRaw = truncateForTrace(response);
         const llmCall = {
+            executions: executions.map(result => ({
+                requestedModel: modelId,
+                model: result.model || modelId,
+                provider: result.provider,
+                fundingScope: result.fundingScope,
+                executionMode: result.executionMode,
+            })),
             request: {
                 model: modelId,
                 systemPrompt: reqSystem.value,
@@ -1006,7 +1028,9 @@ You must respond with valid JSON:
         };
 
         return {
-            modelUsed: modelId,
+            modelUsed: finalExecution.model || modelId,
+            provider: finalExecution.provider,
+            fundingScope: finalExecution.fundingScope,
             thoughtSummary: parsed.thought_summary || "",
             thoughtSteps: parsed.thought_steps || [],
             toolCalls: results,

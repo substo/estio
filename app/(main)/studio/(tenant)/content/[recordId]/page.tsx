@@ -1,3 +1,4 @@
+import { scriptNextAction } from "@/lib/studio/reference-workflow";
 import { studioRouteParams } from "@/lib/studio/route-context";
 import Link from "next/link";
 import { listPendingStudioUploads } from "@/lib/studio/uploads";
@@ -15,11 +16,22 @@ export default async function StudioContentRecordPage({ params }: { params: Prom
   const result = await getStudioContentRecord(locationId, recordId);
   if (!result) notFound();
   const { record, links, files, uploads } = result;
+  const next = scriptNextAction(record, links);
   const pendingUploads = await listPendingStudioUploads(locationId, recordId);
   return (
     <main className="mx-auto max-w-4xl space-y-8 p-6 md:p-10">
       <header className="space-y-2"><nav className="flex gap-4 text-sm"><Link href={`/studio/content`} className="text-muted-foreground hover:underline">Content pipeline</Link><Link href={`/studio/library`} className="text-muted-foreground hover:underline">Research library</Link></nav><h1 className="text-3xl font-semibold tracking-tight">{record.title}</h1></header>
-      {record.payload.stage === "idea" && !record.archived ? <Link href={`/studio/content/${recordId}/script-briefs`} className="inline-block text-sm text-primary hover:underline">Generate a source-backed script brief</Link> : null}
+      <section aria-label="Script next steps" className="space-y-3 rounded-xl border p-5 text-sm">
+        <h2 className="font-medium">Next steps for this piece</h2>
+        <p>{next.message}</p>
+        <p className="text-muted-foreground">{links.length} outgoing linked records · {links.filter(link => link.hasScriptEvidence).length} with text available to the script service. Evidence availability is not factual verification or approval.</p>
+        {!record.archived ? <div className="flex flex-wrap gap-4">
+          {next.kind === "generate" ? <Link href={`/studio/content/${recordId}/script-briefs`} className="text-primary hover:underline">Generate a source-backed script brief</Link> : null}
+          <Link href={`/studio/records/${recordId}/links?kind=reference`} className="text-primary hover:underline">Choose research / optional reference videos</Link>
+          <Link href="/studio/library" className="text-primary hover:underline">Browse or save another source</Link>
+        </div> : null}
+        <p className="text-muted-foreground">Template choice is manual: record the template and its review decision in Production notes. Studio does not enforce an approved template here. For filming, include the final script, shot instructions, on-screen examples and any claims still needing verification.</p>
+      </section>
       <ContentRecordForm locationId={locationId} recordId={recordId} version={record.version} title={record.title} payload={record.payload} />
       {!record.archived ? <Link href={`/studio/records/${recordId}/extract`} className="mr-4 inline-block text-sm text-primary hover:underline">Extract knowledge from saved text</Link> : null}
       <Link href={`/studio/records/${recordId}/links`} className="inline-block text-sm text-primary hover:underline">Manage linked records</Link>

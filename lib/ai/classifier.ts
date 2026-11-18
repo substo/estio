@@ -1,3 +1,4 @@
+import type { TextExecutionContext } from "./runtime/text-execution";
 import { getModelForTask } from "./model-router";
 import { INTENTS, IntentType } from "./intents";
 import { callLLM } from "./llm";
@@ -36,7 +37,8 @@ export interface ClassificationResult {
 export async function classifyIntent(
     message: string,
     conversationContext?: string,
-    locationId?: string
+    locationId?: string,
+    textExecution?: TextExecutionContext
 ): Promise<ClassificationResult> {
     const normalizedMessage = message.toLowerCase();
     const normalizedContext = (conversationContext || "").toLowerCase();
@@ -116,14 +118,14 @@ export async function classifyIntent(
         };
     }
 
-    const model = getModelForTask("intent_classification");
+    const model = textExecution?.model || getModelForTask("intent_classification");
 
     const prompt = conversationContext
         ? `${CLASSIFIER_PROMPT}\n\nRecent context:\n${conversationContext}\n\nMessage to classify:\n"${message}"`
         : `${CLASSIFIER_PROMPT}\n\nMessage to classify:\n"${message}"`;
 
     try {
-        const response = await callLLM(model, prompt, undefined, { locationId });
+        const response = await callLLM(model, prompt, undefined, { ...textExecution, locationId });
         const intentName = response.trim().toUpperCase() as IntentType;
 
         const intentConfig = INTENTS[intentName] ?? INTENTS.UNKNOWN;

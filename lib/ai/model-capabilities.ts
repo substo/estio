@@ -119,7 +119,8 @@ export function isLikelyPropertyImageGenerationModel(model: AiModelDescriptor): 
 }
 
 export function isLikelyPropertyImageAnalysisModel(model: AiModelDescriptor): boolean {
-    if (isChatGptSubscriptionTextModel(model)) return true;
+    // The CRM subscription adapter is text-only; the image executor rejects it.
+    if (isChatGptSubscriptionTextModel(model)) return false;
     if (!isGeminiFamilyModel(model) || isExcludedUtilityModel(model)) return false;
     const value = normalizeModelValue(model.value).toLowerCase();
     if (value.includes("-live") || value.includes("native-audio") || value.includes("transcribe")) return false;

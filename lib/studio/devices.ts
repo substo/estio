@@ -115,7 +115,7 @@ export async function executeStudioDeviceCommand(token: string, brand: "estio" |
     estioAuthorizedBy = identity.approvedBy;
   }
   // Outermost device entry point: onboarding research, then Library summaries, then the base device protocol.
-  return studioDb.call<unknown>("studio_onboarding_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy });
+  return studioDb.call<unknown>("studio_text_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy });
 }
 
 export const PAIRING_POLL_SECONDS = 5;

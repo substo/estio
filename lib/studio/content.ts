@@ -1,4 +1,8 @@
 import "server-only";
+import { auth } from "@clerk/nextjs/server";
+import db from "@/lib/db";
+import { createStudioDb } from "./db";
+import { createSourceIdeaService } from "./source-idea-service";
 import { getStudioAccess } from "./access";
 import { getStudioRecordRelations } from "./record-relations";
 import { Prisma } from "@prisma/client";
@@ -40,4 +44,14 @@ export async function saveStudioContentRecord(locationId: string, recordId: stri
   if (!uuid.test(recordId) || !Number.isSafeInteger(version) || version < 0) throw new Error("Invalid content record request.");
   return studioDb.call<StudioContentRecord>("studio_save_record", { p_location_id: access.locationId, p_record_id: recordId, p_kind: "content",
     p_title: draft.title, p_payload_patch: draft.payload, p_expected_version: version, p_clerk_user_id: access.userId });
+}
+
+/** New source-backed ideas save and link together; failures roll back both writes. */
+export async function createStudioSourceIdea(locationId: string, sourceId: string, ideaId: string, title: string, summary: string) {
+  const service = createSourceIdeaService({
+    authorize: getStudioAccess,
+    isImpersonating: async () => Boolean((await auth()).actor),
+    transaction: run => db.$transaction(tx => run(createStudioDb(tx))),
+  });
+  return service(locationId, sourceId, ideaId, title, summary);
 }

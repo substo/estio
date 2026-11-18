@@ -1,3 +1,4 @@
+import { readStudioTextProvider } from "./text-provider";
 import { StudioCommandError } from "./command-error";
 
 export const IDEA_REVIEW_MODEL = "gpt-6-luna";
@@ -15,7 +16,8 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function readIdeaReviewRequest(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new IdeaReviewError("Invalid idea review.");
   const b = value as Record<string, unknown>;
-  if (typeof b.requestId !== "string" || !uuid.test(b.requestId) || b.confirmPaid !== true || !Array.isArray(b.ideas)
+  const provider = readStudioTextProvider(b.provider);
+  if (typeof b.requestId !== "string" || !uuid.test(b.requestId) || (provider === "openai" ? b.confirmPaid !== true : b.confirmSubscription !== true) || !Array.isArray(b.ideas)
     || b.ideas.length < 1 || b.ideas.length > 5 || typeof b.focus !== "string" || b.focus.length > 300) throw new IdeaReviewError("Select one to five ideas and authorize a paid review.");
   const ideas = b.ideas.map((i: unknown) => {
     if (!i || typeof i !== "object") throw new IdeaReviewError("Invalid idea selection.");
@@ -24,7 +26,7 @@ export function readIdeaReviewRequest(value: unknown) {
     return { id: x.id.toLowerCase(), version: Number(x.version) };
   }).sort((a, b) => a.id.localeCompare(b.id));
   if (new Set(ideas.map(i => i.id)).size !== ideas.length) throw new IdeaReviewError("Select each idea once.");
-  return { requestId: b.requestId.toLowerCase(), focus: b.focus.trim(), ideas, confirmPaid: true };
+  return { requestId: b.requestId.toLowerCase(), focus: b.focus.trim(), ideas, provider, confirmPaid: provider === "openai", confirmSubscription: provider === "subscription" };
 }
 
 export function readIdeaReviewResult(value: unknown, snapshot: IdeaSnapshot): IdeaReviewResult {

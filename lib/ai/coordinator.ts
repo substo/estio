@@ -1,3 +1,4 @@
+import { withAiWorkflowInstructions } from "./workflow-capabilities";
 import { getLocationConfig } from "@/lib/location-config/service";
 import db from "@/lib/db";
 import { getMessages, getConversation } from "@/lib/ghl/conversations";
@@ -1207,7 +1208,7 @@ export async function generateDraft(context: CoordinationContext) {
         `;
 
         // Add current composer draft and specific user instruction if provided.
-        let finalPrompt = fullPrompt;
+        let finalPrompt = withAiWorkflowInstructions(fullPrompt, "crm_conversation_draft");
         if (normalizedBaseDraft) {
             finalPrompt += `\n\nCURRENT COMPOSER DRAFT TO REVISE:\n${normalizedBaseDraft}\n\nRevision rules:\n1. Revise this draft; do not write a separate unrelated reply.\n2. Preserve the opening/intro, paragraph structure, factual meaning, commitments, property details, dates, times, and links unless the user instruction explicitly changes them.\n3. Do not summarize, shorten, or remove details merely because the general task says to be concise.\n4. Return only the revised send-ready message body.`;
         }

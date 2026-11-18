@@ -1,3 +1,4 @@
+import { readStudioTextProvider } from "./text-provider";
 import { StudioCommandError } from "./command-error";
 export const KNOWLEDGE_EXTRACTION_PROMPT = "studio.knowledge-extract.v1";
 export const FINDING_KINDS = ["claim","method","example","question","objection","content_pattern"] as const;
@@ -15,14 +16,14 @@ function requestId(value: unknown) { if(typeof value!=="string"||!uuid.test(valu
 export function readKnowledgeExtractionCommand(value: unknown) {
   const b=requestObject(value); const id=requestId(b.requestId);
   if(b.action==="enqueue") {
-    const sourceId=requestId(b.sourceId);
+    const sourceId=requestId(b.sourceId); const provider=readStudioTextProvider(b.provider);
     if(!Number.isSafeInteger(b.expectedVersion)||Number(b.expectedVersion)<1||!["record_text","source_units","upload_transcript"].includes(String(b.mode))
       ||typeof b.inputId!=="string"||!b.inputId||b.inputId.length>200||!Number.isSafeInteger(b.startUnit)||Number(b.startUnit)<0||Number(b.startUnit)>1000000
-      ||!Number.isSafeInteger(b.unitCount)||Number(b.unitCount)<1||Number(b.unitCount)>8||typeof b.focus!=="string"||b.focus.length>300||b.confirmPaid!==true) throw new StudioCommandError("Choose a bounded source range and explicitly authorize extraction.");
+      ||!Number.isSafeInteger(b.unitCount)||Number(b.unitCount)<1||Number(b.unitCount)>8||typeof b.focus!=="string"||b.focus.length>300||(provider==="openai"?b.confirmPaid!==true:b.confirmSubscription!==true)) throw new StudioCommandError("Choose a bounded source range and explicitly authorize extraction.");
     if(b.mode==="record_text"&&!["transcript","notes","script"].includes(b.inputId))throw new StudioCommandError("Choose saved transcript, notes or script text.");
     if(b.mode==="upload_transcript")requestId(b.inputId);
     return {action:"enqueue" as const,requestId:id,sourceId,expectedVersion:Number(b.expectedVersion),mode:b.mode as ExtractionMode,inputId:b.inputId,
-      startUnit:Number(b.startUnit),unitCount:Number(b.unitCount),focus:b.focus.trim(),confirmPaid:true};
+      startUnit:Number(b.startUnit),unitCount:Number(b.unitCount),focus:b.focus.trim(),provider,confirmPaid:provider==="openai",confirmSubscription:provider==="subscription"};
   }
   if(b.action==="apply") {
     const reviewId=requestId(b.reviewId);

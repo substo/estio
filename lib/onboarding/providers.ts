@@ -1,3 +1,4 @@
+import { withAiWorkflowInstructions } from "../ai/workflow-capabilities";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
 import { callChatGptSubscriptionWithMetadata, isChatGptSubscriptionTransportEnabled, resolveChatGptSubscriptionCredential, resolveChatGptSubscriptionDefaultModel } from "@/lib/ai/chatgpt-subscription";
@@ -41,6 +42,7 @@ function outputText(payload: any): string {
 
 /** One research or extraction call on the given provider, recorded as usage. Throws a plain, secret-free message on failure. */
 export async function runProvider(input: { provider: ResearchProvider; locationId: string; userId: string | null; system: string; user: string; webSearch: boolean; action: string; signal?: AbortSignal }): Promise<ProviderReply> {
+  input = { ...input, system: withAiWorkflowInstructions(input.system, input.webSearch ? "onboarding_research" : "onboarding_answer") };
   const record = (model: string, provider: string, inputTokens: number, outputTokens: number, fundingScope: AiFundingScope) => securelyRecordAiUsage({
     locationId: input.locationId, userId: input.userId, resourceType: "location", resourceId: input.locationId, featureArea: "business_onboarding", action: input.action,
     provider, model, inputTokens, outputTokens, fundingScope, executionMode: "background", metadata: { webSearch: input.webSearch } });

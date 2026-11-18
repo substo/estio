@@ -6,9 +6,9 @@ import { studioDb } from "./studio-db";
 import { type readIdeaReviewRequest, type IdeaSnapshot, type IdeaReviewResult } from "./idea-review-policy";
 export async function enqueueStudioIdeaReview(locationId: string, command: ReturnType<typeof readIdeaReviewRequest>) {
   const access = await requireOwnStudioCommandLocation(locationId);
-  return studioDb.call<{ reviewId: string; jobId: string }>("studio_enqueue_idea_review", {
-    p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_request_id: command.requestId,
-    p_selection: command.ideas, p_focus: command.focus, p_confirm_paid: command.confirmPaid });
+  return studioDb.call<{ reviewId: string; jobId: string }>("studio_enqueue_routed_text_run", {
+    p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId,
+    p_workflow: "idea_review", p_command: command });
 }
 export interface StudioTextRun<T, S = IdeaSnapshot> {
   id: string; job_id: string; model: string; prompt_version: string; snapshot: S; result: T | null;

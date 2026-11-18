@@ -1,5 +1,6 @@
 # Business onboarding
 
+Provider semantics, local-candidate changes, known gaps and bundled runtime instructions: [AI workflows](ai-workflows.md).
 One onboarding for both apps (Estio and Substo) and both products (CRM and Studio). It fills the Business profile
 (`location.business`, see [business data](business-data.md)) plus the Location's name and time zone, by researching the
 business and asking the owner to confirm, instead of asking them to type everything. Owner decisions are in Build's

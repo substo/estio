@@ -58,3 +58,31 @@ test('one preserves existing LIMIT/OFFSET and aggregate reads without appending 
   assert.deepEqual(await db.one(Prisma.sql`select count(*)::int total from generate_series(1,3)`), { total: 3 });
   assert.equal(await db.one(Prisma.sql`select 1 n where false limit 1`), null);
 });
+
+test("source-backed ideas commit both operations and roll back a failed link", async () => {
+  const { createSourceIdeaService } = await import("./source-idea-service");
+  const ideaId = "ab000000-0000-4000-8000-0000000000a2";
+  const failedId = "ab000000-0000-4000-8000-0000000000a3";
+  const authorize = async () => ({ locationId: location, app: "substo" as const, userId: "db-owner" });
+  const service = createSourceIdeaService({ authorize, isImpersonating: async () => false,
+    transaction: run => client.$transaction(tx => run(createStudioDb(tx))),
+  });
+  assert.equal(await service(location, record, ideaId, "Original angle", "A useful audience promise"), ideaId);
+  const links = await db.rows<{ target_id: string }>(Prisma.sql`
+    select target_id from studio.studio_record_links where location_id=${location} and source_id=${ideaId}::uuid`);
+  assert.deepEqual(links, [{ target_id: record }]);
+  const saved = await db.one<{ approved: boolean; version: number }>(Prisma.sql`
+    select approved,version from studio.studio_records where location_id=${location} and id=${ideaId}::uuid`);
+  assert.deepEqual(saved, { approved: false, version: 2 });
+  const failingService = createSourceIdeaService({ authorize, isImpersonating: async () => false,
+    transaction: run => client.$transaction(tx => {
+      const transactionalDb = createStudioDb(tx);
+      return run({ ...transactionalDb, call: async (fn, args) => {
+        if (fn === "studio_change_record_link") throw new Error("Simulated link failure");
+        return transactionalDb.call(fn, args);
+      } });
+    }),
+  });
+  await assert.rejects(failingService(location, record, failedId, "Rollback idea", "Must not remain"));
+  assert.equal(await db.one(Prisma.sql`select id from studio.studio_records where location_id=${location} and id=${failedId}::uuid`), null);
+});

@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import type { TextExecutionContext } from "./text-execution";
 import { Prisma } from "@prisma/client";
 import db from "@/lib/db";
 import { collectDealConversationReferences } from "@/lib/deals/conversation-links";
@@ -1108,10 +1109,17 @@ function buildRuntimePrompt(args: {
     .join("\n\n");
 }
 
-async function processClaimedRuntimeJob(job: Awaited<ReturnType<typeof claimNextPendingRuntimeJob>>, now: Date): Promise<"completed" | "retry" | "dead" | "skipped"> {
+async function processClaimedRuntimeJob(job: Awaited<ReturnType<typeof claimNextPendingRuntimeJob>>, now: Date, textExecution?: TextExecutionContext): Promise<"completed" | "retry" | "dead" | "skipped"> {
   if (!job) return "skipped";
 
   try {
+    // Only the immediate authenticated request carries personal routing authority.
+    // A background claimant must never turn an interrupted interactive draft into
+    // a default-provider run. Persist only this fence, never account credentials.
+    if ((job.payload as { interactiveTextOnly?: boolean } | null)?.interactiveTextOnly
+      && textExecution?.executionMode !== "interactive") {
+      throw new Error("Interactive draft requires a new authenticated request; background provider fallback is blocked.");
+    }
     const decision = job.decision;
     if (!decision) {
       throw new Error("Runtime job has no decision payload.");
@@ -1245,6 +1253,8 @@ async function processClaimedRuntimeJob(job: Awaited<ReturnType<typeof claimNext
       forcedSkill: selectedSkillId,
       forcedIntent: mapSkillToIntent(selectedSkillId),
       runtimeSource: decision.source,
+      // Only the immediate call stack supplies eligibility; never trust job JSON.
+      textExecution,
     });
 
     if (orchestration.traceId) {
@@ -1318,7 +1328,7 @@ async function processClaimedRuntimeJob(job: Awaited<ReturnType<typeof claimNext
     await finalizeRuntimeJobSuccess(job.id, now, orchestration.traceId || null);
     return "completed";
   } catch (error) {
-    const retryable = true;
+    const retryable = !(job.payload as { interactiveTextOnly?: boolean } | null)?.interactiveTextOnly;
     const failure = await finalizeRuntimeJobFailure({
       job,
       now,
@@ -1548,6 +1558,7 @@ async function queueDecisionAndJob(args: {
   now: Date;
   contextSummary: string;
   extraInstruction?: string;
+  interactiveTextOnly?: boolean;
 }): Promise<{ decisionId: string; jobId?: string }> {
   const dueKey = [
     `loc:${args.locationId}`,
@@ -1605,11 +1616,12 @@ async function queueDecisionAndJob(args: {
       decisionId: decision.id,
       status: "pending",
       scheduledAt: args.now,
-      maxAttempts: 6,
+      maxAttempts: args.interactiveTextOnly ? 1 : 6,
       idempotencyKey: sha256(`runtime-job:${dueKey}`),
       payload: {
         contextSummary: args.contextSummary,
         extraInstruction: args.extraInstruction || null,
+        ...(args.interactiveTextOnly ? { interactiveTextOnly: true } : {}),
       } as any,
     },
     select: { id: true },
@@ -1632,6 +1644,7 @@ export async function runAiSkillDecision(args: {
   contextSummary?: string;
   extraInstruction?: string;
   executeImmediately?: boolean;
+  textExecution?: TextExecutionContext;
   now?: Date;
 }): Promise<RunAiSkillDecisionResult> {
   const now = args.now || new Date();
@@ -1711,6 +1724,8 @@ export async function runAiSkillDecision(args: {
     now,
     contextSummary: candidate.contextSummary,
     extraInstruction: args.extraInstruction,
+    interactiveTextOnly: args.source === "manual" && args.executeImmediately === true
+      && args.textExecution?.executionMode === "interactive",
   });
 
   if (!args.executeImmediately || !queued.jobId) {
@@ -1758,7 +1773,8 @@ export async function runAiSkillDecision(args: {
       },
     });
 
-    const outcome = await processClaimedRuntimeJob(claimedJob, immediateNow);
+    const outcome = await processClaimedRuntimeJob(claimedJob, immediateNow,
+      args.source === "manual" ? args.textExecution : undefined);
     if (outcome === "retry") {
       immediateError = "Runtime job scheduled for retry.";
     } else if (outcome === "dead") {

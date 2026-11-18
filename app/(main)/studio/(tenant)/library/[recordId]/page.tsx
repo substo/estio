@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { SourceIdeaForm } from "../../../_components/source-idea-form";
 import { libraryPresentation } from "@/lib/studio/library-presentation";
 import { validatedYoutubeCreator } from "@/lib/studio/library-import-metadata";
 import { LibrarySourceAction } from "../../../_components/library-source-action";
@@ -17,7 +19,7 @@ export default async function StudioLibraryRecordPage({ params }: { params: Prom
   const { locationId, recordId } = await studioRouteParams(params);
   const result = await getStudioLibraryRecord(locationId, recordId);
   if (!result) notFound();
-  const { record, links, files, uploads } = result;
+  const { record, links, files, uploads, findings, hasMoreFindings } = result;
   const view = libraryPresentation(record);
   const creator = validatedYoutubeCreator(record.payload.channelUrl);
   const value = (key: string) => typeof record.payload[key] === 'string' ? record.payload[key] as string : '';
@@ -25,6 +27,19 @@ export default async function StudioLibraryRecordPage({ params }: { params: Prom
   return (
     <main className="mx-auto max-w-4xl space-y-8 p-6 md:p-10">
       <header className="space-y-2"><nav className="flex gap-4 text-sm"><Link href={`/studio/library`} className="text-muted-foreground hover:underline">Research library</Link><Link href={`/studio/content`} className="text-muted-foreground hover:underline">Content pipeline</Link></nav><h1 className="text-3xl font-semibold tracking-tight">{record.title}</h1></header>
+      {record.kind === "reference" && !record.archived ? <section aria-label="Source to script" className="space-y-3 rounded-xl border p-5 text-sm">
+        <h2 className="font-medium">Develop this source into content</h2>
+        <p>{value('transcript').trim() ? "Transcript saved. Check it against the original before using its claims." : "No transcript saved on this source. Add a verbatim transcript through Edit; a URL or description does not establish the video's contents."}</p>
+        <div className="flex flex-wrap gap-4">
+          <a href="#edit-source" className="text-primary hover:underline">Go to source editor</a>
+          <Link href={`/studio/records/${recordId}/extract`} className="text-primary hover:underline">Extract knowledge from saved text</Link>
+          <Link href="/studio/knowledge/extractions" className="text-primary hover:underline">Review extraction proposals</Link>
+        </div>
+        <p className="text-muted-foreground">Extraction proposes findings; applying them creates pending knowledge for separate review. It does not approve an idea or script.</p>
+        {findings.length ? <details><summary className="cursor-pointer font-medium">Review saved knowledge findings</summary><ul className="mt-2 space-y-2 break-words">{findings.map(finding => <li key={finding.id}><Link href={`/studio/knowledge/${finding.id}`} className="text-primary hover:underline">{finding.statement}</Link> <span className="text-muted-foreground">({finding.status})</span></li>)}</ul></details> : <p className="text-muted-foreground">No knowledge findings saved for this source.</p>}
+        {hasMoreFindings ? <Link href="/studio/knowledge?status=all" className="block text-primary hover:underline">Browse more knowledge findings</Link> : null}
+        <details><summary className="cursor-pointer font-medium">Create an idea from this source</summary><SourceIdeaForm locationId={locationId} sourceId={recordId} ideaId={randomUUID()} /></details>
+      </section> : null}
       {view.url ? <a href={view.url} target="_blank" rel="noopener noreferrer" className="text-primary underline">Open original source</a> : null}
       {record.kind !== 'channel' ? <>
         <section><h2 className="font-medium">Source description</h2><p className="whitespace-pre-wrap text-sm">{value('description') || 'No source description saved. Refresh the source or add evidence through Edit.'}</p></section>
@@ -34,7 +49,7 @@ export default async function StudioLibraryRecordPage({ params }: { params: Prom
         {creator && !links.some(link => link.kind === 'channel') ? <LibrarySourceAction locationId={locationId} url={creator.channelUrl} sourceId={recordId} sourceVersion={record.version} /> : null}
         {view.url ? <LibrarySourceAction locationId={locationId} url={view.url} /> : null}
       </> : <p className="text-sm text-muted-foreground">Saved videos linked to this channel appear below. Watching in Studio does not subscribe on YouTube or enable recurring discovery. Discovery approval remains manager controlled.</p>}
-      <details><summary className="cursor-pointer font-medium">Edit source and research notes</summary><div className="mt-4"><LibraryRecordForm locationId={locationId} recordId={recordId} version={record.version} kind={record.kind} title={record.title} payload={record.payload} /></div></details>
+      <details id="edit-source"><summary className="cursor-pointer font-medium">Edit source and research notes</summary><div className="mt-4"><LibraryRecordForm locationId={locationId} recordId={recordId} version={record.version} kind={record.kind} title={record.title} payload={record.payload} /></div></details>
       {record.payload.discovery ? <section className="space-y-2"><h2 className="font-medium">Recorded discovery provenance</h2><p className="text-sm text-muted-foreground">Historical source information, preserved for review.</p><pre className="overflow-auto whitespace-pre-wrap rounded-lg border p-4 text-xs">{JSON.stringify(record.payload.discovery, null, 2)}</pre></section> : null}
       {!record.archived && record.kind !== "channel" ? <Link href={`/studio/records/${recordId}/extract`} className="mr-4 inline-block text-sm text-primary hover:underline">Extract knowledge from saved text</Link> : null}
       <Link href={`/studio/records/${recordId}/links`} className="inline-block text-sm text-primary hover:underline">Manage linked records</Link>

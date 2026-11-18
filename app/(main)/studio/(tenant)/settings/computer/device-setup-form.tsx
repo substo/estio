@@ -7,7 +7,7 @@ import { defaultDeviceConfig, isIanaTimeZone, type StudioDeviceConfig } from "@/
 import type { StudioDeviceSummary } from "@/lib/studio/devices";
 import { buttonClass, endpoint, inputClass, providerReport } from "./shared";
 
-const laterReason = "Saved for later — local workflows arrive in the next slice";
+const laterReason = "Text work uses the selected subscription provider and model for Library summaries, knowledge extraction, idea reviews and script briefs. Transcription settings are saved for a future local workflow";
 const launchReason = "Needs the installed Mac app (not built yet)";
 const list = (value: string) => value.split(/[\s,]+/).map(item => item.trim()).filter(Boolean);
 const configStatus: Record<StudioDeviceSummary["config"]["status"], string> = {

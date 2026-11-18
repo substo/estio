@@ -6,9 +6,9 @@ import { studioDb } from "./studio-db";
 import type { readScriptBriefRequest, readScriptBriefApply, ScriptBriefResult } from "./script-brief-policy";
 export async function enqueueStudioScriptBrief(locationId: string, command: ReturnType<typeof readScriptBriefRequest>) {
   const access = await requireOwnStudioCommandLocation(locationId);
-  return studioDb.call<{ reviewId: string; jobId: string }>("studio_enqueue_script_brief", {
-    p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_request_id: command.requestId,
-    p_selection: command.ideas, p_focus: command.focus, p_confirm_paid: command.confirmPaid });
+  return studioDb.call<{ reviewId: string; jobId: string }>("studio_enqueue_routed_text_run", {
+    p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId,
+    p_workflow: "script_brief", p_command: command });
 }
 export async function applyStudioScriptBrief(locationId: string, command: ReturnType<typeof readScriptBriefApply>) {
   const access = await requireOwnStudioCommandLocation(locationId);

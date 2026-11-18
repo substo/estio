@@ -10,7 +10,7 @@ import { getLocationContext } from "@/lib/auth/location-context";
 
 import { COMPONENT_SCHEMA } from "@/lib/ai/component-schema";
 import { websiteDesignPrompt, RECOMPOSITION_PROMPT } from "@/lib/ai/prompts/design-system";
-import { callLLMWithMetadata } from "@/lib/ai/llm";
+import { generateContentAiText } from "@/lib/ai/content-generation";
 import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 
 import { load } from "cheerio";
@@ -37,21 +37,6 @@ function extractJsonText(generatedText: string): string {
         jsonString = jsonString.substring(firstBrace, lastBrace + 1);
     }
     return jsonString;
-}
-
-async function callContentAiModel(args: {
-    model: string;
-    prompt: string;
-    locationId: string;
-    jsonMode?: boolean;
-    temperature?: number;
-}): Promise<string> {
-    const result = await callLLMWithMetadata(args.model, args.prompt, undefined, {
-        jsonMode: args.jsonMode ?? true,
-        temperature: args.temperature,
-        locationId: args.locationId,
-    });
-    return result.text;
 }
 
 export async function generateContentFromUrl(url: string, locationId?: string, brandVoiceOverride?: string, extractionModelOverride?: string): Promise<GenerateContentResult> {
@@ -245,7 +230,8 @@ export async function generateContentFromUrl(url: string, locationId?: string, b
         console.log("------------------------");
 
         console.log("Sending Prompt to AI provider...");
-        const generatedText = await callContentAiModel({
+        const generatedText = await generateContentAiText({
+            action: "generateContentFromUrl",
             model: activeModel,
             prompt,
             locationId: targetLocationId,
@@ -388,7 +374,8 @@ export async function regeneratePageDesign(currentBlocks: any[], locationId: str
         console.log(prompt);
         console.log("------------------------------");
 
-        const generatedText = await callContentAiModel({
+        const generatedText = await generateContentAiText({
+            action: "regeneratePageDesign",
             model,
             prompt,
             locationId,
@@ -536,7 +523,7 @@ export async function generateBrandVoiceFromSite(locationId: string, websiteUrl?
         ROLE: You are an expert Brand Strategist.
         
         TASK: Research the company associated with: "${searchQuery}".
-        1. "Browse" the web (using your tools) to understand who they are, what they do, their reputation, and their market positioning (Luxury? Affordable? Corporate? Friendly?).
+        1. Use only company facts supplied in this request. No browsing or search tools are available. Do not invent reputation, products or market positioning; when evidence is absent, propose a neutral professional voice and mark it as a suggestion.
         2. Based on this research, write a PRECISE "System Instruction" that captures their specific Brand Voice.
         
         GOAL: The output will be used to instruct an AI Assistant to write content for this company.
@@ -551,7 +538,8 @@ export async function generateBrandVoiceFromSite(locationId: string, websiteUrl?
         console.log(prompt);
         console.log("-----------------------------");
 
-        const generatedText = await callContentAiModel({
+        const generatedText = await generateContentAiText({
+            action: "generateBrandVoiceFromSite",
             model,
             prompt,
             locationId,
@@ -641,7 +629,8 @@ export async function refineBlockContent(currentBlock: any, instruction: string,
         console.log("FULL PROMPT:\n", prompt);
         console.log("----------------------------");
 
-        const generatedText = await callContentAiModel({
+        const generatedText = await generateContentAiText({
+            action: "refineBlockContent",
             model,
             prompt,
             locationId,
@@ -775,7 +764,8 @@ export async function generateSiteTheme(
         console.log("FULL PROMPT:\n", prompt);
         console.log("-----------------------------------");
 
-        const generatedText = await callContentAiModel({
+        const generatedText = await generateContentAiText({
+            action: "generateSiteTheme",
             model,
             prompt,
             locationId,
@@ -870,7 +860,8 @@ export async function generateSectionFromPrompt(
         }
         `;
 
-        const generatedText = await callContentAiModel({
+        const generatedText = await generateContentAiText({
+            action: "generateSectionFromPrompt",
             model,
             prompt: systemPrompt,
             locationId,

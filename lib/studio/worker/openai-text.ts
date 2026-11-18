@@ -1,3 +1,4 @@
+import { withAiWorkflowInstructions } from "../../ai/workflow-capabilities";
 import type { IdeaSnapshot } from "../idea-review-policy";
 import { StudioJobError, StudioProviderRejectedError } from "./handlers";
 export interface TextRunSpec<T, S = IdeaSnapshot> {
@@ -14,7 +15,7 @@ export async function requestStructuredText<T, S = IdeaSnapshot>(spec: TextRunSp
   const response = await fetcher("https://api.openai.com/v1/responses", { method: "POST", cache: "no-store",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]), body: JSON.stringify({ model: spec.model,
-      instructions: spec.instructions, input, store: false, stream: false, tools: [], reasoning: { effort: "none" },
+      instructions: withAiWorkflowInstructions(spec.instructions, spec.workflow), input, store: false, stream: false, tools: [], reasoning: { effort: "none" },
       service_tier: "default", prompt_cache_options: { mode: "explicit" }, max_output_tokens: spec.maxOutputTokens,
       text: { format: { type: "json_schema", name: `studio_${spec.workflow}`, strict: true, schema: spec.schema } } }) });
   if ([400, 401, 403, 404, 422, 429].includes(response.status)) throw new StudioProviderRejectedError("text_provider_rejected", "OpenAI rejected this review request. Check the workspace key, model access and provider limits before retrying.", response.status === 429, 300);

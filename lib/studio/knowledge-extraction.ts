@@ -18,7 +18,7 @@ export async function getKnowledgeExtractionInputs(locationId:string,sourceId:st
 export async function executeKnowledgeExtraction(locationId:string,command:ReturnType<typeof readKnowledgeExtractionCommand>){
  const access=await requireOwnStudioCommandLocation(locationId);
  const authority={p_location_id:access.locationId,p_actor_app:access.app,p_clerk_user_id:access.userId,p_request_id:command.requestId,p_expected_version:command.expectedVersion};
- if(command.action==="enqueue")return studioDb.call("studio_enqueue_knowledge_extraction",{...authority,p_source_id:command.sourceId,p_mode:command.mode,p_input_id:command.inputId,p_start_unit:command.startUnit,p_unit_count:command.unitCount,p_focus:command.focus,p_confirm_paid:command.confirmPaid});
+ if(command.action==="enqueue")return studioDb.call("studio_enqueue_routed_text_run",{p_location_id:access.locationId,p_actor_app:access.app,p_clerk_user_id:access.userId,p_workflow:"knowledge_extract",p_command:command});
  return studioDb.call("studio_apply_knowledge_extraction",{...authority,p_review_id:command.reviewId,p_finding_indexes:command.findingIndexes,p_confirm_pending:command.confirmPending});
 }
 export async function getKnowledgeExtraction(locationId:string,reviewId:string){

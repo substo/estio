@@ -1,5 +1,6 @@
 # Studio Library
 
+Provider semantics, local-candidate changes, known gaps and bundled runtime instructions: [AI workflows](ai-workflows.md).
 Library is shared by Estio and Substo and scoped to the active Location. The deployed baseline and release evidence live in [current status](current-status.md); source changes below require canonical integration before deployment.
 
 ## Current source capabilities

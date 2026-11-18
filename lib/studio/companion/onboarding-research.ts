@@ -44,7 +44,7 @@ export function createOnboardingResearchHandler(deps: { adapter: (p: LocalProvid
       // Subscription logins only: an API-key login would bill a different account.
       if (!ready.ready || !ready.authenticated || ready.loginMethod !== subscriptionLogin[provider]) continue;
       try {
-        const research = await adapter.generate({ signal: context.signal, prompt, webSearch: true, timeoutMs: researchTimeoutMs, maxResultBytes: replyBytes,
+        const research = await adapter.generate({ workflowContext: "onboarding_research", signal: context.signal, prompt, webSearch: true, timeoutMs: researchTimeoutMs, maxResultBytes: replyBytes,
           jsonSchema: researchOutputJsonSchema as unknown as Record<string, unknown>, validate: value => researchOutputSchema.parse(value) });
         return { research: researchOutputSchema.parse(research), provider, model: "native-default" };
       } catch (error) {

@@ -5782,6 +5782,7 @@ export async function generateAIDraft(
                         : null,
                 ].filter(Boolean).join("\n\n"),
                 executeImmediately: true,
+                textExecution: { model: explicitModel, executionMode: "interactive" },
             });
             logAIDraftTiming("generateAIDraft_runtime_end", {
                 conversationId,
@@ -5811,13 +5812,16 @@ export async function generateAIDraft(
                     traceId: runtimeResult.traceId || null,
                 };
             }
+            throw new Error(runtimeResult.error || "The selected skill produced no draft. Review its job before starting a new request.");
         } catch (skillError: any) {
             logAIDraftTiming("generateAIDraft_runtime_failed", {
                 conversationId,
                 elapsedMs: getElapsedMs(overallStartedAt),
                 reason: skillError?.message || String(skillError),
             });
-            console.warn("[generateAIDraft] Skill runtime failed, falling back to legacy generateDraft:", skillError?.message || skillError);
+            // An attempted skill may have generated or used tools. Never replay
+            // it through a different engine/provider after failure or uncertainty.
+            throw new Error(skillError?.message || "Skill draft stopped. Review its job before starting a new request.");
         }
     }
 
@@ -5926,6 +5930,7 @@ export async function generateComposerAIDraft(
                         : null,
                 ].filter(Boolean).join("\n\n"),
                 executeImmediately: true,
+                textExecution: { model: explicitModel, executionMode: "interactive" },
             });
             logAIDraftTiming("generateComposerAIDraft_runtime_end", {
                 conversationId,
@@ -5955,13 +5960,16 @@ export async function generateComposerAIDraft(
                     traceId: runtimeResult.traceId || null,
                 };
             }
+            throw new Error(runtimeResult.error || "The selected skill produced no draft. Review its job before starting a new request.");
         } catch (skillError: any) {
             logAIDraftTiming("generateComposerAIDraft_runtime_failed", {
                 conversationId,
                 elapsedMs: getElapsedMs(overallStartedAt),
                 reason: skillError?.message || String(skillError),
             });
-            console.warn("[generateComposerAIDraft] Skill runtime failed, falling back to legacy generateDraft:", skillError?.message || skillError);
+            // An attempted skill may have generated or used tools. Never replay
+            // it through a different engine/provider after failure or uncertainty.
+            throw new Error(skillError?.message || "Skill draft stopped. Review its job before starting a new request.");
         }
     }
 

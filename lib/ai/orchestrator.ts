@@ -1,3 +1,4 @@
+import type { TextExecutionContext } from "./runtime/text-execution";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { getBusinessViewIfAny } from "@/lib/business-profile/service";
 import db from "@/lib/db";
@@ -6,7 +7,7 @@ import { analyzeSentiment } from "./sentiment";
 import { startTrace, startSpan, endSpan, endTrace } from "./tracing";
 import { validateAction } from "./policy";
 import { SkillLoader, executeSkill } from "./skills/loader";
-import { retrieveContext } from "./memory";
+import { getContactInsights, retrieveContext } from "./memory";
 import { reflectOnDraft } from "./reflexion";
 import { shouldRequireHumanApproval } from "./review-gating";
 import {
@@ -24,6 +25,7 @@ interface OrchestratorInput {
     forcedSkill?: string | null;
     forcedIntent?: string | null;
     runtimeSource?: string | null;
+    textExecution?: TextExecutionContext;
 }
 
 export interface OrchestratorResult {
@@ -70,20 +72,24 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
 
     // ── STEP 1: Classify Intent ──
     const classifySpan = await startSpan(trace, "Classify Intent", "thought");
-    const classification = await classifyIntent(input.message, input.conversationHistory, locationId);
+    const classification = await classifyIntent(input.message, input.conversationHistory, locationId, input.textExecution);
     await endSpan(classifySpan.spanId, classifySpan.startTime, "success", {
         output: `Intent: ${classification.intent} (Risk: ${classification.risk})`
     });
 
     // ── STEP 2: Analyze Sentiment ──
     const sentimentSpan = await startSpan(trace, "Analyze Sentiment", "thought");
-    const sentiment = await analyzeSentiment(input.message, locationId);
+    const sentiment = await analyzeSentiment(input.message, locationId, input.textExecution);
     await endSpan(sentimentSpan.spanId, sentimentSpan.startTime, "success", {
         output: `Sentiment: ${sentiment.emotion}, Readiness: ${sentiment.buyerReadiness}`
     });
 
     // ── STEP 3: Retrieve Relevant Memory ──
-    const memories = await retrieveContext(input.contactId, input.message, 5);
+    // Interactive text routing must not trigger an unrelated global-key
+    // embedding request. Reuse saved contact knowledge without a provider call.
+    const memories = input.textExecution?.executionMode === "interactive"
+        ? (await getContactInsights(input.contactId)).slice(0, 5)
+        : await retrieveContext(input.contactId, input.message, 5);
 
     // ── STEP 4: Route to Skill ──
     let skillResult: any = null;
@@ -216,6 +222,7 @@ export async function orchestrate(input: OrchestratorInput): Promise<Orchestrato
                 expectedLanguage: languageResolution.expectedLanguage,
                 latestInboundMessage: latestInboundText,
                 locationId,
+                ...input.textExecution,
             }
         );
         await endSpan(reflexionSpan.spanId, reflexionSpan.startTime, "success", {

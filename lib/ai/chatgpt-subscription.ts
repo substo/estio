@@ -1,3 +1,4 @@
+import { withAiWorkflowInstructions } from "./workflow-capabilities";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -458,7 +459,7 @@ export function buildCodexTextPrompt(systemPrompt: string, userContent?: string)
         "Return only the final user-facing answer. Do not inspect files, run commands, edit code, or include analysis.",
         "",
         "System instructions:",
-        systemPrompt,
+        withAiWorkflowInstructions(systemPrompt, "hosted_subscription_text"),
         "",
         "User input:",
         userContent || "",
