@@ -3,7 +3,6 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import type { VideoStatus } from "@/lib/studio/video-transcription";
-import { videoNotQueuedMessages } from "@/lib/studio/video-transcription";
 
 const clock = (seconds: number) => new Date(seconds * 1000).toISOString().slice(11, 19);
 const waitingText: Record<NonNullable<VideoStatus["waiting"]>, string> = {
@@ -44,6 +43,6 @@ export function VideoTranscriptionPanel({ locationId, recordId, canTranscribe, s
         {f.ocr_text ? <p className="whitespace-pre-wrap break-words">{f.ocr_text}</p> : <p className="text-muted-foreground">No text read.</p>}</li>)}</ul></details> : null}
     {canRun ? <Button type="button" disabled={pending} onClick={() => void request()}>{pending ? "Requesting…" : latest?.status === "suggested" ? "Transcribe on my Mac" : latest ? "Transcribe again on my Mac" : "Transcribe on my Mac"}</Button> : null}
     {message ? <p role="status">{message}</p> : null}
-    <p className="text-xs text-muted-foreground">Audio is transcribed locally; YouTube captions are the only fallback. No speaker labels or comments. {videoNotQueuedMessages.no_mac}</p>
+    <p className="text-xs text-muted-foreground">Audio is transcribed locally; YouTube captions are the only fallback. No speaker labels or comments.</p>
   </section>;
 }
