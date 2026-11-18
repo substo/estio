@@ -10,11 +10,11 @@ export type DeviceProvider = "codex" | "claude";
 /** A device counts as running while its last heartbeat is this recent (same window as hosted workers). */
 export const DEVICE_ONLINE_SECONDS = 90;
 /** Work a paired computer may run. Mac checks are always allowed; the others are granted while processing is On. */
-export const DEVICE_WORK_KINDS = ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe"] as const;
+export const DEVICE_WORK_KINDS = ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search"] as const;
 export type DeviceWorkKind = typeof DEVICE_WORK_KINDS[number];
 export const ONBOARDING_RESEARCH_KIND: DeviceWorkKind = "studio.onboarding_research";
 export const deviceWorkLabels: Record<DeviceWorkKind, string> = {
-  "studio.text_run": "Knowledge, idea reviews and script briefs", "studio.diagnostic": "Mac checks", "studio.library_summary": "Library summaries", "studio.onboarding_research": "Business research", "studio.video_transcribe": "Video transcription (YouTube audio, captions, slides)",
+  "studio.text_run": "Knowledge, idea reviews and script briefs", "studio.diagnostic": "Mac checks", "studio.library_summary": "Library summaries", "studio.onboarding_research": "Business research", "studio.video_transcribe": "Video transcription (YouTube audio, captions, slides)", "studio.youtube_search": "Related YouTube search in your Mac's browser",
 };
 /** Local reasons a running companion is holding processing back (reported in its heartbeat). */
 export const DEVICE_BLOCK_REASONS = {
@@ -100,6 +100,10 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
       ? Object.fromEntries(Object.entries(video.tools as Record<string, unknown>).filter(([k, x]) => names.includes(k) && typeof x === "string" && /^[A-Za-z0-9._+ -]{1,60}$/.test(x))) : {};
     result.video = { ready: video.ready === true, missing: Array.isArray(video.missing) ? video.missing.filter((x, i, all) => typeof x === "string" && names.includes(x) && all.indexOf(x) === i) : [], tools,
       ...(typeof video.work === "string" && /^[a-z_]{1,40}$/.test(video.work) ? { work: video.work } : {}) };
+  }
+  if (v.youtubeSearch && typeof v.youtubeSearch === "object" && !Array.isArray(v.youtubeSearch)) {
+    const search = v.youtubeSearch as Record<string, unknown>;
+    result.youtubeSearch = { ready: search.ready === true, ...(typeof search.signedIn === "boolean" ? { signedIn: search.signedIn } : {}) };
   }
   if (v.hardware && typeof v.hardware === "object" && !Array.isArray(v.hardware)) {
     const h = v.hardware as Record<string, unknown>;
@@ -211,7 +215,7 @@ export function readDeviceCommand(operation: DeviceOperation, value: unknown): R
     valid(Number.isInteger(v.leaseSeconds) && Number(v.leaseSeconds) >= 10 && Number(v.leaseSeconds) <= 3600);
     out.leaseSeconds = v.leaseSeconds;
   }
-  if (operation === "claim") { valid(Number.isInteger(v.limit) && Number(v.limit) >= 1 && Number(v.limit) <= 50); return { ...out, limit: v.limit, textReady: v.textReady === true, summaryReady: v.summaryReady === true, researchReady: v.researchReady === true, videoReady: v.videoReady === true }; }
+  if (operation === "claim") { valid(Number.isInteger(v.limit) && Number(v.limit) >= 1 && Number(v.limit) <= 50); return { ...out, limit: v.limit, textReady: v.textReady === true, summaryReady: v.summaryReady === true, researchReady: v.researchReady === true, videoReady: v.videoReady === true, youtubeReady: v.youtubeReady === true }; }
   valid(typeof v.jobId === "string" && uuid.test(v.jobId) && typeof v.leaseToken === "string" && uuid.test(v.leaseToken));
   Object.assign(out, { jobId: v.jobId, leaseToken: v.leaseToken });
   if (operation === "video_transcript_chunk") return { ...out, ...readTranscriptChunk(v) };

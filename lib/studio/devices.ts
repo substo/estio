@@ -115,8 +115,8 @@ export async function executeStudioDeviceCommand(token: string, brand: "estio" |
     if (!identity || !await authorizeEstio(identity.locationId, identity.approvedBy)) throw new StudioCommandError("Access denied.", 403);
     estioAuthorizedBy = identity.approvedBy;
   }
-  // Outermost device entry point: video transcription, then Mac text runs, onboarding research, Library summaries and the base device protocol.
-  const call = (observed?: unknown) => studioDb.call<unknown>("studio_video_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy, p_observed: observed });
+  // Outermost device entry point: YouTube search in the Mac's browser, video transcription, then Mac text runs, onboarding research, Library summaries and the base device protocol.
+  const call = (observed?: unknown) => studioDb.call<unknown>("studio_youtube_search_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy, p_observed: observed });
   if (operation === "video_frames_reserve" || operation === "video_frames_verify") return executeVideoFrameOperation(operation, call);
   return call();
 }

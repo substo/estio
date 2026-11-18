@@ -204,3 +204,30 @@ Primary implementation references: [Google web-server OAuth](https://developers.
 [playlistItems.list](https://developers.google.com/youtube/v3/docs/playlistItems/list),
 [search.list](https://developers.google.com/youtube/v3/docs/search/list), and
 [YouTube data handling policies](https://developers.google.com/youtube/terms/developer-policies).
+
+## Related videos: the paired Mac's browser (2026-11-18 owner decision)
+
+"Related YouTube videos" on a Library source or idea does **not** call the YouTube Data API. It queues a
+`studio.youtube_search` job on the requesting account's own paired Mac, which searches
+`youtube.com/results` (videos only, read-only) in its own Chrome profile, headless, and returns public
+title/channel/age/views text. The profile is `~/Library/Application Support/Estio Studio/youtube-browser`
+(override `STUDIO_YOUTUBE_PROFILE`). Run `npm run start:studio-companion -- youtube-login` once to sign in to
+YouTube in that profile (normal Chrome, no automation flags). Searching works signed out too; the profile only
+carries the owner's preferences. No YouTube cookies reach the server.
+
+- Needs Mac processing On, Google Chrome installed and companion `studio-companion-7` or newer. The job waits while
+  the Mac is offline (page shows "Waiting for your Mac…" and gives up after 3 minutes); a lease lost mid-search fails
+  instead of replaying; consent withdrawal cancels queued searches.
+- Browser failures (captcha, consent walls, layout change) fail the search with a plain message. Nothing falls back
+  to the Data API, because API calls are metered usage and the product is flat-fee plus priced usage.
+- Choosing a result is unchanged: it saves a research link and queues the paired-Mac transcription from Gap 1.
+- Provenance on saved links is `provider: "mac_browser"`.
+
+### Scheduled, not built
+
+1. **Server browser through a connected device's network.** Owner direction: second choice after the Mac, allowed only
+   while a device is connected, so requests come from that device's IP. Needs a device-side proxy/tunnel channel and
+   its own authorization and abuse design. No server-side YouTube browser exists today.
+2. **Metered Data API fallback.** Owner direction: third choice, only with usage pricing on top of the flat fee. The
+   metering/pricing system does not exist yet, so the API is not used for Related videos. The explicit Discovery page
+   (search, approved channels, subscriptions) still uses the Data API under its existing 50 operations/day cap.

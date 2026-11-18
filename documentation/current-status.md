@@ -55,6 +55,8 @@ Canonical release remains the only deployment entrypoint. The shared working bra
 2. **Open, requires device:** sustained existing Mac companion diagnostics/local processing. A prior no-provider once-mode job succeeded and exited cleanly; that does not prove sustained processing. Use existing pairing only.
 3. **Blocked on bounded spend authorization:** real onboarding draft/review/save using a specified model and concrete cost ceiling. Mock/disposable access, persistence and ledger checks passed; no real provider run is authorized. Ask the parent for that decision before paid acceptance.
 
+4. **Scheduled (Gap 3 follow-ups, owner direction 2026-11-18):** (a) server-side YouTube browser routed through a connected device's network, only while a device is connected; (b) metered Data API fallback once usage pricing exists. See [Related videos](profile-google-youtube-discovery.md#related-videos-the-paired-macs-browser-2026-11-18-owner-decision). Live acceptance of Mac browser search needs the Mac companion updated to `studio-companion-7`, Chrome installed, and `youtube-login` run once.
+
 Website editing/publishing and Clerk email delivery have no new live acceptance in this cleanup. Do not publish, invite or send messages merely to test. Substo CRM setup-pending is intentionally deferred. Free-form onboarding/search, more social integrations, billing, custom domains and proxy work are deferred.
 
 ## Verify and release

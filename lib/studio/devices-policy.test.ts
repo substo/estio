@@ -114,3 +114,9 @@ test("a Mac is research-capable only while running, opted in, allowed, signed in
   assert.match(reason({}, { capacity: { codex: false } })!, /capacity/);
   assert.match(reason({}, { capacity: undefined })!, /capacity/);
 });
+
+test("YouTube Mac search capability is whitelisted and the claim flag is boolean-only", () => {
+  const safe = safeDeviceCapabilities({ handlers: ["studio.youtube_search", "x"], youtubeSearch: { ready: true, signedIn: false, path: "/Applications/secret" } });
+  assert.deepEqual(safe, { handlers: ["studio.youtube_search"], youtubeSearch: { ready: true, signedIn: false } });
+  assert.deepEqual(safeDeviceCapabilities({ youtubeSearch: { ready: "yes" } }), { youtubeSearch: { ready: false } });
+});

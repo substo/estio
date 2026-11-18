@@ -25,13 +25,15 @@ import { discoverVideoTools, type VideoTools } from "../lib/studio/companion/vid
 import { createVideoTranscribeHandler } from "../lib/studio/companion/video-transcribe";
 import { createVideoDeviceApi } from "../lib/studio/companion/video-api";
 import { fileURLToPath } from "node:url";
+import { createPlaywrightYoutubeBrowser, createYoutubeSearchHandler, findChrome, openYoutubeLogin, youtubeBrowserProfile } from "../lib/studio/companion/youtube-search";
 
-const version = "studio-companion-6";
+const version = "studio-companion-7";
 const quotaMs = 5 * 60_000;
 const quotaHelper = () => path.join(os.homedir(), "Applications/QuotaCell.app/Contents/Helpers/CodexBarCLI");
 const rediscoverMs = 10 * 60_000;
-const usage = "Usage: npm run start:studio-companion -- pair --origin <https origin> [--name 'My Mac'] | start [--once] | readiness\nRun in the background: bash scripts/studio-companion-launchagent.sh install";
+const usage = "Usage: npm run start:studio-companion -- pair --origin <https origin> [--name 'My Mac'] | start [--once] | readiness | youtube-login\nRun in the background: bash scripts/studio-companion-launchagent.sh install";
 const messages: Record<string, string> = {
+  youtube_browser_missing: "Google Chrome was not found on this Mac. Install it, then run youtube-login again.",
   setup_replaced: "`setup` with a pasted device token was replaced by browser pairing. Run: npm run start:studio-companion -- pair --origin <https origin> --name 'My Mac'",
   invalid_arguments: usage, invalid_app_origin: "Use the app's https origin, for example --origin https://substo.com",
   pairing_denied: "Pairing was denied in the browser.", pairing_expired: "The pairing code expired. Run pair again.",
@@ -54,6 +56,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
   const [command, ...rest] = argv;
   if (command === "setup") throw new Error("setup_replaced");
   const { flags, once } = parseArgs(rest);
+  if (command === "youtube-login") { await openYoutubeLogin(); return; }
   if (command === "pair") {
     if (once || !flags.has("--origin")) throw new Error("invalid_arguments");
     await pairDevice({ origin: appOrigin(flags.get("--origin")!), name: flags.get("--name") ?? os.hostname().replace(/\.local$/, ""), platform: os.platform() }, deps.pairing);
@@ -79,14 +82,17 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     let quotaAt = 0; let quota: Awaited<ReturnType<typeof readUsage>> = {};
     const usageNow = async () => { if (Date.now() - quotaAt >= quotaMs) { quota = await readUsage(quotaHelper()).catch(() => ({})); quotaAt = Date.now(); } return quota; };
     await usageNow();
+    let chromePath: string | null = await findChrome();
+    let youtubeSignedIn: boolean | undefined;
     const gate = () => localGate({ state: settings.state, config: settings.config, power: discovery.hardware.power, freeDiskGb: discovery.hardware.freeDiskGb });
-    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, knowledgeOutlineVersion: 2, videoTemplateVersion: 1, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe"], ...providers, ...discovery, video: videoTools.report,
+    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, knowledgeOutlineVersion: 2, videoTemplateVersion: 1, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search"], youtubeSearch: { ready: youtubeReady(), signedIn: youtubeSignedIn }, ...providers, ...discovery, video: videoTools.report,
       capacity: subscriptionCapacity(quota), processingBlocked: gate().reasons.filter(reason => reason in DEVICE_BLOCK_REASONS) });
     const researchReady = () => {
       const capacity = subscriptionCapacity(quota);
       return gate().processing && (["codex", "claude"] as const).some(p => capacity[p] && providers[p].ready);
     };
 
+    const youtubeReady = () => chromePath !== null && gate().processing;
     const videoReady = () => settings.config.features.transcription && gate().processing && videoTools.report.ready;
 
     // Provider login/logout commands arrive with heartbeats; one at a time per provider.
@@ -104,7 +110,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
         .finally(() => active.delete(cmd.provider));
       active.set(cmd.provider, task);
     };
-    const inner = createDeviceStudioQueue(credentials, { capabilities, textReady: () => settings.config.features.text && Boolean(settings.config.textProvider) && researchReady(), summaryReady: () => settings.config.features.text && gate().processing, researchReady, videoReady, configAck: () => settings.pendingAck,
+    const inner = createDeviceStudioQueue(credentials, { capabilities, textReady: () => settings.config.features.text && Boolean(settings.config.textProvider) && researchReady(), summaryReady: () => settings.config.features.text && gate().processing, researchReady, videoReady, youtubeReady, configAck: () => settings.pendingAck,
       onHeartbeat: (state, sentAck) => {
         if (settings.update(state, sentAck)) { log({ event: "config_applied", version: settings.appliedVersion, status: settings.pendingAck?.status }); pulse(); }
         if (state && !once) for (const cmd of state.commands) runCommand(cmd);
@@ -129,7 +135,15 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const textRun = createSubscriptionTextRunHandler({ adapter: p => adapters[p], usage: usageNow, enabled: () => gate().processing, config: () => settings.config, configVersion: () => settings.appliedVersion });
     const video = createVideoTranscribeHandler({ tools: async () => { videoTools = await discoverVideoTools(); return videoTools; }, api: createVideoDeviceApi(credentials), enabled: () => gate().processing, config: () => settings.config,
       adapter: p => adapters[p], usage: usageNow, scriptsDir: fileURLToPath(new URL("./studio-video", import.meta.url)) });
-    const handlers: Record<string, StudioJobHandler> = { "studio.video_transcribe": withShutdown(video), "studio.text_run": withShutdown(textRun), "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
+    const youtubeSearchInner = createYoutubeSearchHandler({ enabled: () => gate().processing, browser: async () => {
+      chromePath = await findChrome();
+      return chromePath ? createPlaywrightYoutubeBrowser({ executablePath: chromePath, profileDir: youtubeBrowserProfile() }) : null;
+    } });
+    const youtubeSearch: StudioJobHandler = async (job, context) => {
+      const result = await youtubeSearchInner(job, context) as { signedIn?: boolean };
+      youtubeSignedIn = result.signedIn; return result;
+    };
+    const handlers: Record<string, StudioJobHandler> = { "studio.video_transcribe": withShutdown(video), "studio.youtube_search": withShutdown(youtubeSearch), "studio.text_run": withShutdown(textRun), "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
     const report = { instanceId, handlers: Object.keys(handlers) };
     if (once) {
       const startedAt = new Date();
@@ -144,7 +158,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     // Rediscover hardware/runtimes/models/CLI login every 10 minutes; power and disk every minute for local gating.
     let refreshing = false;
     const refresh = setInterval(() => { if (!refreshing && !controller.signal.aborted) {
-      refreshing = true; void Promise.all([readiness(), discover(), discoverVideoTools()]).then(([p, d, v]) => { providers = p; discovery = d; videoTools = v; }).catch(() => {}).finally(() => { refreshing = false; });
+      refreshing = true; void Promise.all([readiness(), discover(), discoverVideoTools(), findChrome()]).then(([p, d, v, c]) => { providers = p; discovery = d; videoTools = v; chromePath = c; }).catch(() => {}).finally(() => { refreshing = false; });
     } }, rediscoverMs);
     const quick = setInterval(() => { if (!refreshing) void Promise.all([discoverPowerAndDisk().then(v => { discovery = { ...discovery, hardware: { ...discovery.hardware, ...v } }; }), usageNow()]).catch(() => {}); }, 60_000);
     try { await runStudioWorker({ queue, handlers, workerId, release: version, report, concurrency: 1,

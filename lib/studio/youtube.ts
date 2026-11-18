@@ -14,6 +14,8 @@ import db from "@/lib/db";
 import { createStudioDb } from "./db";
 import { relatedAnchor, saveLinkedYoutubeSelection, saveYoutubeSelection } from "./youtube-bookmark";
 import { recordLinkId } from "./record-link-policy";
+import { randomUUID } from "node:crypto";
+import { readMacYoutubeSearch, startMacYoutubeSearch } from "./youtube-mac-search";
 import { relatedYoutubeQueries, relatedYoutubeSourceId, youtubeDescriptionPreview } from "./youtube-related-policy";
 
 export interface ApprovedYoutubeChannel { channel_id: string; label: string; }
@@ -34,7 +36,7 @@ export async function browseStudioYoutube(locationId: string, input: unknown) {
 }
 
 type YoutubeContext = Awaited<ReturnType<typeof context>>;
-async function browseYoutube({ access, profile }: YoutubeContext, input: unknown, related?: { anchorId: string; expanded: boolean }) {
+async function browseYoutube({ access, profile }: YoutubeContext, input: unknown) {
   if (!hasStudioSecretsKey()) throw new YoutubeError("profile_key_unavailable", "Secure profile and discovery storage is not configured on this server yet.");
   let request;
   try { request = readDiscoveryRequest(input); } catch (error) { throw new YoutubeError("invalid_request", (error as Error).message); }
@@ -63,8 +65,7 @@ async function browseYoutube({ access, profile }: YoutubeContext, input: unknown
     const subscribed = await api.subscriptions("", request.channelId);
     if (!subscribed.channels.some(c => c.id === request.channelId)) throw new YoutubeError("not_subscribed", "This channel is not in your connected account’s subscriptions.");
   }
-  const result = request.mode === "search" ? await api.search(request.query, request.pageToken,
-    related ? { limit: related.expanded ? 11 : 5, includeStatistics: true } : undefined)
+  const result = request.mode === "search" ? await api.search(request.query, request.pageToken)
     : request.mode === "url" ? { videos: await api.videos([request.videoId!]), nextPageToken: null }
     : await api.channelVideos(request.channelId, request.pageToken);
   await stillConnected();
@@ -75,7 +76,7 @@ async function browseYoutube({ access, profile }: YoutubeContext, input: unknown
     // arrives separately when the user saves a reference.
     const provenance: YoutubeProvenance = { kind, observedAt, provider: "youtube_data_api", rights: "research_link_only",
       ...(request.mode === "search" ? { query: request.query } : {}), ...(request.mode === "channel" || request.mode === "subscription" ? { channelId: request.channelId } : {}) };
-    return { ...video, ticket: sealYoutubeSelection({ locationId: access.locationId, brand: access.app, userId: access.userId }, video.id, provenance, { anchorId: related?.anchorId }) };
+    return { ...video, ticket: sealYoutubeSelection({ locationId: access.locationId, brand: access.app, userId: access.userId }, video.id, provenance) };
   });
   return { kind: "videos" as const, videos, nextPageToken: result.nextPageToken, identity, provenance: kind, observedAt };
 }
@@ -94,18 +95,33 @@ export async function browseStudioRelatedYoutube(locationId: string, input: { an
   const authority = await context(locationId);
   const anchor = await relatedAnchor(studioDb, authority.access.locationId, input.anchorId);
   const queries = relatedYoutubeQueries(anchor.title, anchor.topic ?? "");
-  const query = input.query ?? queries[0];
+  const query = String(input.query ?? queries[0] ?? "").trim();
   if (!query) throw new YoutubeError("invalid_request", "Enter a YouTube search for this topic.");
   const expanded = input.expanded === true;
-  const result = await browseYoutube(authority, { mode: "search", query }, { anchorId: anchor.id, expanded });
-  if (result.kind !== "videos") throw new Error("Related search must return videos.");
+  // Default route: the paired Mac searches YouTube in its own signed-in browser profile. The Data API is not used here
+  // (it would be metered usage, which is not priced yet) and nothing silently falls back to it.
+  const jobId = await startMacYoutubeSearch(authority.access, query.slice(0, 160), expanded ? 12 : 6, `related-${randomUUID()}`);
+  return { status: "pending" as const, jobId, query, alternateQuery: queries.find(phrase => phrase !== query) ?? null };
+}
+
+export async function readStudioRelatedYoutube(locationId: string, input: { anchorId?: unknown; jobId?: unknown }) {
+  const authority = await context(locationId);
+  const { access } = authority;
+  const anchor = await relatedAnchor(studioDb, access.locationId, input.anchorId);
+  const state = await readMacYoutubeSearch(access, input.jobId);
+  if (state.status !== "done") return state;
   const seedVideo = relatedYoutubeSourceId(anchor.source_url);
+  const observedAt = new Date().toISOString();
+  const queries = relatedYoutubeQueries(anchor.title, anchor.topic ?? "");
+  const expanded = state.limit > 6;
   return {
-    query: String(query).trim(),
-    alternateQuery: queries.find(phrase => phrase !== String(query).trim()) ?? null,
-    videos: result.videos.filter(video => video.id !== seedVideo).slice(0, expanded ? 10 : 3).map(video => ({
-      ...video, description: youtubeDescriptionPreview(video.description),
-    })),
+    status: "done" as const, query: state.query, alternateQuery: queries.find(phrase => phrase !== state.query) ?? null, signedIn: state.result.signedIn ?? false,
+    videos: state.result.videos.filter(video => video.id !== seedVideo).slice(0, expanded ? 10 : 3).map(video => {
+      const provenance: YoutubeProvenance = { kind: "public_search", observedAt, provider: "mac_browser", rights: "research_link_only", query: state.query };
+      return { id: video.id, title: video.title, channelId: video.channelId ?? "", channelTitle: video.channelTitle ?? "", publishedAt: "", publishedText: video.publishedText, viewsText: video.viewsText,
+        description: video.description ? youtubeDescriptionPreview(video.description) : undefined,
+        ticket: sealYoutubeSelection({ locationId: access.locationId, brand: access.app, userId: access.userId }, video.id, provenance, { anchorId: anchor.id }) };
+    }),
   };
 }
 

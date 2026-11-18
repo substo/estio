@@ -8,8 +8,11 @@ import type { YoutubeVideo } from "@/lib/google/youtube-api";
 import type { VideoQueueResult } from "@/lib/studio/video-transcription";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
 
-type Candidate = YoutubeVideo & { ticket: string };
+type Candidate = Omit<YoutubeVideo, "publishedAt" | "statistics" | "thumbnailUrl"> & { publishedText?: string; viewsText?: string; ticket: string };
 type SearchResult = { query: string; alternateQuery: string | null; videos: Candidate[] };
+type Started = { status: "pending"; jobId: string; query: string; alternateQuery: string | null };
+type Polled = { status: "pending" } | { status: "failed"; message: string } | ({ status: "done" } & SearchResult);
+const POLL_MS = 2000, GIVE_UP_MS = 3 * 60_000, SLOW_MS = 20_000;
 type Saved = { recordId: string; transcription: VideoQueueResult };
 
 export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
@@ -22,6 +25,8 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [slow, setSlow] = useState(false);
+  const run = useRef(0);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [saveError, setSaveError] = useState("");
@@ -41,18 +46,30 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
   }, [anchorId, tenant]);
 
   const search = useCallback(async (showMore: boolean, phrase?: string) => {
-    setLoading(true);
+    const mine = ++run.current;
+    setLoading(true); setSlow(false);
     setError("");
     try {
-      const next = await request<SearchResult>({ action: "related", expanded: showMore, query: phrase || undefined });
-      setResult(next);
-      setQuery(next.query);
+      const begun = await request<Started>({ action: "related", expanded: showMore, query: phrase || undefined });
+      setQuery(begun.query);
+      const startedAt = Date.now();
+      while (mine === run.current) {
+        await new Promise(resolve => setTimeout(resolve, POLL_MS));
+        if (mine !== run.current) return;
+        const polled = await request<Polled>({ action: "relatedStatus", jobId: begun.jobId });
+        if (polled.status === "failed") throw new Error(polled.message);
+        if (polled.status === "done") { setResult(polled); setQuery(polled.query); break; }
+        if (Date.now() - startedAt > SLOW_MS) setSlow(true);
+        if (Date.now() - startedAt > GIVE_UP_MS) throw new Error("Your Mac did not answer. Make sure it is on and the Studio companion is running, then search again.");
+      }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "YouTube discovery could not complete.");
+      if (mine === run.current) setError(cause instanceof Error ? cause.message : "YouTube discovery could not complete.");
     } finally {
-      setLoading(false);
+      if (mine === run.current) { setLoading(false); setSlow(false); }
     }
   }, [request]);
+
+  useEffect(() => () => { run.current++; }, []);
 
   useEffect(() => {
     if (started.current || !section.current) return;
@@ -102,7 +119,7 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
         </div>
         {result?.alternateQuery && <button type="button" className="text-left text-sm text-primary underline disabled:opacity-50" disabled={loading} onClick={() => void search(true, result.alternateQuery ?? undefined)}>Try “{result.alternateQuery}”</button>}
       </form>}
-      {loading ? <p role="status" className="text-sm text-muted-foreground">Searching YouTube…</p> : null}
+      {loading ? <p role="status" className="text-sm text-muted-foreground">{slow ? "Waiting for your Mac to search YouTube… It must be on with the Studio companion running." : "Searching YouTube on your Mac…"}</p> : null}
       {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       {saveError ? <p role="alert" className="text-sm text-destructive">{saveError}</p> : null}
       {result && <p className="text-xs text-muted-foreground">YouTube results for “{result.query}”</p>}
@@ -111,8 +128,6 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
       </p> : null}
       <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {videos.map(video => {
-          const counts = [[video.statistics?.views, "views"], [video.statistics?.likes, "likes"], [video.statistics?.comments, "comments"]]
-            .flatMap(([value, label]) => value ? [`${BigInt(value).toLocaleString()} ${label}`] : []);
           const selection = saved.get(video.id);
           return <article key={video.id} className="min-w-0 overflow-hidden rounded-lg border">
             <button type="button" aria-label={`Preview ${video.title}`} className="block w-full focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary" onClick={event => { previewTrigger.current = event.currentTarget; setPreview(video); }}>
@@ -124,10 +139,10 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
             <div className="space-y-2 p-3 text-sm">
               <h3 className="break-words font-medium">{video.title}</h3>
               <p className="break-words text-xs text-muted-foreground">
-                <a className="hover:underline" href={`https://www.youtube.com/channel/${video.channelId}`} target="_blank" rel="noreferrer">{video.channelTitle}</a>
-                {/^\d{4}-\d{2}-\d{2}/.test(video.publishedAt) && <> · {video.publishedAt.slice(0, 10)}</>}
+                <a className="hover:underline" href={video.channelId ? `https://www.youtube.com/channel/${video.channelId}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(video.channelTitle)}`} target="_blank" rel="noreferrer">{video.channelTitle}</a>
+                {video.publishedText && <> · {video.publishedText}</>}
               </p>
-              {counts.length > 0 && <p className="text-xs tabular-nums">{counts.join(" · ")}</p>}
+              {video.viewsText && <p className="text-xs tabular-nums">{video.viewsText}</p>}
               {video.description && <p className="break-words text-xs text-muted-foreground"><span className="sr-only">Publisher description. </span>{video.description}</p>}
               {selection ? <div role="status" className="space-y-1">
                 <Link className="font-medium text-primary underline" href={`/studio/library/${selection.recordId}`}>Open linked reference</Link>
