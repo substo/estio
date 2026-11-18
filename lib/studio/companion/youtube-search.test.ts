@@ -20,8 +20,10 @@ test("parses public video facts, drops duplicates, invalid ids and ads, honours 
 });
 test("builds the video-filtered results URL and detects a signed-in top bar", () => {
   assert.equal(youtubeSearchUrl("ads & more"), "https://www.youtube.com/results?search_query=ads+%26+more&sp=EgIQAQ%3D%3D");
-  assert.equal(isSignedInTopbar({ topbar: { desktopTopbarRenderer: { topbarButtons: [{ topbarMenuButtonRenderer: {} }] } } }), true);
-  assert.equal(isSignedInTopbar({ topbar: { desktopTopbarRenderer: { topbarButtons: [{ buttonRenderer: {} }] } } }), false);
+  assert.equal(isSignedInTopbar({ topbar: { desktopTopbarRenderer: { topbarButtons: [{ topbarMenuButtonRenderer: { avatar: { thumbnails: [] } } }] } } }), true);
+  // A signed-out page still has a topbarMenuButtonRenderer (settings menu) but offers sign-in and no avatar.
+  assert.equal(isSignedInTopbar({ topbar: { desktopTopbarRenderer: { topbarButtons: [{ buttonRenderer: { navigationEndpoint: { signInEndpoint: {} } } }, { topbarMenuButtonRenderer: {} }] } } }), false);
+  assert.equal(isSignedInTopbar(null), false);
 });
 test("finds Chrome only at fixed locations", async () => {
   assert.equal(await findChrome({} as NodeJS.ProcessEnv, async () => false), null);

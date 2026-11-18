@@ -50,7 +50,9 @@ export function parseYoutubeSearchData(data: unknown, limit: number): MacVideo[]
 export function youtubeSearchUrl(query: string) {
   return `https://www.youtube.com/results?${new URLSearchParams({ search_query: query, sp: "EgIQAQ%3D%3D" }).toString().replace("sp=EgIQAQ%253D%253D", "sp=EgIQAQ%3D%3D")}`;
 }
+/** Signed-out pages carry a sign-in button and no account avatar (checked against live youtube.com, 2026-11-18). */
 export function isSignedInTopbar(data: unknown) {
   const topbar = data && typeof data === "object" ? (data as { topbar?: unknown }).topbar : undefined;
-  return JSON.stringify(topbar ?? {}).includes("topbarMenuButtonRenderer");
+  const text = JSON.stringify(topbar ?? {});
+  return !text.includes("signInEndpoint") && text.includes('"avatar"');
 }
