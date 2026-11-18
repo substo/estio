@@ -8,6 +8,7 @@ set -euo pipefail
 HOME_DIR="${STUDIO_TRANSCRIPTION_HOME:-$HOME/Library/Application Support/Estio Studio/transcription}"
 VENV="$HOME_DIR/venv"
 HF="$HOME_DIR/hf-cache"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODEL="animaslabs/parakeet-tdt-0.6b-v3-mlx-4bit"
 PY="${STUDIO_PYTHON:-/opt/homebrew/bin/python3.11}"
 tool() { for d in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin" /usr/bin; do [ -x "$d/$1" ] && { echo "$d/$1"; return 0; }; done; return 1; }
@@ -34,7 +35,7 @@ install() {
   "$PY" -m venv "$VENV"
   "$VENV/bin/python" -m pip install --quiet --upgrade pip
   "$VENV/bin/python" -m pip install --quiet --upgrade yt-dlp parakeet-mlx
-  HF_HOME="$HF" HF_HUB_DISABLE_XET=1 "$VENV/bin/python" -I -c "from parakeet_mlx import from_pretrained; from_pretrained('$MODEL'); print('model ready')"
+  HF_HOME="$HF" HF_HUB_DISABLE_XET=1 "$VENV/bin/python" -I "$SCRIPT_DIR/studio-video/transcribe-local.py" --prepare-model
   echo "Done. Next, if listed as MISSING above: brew install ffmpeg tesseract"
   check || true
 }

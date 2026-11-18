@@ -12,13 +12,36 @@ import sys
 MODEL = "animaslabs/parakeet-tdt-0.6b-v3-mlx-4bit"
 
 
-def main():
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: transcribe-local.py AUDIO OUTPUT_JSON")
-    os.environ.setdefault("HF_HUB_OFFLINE", "1")
-    from parakeet_mlx import from_pretrained
+def load_model(*, offline):
+    import mlx.core as mx
+    import mlx.nn as nn
+    from huggingface_hub import hf_hub_download
+    from parakeet_mlx.utils import from_config
 
-    model = from_pretrained(MODEL)
+    config_path = hf_hub_download(MODEL, "config.json", local_files_only=offline)
+    weights_path = hf_hub_download(MODEL, "model.safetensors", local_files_only=offline)
+    with open(config_path, encoding="utf-8") as handle:
+        config = json.load(handle)
+    weights = mx.load(weights_path)
+    model = from_config(config)
+    nn.quantize(
+        model,
+        **config["quantization"],
+        class_predicate=lambda path, module: f"{path}.scales" in weights,
+    )
+    model.load_weights(list(weights.items()))
+    return model
+
+
+def main():
+    if sys.argv[1:] == ["--prepare-model"]:
+        load_model(offline=False)
+        print("model ready")
+        return
+    if len(sys.argv) != 3:
+        raise SystemExit("usage: transcribe-local.py AUDIO OUTPUT_JSON | --prepare-model")
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    model = load_model(offline=True)
     result = model.transcribe(sys.argv[1], chunk_duration=120.0, overlap_duration=15.0)
     output = {
         "text": result.text.strip(),
