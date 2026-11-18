@@ -14,7 +14,7 @@ mkdir "$test_dir/socket"
 pg_ctl -D "$test_dir/db" -l "$test_dir/server.log" -o "-k $test_dir/socket -h '' -p 55441" -w start >/dev/null
 run=(env -u PGSERVICE -u PGHOSTADDR -u PGOPTIONS psql --no-psqlrc --host="$test_dir/socket" --port=55441 --username=studio_test --dbname=postgres --set=ON_ERROR_STOP=1)
 "${run[@]}" --file=studio/tests/crm-fixture.sql --file=prisma/migrations/20261028100000_studio_schema/migration.sql --file=studio/tests/crm-fixture-writes.sql >"$test_dir/setup.log"
-for migration in 20261028190000_brand_profile 20261105100000_studio_ai_key_from_settings 20261105140000_studio_library_summary 20261106120000_studio_device_onboarding_research 20261118120000_studio_text_subscription 20261118130000_studio_video_transcription; do
+for migration in 20261028190000_brand_profile 20261105100000_studio_ai_key_from_settings 20261105140000_studio_library_summary 20261106120000_studio_device_onboarding_research 20261118120000_studio_text_subscription 20261118130000_studio_video_transcription 20261118160000_studio_knowledge_outline; do
  "${run[@]}" --file="prisma/migrations/$migration/migration.sql" >>"$test_dir/setup.log"
 done
 "${run[@]}" --file=studio/tests/video-transcription-assertions.sql

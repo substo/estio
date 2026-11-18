@@ -85,6 +85,7 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
   for (const key of ["instanceId", "platform", "arch", "version"])
     if (typeof v[key] === "string" && /^[A-Za-z0-9._:/ -]{1,100}$/.test(v[key])) result[key] = v[key];
   for (const key of ["healthy", "draining"]) if (typeof v[key] === "boolean") result[key] = v[key];
+  if (v.knowledgeOutlineVersion === 2) result.knowledgeOutlineVersion = 2;
   if (Array.isArray(v.handlers)) result.handlers = v.handlers.filter((x, i, all) => (DEVICE_WORK_KINDS as readonly unknown[]).includes(x) && all.indexOf(x) === i);
   if (v.capacity && typeof v.capacity === "object" && !Array.isArray(v.capacity)) {
     const c = v.capacity as Record<string, unknown>;

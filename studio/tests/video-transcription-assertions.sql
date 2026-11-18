@@ -129,6 +129,16 @@ begin
  if (select count(*) from studio.studio_knowledge_source_units where location_id=w and source_id=ra and transcription_id=t::text)<>1
   or not exists(select 1 from jsonb_array_elements(studio.studio_knowledge_extraction_inputs(w,'substo','vt-owner',ra)->'inputs') i where i->>'mode'='source_units' and i->>'inputId'=t::text)
   or not exists(select 1 from jsonb_array_elements(studio.studio_knowledge_extraction_inputs(w,'substo','vt-owner',ra)->'inputs') i where i->>'mode'='record_text' and i->>'inputId'='transcript') then raise exception 'OCR/transcript not offered to extraction'; end if;
+ v:=studio.studio_outline_input(w,ra,ver+1,'record_text','transcript');
+ if jsonb_array_length(v->'units')<>6
+  or not exists(select 1 from jsonb_array_elements(v->'units') u where u->>'evidenceType'='speech' and u->>'startSeconds'='100')
+  or not exists(select 1 from jsonb_array_elements(v->'units') u where u->>'evidenceType'='ocr'
+    and u->>'text'='Slide one: Pricing tiers' and u->>'startSeconds'='12.5' and u->>'context'='…as shown here…')
+  or v::text like '%objectKey%' then raise exception 'Joined outline evidence incorrect: %',v; end if;
+ update studio.studio_records set payload=jsonb_set(payload,'{transcript}','"Edited text"'::jsonb) where id=ra;
+ v:=studio.studio_outline_input(w,ra,ver+1,'record_text','transcript');
+ if jsonb_array_length(v->'units')<>1 or v#>>'{units,0,text}'<>'Edited text'
+   or v#>>'{units,0,startSeconds}' is not null then raise exception 'Stale Mac evidence attached to edited text'; end if;
  if studio.studio_video_device_command(repeat('1',64),'substo','complete',body||jsonb_build_object('result',jsonb_build_object('outcome','transcribed','method','local-parakeet-tdt-v3-4bit','durationSeconds',200,'transcript',jsonb_build_object('chunks',2,'segments',5),'visual',jsonb_build_object('status','ready','frames',2))))<>'false'::jsonb then raise exception 'Completed job completed twice'; end if;
  if exists(select 1 from studio.studio_ai_usage where location_id=w) or exists(select 1 from studio.studio_ai_attempts where location_id=w) then raise exception 'Local transcription was metered as paid usage'; end if;
 

@@ -7,7 +7,7 @@ Shared by Estio and Substo. **2026-11-18 local candidate, not deployed.** The se
 | Operation | Subscription route | Paid API route | Boundaries |
 | --- | --- | --- | --- |
 | Library summary | Requesting Account's paired Mac, Codex/ChatGPT or Claude/claude.ai | **Unsupported** | Saved description/transcript only; no automatic captions, video watching, vision or browsing. Candidate honors Setup's selected provider/model and records actual result metadata. |
-| Knowledge extraction | **Candidate:** requesting Account's paired Mac, selected Codex or Claude | Location OpenAI key, existing structured Responses adapter | Explicit source range; exact quotes and supplied unit IDs; proposed findings; separate selection/apply creates pending knowledge. |
+| Knowledge extraction | **Candidate:** requesting Account's paired Mac, selected Codex or Claude | Location OpenAI key, existing structured Responses adapter | Full selected input in bounded text batches with an updated companion; saved speech/OCR citations and one topic review; explicit **Approve selected** uses existing Knowledge approval. Historical range reviews retain pending application. |
 | Idea review | **Candidate:** same Mac text route | Location OpenAI key | Selected ideas and bounded linked-source excerpts; advisory scores/recommendation; no edits/approval/publishing. |
 | Script brief | **Candidate:** same Mac text route | Location OpenAI key | Exactly one idea with saved evidence; citations/verification flags; separate version-fenced apply replaces the reviewed draft. |
 | Business onboarding research | Existing paired-Mac Codex/Claude capacity selection; existing eligible hosted Location ChatGPT route | Existing OpenAI search route; Gemini reads fetched pages without search | Mac research is separate from Setup's text-provider preference. Research suggestions still need owner confirmation. |
@@ -74,6 +74,8 @@ Local verification uses mocked native/API transports and actual SQL in a disposa
 Parent-reported live baseline evidence: Martin Mac applied Setup v2 (Text work, Codex) and a Library summary completed from saved transcript for source `327b7d30-af49-4605-9fda-c8505a6011cb`. That occurred before this candidate; prior summary selection used capacity order, so selected Codex alone does not prove which CLI executed. The missing-key extraction `de27d543-16c2-470d-99b4-bca541977abd` remains retained failure evidence; it was not retried/mutated by this implementation.
 
 Before release: complete the combined build/checks; apply additive migration `20261118120000_studio_text_subscription` through the canonical migrate-only release workflow; update/restart the Node companion to advertise `studio.text_run` (`studio-companion-4`); verify fresh heartbeat, applied Setup and Account authority. Then obtain authorized real provider and signed-in desktop/mobile/keyboard acceptance for each new route. Native Swift companion parity is not implemented. No production mutation, device-setting change, provider call, commit or deployment was performed by this task.
+
+Full-source extraction limits, review semantics and the transcript-ready integration seam are described in [Studio source knowledge](studio-source-knowledge.md). The full-source change is local and requires its additive migration and updated hosted worker/Node companion.
 
 ## Contributor contract
 
