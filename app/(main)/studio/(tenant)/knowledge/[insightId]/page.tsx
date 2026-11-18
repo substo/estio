@@ -62,10 +62,12 @@ export default async function StudioKnowledgeInsightPage({ params, searchParams 
           const start = numberText(entry.payload.start_sec);
           const end = numberText(entry.payload.end_sec);
           const frame = text(entry.payload.frame_file);
+          const evidenceType = text(entry.payload.evidence_type);
+          const extractionId = text(entry.payload.outline_id) || text(entry.payload.extraction_id);
           return <article key={entry.id} className="space-y-3 rounded-xl border bg-card p-5">
             {quote ? <blockquote className="whitespace-pre-wrap border-l-2 pl-4">{quote}</blockquote> : <p className="text-sm text-muted-foreground">No quote text saved.</p>}
-            <p className="text-sm text-muted-foreground">{start !== null ? `Start ${start}s` : "No start time"}{end !== null ? ` · End ${end}s` : ""}{text(entry.payload.observed_at) ? ` · Observed ${text(entry.payload.observed_at)}` : ""}</p>
-            {entry.payload.origin === "hosted_extraction" ? <p className="text-sm text-muted-foreground">Saved source version {numberText(entry.payload.source_version)} · unit {text(entry.payload.unit_id)}{numberText(entry.payload.char_start)!==null ? ` · characters ${numberText(entry.payload.char_start)}–${numberText(entry.payload.char_end)} (end exclusive)` : " · time range refers to the whole cited unit"}{text(entry.payload.extraction_id) ? <Link href={`${root}/knowledge/extractions/${text(entry.payload.extraction_id)}`} className="ml-2 text-primary hover:underline">Extraction provenance</Link> : null}</p> : null}
+            <p className="text-sm text-muted-foreground">{evidenceType === "ocr" ? "On-screen text · " : evidenceType === "speech" ? "Speech · " : evidenceType === "text" ? "Saved text · " : ""}{start !== null ? `Start ${start}s` : "No start time"}{end !== null ? ` · End ${end}s` : ""}{text(entry.payload.observed_at) ? ` · Observed ${text(entry.payload.observed_at)}` : ""}</p>
+            {entry.payload.origin === "hosted_extraction" ? <p className="text-sm text-muted-foreground">Saved source version {numberText(entry.payload.source_version)} · unit {text(entry.payload.unit_id)}{numberText(entry.payload.char_start)!==null ? ` · characters ${numberText(entry.payload.char_start)}–${numberText(entry.payload.char_end)} (end exclusive)` : " · time range refers to the whole cited unit"}{extractionId ? <Link href={`${root}/knowledge/extractions/${extractionId}`} className="ml-2 text-primary hover:underline">Extraction provenance</Link> : null}</p> : null}
             {citationUrl ? <a href={citationUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline">Open citation URL</a> : null}
             {frame && result.verifiedFrames.evidence.has(entry.id)
               // eslint-disable-next-line @next/next/no-img-element

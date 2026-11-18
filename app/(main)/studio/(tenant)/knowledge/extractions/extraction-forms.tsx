@@ -5,25 +5,47 @@ import {useState} from "react";
 import {useRouter} from "next/navigation";
 import type {ExtractionInputs} from "@/lib/studio/knowledge-extraction";
 import {useStudioCommand} from "../../../_components/use-studio-command";
-export function ExtractionStartForm({locationId,source,inputs}:{locationId:string;source:ExtractionInputs["source"];inputs:ExtractionInputs["inputs"]}){
- const [provider,setProvider]=useState<StudioTextProvider>("subscription");
- const router=useRouter();const [choice,setChoice]=useState(0);const [start,setStart]=useState(0);const [count,setCount]=useState(2);const [focus,setFocus]=useState("");const [confirm,setConfirm]=useState(false);const [queued,setQueued]=useState(false);
- const command=useStudioCommand(`/studio/knowledge/extractions/api`);const input=inputs[choice];
- async function submit(event:React.FormEvent){event.preventDefault();if(!input||queued)return;
-  const result=await command.run({action:"enqueue",requestId:crypto.randomUUID(),sourceId:source.id,expectedVersion:Number(source.version),mode:input.mode,inputId:input.inputId,startUnit:start,unitCount:count,focus,provider,confirmPaid:provider==="openai"&&confirm,confirmSubscription:provider==="subscription"&&confirm});
-  if(result?.ok){setQueued(true);router.push(`/studio/knowledge/extractions/${result.data.reviewId}`);}
- }
- return <form onSubmit={submit} className="space-y-4 rounded-xl border p-5 text-sm"><fieldset disabled={command.pending||command.retry||queued} className="space-y-4">
-  <label className="block space-y-1"><span>Saved input</span><select value={choice} onChange={e=>{setChoice(Number(e.target.value));setStart(0);}} className="block w-full rounded-md border bg-background p-2">{inputs.map((i,n)=><option key={`${i.mode}:${i.inputId}`} value={n}>{i.label} · {i.totalUnits} units</option>)}</select></label>
-  <p className="text-muted-foreground">Saved text and upload transcripts use 2,000-character units. Imported units keep their original IDs and text; no visual/OCR interpretation occurs. Each request covers only your selected range. Up to 20 imported transcriptions and 20 completed uploads are listed.</p>
-  <div className="flex flex-wrap gap-4"><label>First unit (zero-based)<input type="number" min={0} max={Math.max(0,(input?.totalUnits??1)-1)} required value={start} onChange={e=>setStart(Number(e.target.value))} className="ml-2 w-24 rounded-md border bg-background p-2"/></label>
-  <label>Units to process<input type="number" min={1} max={8} required value={count} onChange={e=>setCount(Number(e.target.value))} className="ml-2 w-20 rounded-md border bg-background p-2"/></label></div>
-  <label className="block space-y-1"><span>Topic focus (optional)</span><input maxLength={300} value={focus} onChange={e=>setFocus(e.target.value)} className="block w-full rounded-md border bg-background p-2"/></label>
-  <StudioTextProviderChoice provider={provider} onChange={p=>{setProvider(p);setConfirm(false);}} />
-  <label className="flex items-start gap-2"><input type="checkbox" required checked={confirm} onChange={e=>setConfirm(e.target.checked)}/><span>I am authorized to process this saved text using {provider==="openai"?"the paid Location OpenAI API":"my paired Mac subscription"}. Findings remain proposals until I separately add them as pending knowledge.</span></label>
- </fieldset>
- <button disabled={command.pending||!input||queued} className="rounded-md border px-3 py-2 disabled:opacity-50">{command.pending?"Queuing…":command.retry?"Retry same request":"Extract proposed findings"}</button>
- {command.error?<p role="alert" className="text-destructive">{command.error}</p>:null}</form>;
+export function ExtractionStartForm({ source, inputs }: { source: ExtractionInputs["source"]; inputs: ExtractionInputs["inputs"] }) {
+  const [provider, setProvider] = useState<StudioTextProvider>("subscription");
+  const [choice, setChoice] = useState(0);
+  const [confirm, setConfirm] = useState(false);
+  const [queued, setQueued] = useState(false);
+  const router = useRouter();
+  const command = useStudioCommand("/studio/knowledge/extractions/api");
+  const input = inputs[choice];
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!input || queued) return;
+    const result = await command.run({ action: "enqueueOutline", requestId: crypto.randomUUID(),
+      sourceId: source.id, expectedVersion: Number(source.version), inputId: input.inputId, mode: input.mode,
+      provider, confirmPaid: provider === "openai" && confirm, confirmSubscription: provider === "subscription" && confirm });
+    if (result?.ok) {
+      setQueued(true);
+      router.push(`/studio/knowledge/extractions/${result.data.outlineId}`);
+    }
+  }
+
+  return <form onSubmit={submit} className="space-y-4 rounded-xl border p-5 text-sm">
+    <fieldset disabled={command.pending || command.retry || queued} className="space-y-4">
+      <label className="block space-y-1">Saved evidence<select value={choice} onChange={e => setChoice(Number(e.target.value))}
+        className="block w-full rounded-md border bg-background p-2">
+        {inputs.map((item, index) => <option key={`${item.mode}:${item.inputId}`} value={index}>{item.label}</option>)}
+      </select></label>
+      <p className="text-muted-foreground">Studio reads the entire selected input and brings the takeaways together in one review.</p>
+      <StudioTextProviderChoice fullSource provider={provider} onChange={value => { setProvider(value); setConfirm(false); }} />
+      <label className="flex items-start gap-2">
+        <input type="checkbox" required checked={confirm} onChange={e => setConfirm(e.target.checked)} />
+        <span>{provider === "openai"
+          ? "I authorize paid processing of this input using the Location OpenAI API, with up to $0.48 in batch reservations."
+          : "I authorize processing of this input using my paired Mac subscription."}</span>
+      </label>
+    </fieldset>
+    <button disabled={command.pending || !input || queued} className="rounded-md border px-3 py-2 disabled:opacity-50">
+      {command.pending ? "Queuing…" : command.retry ? "Retry same request" : "Extract knowledge"}
+    </button>
+    {command.error ? <p role="alert" className="text-destructive">{command.error}</p> : null}
+  </form>;
 }
 export function ExtractionApplyForm({locationId,reviewId,version,available}:{locationId:string;reviewId:string;version:number;available:Array<{index:number;statement:string}>}){
  const router=useRouter();const [selected,setSelected]=useState<number[]>([]);const [confirm,setConfirm]=useState(false);const [saved,setSaved]=useState(false);

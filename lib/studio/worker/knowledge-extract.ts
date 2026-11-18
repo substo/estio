@@ -1,10 +1,15 @@
 import { IDEA_REVIEW_MODEL } from "../idea-review-policy";
-import { KNOWLEDGE_EXTRACTION_PROMPT,knowledgeExtractionInstructions,knowledgeExtractionSchema,readKnowledgeExtractionResult,type KnowledgeExtractionResult,type KnowledgeExtractionSnapshot } from "../knowledge-extraction-policy";
+import { KNOWLEDGE_EXTRACTION_PROMPT,knowledgeExtractionInstructions,knowledgeExtractionSchema,readKnowledgeExtractionResult,KNOWLEDGE_OUTLINE_PROMPT,knowledgeOutlineBatchInstructions,knowledgeOutlineBatchSchema,readKnowledgeOutlineBatchResult,type KnowledgeExtractionResult,type KnowledgeExtractionSnapshot } from "../knowledge-extraction-policy";
 import { requestStructuredText,type TextRunSpec } from "./openai-text";
 import { createTextRunHandler,productionTextRunDeps,type TextRunDeps } from "./text-run";
 export const knowledgeExtractionSpec:TextRunSpec<KnowledgeExtractionResult,KnowledgeExtractionSnapshot>={workflow:"knowledge_extract",model:IDEA_REVIEW_MODEL,promptVersion:KNOWLEDGE_EXTRACTION_PROMPT,
   instructions:knowledgeExtractionInstructions,schema:knowledgeExtractionSchema,maxOutputTokens:6000,validate:readKnowledgeExtractionResult};
-export const requestKnowledgeExtraction=(snapshot:KnowledgeExtractionSnapshot,key:string,signal:AbortSignal,fetcher:typeof fetch=fetch)=>requestStructuredText(knowledgeExtractionSpec,snapshot,key,signal,fetcher);
+const outlineSpec: typeof knowledgeExtractionSpec = { ...knowledgeExtractionSpec, promptVersion: KNOWLEDGE_OUTLINE_PROMPT,
+  instructions: knowledgeOutlineBatchInstructions, schema: knowledgeOutlineBatchSchema, validate: readKnowledgeOutlineBatchResult };
+export const knowledgeExtractionSpecFor = (snapshot: unknown) =>
+  snapshot && typeof snapshot === "object" && "mode" in snapshot && snapshot.mode === "outline" ? outlineSpec : knowledgeExtractionSpec;
+
+export const requestKnowledgeExtraction=(snapshot:KnowledgeExtractionSnapshot,key:string,signal:AbortSignal,fetcher:typeof fetch=fetch)=>requestStructuredText(knowledgeExtractionSpecFor(snapshot),snapshot,key,signal,fetcher);
 export type KnowledgeExtractionDeps=TextRunDeps<KnowledgeExtractionResult,KnowledgeExtractionSnapshot>;
-export const createKnowledgeExtractionHandler=(deps:KnowledgeExtractionDeps)=>createTextRunHandler(knowledgeExtractionSpec,deps);
+export const createKnowledgeExtractionHandler=(deps:KnowledgeExtractionDeps)=>createTextRunHandler(knowledgeExtractionSpec,deps,knowledgeExtractionSpecFor);
 export const productionKnowledgeExtractionDeps=(rest:KnowledgeExtractionDeps["db"])=>productionTextRunDeps(rest,requestKnowledgeExtraction);

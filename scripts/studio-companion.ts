@@ -22,7 +22,7 @@ import { createLibrarySummaryHandler } from "../lib/studio/companion/library-sum
 import { createOnboardingResearchHandler, subscriptionCapacity } from "../lib/studio/companion/onboarding-research";
 import { DEVICE_BLOCK_REASONS } from "../lib/studio/devices-policy";
 
-const version = "studio-companion-4";
+const version = "studio-companion-5";
 const quotaMs = 5 * 60_000;
 const quotaHelper = () => path.join(os.homedir(), "Applications/QuotaCell.app/Contents/Helpers/CodexBarCLI");
 const rediscoverMs = 10 * 60_000;
@@ -76,7 +76,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const usageNow = async () => { if (Date.now() - quotaAt >= quotaMs) { quota = await readUsage(quotaHelper()).catch(() => ({})); quotaAt = Date.now(); } return quota; };
     await usageNow();
     const gate = () => localGate({ state: settings.state, config: settings.config, power: discovery.hardware.power, freeDiskGb: discovery.hardware.freeDiskGb });
-    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run"], ...providers, ...discovery,
+    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, knowledgeOutlineVersion: 2, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run"], ...providers, ...discovery,
       capacity: subscriptionCapacity(quota), processingBlocked: gate().reasons.filter(reason => reason in DEVICE_BLOCK_REASONS) });
     const researchReady = () => {
       const capacity = subscriptionCapacity(quota);
