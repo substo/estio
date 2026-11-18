@@ -8,6 +8,7 @@ import { StudioUploadForm } from "../../../_components/studio-upload-form";
 import { StudioUploads } from "../../../_components/studio-uploads";
 import { getStudioContentRecord } from "@/lib/studio/content";
 import { ContentRecordForm } from "../../../_components/content-record-form";
+import { getStudioScriptTemplateChoices } from "@/lib/studio/script-templates";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,10 @@ export default async function StudioContentRecordPage({ params }: { params: Prom
   if (!result) notFound();
   const { record, links, files, uploads } = result;
   const next = scriptNextAction(record, links);
-  const pendingUploads = await listPendingStudioUploads(locationId, recordId);
+  const [pendingUploads, templates] = await Promise.all([
+    listPendingStudioUploads(locationId, recordId),
+    getStudioScriptTemplateChoices(locationId, record.script_template_version_id),
+  ]);
   return (
     <main className="mx-auto max-w-4xl space-y-8 p-6 md:p-10">
       <header className="space-y-2"><nav className="flex gap-4 text-sm"><Link href={`/studio/content`} className="text-muted-foreground hover:underline">Content pipeline</Link><Link href={`/studio/library`} className="text-muted-foreground hover:underline">Research library</Link></nav><h1 className="text-3xl font-semibold tracking-tight">{record.title}</h1></header>
@@ -30,9 +34,11 @@ export default async function StudioContentRecordPage({ params }: { params: Prom
           <Link href={`/studio/records/${recordId}/links?kind=reference`} className="text-primary hover:underline">Choose research / optional reference videos</Link>
           <Link href="/studio/library" className="text-primary hover:underline">Browse or save another source</Link>
         </div> : null}
-        <p className="text-muted-foreground">Template choice is manual: record the template and its review decision in Production notes. Studio does not enforce an approved template here. For filming, include the final script, shot instructions, on-screen examples and any claims still needing verification.</p>
+        <p className="text-muted-foreground">For filming, include the final script, shot instructions, on-screen examples and any claims still needing verification.</p>
       </section>
-      <ContentRecordForm locationId={locationId} recordId={recordId} version={record.version} title={record.title} payload={record.payload} />
+      <ContentRecordForm key={`${recordId}:${record.version}`} locationId={locationId} recordId={recordId} version={record.version} title={record.title} payload={record.payload}
+        templateOptions={templates.options} pinnedTemplateId={record.script_template_version_id}
+        templateSelectionSaved={record.script_template_selected} canSelectTemplate={templates.canSelect && !record.archived} />
       {!record.archived ? <Link href={`/studio/records/${recordId}/extract`} className="mr-4 inline-block text-sm text-primary hover:underline">Extract knowledge from saved text</Link> : null}
       <Link href={`/studio/records/${recordId}/links`} className="inline-block text-sm text-primary hover:underline">Manage linked records</Link>
       {links.length ? <section className="space-y-2"><h2 className="font-medium">Linked research and content</h2><ul className="space-y-2 text-sm">{links.map((linked) => <li key={linked.id}><Link className="text-primary hover:underline" href={`/studio/${linked.kind === "content" ? "content" : "library"}/${linked.id}`}>{linked.title}</Link><span className="ml-2 text-muted-foreground">{linked.kind}</span></li>)}</ul></section> : null}

@@ -3,9 +3,15 @@
 import { useActionState, useState } from "react";
 import { CONTENT_LEVELS, CONTENT_STAGES } from "@/lib/studio/content-policy";
 import { saveContentAction } from "../(tenant)/content/actions";
+import { initialScriptTemplateSelection, type ScriptTemplateOption } from "@/lib/studio/script-template-policy";
+import { ScriptTemplateBeats } from "./script-template-beats";
+import Link from "next/link";
 
-export function ContentRecordForm({ locationId, recordId, version, title = "", payload = {} }: {
+export function ContentRecordForm({ locationId, recordId, version, title = "", payload = {}, templateOptions = [],
+  pinnedTemplateId, templateSelectionSaved, canSelectTemplate = false }: {
   locationId: string; recordId: string; version: number; title?: string; payload?: Record<string, unknown>;
+  templateOptions?: readonly ScriptTemplateOption[]; pinnedTemplateId?: string | null;
+  templateSelectionSaved?: boolean; canSelectTemplate?: boolean;
 }) {
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(
     ["title", "summary", "notes", "script"].map((field) => [field, field === "title" ? title : typeof payload[field] === "string" ? payload[field] as string : ""]),
@@ -15,6 +21,10 @@ export function ContentRecordForm({ locationId, recordId, version, title = "", p
   const [pillar, setPillar] = useState(payload.pillar == null ? "" : String(payload.pillar));
   const [approved, setApproved] = useState(payload.approved === true);
   const [archived, setArchived] = useState(payload.archived === true);
+  const [templateId, setTemplateId] = useState(() => canSelectTemplate
+    ? initialScriptTemplateSelection({ pinnedId: pinnedTemplateId, selectionSaved: templateSelectionSaved, script: payload.script, options: templateOptions })
+    : pinnedTemplateId ?? "unchanged");
+  const selectedTemplate = templateOptions.find(template => template.id === templateId);
   const [state, action, pending] = useActionState(saveContentAction.bind(null, locationId, recordId, version), {});
   const inputClass = "mt-1 w-full rounded-md border bg-background p-3 text-sm";
   return (
@@ -35,7 +45,24 @@ export function ContentRecordForm({ locationId, recordId, version, title = "", p
         </select></label>
       </div>
       {[{ name: "summary", label: "Idea summary", rows: 3 }, { name: "script", label: "Script", rows: 16 }, { name: "notes", label: "Production notes", rows: 6 }].map(({ name, label, rows }) => (
-        <label key={name} className="block text-sm font-medium">{label}<textarea name={name} rows={rows} value={values[name]} maxLength={name === "script" ? 100_000 : 20_000} onChange={(event) => setValues({ ...values, [name]: event.target.value })} className={inputClass} /></label>
+        <div key={name} className="space-y-3">
+          {name === "script" && (selectedTemplate || canSelectTemplate) ? <div className="space-y-2">
+            {canSelectTemplate && templateOptions.length ? <label className="block text-sm font-medium">
+              Script template
+              <select name="scriptTemplateVersion" value={templateId} onChange={event => setTemplateId(event.target.value)} className={inputClass}>
+                {templateId === "unchanged" ? <option value="unchanged">Choose a template (optional)</option> : null}
+                <option value="">No template</option>
+                {templateOptions.map(template => <option key={template.id} value={template.id}>{template.name} · v{template.version}</option>)}
+              </select>
+            </label> : canSelectTemplate ? <p className="text-sm text-muted-foreground">No approved templates yet. <Link className="text-primary hover:underline" href="/studio/content/templates">Browse script templates</Link></p> : null}
+            {selectedTemplate ? <details className="space-y-2">
+              <summary className="cursor-pointer text-sm font-medium">{canSelectTemplate ? "View template beats" : `${selectedTemplate.name} · v${selectedTemplate.version}`}</summary>
+              <p className="break-words text-sm text-muted-foreground">{selectedTemplate.purpose}</p>
+              <ScriptTemplateBeats beats={selectedTemplate.beats} />
+            </details> : null}
+          </div> : null}
+          <label className="block text-sm font-medium">{label}<textarea name={name} rows={rows} value={values[name]} maxLength={name === "script" ? 100_000 : 20_000} onChange={(event) => setValues({ ...values, [name]: event.target.value })} className={inputClass} /></label>
+        </div>
       ))}
       <input type="hidden" name="approvedPresent" value="1" /><input type="hidden" name="archivedPresent" value="1" />
       <div className="flex flex-wrap gap-5 text-sm">

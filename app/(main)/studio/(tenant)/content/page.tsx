@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { listStudioContent } from "@/lib/studio/content";
 import { CONTENT_STAGES, contentStageForDisplay, contentStageLabel, filterContentSummaries, readContentFilters } from "@/lib/studio/content-policy";
 import { ContentRecordForm } from "../../_components/content-record-form";
+import { getStudioScriptTemplateChoices } from "@/lib/studio/script-templates";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ export default async function StudioContentPage({ params, searchParams }: {
   const query = await searchParams;
   const filters = readContentFilters(query);
   const { search, showArchived, stage: selectedStage } = filters;
-  const result = await listStudioContent(locationId, showArchived);
+  const [result, templates] = await Promise.all([listStudioContent(locationId, showArchived), getStudioScriptTemplateChoices(locationId)]);
   if (!result) notFound();
   const records = filterContentSummaries(result.records, filters);
   const stages = selectedStage === "all" ? [...CONTENT_STAGES, "unclassified"] as const : [selectedStage];
@@ -26,6 +27,7 @@ export default async function StudioContentPage({ params, searchParams }: {
       <header className="space-y-2"><nav className="flex flex-wrap gap-4 text-sm"><Link href={root} className="text-muted-foreground hover:underline">{result.access.locationName}</Link><Link href={`${root}/library`} className="text-muted-foreground hover:underline">Research library</Link></nav><h1 className="text-3xl font-semibold tracking-tight">Content pipeline</h1><p className="text-muted-foreground">Develop ideas, write scripts, and move each piece through production to review.</p></header>
       <Link href={`${root}/content/idea-reviews`} className="inline-block text-sm text-primary hover:underline">Review saved ideas with AI</Link>
       <Link href={`${root}/content/script-briefs`} className="ml-4 inline-block text-sm text-primary hover:underline">Recent script briefs</Link>
+      <Link href={`${root}/content/templates`} className="ml-4 inline-block text-sm text-primary hover:underline">Script templates</Link>
       <form key={JSON.stringify(filters)} method="get" className="flex flex-wrap items-end gap-4 rounded-lg border p-4" aria-label="Content pipeline filters">
         <label className="flex-1 text-sm font-medium">Search titles and summaries<input type="search" name="q" defaultValue={search} maxLength={200} className="mt-1 w-full rounded-md border bg-background px-3 py-2" /></label>
         <label className="text-sm font-medium">Stage<select name="stage" defaultValue={selectedStage} className="mt-1 block rounded-md border bg-background px-3 py-2">
@@ -51,7 +53,9 @@ export default async function StudioContentPage({ params, searchParams }: {
           </section>;
         })}
       </div>
-      <details open={result.records.length === 0} className="max-w-4xl space-y-4"><summary className="cursor-pointer text-xl font-medium">Add an idea or content piece</summary><ContentRecordForm locationId={locationId} recordId={randomUUID()} version={0} /></details>
+      <details open={result.records.length === 0} className="max-w-4xl space-y-4"><summary className="cursor-pointer text-xl font-medium">Add an idea or content piece</summary>
+        <ContentRecordForm locationId={locationId} recordId={randomUUID()} version={0} templateOptions={templates.options} canSelectTemplate={templates.canSelect} />
+      </details>
     </main>
   );
 }
