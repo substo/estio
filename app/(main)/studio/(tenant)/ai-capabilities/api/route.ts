@@ -15,9 +15,11 @@ export const GET = withStudioRoute(async (request, { params }) => {
     report: Record<string, unknown>; desired_config: StudioDeviceConfig; config_version: number; applied_config_version: number; config_status: string }>(Prisma.sql`
     select paused,processing_enabled,allowed_kinds,seen_at,report,desired_config,config_version,applied_config_version,config_status
     from studio.studio_devices where location_id=${access.locationId} and app=${access.app} and created_by=${access.userId} and revoked_at is null order by seen_at desc nulls last limit 20`);
-  const needsOutline = new URL(request.url).searchParams.get("workflow") === "knowledge_outline";
+  const workflow = new URL(request.url).searchParams.get("workflow");
   const devices = rows.map(d => {
-    if (needsOutline && d.report?.knowledgeOutlineVersion !== 2)
+    if (workflow === "video_template" && d.report?.videoTemplateVersion !== 1)
+      return { ready: false, reason: "Update and restart the Studio companion for video template extraction." };
+    if (workflow === "knowledge_outline" && d.report?.knowledgeOutlineVersion !== 2)
       return { ready: false, reason: "Update and restart the Studio companion for full-source extraction." };
     try { return deviceTextReadiness({ revoked: false, paused: d.paused, processingEnabled: d.processing_enabled, allowedKinds: d.allowed_kinds,
       seenAt: d.seen_at, capabilities: safeDeviceCapabilities(d.report), config: readDeviceConfig(d.desired_config),

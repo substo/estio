@@ -97,3 +97,23 @@ test("outline batches use the new prompt on the same subscription transport", as
   { output, model: "test-model", provider: "codex" });
  assert.equal(executions, 1);
 });
+
+test("video template subscription uses its prompt and returns a review with exact quotes", async () => {
+ const timed = { ...snapshot, mode: "script_template", units: [{ ...snapshot.units[0], startSeconds: 5, endSeconds: 9, evidenceType: "speech" }] };
+ const output = { name: "Prove the outcome", purpose: "Show a result early", limitations: ["Only speech available"],
+  beats: [{ name: "State the result", guidance: "Name the result in one sentence", rationale: "The speaker gives a concrete opening",
+    citations: [{ unitId: "u1", quote: "exact quote" }] }] };
+ let calls = 0;
+ const run = handler(() => adapter(async request => {
+   calls++;
+   assert.equal(request.workflowContext, "video_template");
+   assert.equal(request.webSearch, undefined);
+   assert.match(request.prompt, /on-screen words only/i);
+   assert.match(request.prompt, /"startSeconds":5/);
+   return request.validate(output);
+ }));
+ const queued = { ...job, payload: { ...job.payload, snapshot: timed, promptVersion: "studio.video-template.v1" } };
+ await assert.rejects(run({ ...queued, payload: { ...queued.payload, promptVersion: "studio.knowledge-extract.v2" } }, context), /Update the companion/);
+ assert.deepEqual(await run(queued, context), { output, provider: "codex", model: "test-model" });
+ assert.equal(calls, 1);
+});

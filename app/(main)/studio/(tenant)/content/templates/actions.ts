@@ -7,6 +7,8 @@ import { StudioDbError } from "@/lib/studio/db";
 import { readScriptTemplateDraft } from "@/lib/studio/script-template-policy";
 import { approveStudioScriptTemplate, proposeStudioScriptTemplate } from "@/lib/studio/script-templates";
 
+import { saveVideoTemplateDraft } from "@/lib/studio/video-template";
+
 const path = "/studio/content/templates";
 
 function commandError(error: unknown) {
@@ -25,6 +27,22 @@ export async function proposeScriptTemplateAction(locationId: string, templateId
   catch (error) { return { error: error instanceof Error ? error.message : "Check the template fields." }; }
   try { await proposeStudioScriptTemplate(locationId, templateId, id, version, draft); }
   catch (error) { return { error: commandError(error) }; }
+  revalidatePath(path);
+  redirect(`${path}/${templateId}`);
+}
+
+export async function saveExtractedScriptTemplateAction(locationId: string, reviewId: string, templateId: string, id: string,
+  _state: { error?: string }, form: FormData): Promise<{ error?: string }> {
+  let draft;
+  try { draft = readScriptTemplateDraft(form); }
+  catch (error) { return { error: error instanceof Error ? error.message : "Check the template fields." }; }
+  try { await saveVideoTemplateDraft(locationId, reviewId, templateId, id, draft); }
+  catch (error) {
+    if (error instanceof StudioDbError && error.status === 409) {
+      return { error: "This extraction changed, its evidence is out of date, or a draft was already saved. Reload the review before continuing." };
+    }
+    return { error: commandError(error) };
+  }
   revalidatePath(path);
   redirect(`${path}/${templateId}`);
 }

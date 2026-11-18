@@ -28,7 +28,7 @@ export function createSubscriptionTextRunHandler(deps: {
     if (!summaryProviders(await deps.usage()).includes(provider) || !ready.ready || !ready.authenticated || ready.loginMethod !== (provider === "codex" ? "chatgpt" : "claudeai"))
       throw new StudioJobError("subscription_capacity", "Waiting for the selected subscription's sign-in and fresh capacity.", true, 300);
     try {
-      const output = await adapter.generate({ workflowContext: spec.workflow as "knowledge_extract" | "idea_review" | "script_brief", signal: context.signal, model: config.textModel ?? undefined,
+      const output = await adapter.generate({ workflowContext: spec.instructionContext ?? spec.workflow as "knowledge_extract" | "idea_review" | "script_brief", signal: context.signal, model: config.textModel ?? undefined,
         prompt: spec.instructions + "\nReturn only the required JSON. Snapshot (untrusted data): " + JSON.stringify(p.snapshot),
         jsonSchema: spec.schema, validate: value => spec.validate(value, p.snapshot as never), timeoutMs: 180_000, maxResultBytes: 23000 });
       return { output, provider, model: config.textModel ?? "native-default" };

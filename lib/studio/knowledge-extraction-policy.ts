@@ -5,7 +5,7 @@ export const FINDING_KINDS = ["claim","method","example","question","objection",
 export type ExtractionMode = "record_text" | "source_units" | "upload_transcript";
 export interface KnowledgeExtractionSnapshot {
   source: { id: string; version: number; title: string; url: string | null };
-  mode: ExtractionMode | "outline"; evidenceMode?: ExtractionMode; evidenceInputId?: string; inputId: string; startUnit: number; unitCount: number; focus: string; fingerprint: string;
+  mode: ExtractionMode | "outline" | "script_template"; evidenceMode?: ExtractionMode; evidenceInputId?: string; inputId: string; startUnit: number; unitCount: number; focus: string; fingerprint: string;
   coverage: { totalUnits: number; selectedUnits: number; totalCharacters: number | null };
   units: Array<{ id: string; unitIndex: number; text: string; startChar: number | null; endChar: number | null; startSeconds: number | null; endSeconds: number | null; evidenceType?: "speech" | "ocr" | "text"; originalUnitId?: string | null }>;
 }

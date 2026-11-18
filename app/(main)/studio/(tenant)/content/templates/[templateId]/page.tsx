@@ -36,12 +36,14 @@ export default async function StudioScriptTemplatePage({ params, searchParams }:
   const result = await getStudioScriptTemplate(locationId, templateId);
   if (!result) notFound();
   const [latest, ...history] = result.versions;
+  const sourceReview = result.versions.find(version => version.source_review_id)?.source_review_id;
   return <main className="mx-auto max-w-3xl space-y-6 p-6 md:p-10">
     <header className="space-y-3">{back}<h1 className="break-words text-3xl font-semibold">{latest.name}</h1>
       <p className="break-words text-muted-foreground">{latest.purpose}</p>
       <p className="text-sm">{latest.approved_at ? "Approved" : "Draft awaiting approval"} · v{latest.version}</p>
     </header>
     <ScriptTemplateBeats beats={latest.beats} />
+    {sourceReview ? <Link className="block text-sm text-primary underline" href={`${path}/from-video/${sourceReview}`}>Review original video extraction and citations</Link> : null}
     {result.canApprove && !latest.approved_at ? <ApproveScriptTemplateForm
       action={approveScriptTemplateAction.bind(null, locationId, templateId, latest.id)} version={latest.version} /> : null}
     {result.canEdit ? <details className="space-y-4 rounded-lg border p-4">

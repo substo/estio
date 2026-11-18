@@ -41,6 +41,7 @@ export default async function StudioLibraryRecordPage({ params }: { params: Prom
         <h2 className="font-medium">Develop this source into content</h2>
         <p>{value('transcript').trim() ? "Transcript saved. Check it against the original before using its claims." : "No transcript saved on this source. Add a verbatim transcript through Edit; a URL or description does not establish the video's contents."}</p>
         <div className="flex flex-wrap gap-4">
+          {canonicalYoutubeVideo(view.url) ? <Link href={`/studio/library/${recordId}/template`} className="text-primary hover:underline">Extract script template</Link> : null}
           <a href="#edit-source" className="text-primary hover:underline">Go to source editor</a>
           {latestOutline ? <Link href={`/studio/knowledge/extractions/${latestOutline.id}`} className="text-primary hover:underline">Open knowledge review</Link>
             : <Link href={`/studio/records/${recordId}/extract`} className="text-primary hover:underline">Extract knowledge</Link>}

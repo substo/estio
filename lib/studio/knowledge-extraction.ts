@@ -50,7 +50,7 @@ export async function getKnowledgeExtraction(locationId:string,reviewId:string){
  const access=await getStudioAccess(locationId);if(!access||!reviewUuid.test(reviewId))return null;
  const review=await studioDb.one<StudioTextRun<KnowledgeExtractionResult,KnowledgeExtractionSnapshot>>(Prisma.sql`
   select id,job_id,model,prompt_version,snapshot,result,created_at,completed_at,stale_at_completion
-  from studio.studio_idea_reviews where location_id=${access.locationId} and id=${reviewId}::uuid and workflow='knowledge_extract'`);
+  from studio.studio_idea_reviews where location_id=${access.locationId} and id=${reviewId}::uuid and workflow='knowledge_extract' and snapshot->>'mode' is distinct from 'script_template'`);
  if(!review)return null;
  const [state,jobs]=await Promise.all([
   studioDb.call<ExtractionState>("studio_knowledge_extraction_state",{p_location_id:access.locationId,p_actor_app:access.app,p_clerk_user_id:access.userId,p_review_id:reviewId}),
@@ -89,6 +89,6 @@ export async function listKnowledgeExtractions(locationId: string) {
       union all
       select id, snapshot#>>'{source,title}' as title, created_at, false as outline
       from studio.studio_idea_reviews where location_id=${access.locationId} and workflow='knowledge_extract'
-        and snapshot->>'mode' is distinct from 'outline'
+        and snapshot->>'mode' is distinct from 'outline' and snapshot->>'mode' is distinct from 'script_template'
     ) history order by created_at desc,id limit 30`);
 }

@@ -9,6 +9,7 @@ Shared by Estio and Substo. **2026-11-18 local candidate, not deployed.** The se
 | Library summary | Requesting Account's paired Mac, Codex/ChatGPT or Claude/claude.ai | **Unsupported** | Saved description/transcript only; no automatic captions, video watching, vision or browsing. Candidate honors Setup's selected provider/model and records actual result metadata. |
 | Knowledge extraction | **Candidate:** requesting Account's paired Mac, selected Codex or Claude | Location OpenAI key, existing structured Responses adapter | Full selected input in bounded text batches with an updated companion; saved speech/OCR citations and one topic review; explicit **Approve selected** uses existing Knowledge approval. Historical range reviews retain pending application. |
 | Idea review | **Candidate:** same Mac text route | Location OpenAI key | Selected ideas and bounded linked-source excerpts; advisory scores/recommendation; no edits/approval/publishing. |
+| Video template extraction | Requesting Account’s ready paired Mac with `videoTemplateVersion: 1` | Location OpenAI key, one standard text reservation | Saved YouTube speech timestamps and available OCR text, sampled when needed. Exact quoted citations and editable, separately approved writing guidance. |
 | Script brief | **Candidate:** same Mac text route | Location OpenAI key | Exactly one idea with saved evidence; citations/verification flags; separate version-fenced apply replaces the reviewed draft. |
 | Business onboarding research | Existing paired-Mac Codex/Claude capacity selection; existing eligible hosted Location ChatGPT route | Existing OpenAI search route; Gemini reads fetched pages without search | Mac research is separate from Setup's text-provider preference. Research suggestions still need owner confirmation. |
 | Onboarding typed-answer mapping | Existing **hosted Location ChatGPT** only; **paired Mac unsupported** | Existing OpenAI/Gemini server routes | With Mac only, single text fields can save typed text; structured/multiple fields need direct profile editing. No new asynchronous answer/apply contract is added. |
@@ -48,7 +49,7 @@ Job kind `studio.video_transcribe`, handler advertised by companion `studio-comp
 
 ## Runtime instructions: what actually reaches the AI
 
-The executable source is [`lib/ai/workflow-capabilities.ts`](../lib/ai/workflow-capabilities.ts), contract version `ai-workflows.2026-11-18.v2`. It is imported into the build; production does not need `documentation/`, which deployment excludes. This document is for people/contributors and is **not automatically read by a model**.
+The executable source is [`lib/ai/workflow-capabilities.ts`](../lib/ai/workflow-capabilities.ts), contract version `ai-workflows.2026-11-18.v3`. It is imported into the build; production does not need `documentation/`, which deployment excludes. This document is for people/contributors and is **not automatically read by a model**.
 
 Bounded operation-relevant instructions are explicitly prepended at:
 

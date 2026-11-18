@@ -8,6 +8,7 @@ import { studioDb } from "./studio-db";
 
 type TemplateVersion = ScriptTemplateOption & {
   approved_at: string | null;
+  source_review_id?: string | null;
 };
 
 type TemplateSummary = Omit<TemplateVersion, "beats"> & {
@@ -36,7 +37,7 @@ export async function getStudioScriptTemplate(locationId: string, templateId: st
   const [access, state] = await Promise.all([getStudioAccess(locationId), auth()]);
   if (!access || !SCRIPT_TEMPLATE_UUID.test(templateId)) return null;
   const versions = await studioDb.rows<TemplateVersion>(Prisma.sql`
-    SELECT id, version, name, purpose, beats, approved_at
+    SELECT id, version, name, purpose, beats, approved_at, source_review_id
     FROM studio.studio_script_template_versions
     WHERE location_id = ${access.locationId} AND template_id = ${templateId}::uuid
     ORDER BY version DESC`);
