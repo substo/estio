@@ -8,6 +8,7 @@ DECLARE
   transcript text; segments jsonb; snapshot jsonb; cmd jsonb; run jsonb; paid jsonb; claimed jsonb; completion jsonb;
   device uuid; review uuid; job uuid; lease uuid; attempt uuid; usage uuid;
   digest text := repeat('e',64); template uuid := gen_random_uuid(); draft uuid := gen_random_uuid();
+  content_id uuid := gen_random_uuid(); next_version uuid := gen_random_uuid();
   proposal jsonb; edited_beats jsonb := '[{"name":"Edited opening","guidance":"State the viewer outcome."}]';
 BEGIN
   SELECT v.record_id,v.id INTO STRICT mac_source,mac_transcription FROM studio.studio_video_transcriptions v
@@ -101,6 +102,15 @@ BEGIN
     RAISE EXCEPTION 'Member approved template';
   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   PERFORM studio.studio_approve_script_template(loc,'substo',actor,template,draft);
+  PERFORM studio.studio_save_content_template_selection(loc,'substo','vt-template-member',content_id,'Pinned script','{"script":"Keep this script"}',0,draft);
+  PERFORM studio.studio_propose_script_template(loc,'substo','vt-template-member',template,next_version,1,'Revised example','General purpose',edited_beats);
+  PERFORM studio.studio_approve_script_template(loc,'substo',actor,template,next_version);
+  snapshot:=studio.studio_script_template_snapshot(loc,content_id);
+  IF snapshot->>'versionId' IS DISTINCT FROM draft::text OR snapshot->>'version' IS DISTINCT FROM '1'
+    OR snapshot->'beats' IS DISTINCT FROM edited_beats OR snapshot ? 'sourceReviewId'
+    OR (SELECT payload->>'script' FROM studio.studio_records WHERE id=content_id) IS DISTINCT FROM 'Keep this script'
+    THEN RAISE EXCEPTION 'A later approval changed the pinned video template or script: %',snapshot; END IF;
+
 
   cmd:=cmd||jsonb_build_object('requestId',gen_random_uuid(),'provider','openai','confirmSubscription',false);
   BEGIN
