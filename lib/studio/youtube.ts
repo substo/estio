@@ -167,8 +167,9 @@ export async function readStudioRelatedYoutube(locationId: string, input: { anch
     description: video.description ? youtubeDescriptionPreview(video.description) : undefined, score: video.score ?? null, reason: video.reason ?? "", band: video.band ?? "unranked",
     ticket: seal(access, anchor.id, video.id, provider, state.query) }));
   const base = state.result.trace;
+  const fullCandidates = cards.map(card => ({ id: card.id, title: card.title, channel: card.channelTitle || undefined, score: card.score, reason: card.reason || undefined, band: card.band }));
   const trace: RelatedTrace = base
-    ? { ...base, ...(base.mode === "rank" ? { queries: [{ query: state.query, by: "heuristic" as const, found: videos.length }] } : {}) }
+    ? { ...base, candidates: fullCandidates, ...(base.mode === "rank" ? { queries: [{ query: state.query, by: "heuristic" as const, found: videos.length }] } : {}) }
     : { version: 1, route, mode: "search", queries: [{ query: state.query, by: "heuristic", found: videos.length }],
         notes: [state.egress ? "Searched through the connected device network. Relevance was not checked: the models run on your Mac." : "Plain search."],
         candidates: videos.map(video => ({ id: video.id, title: video.title, channel: video.channelTitle, score: null, reason: "", band: "unranked" as const })) };

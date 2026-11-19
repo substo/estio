@@ -54,20 +54,29 @@ export const relatedTraceSchema = z.object({
   version: z.literal(1), route: z.enum(["mac_browser", "device_network", "api"]), mode: relatedModeSchema.or(z.literal("heuristic")),
   focus: z.string().max(300).optional(), queries: z.array(z.object({ query: z.string().max(160), by: z.enum(["model", "heuristic", "user"]), found: z.number().int().min(0).max(50) }).strict()).max(6),
   planner: traceStepSchema.optional(), ranker: traceStepSchema.optional(), notes: z.array(z.string().max(200)).max(6).optional(),
-  candidates: z.array(z.object({ id: z.string().max(11), title: z.string().max(300), channel: z.string().max(200).optional(), score: z.number().nullable(), reason: z.string().max(240), band: z.enum(["relevant", "maybe", "off_topic", "unranked"]) }).strict()).max(24),
+  /** The Mac sends only id, score and band (the titles and reasons travel once, in `videos`); the server fills the rest when it stores the run. */
+  candidates: z.array(z.object({ id: z.string().max(11), title: z.string().max(300).optional(), channel: z.string().max(200).optional(), score: z.number().nullable(), reason: z.string().max(240).optional(), band: z.enum(["relevant", "maybe", "off_topic", "unranked"]) }).strict()).max(24),
 }).strict();
 export type RelatedTrace = z.infer<typeof relatedTraceSchema>;
 export const relatedResultSchema = macSearchResultSchema.extend({ trace: relatedTraceSchema.optional() }).strict();
 export type RelatedResult = z.infer<typeof relatedResultSchema>;
 
-/** The Mac's complete() body is capped at 32 KB: shrink the prompts first so scores and reasons always survive. */
-export function fitResultSize<T extends { trace?: RelatedTrace }>(result: T, maxBytes = 26000): T {
+/** The Mac's complete() body is capped at 32 KB (the server accepts 30 KB of result). Shrink in stages so scores and ordering always survive:
+ * prompts first, then video descriptions, then reasons, then the lowest-ranked videos. */
+export function fitResultSize<T extends { videos: Array<{ description?: string; reason?: string; id: string }>; trace?: RelatedTrace }>(result: T, maxBytes = 26000): T {
   const size = () => Buffer.byteLength(JSON.stringify(result));
+  if (size() <= maxBytes) return result;
   const trace = result.trace;
-  if (!trace || size() <= maxBytes) return result;
   for (const key of ["planner", "ranker"] as const) {
-    const step = trace[key];
+    const step = trace?.[key];
     if (step && size() > maxBytes) step.prompt = `${step.prompt.slice(0, Math.max(600, step.prompt.length - (size() - maxBytes) - 40))}…[prompt shortened to fit]`;
+  }
+  if (size() > maxBytes) for (const video of result.videos) delete video.description;
+  if (size() > maxBytes) for (const video of result.videos) if (video.reason) video.reason = video.reason.slice(0, 100);
+  while (size() > maxBytes && result.videos.length > 8) {
+    const dropped = result.videos.pop()!;
+    if (trace) trace.candidates = trace.candidates.filter(candidate => candidate.id !== dropped.id);
+    if (trace) trace.notes = [...(trace.notes ?? []).filter(note => !note.startsWith("Some lower-ranked")), "Some lower-ranked videos were left out to fit the Mac's reply limit."].slice(0, 6);
   }
   return result;
 }

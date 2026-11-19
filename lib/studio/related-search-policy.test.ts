@@ -33,5 +33,5 @@ test("an oversize trace sheds prompt text before scores and reasons", () => {
     candidates: Array.from({ length: 12 }, (_, i) => ({ id: String(i).padStart(11, "a"), title: "t".repeat(200), score: 50, reason: "r".repeat(200), band: "maybe" as const })) });
   const fitted = fitResultSize({ videos: [], trace }, 20000);
   assert.ok(Buffer.byteLength(JSON.stringify(fitted)) <= 20000); assert.equal(fitted.trace!.candidates.length, 12); assert.match(fitted.trace!.planner!.prompt, /shortened/);
-  assert.ok(fitted.trace!.candidates.every(c => c.reason.length === 200));
+  assert.ok(fitted.trace!.candidates.every(c => c.reason?.length === 200));
 });

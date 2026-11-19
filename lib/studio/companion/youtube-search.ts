@@ -76,17 +76,32 @@ async function pickModel(models: RelatedModelDeps, signal: AbortSignal): Promise
   return { reason: reasons.join("; ") };
 }
 type Picked = { provider: LocalProvider; adapter: LocalTextAdapter; model: string | undefined };
+/** Keep the start of a prompt (instructions + source) and say that the rest was cut, so the stored trace never exceeds its limits. */
+const clipForTrace = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 40)}…[prompt shortened for the log]`);
 async function modelStep<T>(picked: Picked, signal: AbortSignal, prompt: string, schema: z.ZodType<T>, jsonSchema: Record<string, unknown>) {
   const started = Date.now();
   const value = await picked.adapter.generate({ workflowContext: "related_video_search", signal, model: picked.model, prompt, jsonSchema, validate: v => schema.parse(v), timeoutMs: 120_000, maxResultBytes: 8192 });
-  return { value, step: { provider: picked.provider, model: picked.model ?? "native-default", prompt: CONTRACT_NOTE + prompt, response: JSON.stringify(value).slice(0, 3000), ms: Date.now() - started } };
+  return { value, step: { provider: picked.provider, model: picked.model ?? "native-default", prompt: clipForTrace(CONTRACT_NOTE + prompt, 8900), response: JSON.stringify(value).slice(0, 3000), ms: Date.now() - started } };
 }
 const toVideo = (c: RankedCandidate | MacVideo): MacVideo => macVideoSchema.parse(Object.fromEntries(Object.entries({
-  id: c.id, title: c.title, channelId: c.channelId, channelTitle: c.channelTitle, publishedText: c.publishedText, viewsText: c.viewsText, description: c.description,
+  id: c.id, title: c.title.slice(0, 200), channelId: c.channelId, channelTitle: c.channelTitle?.slice(0, 80), publishedText: c.publishedText, viewsText: c.viewsText, description: c.description?.slice(0, 200),
   ...("score" in c ? { score: c.score, reason: c.reason, band: c.band } : {}) }).filter(([, v]) => v !== undefined)));
 
 /** Search (and, when asked, plan and rank) in the Mac's own browser and subscription. Model steps degrade to an unranked result with a note; they never fail the search. */
 export function createYoutubeSearchHandler(deps: { browser: () => Promise<YoutubeBrowser | null>; enabled: () => boolean; models?: RelatedModelDeps }): StudioJobHandler {
+  const inner = createRelatedHandler(deps);
+  return async (job, context) => {
+    try { return await inner(job, context); }
+    catch (error) {
+      if (error instanceof StudioJobError || context.signal.aborted) throw error;
+      // Never surface a bare "unexpected error": say where it happened (field paths only, no data) and do not retry.
+      const where = error instanceof z.ZodError ? error.issues.slice(0, 3).map(issue => `${issue.path.join(".") || "result"}: ${issue.code}`).join("; ") : (error instanceof Error ? error.name : "unknown");
+      throw new StudioJobError("related_internal_error", `Related search hit an internal error (${where}). It was not retried.`, false);
+    }
+  };
+}
+
+function createRelatedHandler(deps: { browser: () => Promise<YoutubeBrowser | null>; enabled: () => boolean; models?: RelatedModelDeps }): StudioJobHandler {
   return async (job, context) => {
     if (!deps.enabled()) throw new StudioJobError("local_policy", "Waiting for the computer's processing settings.", true, 300);
     const payload = relatedPayloadSchema.parse(job.payload);
@@ -147,8 +162,8 @@ export function createYoutubeSearchHandler(deps: { browser: () => Promise<Youtub
 
     function finish(ranked: RankedCandidate[], parts: Omit<RelatedTrace, "version" | "candidates">, signedIn?: boolean, keepOrder = false) {
       const ordered = keepOrder ? ranked : ranked;
-      const trace: RelatedTrace = relatedTraceSchema.parse({ version: 1, ...parts, notes: parts.notes?.length ? parts.notes : undefined,
-        candidates: ordered.map(c => ({ id: c.id, title: c.title, channel: c.channelTitle, score: c.score, reason: c.reason, band: c.band })) });
+      const trace: RelatedTrace = relatedTraceSchema.parse({ version: 1, ...parts, notes: parts.notes?.length ? parts.notes.slice(0, 6).map(note => note.slice(0, 200)) : undefined,
+        candidates: ordered.map(c => ({ id: c.id, score: c.score, band: c.band })) });
       return fitResultSize(relatedResultSchema.parse({ videos: ordered.map(toVideo), ...(signedIn === undefined ? {} : { signedIn }), trace }));
     }
   };

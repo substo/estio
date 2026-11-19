@@ -72,3 +72,25 @@ test("when no model is usable the log says exactly why", async () => {
   assert.match((await run(mk(usage, false), payload)).trace.notes!.join(" "), /not ready or not signed in/);
   assert.match((await run(mk(usage, "throws"), payload)).trace.notes!.join(" "), /readiness check failed/);
 });
+
+test("a realistically large source, context and candidate pool never crashes the run and always fits the Mac's reply limit", async () => {
+  const big = { kind: "reference" as const, title: "T".repeat(300), summary: "word ".repeat(400).slice(0, 2000) };
+  const bigContext = { approvedTitles: Array.from({ length: 15 }, (_, i) => `Library source title number ${i} `.padEnd(120, "x")), pinnedKnowledge: Array.from({ length: 10 }, (_, i) => `Pinned insight ${i} `.padEnd(200, "y")),
+    profile: { summary: "s".repeat(300), tagline: "t".repeat(300), offer: "o".repeat(300), audience: "a".repeat(300) } };
+  const mkVideo = (i: number) => ({ id: `v${String(i).padStart(10, "0")}`, title: `Candidate ${i} `.padEnd(300, "z"), channelTitle: "c".repeat(200), publishedText: "2 years ago", viewsText: "1,234,567 views", description: "d".repeat(400) });
+  const pool = Array.from({ length: 18 }, (_, i) => mkVideo(i));
+  const seen: string[] = []; const byQuery: Record<string, ReturnType<typeof mkVideo>[]> = { "q one": pool.slice(0, 9), "q two": pool.slice(9) };
+  const result = await run({ enabled: () => true, browser: browser(byQuery as never, seen), models: model({ plan: { queries: ["q one", "q two"], focus: "f".repeat(300) },
+    rank: { rankings: pool.map((p, i) => ({ id: p.id, score: 90 - i, reason: "r".repeat(240) })) } }) }, { query: "k", limit: 12, mode: "plan_search_rank", source: big, context: bigContext });
+  assert.equal(result.videos.length, 18); assert.ok(Buffer.byteLength(JSON.stringify(result)) <= 26000, `result is ${Buffer.byteLength(JSON.stringify(result))} bytes`);
+  assert.ok(result.trace.planner!.prompt.length <= 9000 && result.trace.ranker!.prompt.length <= 9000); assert.equal(result.videos[0].band, "relevant");
+});
+test("a long 'no model' reason is shortened to fit the trace instead of crashing", async () => {
+  const longReason = { enabled: () => true, browser: browser({ k: [v(ids.a, "A")] }), models: { adapter: () => { throw new Error("x"); }, usage: (async () => ({ codex: reading(1) })) as never, config: () => ({ ...defaultDeviceConfig, textProvider: "codex" as const }) } };
+  const result = await run(longReason, { query: "k", limit: 6, mode: "plan_search_rank", source, context });
+  assert.ok(result.trace.notes!.every(n => n.length <= 200)); assert.equal(result.videos[0].band, "unranked");
+});
+test("any unexpected internal error is reported as a plain, non-retried failure with where it happened", async () => {
+  const handler = createYoutubeSearchHandler({ enabled: () => true, browser: async () => ({ search: async () => ({ videos: [{ id: "bad", title: "x" } as never] }) }) });
+  await assert.rejects(handler(job({ query: "k", limit: 6 }), ctx()), (e: unknown) => e instanceof StudioJobError && e.code === "related_internal_error" && !e.retryable && /internal error \(id: invalid_string/.test(e.message));
+});
