@@ -5,11 +5,14 @@ import { OutlineTopics, RefreshKnowledgeOutline, TranscriptPassage } from "./out
 
 const pageSize = 24;
 
-export function KnowledgeOutlineDetail({ outline, query, embedded = false }: {
-  outline: KnowledgeOutline; query: { passage?: string; transcript?: string }; embedded?: boolean;
+export function KnowledgeOutlineDetail({ outline, query, embedded = false, framesFailed = false }: {
+  outline: KnowledgeOutline; query: { passage?: string; transcript?: string }; embedded?: boolean; framesFailed?: boolean;
 }) {
   const { batches, annotations } = outline;
-  const { topics, units, covered, duplicates } = buildKnowledgeOutline(batches);
+  const { topics, units, covered, duplicates, allTakeaways, featured } = buildKnowledgeOutline(batches);
+  const speech = units.filter(unit => unit.evidenceType === "speech").length;
+  const ocr = units.filter(unit => unit.evidenceType === "ocr").length;
+  const other = units.length - speech - ocr;
   const source = batches[0]?.snapshot.source;
   const url = safeStudioSourceUrl(source?.url);
   const waiting = batches.some(batch => ["queued", "running"].includes(batch.status) && !batch.result);
@@ -33,7 +36,9 @@ export function KnowledgeOutlineDetail({ outline, query, embedded = false }: {
     <section aria-label="Processing coverage" className="space-y-2 text-sm">
       <p role="status"><strong>{complete ? "Reading complete" : waiting ? "Reading source" : "Extraction incomplete"}</strong>
         {" · "}{covered} of {units.length} evidence passages processed · {batches.filter(batch => batch.result).length} of {batches.length} batches</p>
-      {duplicates ? <p className="text-muted-foreground">{duplicates} exact {duplicates === 1 ? "duplicate combined" : "duplicates combined"}. Distinct citations are shown with the takeaway.</p> : null}
+      {units.length ? <p className="text-muted-foreground">{speech} speech · {ocr} on-screen text{other ? ` · ${other} saved text` : ""}
+        {framesFailed ? " · Frame processing failed" : null}</p> : null}
+      {duplicates ? <p className="text-muted-foreground">{duplicates} {duplicates === 1 ? "duplicate combined" : "duplicates combined"}. Distinct citations are shown with the takeaway.</p> : null}
       {waiting ? <RefreshKnowledgeOutline /> : null}
       {batches.length ? <details>
         <summary className="cursor-pointer text-muted-foreground">Processing details</summary>
@@ -47,7 +52,9 @@ export function KnowledgeOutlineDetail({ outline, query, embedded = false }: {
       </div> : null}
       {stale ? <p role="status" className="rounded-md border p-3">The source changed. Start a new extraction for the current evidence. This review keeps its original evidence and notes.</p> : null}
     </section>
-    {covered ? <OutlineTopics outlineId={outline.id} topics={topics} annotations={annotations} canApprove={complete && !stale} /> : null}
+    {covered ? <OutlineTopics key={outline.id} outlineId={outline.id} sourceId={outline.sourceId} topics={topics}
+      allTakeaways={allTakeaways} featured={featured} curated={batches.some(batch => batch.snapshot.curationVersion === 1)}
+      annotations={annotations} initialTriage={outline.triage ?? {}} canApprove={complete && !stale} /> : null}
     {units.length ? <details id="transcript" open={query.passage !== undefined || query.transcript !== undefined}
       className="space-y-3 rounded-xl border p-4 sm:p-5">
       <summary className="cursor-pointer font-semibold">{isSavedNotes ? "Read saved evidence" : "Read transcript and source evidence"}</summary>

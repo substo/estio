@@ -25,9 +25,15 @@ export function readKnowledgeOutlineCommand(body: Record<string, unknown>) {
       return invalid("Choose saved evidence and authorize its processing.");
     }
     return { action: "enqueueOutline" as const, requestId, sourceId, expectedVersion: Number(body.expectedVersion),
-      mode, inputId, provider, confirmPaid: provider === "openai", confirmSubscription: provider === "subscription" };
+      mode, inputId, curationVersion: 1, provider, confirmPaid: provider === "openai", confirmSubscription: provider === "subscription" };
   }
   const outlineId = readId(body.outlineId);
+  if (body.action === "triage") {
+    const { nodeKey, state } = body;
+    if (typeof nodeKey !== "string" || !/^finding:[a-f0-9-]{36}:[0-9]$/.test(nodeKey) ||
+      (state !== "kept" && state !== "hidden" && state !== "clear")) return invalid("Choose a takeaway to review.");
+    return { action: "triage" as const, requestId, outlineId, nodeKey, state };
+  }
   if (body.action === "annotate") {
     const { nodeKey, note, title, summary, expectedVersion } = body;
     if (typeof nodeKey !== "string" || !nodeKey || new TextEncoder().encode(nodeKey).byteLength > 6000
@@ -39,14 +45,26 @@ export function readKnowledgeOutlineCommand(body: Record<string, unknown>) {
     return { action: "annotate" as const, requestId, outlineId, expectedVersion: Number(expectedVersion), nodeKey,
       note: note.trim(), title: title.trim(), summary: summary.trim() };
   }
-  if (body.action !== "approve" || body.confirmApproval !== true || !Array.isArray(body.selections)
-    || body.selections.length < 1 || body.selections.length > 50) return invalid("Select up to 50 takeaways to approve.");
+  if (body.action !== "approve" || body.confirmApproval !== true) return invalid("Confirm which takeaways to approve.");
+  const { selections } = readFindingReferences(body);
+  return { action: "approve" as const, requestId, outlineId, selections, confirmApproval: true };
+}
+
+export type FindingSelection = { outlineId: string; selections: Array<{ reviewId: string; index: number }> };
+
+export function readFindingReferences(value: unknown): FindingSelection {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return invalid("Select takeaways from this review.");
+  const body = value as Record<string, unknown>;
+  const outlineId = readId(body.outlineId);
+  if (!Array.isArray(body.selections) || body.selections.length < 1 || body.selections.length > 50) {
+    return invalid("Select between 1 and 50 cited findings.");
+  }
   const selections = body.selections.map(item => {
     if (!item || !Number.isInteger(item.index) || item.index < 0 || item.index > 9) return invalid("Select valid takeaways.");
     return { reviewId: readId(item.reviewId), index: Number(item.index) };
   }).sort((a, b) => a.reviewId.localeCompare(b.reviewId) || a.index - b.index);
   if (new Set(selections.map(s => `${s.reviewId}:${s.index}`)).size !== selections.length) return invalid("Select each takeaway once.");
-  return { action: "approve" as const, requestId, outlineId, selections, confirmApproval: true };
+  return { outlineId, selections };
 }
 
 export interface OutlineAnnotation {
@@ -79,6 +97,7 @@ export interface KnowledgeOutline {
   provider: "openai" | "subscription";
   batches: OutlineBatch[];
   annotations: Record<string, OutlineAnnotation>;
+  triage?: Record<string, "kept" | "hidden">;
 }
 
 export type EvidenceUnit = KnowledgeExtractionSnapshot["units"][number];
@@ -94,6 +113,10 @@ export interface OutlineTakeaway {
   key: string;
   selection: { reviewId: string; index: number };
   statement: string;
+  curation?: import("./knowledge-extraction-policy").FindingCuration;
+  unverified: boolean;
+  references: Array<{ reviewId: string; index: number }>;
+  alternateStatements?: string[];
   citations: OutlineCitation[];
   applied?: AppliedTakeaway;
 }
@@ -107,11 +130,21 @@ export interface OutlineTopic {
 const findingKey = (reviewId: string, index: number) => `finding:${reviewId}:${index}`;
 const normalizeTopic = (part: string) => part.trim().replace(/\s+/gu, " ").toLowerCase();
 
-/** Merge exact statements only; alternate verifiable citations remain available in the review. */
+/** The display merges matching assertions while retaining each immutable finding reference. */
+function pointIdentity(finding: KnowledgeExtractionResult["findings"][number]) {
+  const editorial = finding.curation;
+  // Keep reported claims, examples and numeric qualifiers distinct unless the text itself is identical.
+  if (editorial?.basis === "advice" && editorial.equivalentPoint && !/\d/.test(finding.statement)) {
+    return JSON.stringify(["equivalent", finding.kind, normalizeTopic(editorial.use), editorial.equivalentPoint, /\b(?:no|not|never|avoid|without)\b/i.test(finding.statement)]);
+  }
+  return JSON.stringify(["exact", finding.kind, finding.statement]);
+}
+
 export function buildKnowledgeOutline(batches: OutlineBatch[]) {
   const topics: OutlineTopic[] = [];
   const units: EvidenceUnit[] = [];
   const takeaways = new Map<string, OutlineTakeaway>();
+  const exact = new Map<string, OutlineTakeaway>();
   let covered = 0;
   for (const batch of batches) {
     const batchUnits = new Map(batch.snapshot.units.map(unit => [unit.id, unit]));
@@ -120,15 +153,24 @@ export function buildKnowledgeOutline(batches: OutlineBatch[]) {
     covered += batch.snapshot.units.length;
     batch.result.findings.forEach((finding, index) => {
       const unit = batchUnits.get(finding.unitId);
-      if (!unit || !finding.topicPath?.length) return;
+      if (!unit || !finding.topicPath?.length || !finding.quote.trim() || !unit.text.includes(finding.quote)) return;
       const citation = { quote: finding.quote, index: unit.unitIndex, type: unit.evidenceType,
         start: unit.startSeconds, end: unit.endSeconds, startChar: unit.startChar };
-      const identity = JSON.stringify([finding.kind, finding.statement]);
+      const identity = pointIdentity(finding);
+      const exactKey = JSON.stringify([finding.kind, finding.statement]);
+      const reference = { reviewId: batch.reviewId, index };
       const applied = batch.applied.find(item => item.index === index);
-      const existing = takeaways.get(identity);
+      const existing = exact.get(exactKey) ?? takeaways.get(identity);
       if (existing) {
         if (!existing.citations.some(c => c.index === citation.index && c.quote === citation.quote)) existing.citations.push(citation);
         existing.applied ??= applied;
+        existing.unverified ||= finding.kind === "claim" || finding.curation?.basis === "speaker_claim";
+        if (finding.curation?.featured && !existing.curation?.featured) existing.curation = finding.curation;
+        existing.references.push(reference);
+        if (existing.statement !== finding.statement && !existing.alternateStatements?.includes(finding.statement)) {
+          (existing.alternateStatements ??= []).push(finding.statement);
+        }
+        exact.set(exactKey, existing);
         return;
       }
       let branches = topics;
@@ -144,12 +186,24 @@ export function buildKnowledgeOutline(batches: OutlineBatch[]) {
         branches = leaf.branches;
       }
       const takeaway: OutlineTakeaway = { key: findingKey(batch.reviewId, index), selection: { reviewId: batch.reviewId, index },
-        statement: finding.statement, citations: [citation], applied };
+        statement: finding.statement, curation: finding.curation, unverified: finding.kind === "claim" || finding.curation?.basis === "speaker_claim",
+        references: [reference], citations: [citation], applied };
       takeaways.set(identity, takeaway);
+      exact.set(exactKey, takeaway);
       leaf?.takeaways.push(takeaway);
     });
   }
-  return { topics, units, covered, duplicates: batches.reduce((sum, batch) => sum + (batch.result?.findings.length ?? 0), 0) - takeaways.size };
+  const allTakeaways = [...takeaways.values()];
+  const featured = new Map<string, { title: string; items: OutlineTakeaway[] }>();
+  for (const item of allTakeaways) {
+    if (!item.curation?.featured) continue;
+    const title = item.curation.use;
+    const key = normalizeTopic(title);
+    const group = featured.get(key) ?? { title, items: [] };
+    group.items.push(item);
+    featured.set(key, group);
+  }
+  return { topics, units, covered, allTakeaways, featured: [...featured.values()], duplicates: batches.reduce((sum, batch) => sum + (batch.result?.findings.length ?? 0), 0) - takeaways.size };
 }
 
 export function evidenceTime(start: number | null, end: number | null) {

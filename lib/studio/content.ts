@@ -57,11 +57,11 @@ export async function saveStudioContentRecord(locationId: string, recordId: stri
 }
 
 /** New source-backed ideas save and link together; failures roll back both writes. */
-export async function createStudioSourceIdea(locationId: string, sourceId: string, ideaId: string, title: string, summary: string) {
+export async function createStudioSourceIdea(locationId: string, sourceId: string, ideaId: string, title: string, summary: string, draftReviewId?: string) {
   const service = createSourceIdeaService({
     authorize: getStudioAccess,
     isImpersonating: async () => Boolean((await auth()).actor),
     transaction: run => db.$transaction(tx => run(createStudioDb(tx))),
   });
-  return service(locationId, sourceId, ideaId, title, summary);
+  return service(locationId, sourceId, ideaId, title, summary, draftReviewId);
 }

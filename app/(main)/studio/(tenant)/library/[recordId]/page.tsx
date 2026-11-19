@@ -32,7 +32,7 @@ import { SourceAssistant } from "../../../_components/source-assistant";
 export const dynamic = "force-dynamic";
 const card = "scroll-mt-16 space-y-3 rounded-xl border bg-card p-4 md:p-5";
 
-export default async function StudioLibraryRecordPage({ params }: { params: Promise<{ recordId: string }> }) {
+export default async function StudioLibraryRecordPage({ params, searchParams }: { params: Promise<{ recordId: string }>; searchParams: Promise<{ knowledgeReview?: string }> }) {
   const { locationId, recordId } = await studioRouteParams(params);
   const result = await getStudioLibraryRecord(locationId, recordId);
   if (!result) notFound();
@@ -49,7 +49,11 @@ export default async function StudioLibraryRecordPage({ params }: { params: Prom
     active && youtube ? getVideoStatus(locationId, recordId).catch(() => null) : null,
     active ? getKnowledgeExtractionInputs(locationId, recordId).catch(() => null) : null,
   ]);
-  const outline = latestOutline ? await getKnowledgeOutline(locationId, latestOutline.id).catch(() => null) : null;
+  const requestedReview = (await searchParams).knowledgeReview;
+  const requestedOutline = active && typeof requestedReview === "string" && requestedReview !== latestOutline?.id
+    ? await getKnowledgeOutline(locationId, requestedReview).catch(() => null) : null;
+  const outline = requestedOutline?.sourceId === recordId ? requestedOutline
+    : latestOutline ? await getKnowledgeOutline(locationId, latestOutline.id).catch(() => null) : null;
   const hasTranscript = Boolean(value('transcript').trim());
   const contentLinks = links.filter(link => link.kind === "content");
   const otherLinks = links.filter(link => link.kind !== "content");
@@ -108,7 +112,7 @@ export default async function StudioLibraryRecordPage({ params }: { params: Prom
   </div>;
   const knowledgePanel = <div className="space-y-3">
     {panelHead("Knowledge", null, <InfoTip label="About knowledge">Cited takeaways you approve before they are kept. Use the assistant's Knowledge mode to extract them.</InfoTip>)}
-    {outline ? <KnowledgeOutlineDetail outline={outline} query={{}} embedded /> : null}
+    {outline ? <KnowledgeOutlineDetail outline={outline} query={{}} embedded framesFailed={videoStatus?.latest?.visual_status === "failed"} /> : null}
     {findings.length ? <><h3 className="font-medium">Saved knowledge</h3><ul className="space-y-2 break-words text-sm">{findings.map(finding => <li key={finding.id}><Link href={`/studio/knowledge/${finding.id}`} className="text-primary hover:underline">{finding.statement}</Link> <span className="text-muted-foreground">({finding.status})</span></li>)}</ul></> : outline ? null : <p className="text-sm text-muted-foreground">No knowledge saved for this source.</p>}
     {hasMoreFindings ? <Link href="/studio/knowledge?status=all" className="block text-sm text-primary hover:underline">Browse more</Link> : null}
   </div>;

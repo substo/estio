@@ -31,10 +31,10 @@ export async function saveContentAction(
   redirect(`/studio/content/${recordId}`);
 }
 
-export async function createSourceIdeaAction(locationId: string, sourceId: string, ideaId: string,
+export async function createSourceIdeaAction(locationId: string, sourceId: string, ideaId: string, draftReviewId: string | undefined,
   _previous: { error?: string }, form: FormData): Promise<{ error?: string }> {
   try {
-    await createStudioSourceIdea(locationId, sourceId, ideaId, String(form.get("title") || ""), String(form.get("summary") || ""));
+    await createStudioSourceIdea(locationId, sourceId, ideaId, String(form.get("title") || ""), String(form.get("summary") || ""), draftReviewId);
   } catch {
     return { error: "Could not create this idea with its source. Your draft is still here. Check that the source is active and use your own account, then retry." };
   }

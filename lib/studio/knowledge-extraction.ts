@@ -1,4 +1,5 @@
 import "server-only";
+import { auth } from "@clerk/nextjs/server";
 import { getStudioAccess } from "./access";
 import { requireOwnStudioCommandLocation } from "./paid-workspace";
 import { StudioDbError } from "./db";
@@ -21,7 +22,7 @@ export async function getKnowledgeExtractionInputs(locationId:string,sourceId:st
  } catch(error) { if(error instanceof StudioDbError && ["22023","42501"].includes(error.code??""))return null;throw error; }
 }
 export function readStudioKnowledgeCommand(value: unknown) {
-  if (value && typeof value === "object" && "action" in value && ["enqueueOutline", "annotate", "approve"].includes(String(value.action))) {
+  if (value && typeof value === "object" && "action" in value && ["enqueueOutline", "annotate", "approve", "triage"].includes(String(value.action))) {
     return readKnowledgeOutlineCommand(value as Record<string, unknown>);
   }
   return readKnowledgeExtractionCommand(value);
@@ -29,7 +30,7 @@ export function readStudioKnowledgeCommand(value: unknown) {
 
 export async function executeKnowledgeExtraction(locationId:string,command:ReturnType<typeof readStudioKnowledgeCommand>){
  const access=await requireOwnStudioCommandLocation(locationId);
- if (command.action === "enqueueOutline" || command.action === "annotate" || command.action === "approve") {
+ if (command.action === "enqueueOutline" || command.action === "annotate" || command.action === "approve" || command.action === "triage") {
    const rpc = command.action === "enqueueOutline" ? "studio_enqueue_knowledge_outline" : "studio_change_knowledge_outline";
    try {
      return await studioDb.call(rpc, { p_location: access.locationId, p_app: access.app, p_actor: access.userId, p_command: command });
@@ -63,9 +64,10 @@ export async function getKnowledgeExtraction(locationId:string,reviewId:string){
 export async function getKnowledgeOutline(locationId: string, outlineId: string) {
   const access = await getStudioAccess(locationId);
   if (!access || !reviewUuid.test(outlineId)) return null;
-  return studioDb.call<KnowledgeOutline | null>("studio_get_knowledge_outline", {
+  const outline = await studioDb.call<KnowledgeOutline | null>("studio_get_knowledge_outline", {
     p_location: access.locationId, p_app: access.app, p_actor: access.userId, p_outline: outlineId,
   });
+  return outline && (await auth()).actor ? { ...outline, triage: {} } : outline;
 }
 
 export async function getLatestKnowledgeOutline(locationId: string, sourceId: string) {

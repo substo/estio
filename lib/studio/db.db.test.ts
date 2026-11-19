@@ -132,3 +132,33 @@ test("replacing My notes persists, preserves other fields and rejects the loser 
   assert.equal(row.payload.notes, results[0]!.ok ? "writer A" : "writer B");
   assert.equal(row.payload.description, "Keep me");
 });
+
+test("confirmed selected idea retains exact citation provenance before any Knowledge approval", { skip: process.env.STUDIO_TEST_CURATION !== "1" }, async () => {
+  const loc = "ac000000-0000-4000-8000-000000000041", source = "ac000000-0000-4000-8000-000000000042";
+  const idea = "ac000000-0000-4000-8000-000000000043", actor = "curation-owner";
+  const draft = await db.one<{ id: string }>(Prisma.sql`select id from studio.studio_idea_reviews
+    where location_id=${loc} and snapshot ? 'selectedOutline' and result is not null`);
+  assert.ok(draft);
+  const { createSourceIdeaService } = await import("./source-idea-service");
+  const service = createSourceIdeaService({
+    authorize: async () => ({ locationId: loc, app: "substo", userId: actor }),
+    isImpersonating: async () => false,
+    transaction: run => client.$transaction(tx => run(createStudioDb(tx))),
+  });
+  assert.equal(await db.one(Prisma.sql`select id from studio.studio_knowledge_insights where location_id=${loc}`), null);
+  assert.equal(await service(loc, source, idea, "My edited hook", "My edited filming angle", draft.id), idea);
+  const saved = await db.one<{ title: string; approved: boolean; payload: { knowledgeInspiration: {
+    draftReviewId: string; outlineId: string; findings: Array<{ text: string; reviewId: string; findingIndex: number }>;
+  } } }>(Prisma.sql`select title,approved,payload from studio.studio_records where location_id=${loc} and id=${idea}::uuid`);
+  assert.equal(saved?.title, "My edited hook");
+  assert.equal(saved?.approved, false);
+  const inspiration = saved?.payload.knowledgeInspiration;
+  assert.equal(inspiration?.draftReviewId, draft.id);
+  assert.equal(inspiration?.findings[0].text, "Build the opening around a recognizable mistake");
+  assert.deepEqual(await db.one(Prisma.sql`select target_id from studio.studio_record_links where location_id=${loc} and source_id=${idea}::uuid`), { target_id: source });
+
+  await db.call("studio_change_knowledge_outline", { p_location: loc, p_app: "substo", p_actor: actor,
+    p_command: { action: "approve", requestId: "ac000000-0000-4000-8000-000000000044", outlineId: inspiration!.outlineId,
+      selections: inspiration!.findings.map(f => ({ reviewId: f.reviewId, index: f.findingIndex })), confirmApproval: true } });
+  assert.deepEqual(await db.one(Prisma.sql`select status from studio.studio_knowledge_insights where location_id=${loc}`), { status: "approved" });
+});

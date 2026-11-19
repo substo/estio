@@ -19,6 +19,10 @@ export default async function StudioContentRecordPage({ params }: { params: Prom
   if (!result) notFound();
   const { record, links, files, uploads } = result;
   const next = scriptNextAction(record, links);
+  const inspiration = record.payload.knowledgeInspiration as { outlineId?: unknown; sourceId?: unknown } | undefined;
+  const inspirationId = typeof inspiration?.outlineId === "string"
+    && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(inspiration.outlineId)
+    && links.some(link => link.id === inspiration.sourceId) ? inspiration.outlineId : null;
   const [pendingUploads, templates] = await Promise.all([
     listPendingStudioUploads(locationId, recordId),
     getStudioScriptTemplateChoices(locationId, record.script_template_version_id),
@@ -29,6 +33,7 @@ export default async function StudioContentRecordPage({ params }: { params: Prom
       <section aria-label="Script next steps" className="space-y-3 rounded-xl border p-5 text-sm">
         <h2 className="font-medium">Next steps for this piece</h2>
         <p>{next.message}</p>
+        {inspirationId ? <Link href={`/studio/knowledge/extractions/${inspirationId}`} className="inline-block text-primary underline">Open cited inspiration</Link> : null}
         <p className="text-muted-foreground">{links.length} outgoing linked records · {links.filter(link => link.hasScriptEvidence).length} with text available to the script service. Evidence availability is not factual verification or approval.</p>
         {!record.archived ? <div className="flex flex-wrap gap-4">
           {next.kind === "generate" ? <Link href={`/studio/content/${recordId}/script-briefs`} className="text-primary hover:underline">Generate a source-backed script brief</Link> : null}

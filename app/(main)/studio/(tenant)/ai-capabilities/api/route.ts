@@ -19,9 +19,11 @@ export const GET = withStudioRoute(async (request, { params }) => {
   const devices = rows.map(d => {
     if (workflow === "video_template" && d.report?.videoTemplateVersion !== 1)
       return { ready: false, reason: "Update and restart the Studio companion for video template extraction." };
+    if (workflow === "selected_idea" && (d.report?.sourceAssistVersion !== 1 || d.report?.knowledgeCurationVersion !== 1))
+      return { ready: false, reason: "Update and restart the Studio companion to draft from selected evidence." };
     if (workflow === "source_assist" && d.report?.sourceAssistVersion !== 1)
       return { ready: false, reason: "Update and restart the Studio companion for the source assistant." };
-    if (workflow === "knowledge_outline" && d.report?.knowledgeOutlineVersion !== 2)
+    if (workflow === "knowledge_outline" && (d.report?.knowledgeOutlineVersion !== 2 || d.report?.knowledgeCurationVersion !== 1))
       return { ready: false, reason: "Update and restart the Studio companion for full-source extraction." };
     try { return deviceTextReadiness({ revoked: false, paused: d.paused, processingEnabled: d.processing_enabled, allowedKinds: d.allowed_kinds,
       seenAt: d.seen_at, capabilities: safeDeviceCapabilities(d.report), config: readDeviceConfig(d.desired_config),
