@@ -54,10 +54,10 @@ export async function runStudioJob(job: StudioJob, options: Pick<StudioWorkerOpt
   } catch (error) {
     if (controller.signal.aborted) { log({ event: "job_lease_lost", jobId: job.id, kind: job.kind }); return; }
     const failure = error instanceof StudioJobError
-      ? { code: error.code, message: error.message, retryable: error.retryable, retryAfterSeconds: error.retryAfterSeconds }
+      ? { code: error.code, message: error.message, retryable: error.retryable, retryAfterSeconds: error.retryAfterSeconds, ...(error.stage ? { stage: error.stage } : {}) }
       : { code: "unexpected_error", message: "The worker hit an unexpected error. It will retry.", retryable: true };
     const outcome = await queue.fail(job.id, workerId, failure, job.lease_token).catch(() => "report_failed");
-    log({ event: "job_failed", jobId: job.id, kind: job.kind, code: failure.code, outcome });
+    log({ event: "job_failed", jobId: job.id, kind: job.kind, code: failure.code, ...("stage" in failure ? { stage: failure.stage } : {}), outcome });
   } finally { finished = true; clearTimeout(renewal); clearTimeout(deadline!); }
 }
 

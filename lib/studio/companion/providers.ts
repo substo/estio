@@ -89,9 +89,9 @@ export function createLocalTextAdapter(provider: LocalProvider, run: ProcessRunn
         }
         // Web search adds tool events to the stream, so research allows a larger (still bounded) output.
         const { stdout } = await run({ command: provider, args, cwd, input: request.workflowContext ? withAiWorkflowInstructions(request.prompt, request.workflowContext) : request.prompt, signal: request.signal, timeoutMs, maxOutputBytes: webSearch ? 4 * 1024 * 1024 : 256 * 1024 });
+        let value: unknown;
         try {
           const events = stdout.trim().split("\n").filter(Boolean).map(line => object.parse(JSON.parse(line)));
-          let value: unknown;
           if (provider === "codex") {
             if (!events.some(e => e.type === "turn.completed") || events.some(e => e.type === "turn.failed" || e.type === "error")) throw new Error();
             const messages = events.filter(e => e.type === "item.completed" && object.safeParse(e.item).success)
@@ -105,8 +105,8 @@ export function createLocalTextAdapter(provider: LocalProvider, run: ProcessRunn
             value = results[0].structured_output;
           }
           if (value === undefined || Buffer.byteLength(JSON.stringify(value)) > maxResultBytes) throw new Error();
-          return request.validate(value);
         } catch { throw new Error("invalid_provider_result"); }
+        try { return request.validate(value); } catch { throw new Error("result_validation_failed"); }
       });
     },
   };

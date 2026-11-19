@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { buildKnowledgeOutline, type KnowledgeOutline } from "@/lib/studio/knowledge-outline";
 import { safeStudioSourceUrl } from "@/lib/studio/library-policy";
+import { RetryBatchForm } from "./extraction-forms";
 import { OutlineTopics, RefreshKnowledgeOutline, TranscriptPassage } from "./outline-review";
 
 const pageSize = 24;
@@ -50,6 +51,10 @@ export function KnowledgeOutlineDetail({ outline, query, embedded = false, frame
       {failures.length ? <div className="space-y-2 rounded-md border p-3">
         <p role="alert">{failures.length} {failures.length === 1 ? "batch stopped" : "batches stopped"} before completion. Resolve failed work before approving takeaways.</p>
         {[...new Set(failures.map(batch => batch.error).filter(Boolean))].map(error => <p className="break-words" key={error}>{error}</p>)}
+        <p className="text-muted-foreground">Completed batches are kept. A retry runs only the stopped batch again.</p>
+        {failures.filter(batch => batch.jobId && batch.status === "failed").map(batch => <RetryBatchForm key={batch.reviewId} outlineId={outline.id}
+          reviewId={batch.reviewId} provider={outline.provider} firstPassage={batch.snapshot.startUnit + 1}
+          lastPassage={batch.snapshot.startUnit + batch.snapshot.unitCount} />)}
         <Link href="/studio/jobs" className="text-primary underline">Open Jobs</Link>
       </div> : null}
       {stale ? <p role="status" className="rounded-md border p-3">The source changed. Start a new extraction for the current evidence. This review keeps its original evidence and notes.</p> : null}

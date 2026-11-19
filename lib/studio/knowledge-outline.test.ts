@@ -83,3 +83,12 @@ test("hosted structured adapter sends v2 evidence and schema through the existin
   assert.equal(output.costMicros, 70);
   assert.deepEqual(output.result, result);
 });
+test("batch retry needs its own matching funding authorization and bound identifiers", () => {
+  const id = "ac000000-0000-4000-8000-000000000001";
+  const base = { action: "retryBatch", requestId: id, outlineId: id, reviewId: id };
+  assert.deepEqual(readKnowledgeOutlineCommand({ ...base, provider: "subscription", confirmSubscription: true }),
+    { action: "retryBatch", requestId: id, outlineId: id, reviewId: id, provider: "subscription", confirmPaid: false, confirmSubscription: true });
+  assert.throws(() => readKnowledgeOutlineCommand({ ...base, provider: "subscription", confirmPaid: true }));
+  assert.throws(() => readKnowledgeOutlineCommand({ ...base, provider: "openai", confirmSubscription: true }));
+  assert.throws(() => readKnowledgeOutlineCommand({ ...base, provider: "subscription", confirmSubscription: true, reviewId: "nope" }));
+});

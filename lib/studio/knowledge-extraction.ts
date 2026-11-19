@@ -22,7 +22,7 @@ export async function getKnowledgeExtractionInputs(locationId:string,sourceId:st
  } catch(error) { if(error instanceof StudioDbError && ["22023","42501"].includes(error.code??""))return null;throw error; }
 }
 export function readStudioKnowledgeCommand(value: unknown) {
-  if (value && typeof value === "object" && "action" in value && ["enqueueOutline", "annotate", "approve", "triage"].includes(String(value.action))) {
+  if (value && typeof value === "object" && "action" in value && ["enqueueOutline", "retryBatch", "annotate", "approve", "triage"].includes(String(value.action))) {
     return readKnowledgeOutlineCommand(value as Record<string, unknown>);
   }
   return readKnowledgeExtractionCommand(value);
@@ -30,14 +30,15 @@ export function readStudioKnowledgeCommand(value: unknown) {
 
 export async function executeKnowledgeExtraction(locationId:string,command:ReturnType<typeof readStudioKnowledgeCommand>){
  const access=await requireOwnStudioCommandLocation(locationId);
- if (command.action === "enqueueOutline" || command.action === "annotate" || command.action === "approve" || command.action === "triage") {
-   const rpc = command.action === "enqueueOutline" ? "studio_enqueue_knowledge_outline" : "studio_change_knowledge_outline";
+ if (command.action === "enqueueOutline" || command.action === "retryBatch" || command.action === "annotate" || command.action === "approve" || command.action === "triage") {
+   const rpc = command.action === "enqueueOutline" ? "studio_enqueue_knowledge_outline" : command.action === "retryBatch" ? "studio_retry_knowledge_outline_batch" : "studio_change_knowledge_outline";
    try {
      return await studioDb.call(rpc, { p_location: access.locationId, p_app: access.app, p_actor: access.userId, p_command: command });
    } catch (error) {
      if (error instanceof StudioDbError) {
        if (error.code === "P2010") throw new StudioCommandError("This evidence exceeds the full extraction limit. Save it as shorter sources and try again.");
        if (error.code === "P2011") throw new StudioCommandError("Your updated paired Mac must be online with Text work, subscription sign-in and capacity.");
+       if (error.code === "40001" && command.action === "retryBatch") throw new StudioCommandError("This batch already changed. Reload to see its current state.", 409);
        if (error.code === "P2012") throw new StudioCommandError("Extraction is already processing for this source, or the Location queue is full.", 409);
      }
      throw error;

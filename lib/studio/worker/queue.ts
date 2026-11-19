@@ -10,7 +10,7 @@ export interface StudioQueue {
   claim(workerId: string, limit: number, leaseSeconds: number): Promise<StudioJob[]>;
   extend(jobId: string, workerId: string, leaseSeconds: number, leaseToken: string): Promise<boolean>;
   complete(jobId: string, workerId: string, result: Record<string, unknown>, leaseToken: string): Promise<boolean>;
-  fail(jobId: string, workerId: string, failure: { code: string; message: string; retryable: boolean; retryAfterSeconds?: number }, leaseToken: string): Promise<string>;
+  fail(jobId: string, workerId: string, failure: { code: string; message: string; retryable: boolean; retryAfterSeconds?: number; stage?: string }, leaseToken: string): Promise<string>;
   heartbeat(workerId: string, release: string | null, startedAt: Date, report?: StudioWorkerReport): Promise<void>;
 }
 

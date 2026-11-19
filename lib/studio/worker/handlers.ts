@@ -6,7 +6,7 @@ import type { StudioJob } from "./queue";
  * Messages are shown to workspace members, so never include secrets.
  */
 export class StudioJobError extends Error {
-  constructor(public readonly code: string, message: string, public readonly retryable: boolean, public readonly retryAfterSeconds?: number) {
+  constructor(public readonly code: string, message: string, public readonly retryable: boolean, public readonly retryAfterSeconds?: number, public readonly stage?: string) {
     super(message); this.name = "StudioJobError";
   }
 }

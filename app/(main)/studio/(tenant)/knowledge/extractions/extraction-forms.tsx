@@ -1,7 +1,7 @@
 "use client";
 import { StudioTextProviderChoice } from "../../../_components/text-provider-choice";
 import type { StudioTextProvider } from "@/lib/studio/text-provider";
-import {useState} from "react";
+import {useRef,useState} from "react";
 import {useRouter} from "next/navigation";
 import type {ExtractionInputs} from "@/lib/studio/knowledge-extraction";
 import {useStudioCommand} from "../../../_components/use-studio-command";
@@ -60,4 +60,37 @@ export function ExtractionApplyForm({locationId,reviewId,version,available}:{loc
   <label className="flex items-start gap-2"><input type="checkbox" required checked={confirm} onChange={e=>setConfirm(e.target.checked)}/><span>I reviewed these proposals and confirm adding new findings as pending knowledge. Exact existing source/statement/kind matches are reused with their current statuses; no topics, approvals or existing findings are overwritten.</span></label>
  </fieldset><button disabled={command.pending||(!command.retry&&!selected.length)} className="rounded-md border px-3 py-2 disabled:opacity-50">{command.pending?"Adding…":command.retry?"Retry same application":"Add selected pending findings"}</button>
  {command.error?<p role="alert" className="text-destructive">{command.error}</p>:null}</form>;
+}
+
+/** Explicit, separately authorized rerun of one stopped batch. Completed batches are not resubmitted. */
+export function RetryBatchForm({ outlineId, reviewId, provider, firstPassage, lastPassage }: {
+  outlineId: string; reviewId: string; provider: StudioTextProvider; firstPassage: number; lastPassage: number;
+}) {
+  const [confirm, setConfirm] = useState(false);
+  const [queued, setQueued] = useState(false);
+  const requestId = useRef(crypto.randomUUID());
+  const router = useRouter();
+  const command = useStudioCommand("/studio/knowledge/extractions/api");
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (queued) return;
+    const result = await command.run({ action: "retryBatch", requestId: requestId.current, outlineId, reviewId, provider,
+      confirmPaid: provider === "openai" && confirm, confirmSubscription: provider === "subscription" && confirm });
+    if (result?.ok) { setQueued(true); router.refresh(); } else if (result?.status === 409) router.refresh();
+  }
+  if (queued) return <p role="status">Retry queued for passages {firstPassage}–{lastPassage}.</p>;
+  return <form onSubmit={submit} className="space-y-2">
+    <fieldset disabled={command.pending || command.retry} className="space-y-2">
+      <label className="flex items-start gap-2">
+        <input type="checkbox" required checked={confirm} onChange={e => setConfirm(e.target.checked)} />
+        <span>{provider === "openai"
+          ? `I authorize paid reprocessing of passages ${firstPassage}–${lastPassage} using the Location OpenAI API.`
+          : `I authorize running passages ${firstPassage}–${lastPassage} again on my paired Mac subscription.`}</span>
+      </label>
+      <button className="rounded-md border px-3 py-2 disabled:opacity-50">
+        {command.pending ? "Queuing…" : command.retry ? "Retry same request" : `Retry passages ${firstPassage}–${lastPassage}`}
+      </button>
+    </fieldset>
+    {command.error ? <p role="alert" className="text-destructive">{command.error}</p> : null}
+  </form>;
 }

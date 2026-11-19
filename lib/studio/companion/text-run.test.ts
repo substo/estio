@@ -139,3 +139,19 @@ test("source assistant runs one tool-free request with its own prompt, treats ev
  assert.deepEqual(await run(queued, context), { output, provider: "codex", model: "test-model" });
  assert.equal(calls, 1);
 });
+test("failed subscription execution names a sanitized stage and never replays", async () => {
+ const { CompanionProcessError } = await import("./process");
+ const cases: Array<[Error, string]> = [
+  [new Error("provider_not_ready"), "cli_not_ready"], [new CompanionProcessError("cli_timeout"), "cli_timeout"],
+  [new CompanionProcessError("cli_failed"), "cli_failed"], [new Error("invalid_provider_result"), "result_parse"],
+  [new Error("result_validation_failed"), "result_validation"], [new Error("secret evidence text"), "unknown"]];
+ for (const [error, stage] of cases) {
+  let calls = 0;
+  await assert.rejects(handler(() => adapter(async () => { calls++; throw error; }))(job, context), (thrown: Error & { code?: string; retryable?: boolean }) => {
+   assert.equal(thrown.code, "text_execution_uncertain"); assert.equal(thrown.retryable, false);
+   assert.match(thrown.message, new RegExp(`stage: ${stage}\\)`)); assert.doesNotMatch(thrown.message, /secret evidence/);
+   return true;
+  });
+  assert.equal(calls, 1);
+ }
+});

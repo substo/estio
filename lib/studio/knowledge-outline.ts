@@ -28,6 +28,12 @@ export function readKnowledgeOutlineCommand(body: Record<string, unknown>) {
       mode, inputId, curationVersion: 1, provider, confirmPaid: provider === "openai", confirmSubscription: provider === "subscription" };
   }
   const outlineId = readId(body.outlineId);
+  if (body.action === "retryBatch") {
+    const reviewId = readId(body.reviewId);
+    const provider = readStudioTextProvider(body.provider);
+    if (provider === "subscription" ? body.confirmSubscription !== true : body.confirmPaid !== true) return invalid("Authorize processing of this batch.");
+    return { action: "retryBatch" as const, requestId, outlineId, reviewId, provider, confirmPaid: provider === "openai", confirmSubscription: provider === "subscription" };
+  }
   if (body.action === "triage") {
     const { nodeKey, state } = body;
     if (typeof nodeKey !== "string" || !/^finding:[a-f0-9-]{36}:[0-9]$/.test(nodeKey) ||
@@ -81,6 +87,7 @@ export interface AppliedTakeaway {
 }
 export interface OutlineBatch {
   reviewId: string;
+  jobId?: string;
   snapshot: KnowledgeExtractionSnapshot;
   result: KnowledgeExtractionResult | null;
   model: string;
