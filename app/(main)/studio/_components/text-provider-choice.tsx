@@ -7,9 +7,10 @@ export function StudioTextProviderChoice({ provider, onChange, fullSource = fals
   const headers = useStudioTenantHeaders();
   const tenant = headers["X-Studio-Tenant"];
   const [state, setState] = useState<Readiness | null>(null);
-  useEffect(() => { const controller = new AbortController(); setState(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { const controller = new AbortController(); setState(null); setFailed(false);
     void fetch(sourceAssist ? "/studio/ai-capabilities/api?workflow=source_assist" : videoTemplate ? "/studio/ai-capabilities/api?workflow=video_template" : fullSource ? "/studio/ai-capabilities/api?workflow=knowledge_outline" : "/studio/ai-capabilities/api", { headers: { "X-Studio-Tenant": tenant }, cache: "no-store", signal: controller.signal })
-      .then(r => r.ok ? r.json() : null).then(setState).catch(() => {});
+      .then(r => r.ok ? r.json() : Promise.reject(new Error("unavailable"))).then(setState).catch(error => { if (!controller.signal.aborted) setFailed(true); });
     return () => controller.abort();
   }, [tenant, fullSource, videoTemplate, sourceAssist]);
   if (compact) return <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -17,7 +18,7 @@ export function StudioTextProviderChoice({ provider, onChange, fullSource = fals
     <select id="assistant-model" className="min-h-9 rounded-md border bg-background px-2 text-xs" value={provider} onChange={e => onChange(e.target.value as StudioTextProvider)}>
       <option value="subscription">My Mac subscription</option><option value="openai">Location OpenAI API (paid)</option>
     </select>
-    <span role="status" className={state?.[provider]?.ready === false ? "text-destructive" : "text-muted-foreground"}>{state ? (state[provider]?.ready ? "Ready" : state[provider]?.reason) : "Checking…"}</span>
+    <span role="status" className={state?.[provider]?.ready === false ? "text-destructive" : "text-muted-foreground"}>{state ? (state[provider]?.ready ? "Ready" : state[provider]?.reason) : failed ? "Could not check readiness. You can still try; the server will say if it is not ready." : "Checking…"}</span>
   </div>;
   return <div className="space-y-2">
     <label className="block space-y-1">Process with<select className="block w-full rounded-md border bg-background p-2" value={provider} onChange={e => onChange(e.target.value as StudioTextProvider)}>

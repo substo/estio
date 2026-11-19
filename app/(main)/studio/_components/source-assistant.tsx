@@ -128,8 +128,9 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
       requestKey.current = null;
       const id = knowledge ? data.outlineId : data.reviewId;
       push({ role: "assistant", text: knowledge ? "Knowledge extraction started on " + (provider === "subscription" ? "your Mac" : "the Location OpenAI key") + ". Review the cited takeaways when it finishes:" : "Script template extraction started. Review the beats when it finishes:", link: { href: knowledge ? `/studio/knowledge/extractions/${id}` : `/studio/content/templates/from-video/${id}`, label: knowledge ? "Open knowledge review" : "Open template review" } });
-      setOpen(false); window.setTimeout(() => window.dispatchEvent(new CustomEvent(OPEN_TAB_EVENT, { detail: knowledge ? "knowledge" : "script" })), 50);
-      router.refresh();
+      setOpen(false);
+      // Switch tabs first: updating the URL hash after a refresh starts would restore the old page state over it.
+      window.setTimeout(() => { window.dispatchEvent(new CustomEvent(OPEN_TAB_EVENT, { detail: knowledge ? "knowledge" : "script" })); window.setTimeout(() => router.refresh(), 100); }, 50);
     } catch { push({ role: "assistant", text: "The outcome is unconfirmed. Press Run again to check this same request.", tone: "error" }); }
     finally { setAsking(false); }
   }
@@ -187,7 +188,7 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
       </fieldset>
       {mode === "knowledge" && knowledgeInputs.length > 1 ? <label className="flex items-center gap-2 text-xs">Evidence<select value={inputChoice} onChange={event => setInputChoice(Number(event.target.value))} className="min-h-9 min-w-0 flex-1 rounded-md border bg-background px-2 text-xs">{knowledgeInputs.map((item, index) => <option key={`${item.mode}:${item.inputId}`} value={index}>{item.label}</option>)}</select></label> : null}
       {hasEvidence ? <StudioTextProviderChoice compact sourceAssist={!taskMode} fullSource={mode === "knowledge"} videoTemplate={mode === "template"} provider={provider} onChange={setProvider} />
-        : <p className="text-xs text-muted-foreground">The assistant needs a saved transcript or description. Transcribe on your Mac first.</p>}
+        : <p className="text-xs text-muted-foreground">The assistant needs a saved transcript or description. Add one in the Transcript tab first.</p>}
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" onClick={() => void ask()} disabled={asking || archived || !hasEvidence || (taskMode ? (mode === "knowledge" && !knowledgeInput) : !text.trim())} className="min-h-10">{asking ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles aria-hidden="true" className="mr-2 h-4 w-4" />}{taskMode ? (mode === "knowledge" ? "Extract knowledge" : "Extract template") : "Ask"}</Button>
         {taskMode ? null : <Button type="button" variant="outline" onClick={() => void saveAsWritten()} disabled={saving || archived || !text.trim()} className="min-h-10"><NotebookPen aria-hidden="true" className="mr-2 h-4 w-4" />Save as written</Button>}

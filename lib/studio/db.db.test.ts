@@ -106,3 +106,29 @@ test("related YouTube selection saves and links atomically, reuses bookmarks and
   assert.equal(await db.one(Prisma.sql`select record_id from studio.studio_youtube_bookmarks where location_id = ${location} and video_id = 'Zyx9876abcd'`), null);
   await assert.rejects(save(selection.recordId), /already the starting source/);
 });
+
+// Note replacement through the real service and real studio_save_record, including two writers racing on one version.
+import { replaceSourceNotes, type SourceNoteDeps } from "./source-note-service";
+test("replacing My notes persists, preserves other fields and rejects the loser of a concurrent edit", async () => {
+  const loc = "ab000000-0000-4000-8000-000000000002", rec = "ab000000-0000-4000-8000-0000000000b1", owner = "notes-owner";
+  await db.call("studio_create_substo_location", { p_location_id: loc, p_name: "Notes replace", p_clerk_user_id: owner });
+  await db.call("studio_save_record", { p_location_id: loc, p_record_id: rec, p_kind: "reference", p_title: "Video", p_payload_patch: { description: "Keep me", transcript: "Keep this too", notes: "first" }, p_expected_version: 0, p_clerk_user_id: owner });
+  const deps: SourceNoteDeps = {
+    hasAccess: async () => true,
+    getSource: async (l, r) => (await client.$queryRaw<Array<{ kind: string; title: string; version: number; archived: boolean; payload: Record<string, unknown> }>>(Prisma.sql`select kind, title, version, archived, payload from studio.studio_records where location_id=${l} and id=${r}::uuid`)).map(row => ({ ...row, version: Number(row.version) }))[0] ?? null,
+    save: (l, r, draft, version) => db.call("studio_save_record", { p_location_id: l, p_record_id: r, p_kind: draft.kind, p_title: draft.title, p_payload_patch: draft.payload, p_expected_version: version, p_clerk_user_id: owner }),
+    isConflict: error => error instanceof StudioDbError && error.code === "40001",
+  };
+  const read = async () => (await client.$queryRaw<Array<{ version: number; payload: Record<string, unknown> }>>(Prisma.sql`select version, payload from studio.studio_records where location_id=${loc} and id=${rec}::uuid`))[0]!;
+  assert.deepEqual(await replaceSourceNotes(deps, loc, rec, "second", 1), { ok: true });
+  let row = await read();
+  assert.equal(row.payload.notes, "second"); assert.equal(row.payload.description, "Keep me"); assert.equal(row.payload.transcript, "Keep this too"); assert.equal(Number(row.version), 2);
+  const stale = await replaceSourceNotes(deps, loc, rec, "stale", 1);
+  assert.equal(stale.ok, false); assert.equal((await read()).payload.notes, "second");
+  const results = await Promise.all([replaceSourceNotes(deps, loc, rec, "writer A", 2), replaceSourceNotes(deps, loc, rec, "writer B", 2)]);
+  assert.equal(results.filter(result => result.ok).length, 1, JSON.stringify(results));
+  row = await read();
+  assert.equal(Number(row.version), 3);
+  assert.equal(row.payload.notes, results[0]!.ok ? "writer A" : "writer B");
+  assert.equal(row.payload.description, "Keep me");
+});

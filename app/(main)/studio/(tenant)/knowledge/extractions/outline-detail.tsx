@@ -59,6 +59,6 @@ export function KnowledgeOutlineDetail({ outline, query, embedded = false }: {
         {page < finalPage ? <Link className="text-primary underline" href={pageHref(page + 1)}>Next passages</Link> : null}
       </nav>
     </details> : null}
-    {source ? <Link href={`/studio/records/${source.id}/extract`} className="text-sm text-primary underline">Extraction options</Link> : null}
+    {source && !embedded ? <Link href={`/studio/records/${source.id}/extract`} className="text-sm text-primary underline">Extraction options</Link> : null}
   </Shell>;
 }
