@@ -281,3 +281,23 @@ the Mac's 32 KB reply limit.
 
 Needs companion `studio-companion-8` (reports `youtubeSearch.rank`); Settings → Connected computer shows readiness. The
 device-network tier only searches; it cannot rank, so it is labelled unchecked.
+
+### Diagnosing a failed Related search (2026-11-19)
+
+Every search runs as one job (`studio.youtube_search`), so the stage is recoverable from three places that share the job id
+(the page shows `ref <first 8 characters>`): `studio.studio_jobs` / `studio_job_events` (queued, started, failed, with the code),
+the Mac log `~/Library/Logs/Estio/studio-companion.log` (`job_failed` with `code` and, for an unclassified failure, `stage`:
+`device_complete_failed` means the server refused the Mac's result; an error class such as `TypeError` means the handler threw),
+and the run log page `/studio/related-history/<id>` for runs that completed.
+
+Failure stages and their codes: **queue/route** (`unexpected_error` with `stage: device_complete_failed`: the device HTTP route
+rejected the result), **SQL** (`22023` Invalid command from `studio_youtube_search_device_command`), **browser**
+(`youtube_search_failed (timeout | navigation | profile_in_use | browser_launch | browser_closed | page_data)`, `youtube_blocked`,
+`youtube_browser_missing`), **provider** (a model step never fails the search; it adds a note and the results are shown unranked),
+**parser** (`related_internal_error (<field path>: <issue>)`), **lease** (`worker_lease_expired`: the Mac stopped or slept).
+
+**Root cause fixed:** the device HTTP route validates a job's `complete` result with a per-kind reader
+(`readDeviceCommand` in `lib/studio/devices-policy.ts`). A search result matched none of them and fell through to the diagnostic
+reader (allowed keys `ok/workerId/checkedAt/provider/model/output/summary/durationMs`, at most 4 KB), so the route answered
+"Invalid command" and no Related search ever completed in production. `readDeviceYoutubeSearchResult` now validates it with the
+strict shared schema. Searches are never retried automatically; a failure always says so and carries the `ref`.

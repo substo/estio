@@ -57,7 +57,11 @@ export async function runStudioJob(job: StudioJob, options: Pick<StudioWorkerOpt
       ? { code: error.code, message: error.message, retryable: error.retryable, retryAfterSeconds: error.retryAfterSeconds, ...(error.stage ? { stage: error.stage } : {}) }
       : { code: "unexpected_error", message: "The worker hit an unexpected error. It will retry.", retryable: true };
     const outcome = await queue.fail(job.id, workerId, failure, job.lease_token).catch(() => "report_failed");
-    log({ event: "job_failed", jobId: job.id, kind: job.kind, code: failure.code, ...("stage" in failure ? { stage: failure.stage } : {}), outcome });
+    // Report structured stages and fixed device call codes without logging provider or browser messages.
+    const stage = error instanceof StudioJobError ? error.stage
+      : error instanceof Error && /^device_[a-z0-9_]+_failed$/.test(error.message) ? error.message
+      : error instanceof Error ? error.name : "unknown";
+    log({ event: "job_failed", jobId: job.id, kind: job.kind, code: failure.code, outcome, ...(stage ? { stage } : {}) });
   } finally { finished = true; clearTimeout(renewal); clearTimeout(deadline!); }
 }
 
