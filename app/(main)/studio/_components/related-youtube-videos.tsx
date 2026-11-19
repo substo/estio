@@ -11,7 +11,7 @@ import { useStudioTenantHeaders } from "./studio-tenant-context";
 type Candidate = Omit<YoutubeVideo, "publishedAt" | "statistics" | "thumbnailUrl"> & { publishedText?: string; viewsText?: string; ticket: string };
 type SearchResult = { query: string; alternateQuery: string | null; videos: Candidate[] };
 type Started = { status: "pending"; jobId: string; query: string; alternateQuery: string | null };
-type Polled = { status: "pending" } | { status: "failed"; message: string } | ({ status: "done" } & SearchResult);
+type Polled = { status: "pending" } | { status: "failed"; message: string } | ({ status: "done"; viaDevice?: boolean } & SearchResult);
 const POLL_MS = 2000, GIVE_UP_MS = 3 * 60_000, SLOW_MS = 20_000;
 type Saved = { recordId: string; transcription: VideoQueueResult };
 
@@ -26,6 +26,7 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [slow, setSlow] = useState(false);
+  const [viaDevice, setViaDevice] = useState(false);
   const run = useRef(0);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
@@ -58,7 +59,7 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
         if (mine !== run.current) return;
         const polled = await request<Polled>({ action: "relatedStatus", jobId: begun.jobId });
         if (polled.status === "failed") throw new Error(polled.message);
-        if (polled.status === "done") { setResult(polled); setQuery(polled.query); break; }
+        if (polled.status === "done") { setResult(polled); setQuery(polled.query); setViaDevice(polled.viaDevice === true); break; }
         if (Date.now() - startedAt > SLOW_MS) setSlow(true);
         if (Date.now() - startedAt > GIVE_UP_MS) throw new Error("Your Mac did not answer. Make sure it is on and the Studio companion is running, then search again.");
       }
@@ -122,7 +123,7 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
       {loading ? <p role="status" className="text-sm text-muted-foreground">{slow ? "Waiting for your Mac to search YouTube… It must be on with the Studio companion running." : "Searching YouTube on your Mac…"}</p> : null}
       {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       {saveError ? <p role="alert" className="text-sm text-destructive">{saveError}</p> : null}
-      {result && <p className="text-xs text-muted-foreground">YouTube results for “{result.query}”</p>}
+      {result && <p className="text-xs text-muted-foreground">YouTube results for “{result.query}”{viaDevice ? " · searched through your connected phone’s network" : ""}</p>}
       {result && !videos.length && !loading ? <p className="text-sm text-muted-foreground">
         {result.videos.length ? "You skipped all results for this search." : "No other public videos found. Try a different search."}
       </p> : null}

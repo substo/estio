@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { decryptStudioSecret, encryptStudioSecret } from "./secrets";
 export interface YoutubeSelectionPrincipal { locationId: string; brand: "estio" | "substo"; userId: string; }
-export interface YoutubeProvenance { kind: "public_search" | "approved_channel" | "subscription" | "saved_url"; observedAt: string; provider: "youtube_data_api" | "mac_browser"; rights: "research_link_only"; query?: string; channelId?: string; }
+export interface YoutubeProvenance { kind: "public_search" | "approved_channel" | "subscription" | "saved_url"; observedAt: string; provider: "youtube_data_api" | "mac_browser" | "device_network_browser"; rights: "research_link_only"; query?: string; channelId?: string; }
 const context = (p: YoutubeSelectionPrincipal) => `studio:youtube-selection:${p.locationId}:${p.brand}:${p.userId}`;
 type SelectionScope = { now?: number; anchorId?: string };
 export function sealYoutubeSelection(principal: YoutubeSelectionPrincipal, videoId: string, provenance: YoutubeProvenance, { now = Date.now(), anchorId }: SelectionScope = {}) {

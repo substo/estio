@@ -223,11 +223,29 @@ carries the owner's preferences. No YouTube cookies reach the server.
 - Choosing a result is unchanged: it saves a research link and queues the paired-Mac transcription from Gap 1.
 - Provenance on saved links is `provider: "mac_browser"`.
 
+### Tier 2: the Location's connected device network (built 2026-11-19)
+
+If the account's own Mac cannot search (no paired Mac, processing off, no Chrome, or an old companion), Related videos
+queues a hosted `studio.youtube_search_egress` job instead. The hosted Studio worker asks the device-tunnel gateway
+(`POST /studio/egress`, internal secret, loopback only) for the Location's isolated Studio listener and runs the same
+read-only search in the server's headless Chrome with `--proxy-server=socks5://127.0.0.1:<port>` and DNS forced through
+the proxy, so the request leaves from the connected Android device's network.
+
+- **Only while the device is connected.** If the Location has no online bound Android device the job fails at once and
+  the page shows the Mac's own reason (for example "Pair your Mac in Setup"). It never searches from the server's IP.
+- **Isolated from WhatsApp.** The Studio listener is a second SOCKS port per connected device with its own allowlist
+  (`youtube.com`, `ytimg.com`, `gstatic.com`, `google.com`, `googleapis.com`, `ggpht.com`, `googleusercontent.com`, port
+  443 only; never WhatsApp hosts), a 16-stream cap, a 2-minute idle close, and its bytes are excluded from WhatsApp
+  send-proof counters (`lib/device-tunnel/studio-egress-policy.ts`). It reuses the existing runtime-ownership checks.
+- **Authority** is unchanged: Business member with AI-manager authority, 20 searches per minute, read-only, one attempt.
+- Saved links record `provider: "device_network_browser"` and the page says the search used the connected phone's network.
+- It consumes the phone's mobile data (a results page is roughly 1–2 MB).
+- Needs `DEVICE_TUNNEL_INTERNAL_SECRET` (and optionally `DEVICE_TUNNEL_GATEWAY_URL`) in the Studio worker's environment.
+  Without it the job fails with "not configured on this server".
+- Deploying this changes the gateway, so the owned deploy script restarts it and the WhatsApp browser briefly reconnects.
+
 ### Scheduled, not built
 
-1. **Server browser through a connected device's network.** Owner direction: second choice after the Mac, allowed only
-   while a device is connected, so requests come from that device's IP. Needs a device-side proxy/tunnel channel and
-   its own authorization and abuse design. No server-side YouTube browser exists today.
-2. **Metered Data API fallback.** Owner direction: third choice, only with usage pricing on top of the flat fee. The
-   metering/pricing system does not exist yet, so the API is not used for Related videos. The explicit Discovery page
-   (search, approved channels, subscriptions) still uses the Data API under its existing 50 operations/day cap.
+**Metered Data API fallback (tier 3).** Owner decision 2026-11-19: keep scheduled. It needs usage pricing on top of the
+flat fee, which does not exist yet, so the API is not used for Related videos. The explicit Discovery page (search,
+approved channels, subscriptions) still uses the Data API under its existing 50 operations/day cap.

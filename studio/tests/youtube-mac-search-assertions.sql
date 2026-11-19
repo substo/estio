@@ -83,3 +83,22 @@ begin
  update studio.studio_devices set processing_enabled=true where id=d;
  if jsonb_typeof(studio.studio_youtube_search_device_command(repeat('1',64),'substo','claim',jsonb_build_object('workerId','mac','limit',1,'leaseSeconds',120)))<>'array' then raise exception 'Fallthrough claim broken'; end if;
 end $$;
+
+-- Tier 2: hosted egress search admission.
+do $$
+declare w text:='ae000000-0000-4000-8000-000000000001'; r jsonb; j uuid; n int;
+begin
+ if has_function_privilege('authenticated','studio.studio_enqueue_youtube_search_egress(text,text,text,jsonb)','EXECUTE')
+  or not has_function_privilege('service_role','studio.studio_enqueue_youtube_search_egress(text,text,text,jsonb)','EXECUTE') then raise exception 'Unsafe egress grants'; end if;
+ begin perform studio.studio_enqueue_youtube_search_egress(w,'substo','yt-other',jsonb_build_object('query','ads','requestKey','e0','limit',5));raise exception 'Cross tenant accepted';exception when sqlstate '42501' then null;end;
+ begin perform studio.studio_enqueue_youtube_search_egress(w,'substo','yt-member',jsonb_build_object('query','ads','requestKey','e0','limit',5));raise exception 'Member without authority enqueued';exception when sqlstate '42501' then null;end;
+ begin perform studio.studio_enqueue_youtube_search_egress(w,'substo','yt-owner',jsonb_build_object('query','','requestKey','e0','limit',5));raise exception 'Empty query accepted';exception when sqlstate '22023' then null;end;
+ begin perform studio.studio_enqueue_youtube_search_egress(w,'substo','yt-owner',jsonb_build_object('query','ads','requestKey','e0','limit',99));raise exception 'Big limit accepted';exception when sqlstate '22023' then null;end;
+ begin perform studio.studio_enqueue_youtube_search_egress(w,'substo','yt-owner',jsonb_build_object('query','ads','requestKey','e0','limit',5,'macReason','bad reason!'));raise exception 'Bad reason accepted';exception when sqlstate '22023' then null;end;
+ r:=studio.studio_enqueue_youtube_search_egress(w,'substo','yt-owner',jsonb_build_object('query','ads that convert','requestKey','e1','limit',6,'macReason','YS001')); j:=(r->>'jobId')::uuid;
+ if studio.studio_enqueue_youtube_search_egress(w,'substo','yt-owner',jsonb_build_object('query','ads that convert','requestKey','e1','limit',6,'macReason','YS001'))->>'jobId'<>j::text then raise exception 'Egress enqueue not idempotent'; end if;
+ if not exists(select 1 from studio.studio_jobs where id=j and execution_target='hosted' and device_id is null and kind='studio.youtube_search_egress' and max_attempts=1 and payload->>'macReason'='YS001') then raise exception 'Egress job shape wrong'; end if;
+ -- A hosted worker, not a paired Mac, claims it.
+ select count(*) into n from studio.studio_claim_jobs('hosted-test',5,60) x where x.id=j;
+ if n<>1 then raise exception 'Hosted worker did not claim the egress job'; end if;
+end $$;

@@ -27,7 +27,7 @@ test("builds the video-filtered results URL and detects a signed-in top bar", ()
 });
 test("finds Chrome only at fixed locations", async () => {
   assert.equal(await findChrome({} as NodeJS.ProcessEnv, async () => false), null);
-  assert.equal(await findChrome({ STUDIO_YOUTUBE_CHROME: "/x/chrome" } as NodeJS.ProcessEnv, async p => p === "/x/chrome"), "/x/chrome");
+  assert.equal(await findChrome({ STUDIO_YOUTUBE_CHROME: "/x/chrome" } as unknown as NodeJS.ProcessEnv, async p => p === "/x/chrome"), "/x/chrome");
 });
 test("handler validates the payload and returns only the bounded result", async () => {
   const handler = createYoutubeSearchHandler({ enabled: () => true, browser: async () => ({ search: async () => ({ videos: parseYoutubeSearchData(page, 3), signedIn: true }) }) });

@@ -115,9 +115,9 @@ export async function readStudioRelatedYoutube(locationId: string, input: { anch
   const queries = relatedYoutubeQueries(anchor.title, anchor.topic ?? "");
   const expanded = state.limit > 6;
   return {
-    status: "done" as const, query: state.query, alternateQuery: queries.find(phrase => phrase !== state.query) ?? null, signedIn: state.result.signedIn ?? false,
+    status: "done" as const, query: state.query, alternateQuery: queries.find(phrase => phrase !== state.query) ?? null, signedIn: state.result.signedIn ?? false, viaDevice: state.viaDevice,
     videos: state.result.videos.filter(video => video.id !== seedVideo).slice(0, expanded ? 10 : 3).map(video => {
-      const provenance: YoutubeProvenance = { kind: "public_search", observedAt, provider: "mac_browser", rights: "research_link_only", query: state.query };
+      const provenance: YoutubeProvenance = { kind: "public_search", observedAt, provider: state.viaDevice ? "device_network_browser" : "mac_browser", rights: "research_link_only", query: state.query };
       return { id: video.id, title: video.title, channelId: video.channelId ?? "", channelTitle: video.channelTitle ?? "", publishedAt: "", publishedText: video.publishedText, viewsText: video.viewsText,
         description: video.description ? youtubeDescriptionPreview(video.description) : undefined,
         ticket: sealYoutubeSelection({ locationId: access.locationId, brand: access.app, userId: access.userId }, video.id, provenance, { anchorId: anchor.id }) };

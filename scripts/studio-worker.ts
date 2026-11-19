@@ -6,6 +6,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { studioReadinessRequired, STUDIO_WORKER_HANDLERS } from "../lib/studio/readiness";
 import { readStudioRelease, runtimeStudioReadiness } from "../lib/studio/readiness-runtime";
 import { studioJobHandlers } from "../lib/studio/worker/handlers";
+import { createGatewayClient, createPuppeteerEgressBrowser, createYoutubeEgressSearchHandler } from "../lib/studio/worker/youtube-egress-search";
 import { createOnboardingHandlers } from "../lib/onboarding/research";
 import { createStudioR2Store, readStudioR2Config } from "../lib/studio/media-r2";
 import { createTranscribeUploadHandler, productionTranscribeDeps } from "../lib/studio/worker/transcribe-upload";
@@ -51,6 +52,8 @@ async function main() {
   handlers["studio.script_brief"] = createScriptBriefHandler(productionScriptBriefDeps(db));
   handlers["studio.knowledge_extract"] = createKnowledgeExtractionHandler(productionKnowledgeExtractionDeps(db));
   handlers["studio.youtube_discovery"] = createYoutubeDiscoveryHandler(productionYoutubeDiscoveryDeps(db));
+  // Related-video search through the Location's connected device network (read-only; the Mac route is preferred and handled on the Mac).
+  handlers["studio.youtube_search_egress"] = createYoutubeEgressSearchHandler({ gateway: createGatewayClient(), browser: createPuppeteerEgressBrowser() });
   // Business onboarding research (both apps) runs on the same durable queue.
   Object.assign(handlers, createOnboardingHandlers(db));
   const r2 = readStudioR2Config();

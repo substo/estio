@@ -7,9 +7,11 @@ export const macVideoSchema = z.object({
   publishedText: z.string().max(80).optional(), viewsText: z.string().max(80).optional(), description: z.string().max(400).optional(),
 }).strict();
 export type MacVideo = z.infer<typeof macVideoSchema>;
-export const macSearchResultSchema = z.object({ videos: z.array(macVideoSchema).max(12), signedIn: z.boolean().optional() }).strict();
+export const macSearchResultSchema = z.object({ videos: z.array(macVideoSchema).max(12), signedIn: z.boolean().optional(), via: z.literal("device_network").optional() }).strict();
 export type MacSearchResult = z.infer<typeof macSearchResultSchema>;
 export const macSearchPayloadSchema = z.object({ query: z.string().trim().min(1).max(160), limit: z.number().int().min(3).max(12) }).strict();
+/** A search that fell through from the Mac to the connected phone network keeps why, for the status line. */
+export const egressSearchPayloadSchema = macSearchPayloadSchema.extend({ macReason: z.string().max(40).optional() }).strict();
 
 const text = (value: unknown, max: number): string | undefined => {
   if (!value || typeof value !== "object") return typeof value === "string" ? clean(value, max) : undefined;
