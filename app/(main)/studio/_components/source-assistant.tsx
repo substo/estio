@@ -4,13 +4,14 @@ import { useRouter } from "next/navigation";
 import { Lightbulb, Loader2, MessageSquare, Mic, MicOff, NotebookPen, Search, Send, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { createSourceIdeaAction } from "../(tenant)/content/actions";
 import { saveSourceNoteAction } from "../(tenant)/library/note-actions";
 import { draftIdeaFromReactions, relatedSearchPhrase, REACTION_LIMIT } from "@/lib/studio/source-assistant-policy";
 import type { SourceAssistRun } from "@/lib/studio/source-assist";
 import type { StudioTextProvider } from "@/lib/studio/text-provider";
 import { StudioTextProviderChoice } from "./text-provider-choice";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
+import { useSourceWorkspace } from "./source-workspace";
+import { OPEN_TAB_EVENT } from "./source-tabs";
 
 type Intent = "discuss" | "rewrite_note" | "propose_idea";
 type Mode = Intent | "knowledge" | "template";
@@ -28,28 +29,17 @@ const INTENTS: Array<{ value: Mode; label: string; hint: string }> = [
 ];
 const clock = (seconds: number) => new Date(seconds * 1000).toISOString().slice(seconds >= 3600 ? 11 : 14, 19);
 
-function IdeaDraft({ locationId, sourceId, ideaId, initial, onCancel }: { locationId: string; sourceId: string; ideaId: string; initial: { title: string; summary: string; ai?: boolean }; onCancel: () => void }) {
-  const [state, action, pending] = useActionState(createSourceIdeaAction.bind(null, locationId, sourceId, ideaId), {});
-  const titleId = useId();
-  return <form action={action} className="space-y-3 rounded-lg border bg-background p-3 text-sm">
-    <p className="font-medium">Review the idea before it is created</p>
-    <p className="text-xs text-muted-foreground">{initial.ai ? "Proposed by the assistant from this source. Edit freely." : "Assembled from your own words, not generated."} This source is linked as research; nothing is copied or approved.</p>
-    <label className="block text-xs font-medium" htmlFor={titleId}>Idea title</label>
-    <input id={titleId} name="title" required maxLength={180} defaultValue={initial.title} className="block w-full rounded-md border bg-background p-2 text-sm" />
-    <label className="block text-xs font-medium">Concept and audience promise<textarea name="summary" required maxLength={20_000} rows={5} defaultValue={initial.summary} className="mt-1 block w-full rounded-md border bg-background p-2 text-sm" /></label>
-    {state.error ? <p role="alert" className="text-destructive">{state.error}</p> : null}
-    <div className="flex flex-wrap gap-2"><Button type="submit" disabled={pending}>{pending ? "Creating…" : "Create linked idea"}</Button><Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button></div>
-  </form>;
-}
-
-export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ideaId, canRelated, archived, hasEvidence, knowledgeInput, canTemplate }: { knowledgeInput: KnowledgeInput | null; canTemplate: boolean; locationId: string; sourceId: string; sourceTitle: string; version: number; ideaId: string; canRelated: boolean; archived: boolean; hasEvidence: boolean }) {
+export function SourceAssistant({ locationId, sourceId, sourceTitle, version, canRelated, archived, hasEvidence, knowledgeInputs, canTemplate }: { knowledgeInputs: KnowledgeInput[]; canTemplate: boolean; locationId: string; sourceId: string; sourceTitle: string; version: number; canRelated: boolean; archived: boolean; hasEvidence: boolean }) {
   const router = useRouter();
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
   const [open, setOpen] = useState(false);
   const [log, setLog] = useState<Entry[]>([]);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
-  const [idea, setIdea] = useState<{ title: string; summary: string; ai?: boolean } | null>(null);
+  const { setNoteProposal, setIdeaProposal } = useSourceWorkspace();
+  const [inputChoice, setInputChoice] = useState(0);
+  const knowledgeInput = knowledgeInputs[inputChoice] ?? null;
+  const showIn = (tab: string, line: string) => { setOpen(false); window.setTimeout(() => window.dispatchEvent(new CustomEvent(OPEN_TAB_EVENT, { detail: tab })), 50); push({ role: "assistant", text: line }); };
   const [listening, setListening] = useState(false);
   const [dictationNote, setDictationNote] = useState("");
   const [canDictate, setCanDictate] = useState(false);
@@ -93,7 +83,7 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, id
     push({ role: "assistant", text: result.error, tone: "error" }); return false;
   }
   async function saveAsWritten() { const value = text.trim() || null; if (await saveNote(value)) { const saved = takeText(); if (saved) setLog(previous => previous.map(item => item.role === "you" && item.text === saved && !item.saved ? { ...item, saved: true } : item)); } }
-  function draftIdea() { const spoken = text.trim() ? [...reactions, text.trim()] : reactions; if (!spoken.length) { push({ role: "assistant", text: "Tell me your reaction first, or use Propose idea to ask the assistant.", tone: "error" }); return; } takeText(); setIdea(draftIdeaFromReactions(sourceTitle, spoken)); }
+  function draftIdea() { const spoken = text.trim() ? [...reactions, text.trim()] : reactions; if (!spoken.length) { push({ role: "assistant", text: "Tell me your reaction first, or use Propose idea to ask the assistant.", tone: "error" }); return; } takeText(); setIdeaProposal(draftIdeaFromReactions(sourceTitle, spoken)); showIn("script", "Drafted an idea from your words. Review it in the Script tab before it is created."); }
   function findRelated(phrase?: string) {
     const query = phrase || relatedSearchPhrase(text.trim() ? [...reactions, text.trim()] : reactions, sourceTitle);
     takeText(); setOpen(false);
@@ -138,6 +128,7 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, id
       requestKey.current = null;
       const id = knowledge ? data.outlineId : data.reviewId;
       push({ role: "assistant", text: knowledge ? "Knowledge extraction started on " + (provider === "subscription" ? "your Mac" : "the Location OpenAI key") + ". Review the cited takeaways when it finishes:" : "Script template extraction started. Review the beats when it finishes:", link: { href: knowledge ? `/studio/knowledge/extractions/${id}` : `/studio/content/templates/from-video/${id}`, label: knowledge ? "Open knowledge review" : "Open template review" } });
+      setOpen(false); window.setTimeout(() => window.dispatchEvent(new CustomEvent(OPEN_TAB_EVENT, { detail: knowledge ? "knowledge" : "script" })), 50);
       router.refresh();
     } catch { push({ role: "assistant", text: "The outcome is unconfirmed. Press Run again to check this same request.", tone: "error" }); }
     finally { setAsking(false); }
@@ -169,8 +160,8 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, id
       <p className="whitespace-pre-wrap break-words">{result.reply}</p>
       {result.citations.length ? <ul className="space-y-1 border-l-2 pl-3 text-xs text-muted-foreground">{result.citations.map((c, i) => <li key={i}>“{c.quote}”{run!.citedAt[c.unitId] != null ? <span className="ml-1 tabular-nums">· {clock(run!.citedAt[c.unitId]!)}</span> : null}</li>)}</ul> : null}
       {result.limitations.length ? <ul className="list-disc pl-5 text-xs text-muted-foreground">{result.limitations.map((item, i) => <li key={i}>{item}</li>)}</ul> : null}
-      {result.note ? <ProposedNote key={entry.id} note={result.note} disabled={saving || archived} onSave={value => saveNote(value)} /> : null}
-      {result.ideaTitle && result.ideaConcept ? <Button type="button" variant="secondary" disabled={archived} onClick={() => setIdea({ title: result.ideaTitle!, summary: result.ideaConcept!, ai: true })}><Lightbulb aria-hidden="true" className="mr-2 h-4 w-4" />Review proposed idea</Button> : null}
+      {result.note ? <Button type="button" variant="secondary" disabled={archived} onClick={() => { setNoteProposal(result.note!); showIn("notes", "Showing the proposed note change in My notes. Nothing is saved until you apply it."); }}><NotebookPen aria-hidden="true" className="mr-2 h-4 w-4" />Review change in My notes</Button> : null}
+      {result.ideaTitle && result.ideaConcept ? <Button type="button" variant="secondary" disabled={archived} onClick={() => { setIdeaProposal({ title: result.ideaTitle!, summary: result.ideaConcept!, ai: true }); showIn("script", "Showing the proposed idea in the Script tab. It is not created until you confirm."); }}><Lightbulb aria-hidden="true" className="mr-2 h-4 w-4" />Review proposed idea</Button> : null}
       {result.relatedQuery && canRelated ? <Button type="button" variant="outline" onClick={() => findRelated(result.relatedQuery!)}><Search aria-hidden="true" className="mr-2 h-4 w-4" />Search “{result.relatedQuery}”</Button> : null}
       <p className="text-xs text-muted-foreground">{run!.provider === "subscription" ? "Your Mac subscription" : "Location OpenAI key (paid)"} · {run!.model.replace(/^mac_/, "")} · {run!.evidence.kind === "description" ? "from the saved description only" : `${run!.evidence.selected} of ${run!.evidence.total} saved passages read`}{run!.stale ? " · source changed since" : ""}. Nothing is saved until you choose.</p>
     </div>;
@@ -183,7 +174,6 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, id
         ? <div key={entry.id} className="ml-6 space-y-1 rounded-lg bg-primary/10 p-3"><p className="whitespace-pre-wrap break-words">{entry.text}</p>{entry.saved ? <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Saved to My notes</p> : <button type="button" disabled={saving || archived} onClick={() => void saveNote(entry.text, entry.id)} className="inline-flex min-h-9 items-center text-xs font-medium text-primary hover:underline disabled:opacity-50">Save to My notes as written</button>}</div>
         : entry.role === "ai" ? <AiAnswer key={entry.id} entry={entry} />
         : <p key={entry.id} role={entry.tone === "error" ? "alert" : undefined} className={`mr-6 whitespace-pre-wrap break-words rounded-lg bg-muted p-3 ${entry.tone === "error" ? "text-destructive" : ""}`}>{entry.text}{entry.link ? <> <a href={entry.link.href} className="font-medium text-primary underline">{entry.link.label}</a></> : null}</p>)}
-      {idea ? <IdeaDraft key={`${idea.title}:${idea.summary}`} locationId={locationId} sourceId={sourceId} ideaId={ideaId} initial={idea} onCancel={() => setIdea(null)} /> : null}
     </div>
     <div className="space-y-2 border-t p-3">
       {archived ? <p className="text-xs text-muted-foreground">This source is archived, so notes and ideas are read-only.</p> : null}
@@ -195,7 +185,8 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, id
         <legend className="sr-only">Assistant mode</legend>
         <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Assistant mode">{INTENTS.filter(item => item.value !== "template" || canTemplate).map(item => <label key={item.value} title={item.hint} className={`inline-flex min-h-9 cursor-pointer items-center rounded-full border px-3 text-xs font-medium transition-colors duration-150 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary ${mode === item.value ? "border-primary bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}><input type="radio" className="sr-only" name={`mode-${variant}`} checked={mode === item.value} onChange={() => setMode(item.value)} />{item.label}</label>)}</div>
       </fieldset>
-      {hasEvidence ? <StudioTextProviderChoice sourceAssist compact provider={provider} onChange={setProvider} />
+      {mode === "knowledge" && knowledgeInputs.length > 1 ? <label className="flex items-center gap-2 text-xs">Evidence<select value={inputChoice} onChange={event => setInputChoice(Number(event.target.value))} className="min-h-9 min-w-0 flex-1 rounded-md border bg-background px-2 text-xs">{knowledgeInputs.map((item, index) => <option key={`${item.mode}:${item.inputId}`} value={index}>{item.label}</option>)}</select></label> : null}
+      {hasEvidence ? <StudioTextProviderChoice compact sourceAssist={!taskMode} fullSource={mode === "knowledge"} videoTemplate={mode === "template"} provider={provider} onChange={setProvider} />
         : <p className="text-xs text-muted-foreground">The assistant needs a saved transcript or description. Transcribe on your Mac first.</p>}
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" onClick={() => void ask()} disabled={asking || archived || !hasEvidence || (taskMode ? (mode === "knowledge" && !knowledgeInput) : !text.trim())} className="min-h-10">{asking ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles aria-hidden="true" className="mr-2 h-4 w-4" />}{taskMode ? (mode === "knowledge" ? "Extract knowledge" : "Extract template") : "Ask"}</Button>
@@ -224,15 +215,4 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, id
       </SheetContent>
     </Sheet>
   </>;
-}
-
-function ProposedNote({ note, disabled, onSave }: { note: string; disabled: boolean; onSave: (value: string) => Promise<boolean> }) {
-  const [value, setValue] = useState(note);
-  const [saved, setSaved] = useState(false);
-  const id = useId();
-  return <div className="space-y-2 rounded-md border bg-background p-2">
-    <label htmlFor={id} className="text-xs font-medium">Proposed note (edit before saving)</label>
-    <textarea id={id} value={value} rows={4} maxLength={REACTION_LIMIT} onChange={event => { setValue(event.target.value); setSaved(false); }} className="block w-full resize-none rounded-md border bg-background p-2 text-sm" />
-    <Button type="button" disabled={disabled || saved || !value.trim()} onClick={async () => setSaved(await onSave(value))}><NotebookPen aria-hidden="true" className="mr-2 h-4 w-4" />{saved ? "Saved to My notes" : "Save to My notes"}</Button>
-  </div>;
 }

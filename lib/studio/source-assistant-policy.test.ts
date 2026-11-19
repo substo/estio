@@ -30,7 +30,7 @@ test("computer readiness distinguishes none, ready, paused and offline", () => {
   assert.match(summarizeComputerReadiness([{ name: "Mac", status: "offline", processingEnabled: true }]).label, /offline/);
 });
 
-import { saveSourceNote, type SourceNoteDeps } from "./source-note-service";
+import { replaceSourceNotes, saveSourceNote, type SourceNoteDeps } from "./source-note-service";
 const source = { kind: "reference", title: "T", version: 4, archived: false, payload: { notes: "old", description: "keep" } };
 function deps(over: Partial<SourceNoteDeps> = {}) {
   const saved: unknown[] = [];
@@ -55,6 +55,19 @@ test("note save reports a version conflict and a generic failure without saving 
   const other = await saveSourceNote(deps({ save: async () => { throw new Error("db"); } }).deps, "l", "r", "x");
   assert.match(other.ok ? "" : other.error, /try again/);
   assert.equal((await saveSourceNote(deps().deps, "l", "r", "   ")).ok, false);
+});
+
+test("replacing notes writes exactly the reviewed text, patches only notes and is version fenced", async () => {
+  const { saved, deps: d } = deps();
+  assert.deepEqual(await replaceSourceNotes(d, "loc", "rec", "reviewed  \n", 4), { ok: true });
+  assert.deepEqual(saved, [["loc", "rec", { kind: "reference", title: "T", payload: { title: "T", notes: "reviewed" } }, 4]]);
+  const stale = deps();
+  assert.match((await replaceSourceNotes(stale.deps, "loc", "rec", "x", 3) as { error: string }).error, /another tab/);
+  assert.equal(stale.saved.length, 0);
+  for (const over of [{ hasAccess: async () => false }, { getSource: async () => null }, { getSource: async () => ({ ...source, archived: true }) }]) {
+    const r = deps(over); assert.equal((await replaceSourceNotes(r.deps, "l", "r", "x", 4)).ok, false); assert.equal(r.saved.length, 0);
+  }
+  assert.equal((await replaceSourceNotes(deps().deps, "l", "r", "x".repeat(20_001), 4)).ok, false);
 });
 
 import { computerTasks, type ComputerTaskInput } from "./computer-readiness-policy";

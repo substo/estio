@@ -5,8 +5,8 @@ import { OutlineTopics, RefreshKnowledgeOutline, TranscriptPassage } from "./out
 
 const pageSize = 24;
 
-export function KnowledgeOutlineDetail({ outline, query }: {
-  outline: KnowledgeOutline; query: { passage?: string; transcript?: string };
+export function KnowledgeOutlineDetail({ outline, query, embedded = false }: {
+  outline: KnowledgeOutline; query: { passage?: string; transcript?: string }; embedded?: boolean;
 }) {
   const { batches, annotations } = outline;
   const { topics, units, covered, duplicates } = buildKnowledgeOutline(batches);
@@ -23,12 +23,13 @@ export function KnowledgeOutlineDetail({ outline, query }: {
   const pageHref = (n: number) => `/studio/knowledge/extractions/${outline.id}?transcript=${n}#transcript`;
   const isSavedNotes = batches[0]?.snapshot.evidenceMode === "record_text" && batches[0].snapshot.evidenceInputId !== "transcript";
 
-  return <main className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6 md:p-10">
-    <header className="space-y-2">
+  const Shell = embedded ? "div" : "main";
+  return <Shell className={embedded ? "space-y-6" : "mx-auto max-w-4xl space-y-6 p-4 sm:p-6 md:p-10"}>
+    {embedded ? null : <header className="space-y-2">
       <Link href="/studio/knowledge/extractions" className="text-sm text-primary underline">Knowledge extractions</Link>
       <h1 className="break-words text-2xl font-semibold sm:text-3xl">{source?.title ?? "Source knowledge"}</h1>
       {url ? <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm text-primary underline">Open original source</a> : null}
-    </header>
+    </header>}
     <section aria-label="Processing coverage" className="space-y-2 text-sm">
       <p role="status"><strong>{complete ? "Reading complete" : waiting ? "Reading source" : "Extraction incomplete"}</strong>
         {" · "}{covered} of {units.length} evidence passages processed · {batches.filter(batch => batch.result).length} of {batches.length} batches</p>
@@ -59,5 +60,5 @@ export function KnowledgeOutlineDetail({ outline, query }: {
       </nav>
     </details> : null}
     {source ? <Link href={`/studio/records/${source.id}/extract`} className="text-sm text-primary underline">Extraction options</Link> : null}
-  </main>;
+  </Shell>;
 }

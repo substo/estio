@@ -6,7 +6,7 @@ import { libraryPresentation, platformLabels } from "@/lib/studio/library-presen
 import { validatedYoutubeCreator } from "@/lib/studio/library-import-metadata";
 import { studioRouteParams } from "@/lib/studio/route-context";
 import { listPendingStudioUploads } from "@/lib/studio/uploads";
-import { getKnowledgeExtractionInputs, getLatestKnowledgeOutline } from "@/lib/studio/knowledge-extraction";
+import { getKnowledgeExtractionInputs, getKnowledgeOutline, getLatestKnowledgeOutline } from "@/lib/studio/knowledge-extraction";
 import { getStudioLibraryRecord } from "@/lib/studio/library";
 import { getVideoStatus } from "@/lib/studio/video-transcription";
 import { canonicalYoutubeVideo } from "@/lib/studio/video-transcription-policy";
@@ -21,6 +21,11 @@ import { LibraryPlatformIcon } from "../../../_components/library-cards";
 import { SourcePlayer } from "../../../_components/source-player";
 import { ExpandableText } from "../../../_components/expandable-text";
 import { SourceTabs, type SourceTab } from "../../../_components/source-tabs";
+import { KnowledgeOutlineDetail } from "../../knowledge/extractions/outline-detail";
+import { SourceWorkspaceProvider } from "../../../_components/source-workspace";
+import { NotesPanel } from "../../../_components/notes-panel";
+import { IdeaPanel } from "../../../_components/idea-panel";
+import { SourceTemplatePanel } from "../../../_components/source-template-panel";
 import { InfoTip } from "../../../_components/info-tip";
 import { SourceAssistant } from "../../../_components/source-assistant";
 
@@ -44,6 +49,7 @@ export default async function StudioLibraryRecordPage({ params }: { params: Prom
     active && youtube ? getVideoStatus(locationId, recordId).catch(() => null) : null,
     active ? getKnowledgeExtractionInputs(locationId, recordId).catch(() => null) : null,
   ]);
+  const outline = latestOutline ? await getKnowledgeOutline(locationId, latestOutline.id).catch(() => null) : null;
   const hasTranscript = Boolean(value('transcript').trim());
   const contentLinks = links.filter(link => link.kind === "content");
   const otherLinks = links.filter(link => link.kind !== "content");
@@ -72,12 +78,11 @@ export default async function StudioLibraryRecordPage({ params }: { params: Prom
     <StudioUploads locationId={locationId} uploads={uploads} />
     <StudioUploadForm key={recordId} locationId={locationId} recordId={recordId} pendingUploads={pendingUploads} />
   </>;
-  const edit = <details id="edit-source" className={card}><summary className="cursor-pointer font-medium">Edit source, transcript and notes</summary><div className="mt-4"><LibraryRecordForm locationId={locationId} recordId={recordId} version={record.version} kind={record.kind} title={record.title} payload={record.payload} /></div></details>;
 
   if (!isSource) return <main className="mx-auto w-full min-w-0 max-w-4xl space-y-5 p-4 md:p-6">
     {breadcrumb}{header}
     <p className="text-sm text-muted-foreground">Saved videos linked to this channel appear below. Watching in Studio does not subscribe on YouTube or enable recurring discovery. Discovery approval remains manager controlled.</p>
-    {contentLinks.length ? null : null}{edit}{footer}
+    {footer}
   </main>;
 
   const statusChip = (ok: boolean, text: string) => <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${ok ? "bg-emerald-50 text-emerald-700" : "bg-muted text-muted-foreground"}`}>{ok ? <Check aria-hidden="true" className="h-3.5 w-3.5" /> : null}{text}</span>;
@@ -95,19 +100,19 @@ export default async function StudioLibraryRecordPage({ params }: { params: Prom
       <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">{summaryText || view.statusMessage || "No summary yet."}</p>
     </div>
   </div>;
-  const scriptPanel = <div className="space-y-3">
+  const scriptPanel = <div className="space-y-4">
     {panelHead("Script", null, <InfoTip label="About scripts">Ideas keep this source linked as research; nothing is copied or approved. Use the assistant's Idea or Script template modes to create them.</InfoTip>)}
+    <IdeaPanel locationId={locationId} sourceId={recordId} ideaId={randomUUID()} archived={record.archived} />
     {contentLinks.length ? <ul className="space-y-1 text-sm">{contentLinks.map(linked => <li key={linked.id}><Link className="text-primary hover:underline" href={`/studio/content/${linked.id}`}>{linked.title}</Link></li>)}</ul> : <p className="text-sm text-muted-foreground">No ideas or scripts from this source yet.</p>}
+    {youtube ? <SourceTemplatePanel locationId={locationId} sourceId={recordId} /> : null}
   </div>;
   const knowledgePanel = <div className="space-y-3">
-    {panelHead("Knowledge", null, <InfoTip label="About knowledge">Cited takeaways you approve before they are kept. Use the assistant's Knowledge mode to extract them.</InfoTip>, latestOutline ? <Link href={`/studio/knowledge/extractions/${latestOutline.id}`} className="text-sm font-medium text-primary hover:underline">Latest review</Link> : null)}
-    {findings.length ? <ul className="space-y-2 break-words text-sm">{findings.map(finding => <li key={finding.id}><Link href={`/studio/knowledge/${finding.id}`} className="text-primary hover:underline">{finding.statement}</Link> <span className="text-muted-foreground">({finding.status})</span></li>)}</ul> : <p className="text-sm text-muted-foreground">No knowledge saved for this source.</p>}
+    {panelHead("Knowledge", null, <InfoTip label="About knowledge">Cited takeaways you approve before they are kept. Use the assistant's Knowledge mode to extract them.</InfoTip>)}
+    {outline ? <KnowledgeOutlineDetail outline={outline} query={{}} embedded /> : null}
+    {findings.length ? <><h3 className="font-medium">Saved knowledge</h3><ul className="space-y-2 break-words text-sm">{findings.map(finding => <li key={finding.id}><Link href={`/studio/knowledge/${finding.id}`} className="text-primary hover:underline">{finding.statement}</Link> <span className="text-muted-foreground">({finding.status})</span></li>)}</ul></> : outline ? null : <p className="text-sm text-muted-foreground">No knowledge saved for this source.</p>}
     {hasMoreFindings ? <Link href="/studio/knowledge?status=all" className="block text-sm text-primary hover:underline">Browse more</Link> : null}
   </div>;
-  const notesPanel = <div className="space-y-2">
-    {panelHead("My notes", null, <InfoTip label="About notes">Your own notes on this source. Use the assistant to dictate, rewrite and save them.</InfoTip>)}
-    {notes ? <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{notes}</p> : <p className="text-sm text-muted-foreground">Nothing yet. Tell the assistant your reaction.</p>}
-  </div>;
+  const notesPanel = <NotesPanel locationId={locationId} sourceId={recordId} version={record.version} notes={notes} archived={record.archived} />;
   const moreLinks = <details className="rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Linked records and files</summary><div className="mt-3 space-y-5">{footer}</div></details>;
   const tabs: SourceTab[] = [
     { id: "transcript", label: "Transcript", badge: hasTranscript ? undefined : undefined, panel: transcriptPanel },
@@ -120,7 +125,7 @@ export default async function StudioLibraryRecordPage({ params }: { params: Prom
     { id: "more", label: "Files", panel: moreLinks },
   ];
 
-  return <main className="mx-auto w-full min-w-0 max-w-7xl space-y-3 p-4 pb-24 md:p-6 lg:pb-6">
+  return <SourceWorkspaceProvider><main className="mx-auto w-full min-w-0 max-w-7xl space-y-3 p-4 pb-24 md:p-6 lg:pb-6">
     {breadcrumb}
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
       <div className="flex min-w-0 flex-col gap-4">
@@ -134,7 +139,7 @@ export default async function StudioLibraryRecordPage({ params }: { params: Prom
         </div>
         <SourceTabs tabs={tabs} />
       </div>
-      <SourceAssistant locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} ideaId={randomUUID()} canRelated={active} archived={record.archived} knowledgeInput={knowledgeInputs?.inputs[0] ?? null} canTemplate={Boolean(youtube) && hasTranscript} />
+      <SourceAssistant locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} canRelated={active} archived={record.archived} knowledgeInputs={knowledgeInputs?.inputs ?? []} canTemplate={Boolean(youtube) && hasTranscript} />
     </div>
-  </main>;
+  </main></SourceWorkspaceProvider>;
 }
