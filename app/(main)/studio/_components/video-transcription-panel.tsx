@@ -10,7 +10,7 @@ const waitingText: Record<NonNullable<VideoStatus["waiting"]>, string> = {
   mac_paused: "Waiting: your Mac is paused in Setup.", processing_off: "Waiting: Mac processing is off in Setup.",
   tools_missing: "Waiting: your Mac is missing transcription tools. Follow the Setup guide on the Mac page.",
 };
-export function VideoTranscriptionPanel({ locationId, recordId, canTranscribe, status }: { locationId: string; recordId: string; canTranscribe: boolean; status: VideoStatus }) {
+export function VideoTranscriptionPanel({ locationId, recordId, canTranscribe, status, hasTranscript = false }: { locationId: string; recordId: string; canTranscribe: boolean; status: VideoStatus; hasTranscript?: boolean }) {
   const router = useRouter(); const key = useRef<string | null>(null);
   const [pending, setPending] = useState(false); const [message, setMessage] = useState("");
   const latest = status.latest;
@@ -32,8 +32,8 @@ export function VideoTranscriptionPanel({ locationId, recordId, canTranscribe, s
     : latest.status === "skipped" ? (latest.relevance ? `Skipped, low relevance (${latest.relevance.score}/100): ${latest.relevance.reason}` : latest.error_message ?? "Skipped.")
     : latest.status === "cancelled" ? latest.error_message ?? "Cancelled." : `Failed: ${latest.error_message ?? "transcription did not complete"}`;
   const canRun = canTranscribe && (!latest || !["queued", "running"].includes(latest.status));
-  return <section aria-label="Mac transcription" className="space-y-2 rounded-xl border p-4 text-sm">
-    <h2 className="font-medium">Mac transcription</h2>
+  return <section aria-label="Mac transcription" className="space-y-2 rounded-lg border bg-muted/30 p-4 text-sm">
+    <h3 className="font-medium">Mac transcription</h3>
     <p role="status">{state}</p>
     {latest && latest.status === "ready" && latest.transcript_applied === false ? <p className="text-muted-foreground">A transcript you saved earlier was kept; the Mac transcript is stored but not applied.</p> : null}
     {status.mac ? <p className="text-muted-foreground">{status.mac.name}: {status.mac.online ? "online" : "offline"}</p> : null}
@@ -41,7 +41,7 @@ export function VideoTranscriptionPanel({ locationId, recordId, canTranscribe, s
       <ul className="mt-2 space-y-3">{status.frames.map(f => <li key={f.frame_index} className="space-y-1">
         <a href={`/studio/video-frames/${latest!.id}/${f.frame_index}`} target="_blank" rel="noopener noreferrer" className="text-primary underline">Frame at {clock(f.time_seconds)}</a>
         {f.ocr_text ? <p className="whitespace-pre-wrap break-words">{f.ocr_text}</p> : <p className="text-muted-foreground">No text read.</p>}</li>)}</ul></details> : null}
-    {canRun ? <Button type="button" disabled={pending} onClick={() => void request()}>{pending ? "Requesting…" : latest?.status === "suggested" ? "Transcribe on my Mac" : latest ? "Transcribe again on my Mac" : "Transcribe on my Mac"}</Button> : null}
+    {canRun ? <Button type="button" variant={hasTranscript ? "outline" : "default"} disabled={pending} onClick={() => void request()}>{pending ? "Requesting…" : latest?.status === "suggested" ? "Transcribe on my Mac" : latest ? "Transcribe again on my Mac" : "Transcribe on my Mac"}</Button> : null}
     {message ? <p role="status">{message}</p> : null}
     <p className="text-xs text-muted-foreground">Audio is transcribed locally; YouTube captions are the only fallback. No speaker labels or comments.</p>
   </section>;

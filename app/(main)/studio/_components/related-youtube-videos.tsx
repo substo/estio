@@ -88,6 +88,16 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
     return () => observer.disconnect();
   }, [search]);
 
+  useEffect(() => {
+    const onAsk = (event: Event) => {
+      const phrase = (event as CustomEvent<{ phrase?: string }>).detail?.phrase?.trim();
+      if (!phrase) return;
+      started.current = true; setExpanded(true); setQuery(phrase); void search(true, phrase);
+    };
+    window.addEventListener("studio:related-search", onAsk);
+    return () => window.removeEventListener("studio:related-search", onAsk);
+  }, [search]);
+
   function explore() {
     started.current = true;
     setExpanded(true);
