@@ -79,7 +79,7 @@ export async function getLatestKnowledgeOutline(locationId: string, sourceId: st
     order by created_at desc,id limit 1`);
 }
 
-export async function listKnowledgeExtractions(locationId: string) {
+export async function listKnowledgeExtractions(locationId: string, sourceId?: string) {
   const access = await getStudioAccess(locationId);
   if (!access) return null;
   return studioDb.rows<{ id: string; title: string; created_at: string; outline: boolean }>(Prisma.sql`
@@ -88,9 +88,11 @@ export async function listKnowledgeExtractions(locationId: string) {
       from studio.studio_knowledge_outlines o
       left join studio.studio_records r on r.location_id=o.location_id and r.id=o.source_id
       where o.location_id=${access.locationId} and o.actor_app=${access.app}
+        ${sourceId ? Prisma.sql`and o.source_id=${sourceId}::uuid` : Prisma.empty}
       union all
       select id, snapshot#>>'{source,title}' as title, created_at, false as outline
-      from studio.studio_idea_reviews where location_id=${access.locationId} and workflow='knowledge_extract'
-        and snapshot->>'mode' is distinct from 'outline' and snapshot->>'mode' is distinct from 'script_template'
+      from studio.studio_idea_reviews where location_id=${access.locationId} and actor_app=${access.app} and workflow='knowledge_extract'
+        and snapshot->>'mode' in ('record_text','source_units','upload_transcript')
+        ${sourceId ? Prisma.sql`and snapshot#>>'{source,id}'=${sourceId}` : Prisma.empty}
     ) history order by created_at desc,id limit 30`);
 }

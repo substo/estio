@@ -15,6 +15,7 @@ export function KnowledgeOutlineDetail({ outline, query, embedded = false, frame
   const other = units.length - speech - ocr;
   const source = batches[0]?.snapshot.source;
   const url = safeStudioSourceUrl(source?.url);
+  const historyUrl = `/studio/knowledge/extractions?source=${outline.sourceId}`;
   const waiting = batches.some(batch => ["queued", "running"].includes(batch.status) && !batch.result);
   const failures = batches.filter(batch => !batch.result && !["queued", "running"].includes(batch.status));
   const complete = batches.length > 0 && batches.every(batch => !!batch.result);
@@ -29,11 +30,12 @@ export function KnowledgeOutlineDetail({ outline, query, embedded = false, frame
   const Shell = embedded ? "div" : "main";
   return <Shell className={embedded ? "space-y-6" : "mx-auto max-w-4xl space-y-6 p-4 sm:p-6 md:p-10"}>
     {embedded ? null : <header className="space-y-2">
-      <Link href="/studio/knowledge/extractions" className="text-sm text-primary underline">Knowledge extractions</Link>
+      <Link href={historyUrl} className="text-sm text-primary underline">Extraction history</Link>
       <h1 className="break-words text-2xl font-semibold sm:text-3xl">{source?.title ?? "Source knowledge"}</h1>
       {url ? <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm text-primary underline">Open original source</a> : null}
     </header>}
     <section aria-label="Processing coverage" className="space-y-2 text-sm">
+      {embedded ? <Link href={historyUrl} className="inline-flex min-h-9 items-center text-primary underline">Extraction history</Link> : null}
       <p role="status"><strong>{complete ? "Reading complete" : waiting ? "Reading source" : "Extraction incomplete"}</strong>
         {" · "}{covered} of {units.length} evidence passages processed · {batches.filter(batch => batch.result).length} of {batches.length} batches</p>
       {units.length ? <p className="text-muted-foreground">{speech} speech · {ocr} on-screen text{other ? ` · ${other} saved text` : ""}
