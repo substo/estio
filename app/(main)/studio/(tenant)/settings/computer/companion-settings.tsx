@@ -118,6 +118,18 @@ function Capabilities({ device }: { device: StudioDeviceSummary }) {
     <p><span className="font-medium">Allowed work:</span> {allowed.join(", ")}{device.processingEnabled ? "" : " (turn processing on to allow research and summaries)"}</p>
     <p><span className="font-medium">Business research:</span> {device.research.ready ? `Ready on ${device.research.providers.map(providerName).join(" and ")}` : `Not available: ${device.research.reason}`}</p>
     <VideoSetupGuide device={device} />
+    <YoutubeSearchStatus device={device} />
+  </div>;
+}
+
+/** Whether this Mac can run Related YouTube search in its own browser, and the one step that unblocks it. */
+function YoutubeSearchStatus({ device }: { device: StudioDeviceSummary }) {
+  const handles = Array.isArray(device.capabilities.handlers) && (device.capabilities.handlers as string[]).includes("studio.youtube_search");
+  const search = (device.capabilities as { youtubeSearch?: { ready?: boolean; signedIn?: boolean } }).youtubeSearch;
+  if (!handles) return <p><span className="font-medium">Related YouTube search:</span> Update the Studio companion on this Mac (git pull, then <code>bash scripts/studio-companion-launchagent.sh restart</code>). Until then Related videos use YouTube&apos;s API.</p>;
+  return <div className="space-y-1">
+    <p><span className="font-medium">Related YouTube search:</span> {search?.ready ? `Ready in this Mac's Chrome${search.signedIn ? " (signed in to YouTube)" : " (not signed in; optional)"}` : "Not ready: install Google Chrome on this Mac and turn processing on."}</p>
+    {search?.ready && !search.signedIn ? <p className="text-muted-foreground">To use your YouTube account, run <code>npm run start:studio-companion -- youtube-login</code> once, sign in, then quit Chrome.</p> : null}
   </div>;
 }
 

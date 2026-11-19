@@ -218,8 +218,8 @@ carries the owner's preferences. No YouTube cookies reach the server.
 - Needs Mac processing On, Google Chrome installed and companion `studio-companion-7` or newer. The job waits while
   the Mac is offline (page shows "Waiting for your Mac…" and gives up after 3 minutes); a lease lost mid-search fails
   instead of replaying; consent withdrawal cancels queued searches.
-- Browser failures (captcha, consent walls, layout change) fail the search with a plain message. Nothing falls back
-  to the Data API, because API calls are metered usage and the product is flat-fee plus priced usage.
+- Browser failures (captcha, consent walls, layout change) fail the search with a plain message and are not retried
+  in another path.
 - Choosing a result is unchanged: it saves a research link and queues the paired-Mac transcription from Gap 1.
 - Provenance on saved links is `provider: "mac_browser"`.
 
@@ -244,8 +244,14 @@ the proxy, so the request leaves from the connected Android device's network.
   Without it the job fails with "not configured on this server".
 - Deploying this changes the gateway, so the owned deploy script restarts it and the WhatsApp browser briefly reconnects.
 
-### Scheduled, not built
+### Tier 3: YouTube Data API fallback (2026-11-19 owner instruction)
 
-**Metered Data API fallback (tier 3).** Owner decision 2026-11-19: keep scheduled. It needs usage pricing on top of the
-flat fee, which does not exist yet, so the API is not used for Related videos. The explicit Discovery page (search,
-approved channels, subscriptions) still uses the Data API under its existing 50 operations/day cap.
+When the Mac is not ready and no connected device network is online (the normal case for a Substo workspace with only a
+Mac), Related videos falls back to the YouTube Data API, using the profile's own YouTube connection or the server key.
+The Settings page tells the owner why the Mac was not used (for example "update the companion"), and an API failure
+reports both reasons. Rate limits and missing authority never fall back.
+
+- Every API call goes through the existing per-workspace discovery cap (50 operations per UTC day, `studio_youtube_request_slot`),
+  which is the usage record.
+- **Scheduled, not built:** usage pricing on top of the flat fee (per-operation price, balance, invoicing). Until it exists
+  the cap is the only control.

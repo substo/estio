@@ -15,6 +15,7 @@ import { createStudioDb } from "./db";
 import { relatedAnchor, saveLinkedYoutubeSelection, saveYoutubeSelection } from "./youtube-bookmark";
 import { recordLinkId } from "./record-link-policy";
 import { randomUUID } from "node:crypto";
+import { getWhatsAppDeviceEgressStatus } from "@/lib/device-tunnel/status";
 import { readMacYoutubeSearch, startMacYoutubeSearch } from "./youtube-mac-search";
 import { relatedYoutubeQueries, relatedYoutubeSourceId, youtubeDescriptionPreview } from "./youtube-related-policy";
 
@@ -36,7 +37,7 @@ export async function browseStudioYoutube(locationId: string, input: unknown) {
 }
 
 type YoutubeContext = Awaited<ReturnType<typeof context>>;
-async function browseYoutube({ access, profile }: YoutubeContext, input: unknown) {
+async function browseYoutube({ access, profile }: YoutubeContext, input: unknown, related?: { anchorId: string; expanded: boolean }) {
   if (!hasStudioSecretsKey()) throw new YoutubeError("profile_key_unavailable", "Secure profile and discovery storage is not configured on this server yet.");
   let request;
   try { request = readDiscoveryRequest(input); } catch (error) { throw new YoutubeError("invalid_request", (error as Error).message); }
@@ -65,7 +66,8 @@ async function browseYoutube({ access, profile }: YoutubeContext, input: unknown
     const subscribed = await api.subscriptions("", request.channelId);
     if (!subscribed.channels.some(c => c.id === request.channelId)) throw new YoutubeError("not_subscribed", "This channel is not in your connected account’s subscriptions.");
   }
-  const result = request.mode === "search" ? await api.search(request.query, request.pageToken)
+  const result = request.mode === "search" ? await api.search(request.query, request.pageToken,
+    related ? { limit: related.expanded ? 11 : 5, includeStatistics: true } : undefined)
     : request.mode === "url" ? { videos: await api.videos([request.videoId!]), nextPageToken: null }
     : await api.channelVideos(request.channelId, request.pageToken);
   await stillConnected();
@@ -76,7 +78,7 @@ async function browseYoutube({ access, profile }: YoutubeContext, input: unknown
     // arrives separately when the user saves a reference.
     const provenance: YoutubeProvenance = { kind, observedAt, provider: "youtube_data_api", rights: "research_link_only",
       ...(request.mode === "search" ? { query: request.query } : {}), ...(request.mode === "channel" || request.mode === "subscription" ? { channelId: request.channelId } : {}) };
-    return { ...video, ticket: sealYoutubeSelection({ locationId: access.locationId, brand: access.app, userId: access.userId }, video.id, provenance) };
+    return { ...video, ticket: sealYoutubeSelection({ locationId: access.locationId, brand: access.app, userId: access.userId }, video.id, provenance, { anchorId: related?.anchorId }) };
   });
   return { kind: "videos" as const, videos, nextPageToken: result.nextPageToken, identity, provenance: kind, observedAt };
 }
@@ -98,10 +100,26 @@ export async function browseStudioRelatedYoutube(locationId: string, input: { an
   const query = String(input.query ?? queries[0] ?? "").trim();
   if (!query) throw new YoutubeError("invalid_request", "Enter a YouTube search for this topic.");
   const expanded = input.expanded === true;
-  // Default route: the paired Mac searches YouTube in its own signed-in browser profile. The Data API is not used here
-  // (it would be metered usage, which is not priced yet) and nothing silently falls back to it.
-  const jobId = await startMacYoutubeSearch(authority.access, query.slice(0, 160), expanded ? 12 : 6, `related-${randomUUID()}`);
-  return { status: "pending" as const, jobId, query, alternateQuery: queries.find(phrase => phrase !== query) ?? null };
+  const alternateQuery = queries.find(phrase => phrase !== query) ?? null;
+  // Use the paired Mac when it is ready, then the Location's connected device network, then the YouTube Data API.
+  const deviceNetwork = await getWhatsAppDeviceEgressStatus(authority.access.locationId).then(status => status.required && status.available).catch(() => false);
+  try {
+    const jobId = await startMacYoutubeSearch(authority.access, query.slice(0, 160), expanded ? 12 : 6, `related-${randomUUID()}`, { deviceNetwork });
+    return { status: "pending" as const, jobId, query, alternateQuery };
+  } catch (error) {
+    if (!(error instanceof YoutubeError) || error.code !== "mac_not_ready") throw error;
+    const macReason = error.message;
+    try {
+      const result = await browseYoutube(authority, { mode: "search", query }, { anchorId: anchor.id, expanded });
+      if (result.kind !== "videos") throw new Error("Related search must return videos.");
+      const seedVideo = relatedYoutubeSourceId(anchor.source_url);
+      return { status: "done" as const, via: "api" as const, query, alternateQuery,
+        videos: result.videos.filter(video => video.id !== seedVideo).slice(0, expanded ? 10 : 3).map(video => ({ ...video, description: youtubeDescriptionPreview(video.description) })) };
+    } catch (apiError) {
+      // Say why the Mac was not used as well as why the fallback failed.
+      throw new YoutubeError(apiError instanceof YoutubeError ? apiError.code : "youtube_unavailable", `${macReason} Falling back to YouTube's API also failed: ${apiError instanceof YoutubeError ? apiError.message : "check the YouTube connection and API access."}`);
+    }
+  }
 }
 
 export async function readStudioRelatedYoutube(locationId: string, input: { anchorId?: unknown; jobId?: unknown }) {

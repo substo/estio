@@ -8,9 +8,9 @@ import type { YoutubeVideo } from "@/lib/google/youtube-api";
 import type { VideoQueueResult } from "@/lib/studio/video-transcription";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
 
-type Candidate = Omit<YoutubeVideo, "publishedAt" | "statistics" | "thumbnailUrl"> & { publishedText?: string; viewsText?: string; ticket: string };
+type Candidate = Omit<YoutubeVideo, "publishedAt" | "statistics" | "thumbnailUrl"> & { publishedAt?: string; statistics?: YoutubeVideo["statistics"]; publishedText?: string; viewsText?: string; ticket: string };
 type SearchResult = { query: string; alternateQuery: string | null; videos: Candidate[] };
-type Started = { status: "pending"; jobId: string; query: string; alternateQuery: string | null };
+type Started = { status: "pending"; jobId: string; query: string; alternateQuery: string | null } | ({ status: "done"; via?: "api" } & SearchResult);
 type Polled = { status: "pending" } | { status: "failed"; message: string } | ({ status: "done"; viaDevice?: boolean } & SearchResult);
 const POLL_MS = 2000, GIVE_UP_MS = 3 * 60_000, SLOW_MS = 20_000;
 type Saved = { recordId: string; transcription: VideoQueueResult };
@@ -53,6 +53,7 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
     try {
       const begun = await request<Started>({ action: "related", expanded: showMore, query: phrase || undefined });
       setQuery(begun.query);
+      if (begun.status === "done") { setResult(begun); setViaDevice(false); return; }
       const startedAt = Date.now();
       while (mine === run.current) {
         await new Promise(resolve => setTimeout(resolve, POLL_MS));
@@ -129,6 +130,8 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
       </p> : null}
       <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {videos.map(video => {
+          const counts = [[video.statistics?.views, "views"], [video.statistics?.likes, "likes"], [video.statistics?.comments, "comments"]]
+            .flatMap(([value, label]) => value ? [`${BigInt(value).toLocaleString()} ${label}`] : []);
           const selection = saved.get(video.id);
           return <article key={video.id} className="min-w-0 overflow-hidden rounded-lg border">
             <button type="button" aria-label={`Preview ${video.title}`} className="block w-full focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary" onClick={event => { previewTrigger.current = event.currentTarget; setPreview(video); }}>
@@ -141,9 +144,9 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
               <h3 className="break-words font-medium">{video.title}</h3>
               <p className="break-words text-xs text-muted-foreground">
                 <a className="hover:underline" href={video.channelId ? `https://www.youtube.com/channel/${video.channelId}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(video.channelTitle)}`} target="_blank" rel="noreferrer">{video.channelTitle}</a>
-                {video.publishedText && <> · {video.publishedText}</>}
+                {video.publishedText ? <> · {video.publishedText}</> : /^\d{4}-\d{2}-\d{2}/.test(video.publishedAt ?? "") ? <> · {video.publishedAt?.slice(0, 10)}</> : null}
               </p>
-              {video.viewsText && <p className="text-xs tabular-nums">{video.viewsText}</p>}
+              {(video.viewsText || counts.length > 0) && <p className="text-xs tabular-nums">{video.viewsText ?? counts.join(" · ")}</p>}
               {video.description && <p className="break-words text-xs text-muted-foreground"><span className="sr-only">Publisher description. </span>{video.description}</p>}
               {selection ? <div role="status" className="space-y-1">
                 <Link className="font-medium text-primary underline" href={`/studio/library/${selection.recordId}`}>Open linked reference</Link>
