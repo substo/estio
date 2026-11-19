@@ -5,9 +5,11 @@ export const macVideoSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9_-]{11}$/), title: z.string().trim().min(1).max(300),
   channelId: z.string().regex(/^UC[A-Za-z0-9_-]{22}$/).optional(), channelTitle: z.string().max(200).optional(),
   publishedText: z.string().max(80).optional(), viewsText: z.string().max(80).optional(), description: z.string().max(400).optional(),
+  /** Set when a model judged this video against the source (see related-search-policy). */
+  score: z.number().min(0).max(100).nullable().optional(), reason: z.string().max(240).optional(), band: z.enum(["relevant", "maybe", "off_topic", "unranked"]).optional(),
 }).strict();
 export type MacVideo = z.infer<typeof macVideoSchema>;
-export const macSearchResultSchema = z.object({ videos: z.array(macVideoSchema).max(12), signedIn: z.boolean().optional(), via: z.literal("device_network").optional() }).strict();
+export const macSearchResultSchema = z.object({ videos: z.array(macVideoSchema).max(24), signedIn: z.boolean().optional(), via: z.literal("device_network").optional() }).strict();
 export type MacSearchResult = z.infer<typeof macSearchResultSchema>;
 export const macSearchPayloadSchema = z.object({ query: z.string().trim().min(1).max(160), limit: z.number().int().min(3).max(12) }).strict();
 /** A search that fell through from the Mac to the connected phone network keeps why, for the status line. */

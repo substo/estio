@@ -17,8 +17,8 @@ export function saveYoutubeSelection(store: StudioDb, access: YoutubeAuthority, 
 
 export async function relatedAnchor(store: StudioDb, locationId: string, anchorId: unknown, lock = false) {
   if (typeof anchorId !== "string" || !recordLinkId(anchorId)) throw new YoutubeError("invalid_anchor", "Choose a saved source or idea.");
-  const record = await store.one<{ id: string; title: string; version: number; source_url: string | null; topic: string | null }>(Prisma.sql`
-    select id, title, version, source_url,
+  const record = await store.one<{ id: string; kind: string; title: string; version: number; source_url: string | null; topic: string | null }>(Prisma.sql`
+    select id, kind, title, version, source_url,
       left(coalesce(nullif(payload->>'aiSummary',''), nullif(payload->>'description',''),
         nullif(payload->>'summary',''), payload->>'transcript'), 2400) as topic
     from studio.studio_records where location_id = ${locationId} and id = ${anchorId}::uuid and not archived

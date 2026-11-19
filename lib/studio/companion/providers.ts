@@ -20,7 +20,7 @@ export function claudeLoginMethod(status: Record<string, unknown>): LoginMethod 
   return method === "claude.ai" ? "claudeai" : method === "console" ? "console" : /api.?key/i.test(method) ? "api_key" : "unknown";
 }
 export interface TextRequest<T> {
-  workflowContext?: "knowledge_extract" | "idea_review" | "script_brief" | "library_summary" | "onboarding_research" | "video_relevance" | "video_template";
+  workflowContext?: "knowledge_extract" | "idea_review" | "script_brief" | "library_summary" | "onboarding_research" | "video_relevance" | "video_template" | "related_video_search";
   model?: string; prompt: string; jsonSchema: Record<string, unknown>; validate: (value: unknown) => T; signal: AbortSignal;
   /** Live web search (Codex `web_search="live"`, Claude WebSearch/WebFetch). Only onboarding research sets this; it is off for everything else. */
   webSearch?: boolean;

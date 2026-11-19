@@ -215,7 +215,7 @@ title/channel/age/views text. The profile is `~/Library/Application Support/Esti
 YouTube in that profile (normal Chrome, no automation flags). Searching works signed out too; the profile only
 carries the owner's preferences. No YouTube cookies reach the server.
 
-- Needs Mac processing On, Google Chrome installed and companion `studio-companion-7` or newer. The job waits while
+- Needs Mac processing On, Google Chrome installed and companion `studio-companion-8` or newer. The job waits while
   the Mac is offline (page shows "Waiting for your Mac…" and gives up after 3 minutes); a lease lost mid-search fails
   instead of replaying; consent withdrawal cancels queued searches.
 - Browser failures (captcha, consent walls, layout change) fail the search with a plain message and are not retried
@@ -255,3 +255,29 @@ reports both reasons. Rate limits and missing authority never fall back.
   which is the usage record.
 - **Scheduled, not built:** usage pricing on top of the flat fee (per-operation price, balance, invoicing). Until it exists
   the cap is the only control.
+
+## Related videos: planning, relevance ranking and the reasoning log (2026-11-19)
+
+The first version only turned the source title plus its most frequent words into one keyword query and showed whatever YouTube
+returned, so results shared words with the source without covering its subject (for example "doctor lawyer" pulling clickbait
+about fake followers). A model never judged relevance. Now:
+
+1. **Plan.** The Mac's own signed-in Codex/Claude subscription (the model chosen in Setup, workflow `related_video_search`)
+   reads the source title/summary, the Business profile, pinned knowledge and approved Library titles and writes 2–4 search
+   queries around the source's core subject.
+2. **Search.** Each query runs in the Mac's Chrome (tier 1). If the Mac cannot search but can still run a model, the Data API
+   finds candidates from the keyword query and the Mac **ranks** them (rank-only job, no browser needed).
+3. **Rank.** The model scores every candidate 0–100 with a one-sentence reason (subject match, not popularity). 60+ shows,
+   40–59 and below go under "Less relevant", and each card shows its score and reason.
+4. **No model, no guess.** If no signed-in subscription model with capacity exists, results are shown collapsed under "Not
+   checked for relevance" with the reason (for example "update the Studio companion"). No paid API is used for judging.
+
+**The reasoning log.** Every run is stored in `studio.studio_related_runs` (service-only; written by
+`studio_record_related_run`, idempotent per job) and shown at `/studio/related-history/<source or idea id>` ("How these were
+chosen" under Related videos): route, which queries came from the model vs keywords vs you, the exact planner and ranker
+prompts (plus the capability-contract version prepended by the Mac), the provider and model, the model's raw reply, timings,
+notes about any degraded step, and every candidate's score, band and reason. Prompts are shortened if a result would exceed
+the Mac's 32 KB reply limit.
+
+Needs companion `studio-companion-8` (reports `youtubeSearch.rank`); Settings → Connected computer shows readiness. The
+device-network tier only searches; it cannot rank, so it is labelled unchecked.

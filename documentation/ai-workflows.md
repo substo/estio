@@ -81,3 +81,11 @@ Full-source extraction limits, review semantics and the transcript-ready integra
 ## Contributor contract
 
 Add a route only with its actual modality/tool adapter, credential scope and explicit funding/consent semantics. Extend the shared selector/readiness **and** atomic SQL admission/allowlists, native handler/version, bounded snapshot/output validation, completion/application and replay fences together. Test the real SQL in isolation. Keep requested versus actual provider/model clear. Never replace a durable paid path with an unmetered LLM call or turn research suggestions into confirmed facts. Update the bundled contract, outbound prompt-capture tests and this matrix together. Report implemented, device-reported, key-present and live-verified evidence distinctly; unknown stays unknown.
+
+## Related video search (2026-11-19)
+
+Workflow context `related_video_search` (`lib/ai/workflow-capabilities.ts`): the requesting account's paired Mac Codex/Claude
+subscription only, no paid API, no tools. Step 1 plans 2–4 YouTube queries; step 2 scores candidates. Both are strict-JSON
+(`lib/studio/related-search-policy.ts`), run inside job kind `studio.youtube_search` (modes `search`, `plan_search_rank`, `rank`), and
+the exact prompts, provider, model, reply and scores are stored per run for the user to read. A failed or unavailable model step
+degrades to unranked results with a note; it never falls back to a paid provider.

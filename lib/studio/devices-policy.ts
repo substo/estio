@@ -103,7 +103,7 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
   }
   if (v.youtubeSearch && typeof v.youtubeSearch === "object" && !Array.isArray(v.youtubeSearch)) {
     const search = v.youtubeSearch as Record<string, unknown>;
-    result.youtubeSearch = { ready: search.ready === true, ...(typeof search.signedIn === "boolean" ? { signedIn: search.signedIn } : {}) };
+    result.youtubeSearch = { ready: search.ready === true, rank: search.rank === true, ...(typeof search.signedIn === "boolean" ? { signedIn: search.signedIn } : {}) };
   }
   if (v.hardware && typeof v.hardware === "object" && !Array.isArray(v.hardware)) {
     const h = v.hardware as Record<string, unknown>;

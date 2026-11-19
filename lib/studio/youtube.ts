@@ -16,7 +16,9 @@ import { relatedAnchor, saveLinkedYoutubeSelection, saveYoutubeSelection } from 
 import { recordLinkId } from "./record-link-policy";
 import { randomUUID } from "node:crypto";
 import { getWhatsAppDeviceEgressStatus } from "@/lib/device-tunnel/status";
-import { readMacYoutubeSearch, startMacYoutubeSearch } from "./youtube-mac-search";
+import { readMacYoutubeSearch, recordRelatedRun, startMacYoutubeSearch } from "./youtube-mac-search";
+import { buildRelevanceContext } from "./video-discovery";
+import type { RelatedContext, RelatedSource, RelatedTrace } from "./related-search-policy";
 import { relatedYoutubeQueries, relatedYoutubeSourceId, youtubeDescriptionPreview } from "./youtube-related-policy";
 
 export interface ApprovedYoutubeChannel { channel_id: string; label: string; }
@@ -93,31 +95,60 @@ function youtubeSelection({ profile, access }: YoutubeContext, ticket: unknown, 
   return selection;
 }
 
+type RelatedAccess = YoutubeContext["access"];
+export type RelatedCard = { id: string; title: string; channelId: string; channelTitle: string; publishedAt?: string; publishedText?: string; viewsText?: string; statistics?: { views?: string; likes?: string; comments?: string };
+  description?: string; ticket: string; score: number | null; reason: string; band: "relevant" | "maybe" | "off_topic" | "unranked" };
+const MAX_CARDS = 12;
+
+async function relatedModelContext(access: RelatedAccess): Promise<RelatedContext> {
+  const full = await buildRelevanceContext(studioDb, access.locationId).catch(() => ({ approvedTitles: [], pinnedKnowledge: [], profile: {} }));
+  return { approvedTitles: (full.approvedTitles ?? []).slice(0, 15), pinnedKnowledge: (full.pinnedKnowledge ?? []).slice(0, 10), profile: full.profile ?? {} };
+}
+const seal = (access: RelatedAccess, anchorId: string, videoId: string, provider: YoutubeProvenance["provider"], query: string) => sealYoutubeSelection(
+  { locationId: access.locationId, brand: access.app, userId: access.userId }, videoId, { kind: "public_search", observedAt: new Date().toISOString(), provider, rights: "research_link_only", query }, { anchorId });
+const countText = (value: string | undefined, label: string) => (value ? `${BigInt(value).toLocaleString("en")} ${label}` : undefined);
+
 export async function browseStudioRelatedYoutube(locationId: string, input: { anchorId?: unknown; query?: unknown; expanded?: unknown }) {
   const authority = await context(locationId);
-  const anchor = await relatedAnchor(studioDb, authority.access.locationId, input.anchorId);
+  const { access } = authority;
+  const anchor = await relatedAnchor(studioDb, access.locationId, input.anchorId);
   const queries = relatedYoutubeQueries(anchor.title, anchor.topic ?? "");
   const query = String(input.query ?? queries[0] ?? "").trim();
   if (!query) throw new YoutubeError("invalid_request", "Enter a YouTube search for this topic.");
   const expanded = input.expanded === true;
   const alternateQuery = queries.find(phrase => phrase !== query) ?? null;
-  // Use the paired Mac when it is ready, then the Location's connected device network, then the YouTube Data API.
-  const deviceNetwork = await getWhatsAppDeviceEgressStatus(authority.access.locationId).then(status => status.required && status.available).catch(() => false);
+  const source: RelatedSource = { kind: anchor.kind === "content" ? "idea" : "reference", title: anchor.title.slice(0, 300), summary: (anchor.topic ?? "").slice(0, 2000) };
+  const modelContext = await relatedModelContext(access);
+  // Order: the paired Mac plans, searches and ranks with its own subscription; else the connected device network searches; else the Data API finds
+  // candidates and the Mac ranks them; else the results are shown unranked and labelled as such.
+  const deviceNetwork = await getWhatsAppDeviceEgressStatus(access.locationId).then(status => status.required && status.available).catch(() => false);
+  const requestKey = `related-${randomUUID()}`;
   try {
-    const jobId = await startMacYoutubeSearch(authority.access, query.slice(0, 160), expanded ? 12 : 6, `related-${randomUUID()}`, { deviceNetwork });
-    return { status: "pending" as const, jobId, query, alternateQuery };
+    const started = await startMacYoutubeSearch(access, { query: query.slice(0, 160), limit: expanded ? 12 : 8, requestKey, mode: "plan_search_rank", source, context: modelContext }, { deviceNetwork });
+    return { status: "pending" as const, jobId: started.jobId, query, alternateQuery, ranking: started.mode === "plan_search_rank" };
   } catch (error) {
     if (!(error instanceof YoutubeError) || error.code !== "mac_not_ready") throw error;
     const macReason = error.message;
+    let api: Awaited<ReturnType<typeof browseYoutube>>;
+    try { api = await browseYoutube(authority, { mode: "search", query }, { anchorId: anchor.id, expanded }); }
+    catch (apiError) { throw new YoutubeError(apiError instanceof YoutubeError ? apiError.code : "youtube_unavailable", `${macReason} Falling back to YouTube's API also failed: ${apiError instanceof YoutubeError ? apiError.message : "check the YouTube connection and API access."}`); }
+    if (api.kind !== "videos") throw new Error("Related search must return videos.");
+    const seed = relatedYoutubeSourceId(anchor.source_url);
+    const found = api.videos.filter(video => video.id !== seed).slice(0, MAX_CARDS);
+    const candidates = found.map(video => ({ id: video.id, title: video.title.slice(0, 300), channelId: video.channelId, channelTitle: video.channelTitle.slice(0, 200), publishedAt: video.publishedAt?.slice(0, 40),
+      viewsText: countText(video.statistics?.views, "views"), description: youtubeDescriptionPreview(video.description)?.slice(0, 400) }));
     try {
-      const result = await browseYoutube(authority, { mode: "search", query }, { anchorId: anchor.id, expanded });
-      if (result.kind !== "videos") throw new Error("Related search must return videos.");
-      const seedVideo = relatedYoutubeSourceId(anchor.source_url);
-      return { status: "done" as const, via: "api" as const, query, alternateQuery,
-        videos: result.videos.filter(video => video.id !== seedVideo).slice(0, expanded ? 10 : 3).map(video => ({ ...video, description: youtubeDescriptionPreview(video.description) })) };
-    } catch (apiError) {
-      // Say why the Mac was not used as well as why the fallback failed.
-      throw new YoutubeError(apiError instanceof YoutubeError ? apiError.code : "youtube_unavailable", `${macReason} Falling back to YouTube's API also failed: ${apiError instanceof YoutubeError ? apiError.message : "check the YouTube connection and API access."}`);
+      const started = await startMacYoutubeSearch(access, { query: query.slice(0, 160), limit: 8, requestKey, mode: "rank", source, context: modelContext, candidates }, { deviceNetwork: false });
+      return { status: "pending" as const, jobId: started.jobId, query, alternateQuery, ranking: true };
+    } catch (rankError) {
+      if (!(rankError instanceof YoutubeError) || !["mac_not_ready", "mac_search_unavailable"].includes(rankError.code)) throw rankError;
+      // Nothing can judge relevance: show the candidates, clearly unchecked, and keep the reasoning log.
+      const note = `Not checked for relevance: ${rankError.message}`;
+      const trace: RelatedTrace = { version: 1, route: "api", mode: "heuristic", queries: [{ query, by: "heuristic", found: found.length }], notes: [macReason.slice(0, 200), note.slice(0, 200)],
+        candidates: found.map(video => ({ id: video.id, title: video.title, channel: video.channelTitle, score: null, reason: "", band: "unranked" as const })) };
+      const runId = await recordRelatedRun(access, anchor.id, null, trace);
+      return { status: "done" as const, query, alternateQuery, route: "api" as const, viaDevice: false, ranked: false, note, runId,
+        videos: found.map((video): RelatedCard => ({ ...video, description: youtubeDescriptionPreview(video.description), score: null, reason: "", band: "unranked" })) };
     }
   }
 }
@@ -128,19 +159,23 @@ export async function readStudioRelatedYoutube(locationId: string, input: { anch
   const anchor = await relatedAnchor(studioDb, access.locationId, input.anchorId);
   const state = await readMacYoutubeSearch(access, input.jobId);
   if (state.status !== "done") return state;
-  const seedVideo = relatedYoutubeSourceId(anchor.source_url);
-  const observedAt = new Date().toISOString();
+  const seed = relatedYoutubeSourceId(anchor.source_url);
+  const videos = state.result.videos.filter(video => video.id !== seed).slice(0, MAX_CARDS);
+  const route = state.result.trace?.route ?? (state.egress ? "device_network" : "mac_browser");
+  const provider: YoutubeProvenance["provider"] = route === "api" ? "youtube_data_api" : route === "device_network" ? "device_network_browser" : "mac_browser";
+  const cards = videos.map((video): RelatedCard => ({ id: video.id, title: video.title, channelId: video.channelId ?? "", channelTitle: video.channelTitle ?? "", publishedText: video.publishedText, viewsText: video.viewsText,
+    description: video.description ? youtubeDescriptionPreview(video.description) : undefined, score: video.score ?? null, reason: video.reason ?? "", band: video.band ?? "unranked",
+    ticket: seal(access, anchor.id, video.id, provider, state.query) }));
+  const base = state.result.trace;
+  const trace: RelatedTrace = base
+    ? { ...base, ...(base.mode === "rank" ? { queries: [{ query: state.query, by: "heuristic" as const, found: videos.length }] } : {}) }
+    : { version: 1, route, mode: "search", queries: [{ query: state.query, by: "heuristic", found: videos.length }],
+        notes: [state.egress ? "Searched through the connected device network. Relevance was not checked: the models run on your Mac." : "Plain search."],
+        candidates: videos.map(video => ({ id: video.id, title: video.title, channel: video.channelTitle, score: null, reason: "", band: "unranked" as const })) };
+  const runId = await recordRelatedRun(access, anchor.id, state.jobId, trace);
   const queries = relatedYoutubeQueries(anchor.title, anchor.topic ?? "");
-  const expanded = state.limit > 6;
-  return {
-    status: "done" as const, query: state.query, alternateQuery: queries.find(phrase => phrase !== state.query) ?? null, signedIn: state.result.signedIn ?? false, viaDevice: state.viaDevice,
-    videos: state.result.videos.filter(video => video.id !== seedVideo).slice(0, expanded ? 10 : 3).map(video => {
-      const provenance: YoutubeProvenance = { kind: "public_search", observedAt, provider: state.viaDevice ? "device_network_browser" : "mac_browser", rights: "research_link_only", query: state.query };
-      return { id: video.id, title: video.title, channelId: video.channelId ?? "", channelTitle: video.channelTitle ?? "", publishedAt: "", publishedText: video.publishedText, viewsText: video.viewsText,
-        description: video.description ? youtubeDescriptionPreview(video.description) : undefined,
-        ticket: sealYoutubeSelection({ locationId: access.locationId, brand: access.app, userId: access.userId }, video.id, provenance, { anchorId: anchor.id }) };
-    }),
-  };
+  return { status: "done" as const, query: state.query, alternateQuery: queries.find(phrase => phrase !== state.query) ?? null, route, viaDevice: state.viaDevice, runId,
+    ranked: cards.some(card => card.band !== "unranked"), note: trace.notes?.join(" "), videos: cards };
 }
 
 export async function saveStudioRelatedYoutube(locationId: string, input: { anchorId?: unknown; ticket?: unknown; title?: unknown }) {

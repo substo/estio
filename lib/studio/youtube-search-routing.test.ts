@@ -7,7 +7,7 @@ const access = { locationId: "loc", app: "substo" as const, userId: "u" };
 const rpc = (script: Record<string, string | { code: string }>) => { const calls: string[] = [];
   const db: SearchRpc = { call: async <T,>(fn: string) => { calls.push(fn); const r = script[fn]; if (!r) throw new Error("unexpected " + fn); if (typeof r === "object") throw Object.assign(new Error("db"), r); return { jobId: r } as T; } };
   return { db, calls }; };
-const run = (db: SearchRpc, deviceNetwork: boolean) => startRelatedSearchJob(db, access, "ads", 6, "k", { deviceNetwork });
+const run = async (db: SearchRpc, deviceNetwork: boolean, mode?: "rank" | "plan_search_rank") => (await startRelatedSearchJob(db, access, { query: "ads", limit: 6, requestKey: "k", mode }, { deviceNetwork })).jobId;
 
 test("a ready Mac is always used first and nothing else is called", async () => {
   const { db, calls } = rpc({ studio_enqueue_youtube_search: "mac-job", studio_enqueue_youtube_search_egress: "egress-job" });
@@ -38,4 +38,14 @@ test("rate limits and missing authority never fall back to the paid-looking path
 test("unexpected errors propagate unchanged", async () => {
   const { db } = rpc({ studio_enqueue_youtube_search: { code: "XX000" } });
   await assert.rejects(run(db, true), (e: unknown) => !(e instanceof YoutubeError));
+});
+
+test("rank-only never goes to the device network, and a Mac that cannot rank reports why", async () => {
+  const { db, calls } = rpc({ studio_enqueue_youtube_search: { code: "YS006" }, studio_enqueue_youtube_search_egress: "egress-job" });
+  await assert.rejects(run(db, true, "rank"), (e: unknown) => e instanceof YoutubeError && e.code === "mac_not_ready" && /relevance/.test(e.message));
+  assert.deepEqual(calls, ["studio_enqueue_youtube_search"]);
+});
+test("the Mac's reported mode is passed through", async () => {
+  const db: SearchRpc = { call: async <T,>() => ({ jobId: "j", mode: "search" }) as T };
+  assert.deepEqual(await startRelatedSearchJob(db, access, { query: "a", limit: 6, requestKey: "k", mode: "plan_search_rank" }, { deviceNetwork: false }), { jobId: "j", mode: "search", via: "mac" });
 });

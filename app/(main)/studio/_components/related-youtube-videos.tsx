@@ -8,9 +8,10 @@ import type { YoutubeVideo } from "@/lib/google/youtube-api";
 import type { VideoQueueResult } from "@/lib/studio/video-transcription";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
 
-type Candidate = Omit<YoutubeVideo, "publishedAt" | "statistics" | "thumbnailUrl"> & { publishedAt?: string; statistics?: YoutubeVideo["statistics"]; publishedText?: string; viewsText?: string; ticket: string };
-type SearchResult = { query: string; alternateQuery: string | null; videos: Candidate[] };
-type Started = { status: "pending"; jobId: string; query: string; alternateQuery: string | null } | ({ status: "done"; via?: "api" } & SearchResult);
+type Band = "relevant" | "maybe" | "off_topic" | "unranked";
+type Candidate = Omit<YoutubeVideo, "publishedAt" | "statistics" | "thumbnailUrl"> & { publishedAt?: string; statistics?: YoutubeVideo["statistics"]; publishedText?: string; viewsText?: string; ticket: string; score?: number | null; reason?: string; band?: Band };
+type SearchResult = { query: string; alternateQuery: string | null; videos: Candidate[]; ranked?: boolean; note?: string; runId?: string | null; route?: string };
+type Started = { status: "pending"; jobId: string; query: string; alternateQuery: string | null; ranking?: boolean } | ({ status: "done"; via?: "api" } & SearchResult);
 type Polled = { status: "pending" } | { status: "failed"; message: string } | ({ status: "done"; viaDevice?: boolean } & SearchResult);
 const POLL_MS = 2000, GIVE_UP_MS = 3 * 60_000, SLOW_MS = 20_000;
 type Saved = { recordId: string; transcription: VideoQueueResult };
@@ -27,6 +28,7 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
   const [loading, setLoading] = useState(false);
   const [slow, setSlow] = useState(false);
   const [viaDevice, setViaDevice] = useState(false);
+  const [ranking, setRanking] = useState(false);
   const run = useRef(0);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
@@ -53,6 +55,7 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
     try {
       const begun = await request<Started>({ action: "related", expanded: showMore, query: phrase || undefined });
       setQuery(begun.query);
+      setRanking(begun.status === "pending" && begun.ranking === true);
       if (begun.status === "done") { setResult(begun); setViaDevice(false); return; }
       const startedAt = Date.now();
       while (mine === run.current) {
@@ -107,6 +110,41 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
 
   const currentQuery = result?.query ?? "";
   const videos = result?.videos.filter(video => !dismissed.get(currentQuery)?.includes(video.id)) ?? [];
+  const relevant = videos.filter(v => v.band === "relevant");
+  const less = videos.filter(v => v.band === "maybe" || v.band === "off_topic");
+  const unchecked = videos.filter(v => !v.band || v.band === "unranked");
+  const renderCard = (video: Candidate) => {
+          const counts = [[video.statistics?.views, "views"], [video.statistics?.likes, "likes"], [video.statistics?.comments, "comments"]]
+        .flatMap(([value, label]) => value ? [`${BigInt(value).toLocaleString()} ${label}`] : []);
+      const selection = saved.get(video.id);
+      return <article key={video.id} className="min-w-0 overflow-hidden rounded-lg border">
+        <button type="button" aria-label={`Preview ${video.title}`} className="block w-full focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary" onClick={event => { previewTrigger.current = event.currentTarget; setPreview(video); }}>
+          {/* YouTube thumbnails are served by its video CDN. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={`https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`} alt="" width={480} height={360} loading="lazy" className="aspect-video w-full bg-muted object-cover" />
+          <span className="sr-only">Preview</span>
+        </button>
+        <div className="space-y-2 p-3 text-sm">
+          <h3 className="break-words font-medium">{video.title}</h3>
+          <p className="break-words text-xs text-muted-foreground">
+            <a className="hover:underline" href={video.channelId ? `https://www.youtube.com/channel/${video.channelId}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(video.channelTitle)}`} target="_blank" rel="noreferrer">{video.channelTitle}</a>
+            {video.publishedText ? <> · {video.publishedText}</> : /^\d{4}-\d{2}-\d{2}/.test(video.publishedAt ?? "") ? <> · {video.publishedAt?.slice(0, 10)}</> : null}
+          </p>
+          {(video.viewsText || counts.length > 0) && <p className="text-xs tabular-nums">{video.viewsText ?? counts.join(" · ")}</p>}
+          {video.score != null && video.band !== "unranked" && <p className="break-words text-xs"><span className="font-medium">Relevance {video.score}/100</span>{video.reason ? ` · ${video.reason}` : ""}</p>}
+              {video.description && <p className="break-words text-xs text-muted-foreground"><span className="sr-only">Publisher description. </span>{video.description}</p>}
+          {selection ? <div role="status" className="space-y-1">
+            <Link className="font-medium text-primary underline" href={`/studio/library/${selection.recordId}`}>Open linked reference</Link>
+            {selection.transcription.status === "not_queued" && <p className="text-xs text-muted-foreground">{selection.transcription.message}</p>}
+            {["queued", "reused"].includes(selection.transcription.status) && <p className="text-xs text-muted-foreground">Mac transcription queued.</p>}
+          </div> : <div className="flex flex-wrap items-center gap-3">
+            <button type="button" disabled={saving !== null} onClick={() => void save(video)} className="rounded-md border px-3 py-1.5 text-xs font-medium disabled:opacity-50">{saving === video.id ? "Adding…" : "Add as reference"}</button>
+            <button type="button" disabled={saving === video.id} onClick={() => setDismissed(previous => new Map(previous).set(currentQuery, [...(previous.get(currentQuery) ?? []), video.id]))} className="text-xs text-muted-foreground underline">Skip</button>
+          </div>}
+        </div>
+      </article>;
+  };
+  const grid = (items: Candidate[]) => <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">{items.map(renderCard)}</div>;
   return (
     <section ref={section} aria-label="Related YouTube videos" className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -121,45 +159,21 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
         </div>
         {result?.alternateQuery && <button type="button" className="text-left text-sm text-primary underline disabled:opacity-50" disabled={loading} onClick={() => void search(true, result.alternateQuery ?? undefined)}>Try “{result.alternateQuery}”</button>}
       </form>}
-      {loading ? <p role="status" className="text-sm text-muted-foreground">{slow ? "Waiting for your Mac to search YouTube… It must be on with the Studio companion running." : "Searching YouTube on your Mac…"}</p> : null}
+      {loading ? <p role="status" className="text-sm text-muted-foreground">{slow ? "Waiting for your Mac… It must be on with the Studio companion running." : ranking ? "Your Mac is planning the search and checking each video’s relevance…" : "Searching YouTube…"}</p> : null}
       {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       {saveError ? <p role="alert" className="text-sm text-destructive">{saveError}</p> : null}
       {result && <p className="text-xs text-muted-foreground">YouTube results for “{result.query}”{viaDevice ? " · searched through your connected phone’s network" : ""}</p>}
       {result && !videos.length && !loading ? <p className="text-sm text-muted-foreground">
         {result.videos.length ? "You skipped all results for this search." : "No other public videos found. Try a different search."}
       </p> : null}
-      <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {videos.map(video => {
-          const counts = [[video.statistics?.views, "views"], [video.statistics?.likes, "likes"], [video.statistics?.comments, "comments"]]
-            .flatMap(([value, label]) => value ? [`${BigInt(value).toLocaleString()} ${label}`] : []);
-          const selection = saved.get(video.id);
-          return <article key={video.id} className="min-w-0 overflow-hidden rounded-lg border">
-            <button type="button" aria-label={`Preview ${video.title}`} className="block w-full focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary" onClick={event => { previewTrigger.current = event.currentTarget; setPreview(video); }}>
-              {/* YouTube thumbnails are served by its video CDN. */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={`https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`} alt="" width={480} height={360} loading="lazy" className="aspect-video w-full bg-muted object-cover" />
-              <span className="sr-only">Preview</span>
-            </button>
-            <div className="space-y-2 p-3 text-sm">
-              <h3 className="break-words font-medium">{video.title}</h3>
-              <p className="break-words text-xs text-muted-foreground">
-                <a className="hover:underline" href={video.channelId ? `https://www.youtube.com/channel/${video.channelId}` : `https://www.youtube.com/results?search_query=${encodeURIComponent(video.channelTitle)}`} target="_blank" rel="noreferrer">{video.channelTitle}</a>
-                {video.publishedText ? <> · {video.publishedText}</> : /^\d{4}-\d{2}-\d{2}/.test(video.publishedAt ?? "") ? <> · {video.publishedAt?.slice(0, 10)}</> : null}
-              </p>
-              {(video.viewsText || counts.length > 0) && <p className="text-xs tabular-nums">{video.viewsText ?? counts.join(" · ")}</p>}
-              {video.description && <p className="break-words text-xs text-muted-foreground"><span className="sr-only">Publisher description. </span>{video.description}</p>}
-              {selection ? <div role="status" className="space-y-1">
-                <Link className="font-medium text-primary underline" href={`/studio/library/${selection.recordId}`}>Open linked reference</Link>
-                {selection.transcription.status === "not_queued" && <p className="text-xs text-muted-foreground">{selection.transcription.message}</p>}
-                {["queued", "reused"].includes(selection.transcription.status) && <p className="text-xs text-muted-foreground">Mac transcription queued.</p>}
-              </div> : <div className="flex flex-wrap items-center gap-3">
-                <button type="button" disabled={saving !== null} onClick={() => void save(video)} className="rounded-md border px-3 py-1.5 text-xs font-medium disabled:opacity-50">{saving === video.id ? "Adding…" : "Add as reference"}</button>
-                <button type="button" disabled={saving === video.id} onClick={() => setDismissed(previous => new Map(previous).set(currentQuery, [...(previous.get(currentQuery) ?? []), video.id]))} className="text-xs text-muted-foreground underline">Skip</button>
-              </div>}
-            </div>
-          </article>;
-        })}
-      </div>
+      {result?.ranked ? <>
+        {relevant.length ? grid(relevant) : !loading ? <p className="text-sm text-muted-foreground">No videos scored as relevant to this source. Try Explore more or a different search.</p> : null}
+        {less.length > 0 && <details className="space-y-3"><summary className="cursor-pointer text-sm text-muted-foreground">Less relevant ({less.length})</summary>{grid(less)}</details>}
+      </> : unchecked.length > 0 ? <div className="space-y-3">
+        <p role="note" className="text-sm text-amber-700 dark:text-amber-400">Not checked for relevance{result?.note ? `. ${result.note.replace(/^Not checked for relevance: /, "")}` : "."}</p>
+        <details className="space-y-3"><summary className="cursor-pointer text-sm text-muted-foreground">Show {unchecked.length} unchecked results anyway</summary>{grid(unchecked)}</details>
+      </div> : null}
+      {result?.runId ? <p className="text-xs"><Link className="text-primary underline" href={`/studio/related-history/${anchorId}`}>How these were chosen</Link></p> : null}
       <Dialog open={Boolean(preview)} onOpenChange={open => { if (!open) setPreview(null); }}>
         {preview && <DialogContent className="max-h-[90dvh] max-w-2xl overflow-y-auto" onCloseAutoFocus={event => { event.preventDefault(); previewTrigger.current?.focus(); }}>
           <DialogTitle className="break-words pr-7">{preview.title}</DialogTitle>
