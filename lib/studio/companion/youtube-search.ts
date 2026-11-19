@@ -55,16 +55,27 @@ export function createPlaywrightYoutubeBrowser(options: { executablePath: string
 export interface RelatedModelDeps { adapter(provider: LocalProvider): LocalTextAdapter; usage(): Promise<Usage>; config(): StudioDeviceConfig }
 const CONTRACT_NOTE = `[Studio capability contract ${AI_WORKFLOW_CONTRACT_VERSION} for related_video_search is prepended by the Mac]\n`;
 
-/** The Mac's own Codex/Claude subscription, only when signed in with capacity. Never an API key. */
-async function pickModel(models: RelatedModelDeps, signal: AbortSignal) {
+/** The Mac's own signed-in Codex/Claude subscription, only when signed in with capacity. Never an API key.
+ * When none is usable the reason is returned so the run's log can say exactly why (capacity reading, sign-in, or a failed probe). */
+async function pickModel(models: RelatedModelDeps, signal: AbortSignal): Promise<{ picked: Picked } | { reason: string }> {
   const config = models.config();
-  for (const provider of summaryProviders(await models.usage()).filter(p => !config.textProvider || p === config.textProvider)) {
-    const adapter = models.adapter(provider), ready = await adapter.readiness(signal);
-    if (ready.ready && ready.authenticated && ready.loginMethod === (provider === "codex" ? "chatgpt" : "claudeai")) return { provider, adapter, model: config.textModel ?? undefined };
+  const usage = await models.usage().catch(() => null);
+  if (!usage || !Object.keys(usage).length) return { reason: "the subscription capacity reading was unavailable" };
+  const providers = summaryProviders(usage).filter(p => !config.textProvider || p === config.textProvider);
+  if (!providers.length) return { reason: config.textProvider ? `${config.textProvider} has no fresh subscription capacity (or is not the provider chosen in Setup)` : "no Codex/Claude subscription has fresh capacity" };
+  const reasons: string[] = [];
+  for (const provider of providers) {
+    const adapter = models.adapter(provider);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const ready = await adapter.readiness(signal).catch(() => null);
+      if (ready?.ready && ready.authenticated && ready.loginMethod === (provider === "codex" ? "chatgpt" : "claudeai")) return { picked: { provider, adapter, model: config.textModel ?? undefined } };
+      if (ready) { reasons.push(`${provider} is not ready or not signed in with its subscription`); break; }
+      if (attempt === 1) reasons.push(`${provider}'s readiness check failed`);
+    }
   }
-  return null;
+  return { reason: reasons.join("; ") };
 }
-type Picked = NonNullable<Awaited<ReturnType<typeof pickModel>>>;
+type Picked = { provider: LocalProvider; adapter: LocalTextAdapter; model: string | undefined };
 async function modelStep<T>(picked: Picked, signal: AbortSignal, prompt: string, schema: z.ZodType<T>, jsonSchema: Record<string, unknown>) {
   const started = Date.now();
   const value = await picked.adapter.generate({ workflowContext: "related_video_search", signal, model: picked.model, prompt, jsonSchema, validate: v => schema.parse(v), timeoutMs: 120_000, maxResultBytes: 8192 });
@@ -82,8 +93,8 @@ export function createYoutubeSearchHandler(deps: { browser: () => Promise<Youtub
     const mode = payload.mode ?? "search";
     const notes: string[] = [];
     const queries: RelatedTrace["queries"] = [];
-    let picked: Picked | null = null;
-    if (mode !== "search" && deps.models) picked = await pickModel(deps.models, context.signal).catch(() => null);
+    let picked: Picked | null = null; let noModel = "no subscription model is configured on this Mac";
+    if (mode !== "search" && deps.models) { const choice = await pickModel(deps.models, context.signal); if ("picked" in choice) picked = choice.picked; else noModel = choice.reason; }
 
     // rank only: candidates came from the server (the YouTube API); the Mac only judges them.
     if (mode === "rank") {
@@ -118,7 +129,7 @@ export function createYoutubeSearchHandler(deps: { browser: () => Promise<Youtub
     if (picked) {
       try { const p = await modelStep(picked, context.signal, buildPlanPrompt(payload.source, payload.context), planSchema, planJsonSchema); planned = p.value.queries.slice(0, 3); planner = p.step; focus = p.value.focus; }
       catch { notes.push("The planning model did not return usable queries, so the keyword search was used."); }
-    } else notes.push("No signed-in subscription model with capacity on this Mac, so results are not checked for relevance.");
+    } else notes.push(`No usable subscription model (${noModel}), so results are not checked for relevance.`);
     const pool = new Map<string, RelatedCandidate>(); let signedIn: boolean | undefined;
     for (const [index, query] of (planned.length ? planned : [payload.query]).entries()) {
       try {

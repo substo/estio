@@ -44,7 +44,7 @@ test("a failing planner falls back to the keyword query, a failing ranker leaves
 });
 test("no usable model: still searches, results are labelled unranked with the reason", async () => {
   const result = await run({ enabled: () => true, browser: browser({ k: [v(ids.a, "A")] }) }, { query: "k", limit: 6, mode: "plan_search_rank", source, context });
-  assert.equal(result.videos[0].band, "unranked"); assert.match(result.trace.notes!.join(" "), /No signed-in subscription model/);
+  assert.equal(result.videos[0].band, "unranked"); assert.match(result.trace.notes!.join(" "), /No usable subscription model \(no subscription model is configured/);
 });
 test("rank-only mode judges server-supplied candidates, needs a model, and never opens a browser", async () => {
   let opened = false;
@@ -60,4 +60,15 @@ test("plain search mode is unchanged: no model is called and every video is unra
   const prompts: string[] = [];
   const result = await run({ enabled: () => true, models: model({}, prompts), browser: browser({ ads: [v(ids.a, "A")] }) }, { query: "ads", limit: 6 });
   assert.equal(prompts.length, 0); assert.equal(result.trace.mode, "search"); assert.deepEqual(result.trace.queries, [{ query: "ads", by: "user", found: 1 }]);
+});
+
+test("when no model is usable the log says exactly why", async () => {
+  const mk = (usageFn: () => Promise<Record<string, unknown>>, ready: boolean | "throws") => ({ enabled: () => true, browser: browser({ k: [v(ids.a, "A")] }),
+    models: { adapter: (provider: LocalProvider): LocalTextAdapter => ({ provider, readiness: async () => { if (ready === "throws") throw new Error("probe"); return { installed: true, authenticated: ready, ready, models: [], loginMethod: provider === "codex" ? "chatgpt" : "claudeai" }; }, generate: async () => { throw new Error("unused"); } }),
+      usage: usageFn as never, config: () => ({ ...defaultDeviceConfig, textProvider: "codex" as const }) } });
+  const payload = { query: "k", limit: 6, mode: "plan_search_rank", source, context };
+  assert.match((await run(mk(async () => ({}), true), payload)).trace.notes!.join(" "), /capacity reading was unavailable/);
+  assert.match((await run(mk(async () => ({ codex: reading(1) }), true), payload)).trace.notes!.join(" "), /no fresh subscription capacity/);
+  assert.match((await run(mk(usage, false), payload)).trace.notes!.join(" "), /not ready or not signed in/);
+  assert.match((await run(mk(usage, "throws"), payload)).trace.notes!.join(" "), /readiness check failed/);
 });

@@ -9,7 +9,7 @@ const candidates: RelatedCandidate[] = [{ id: "aaaaaaaaaaa", title: "How profess
 test("prompts carry the source, profile and candidates as JSON data and warn that it is untrusted", () => {
   const plan = buildPlanPrompt(source, context), rank = buildRankPrompt(source, context, "creators from professions", candidates);
   for (const prompt of [plan, rank]) { assert.match(prompt, /untrusted/); assert.match(prompt, /Studio for creators/); assert.match(prompt, /Think Media: grow on YouTube/); assert.match(prompt, /New Generation YouTube Influencers/); }
-  assert.match(plan, /core subject over incidental words/); assert.match(rank, /Judge by subject match, not by popularity/); assert.match(rank, /Fake followers exposed/);
+  assert.match(plan, /core subject over incidental words/); assert.match(rank, /Judge by subject match, not by popularity/); assert.match(rank, /Be strict/); assert.match(rank, /Fake followers exposed/);
 });
 test("bands, joining and ordering of model scores; a skipped candidate is unranked, not guessed", () => {
   assert.deepEqual([95, 60, 59, 40, 39, 0].map(relatedBand), ["relevant", "relevant", "maybe", "maybe", "off_topic", "off_topic"]);
