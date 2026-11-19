@@ -3,7 +3,7 @@ import test from "node:test";
 import { defaultDeviceConfig } from "../devices-policy";
 import { StudioJobError } from "../worker/handlers";
 import type { LocalProvider, LocalTextAdapter } from "./providers";
-import { createYoutubeSearchHandler, type YoutubeBrowser } from "./youtube-search";
+import { classifyBrowserError, createYoutubeSearchHandler, type YoutubeBrowser } from "./youtube-search";
 
 const reading = (remaining: number) => ({ remaining, windows: [], at: new Date().toISOString() });
 const usage = async () => ({ codex: reading(90), claudeAgent: reading(90) });
@@ -93,4 +93,16 @@ test("a long 'no model' reason is shortened to fit the trace instead of crashing
 test("any unexpected internal error is reported as a plain, non-retried failure with where it happened", async () => {
   const handler = createYoutubeSearchHandler({ enabled: () => true, browser: async () => ({ search: async () => ({ videos: [{ id: "bad", title: "x" } as never] }) }) });
   await assert.rejects(handler(job({ query: "k", limit: 6 }), ctx()), (e: unknown) => e instanceof StudioJobError && e.code === "related_internal_error" && !e.retryable && /internal error \(id: invalid_string/.test(e.message));
+});
+
+test("a browser failure names its stage from the error class only, never the message", async () => {
+  const e = (name: string, message: string) => Object.assign(new Error(message), { name });
+  assert.equal(classifyBrowserError(e("Error", "Failed to launch: ProcessSingleton /Users/someone/Library/profile")), "profile_in_use");
+  assert.equal(classifyBrowserError(e("Error", "browserType.launch: Executable doesn't exist at /Applications/Chrome")), "browser_launch");
+  assert.equal(classifyBrowserError(e("Error", "page.goto: net::ERR_INTERNET_DISCONNECTED at https://x")), "navigation");
+  assert.equal(classifyBrowserError(e("TimeoutError", "page.goto: Timeout 30000ms exceeded.")), "timeout");
+  assert.equal(classifyBrowserError(e("TimeoutError", "page.waitForFunction: Timeout 20000ms exceeded.")), "page_data");
+  assert.equal(classifyBrowserError(e("Error", "Target page, context or browser has been closed")), "browser_closed");
+  const handler = createYoutubeSearchHandler({ enabled: () => true, browser: async () => ({ search: async () => { throw e("TimeoutError", "page.goto: Timeout 30000ms exceeded at /Users/private/path"); } }) });
+  await assert.rejects(handler(job({ query: "k", limit: 6 }), ctx()), (err: unknown) => err instanceof StudioJobError && err.code === "youtube_search_failed" && /\(timeout\)/.test(err.message) && !err.message.includes("/Users"));
 });

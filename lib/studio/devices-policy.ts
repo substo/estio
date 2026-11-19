@@ -1,4 +1,5 @@
 import { StudioCommandError } from "./command-error";
+import { relatedResultSchema } from "./related-search-policy";
 import { readFramesReserve, readFramesVerify, readTranscriptChunk, readVideoResult, VIDEO_TOOL_NAMES } from "./video-transcription-policy";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const modelPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
@@ -161,6 +162,13 @@ export function readDeviceTextResult(value: unknown): Record<string, unknown> {
   valid(new TextEncoder().encode(JSON.stringify(r)).byteLength <= 24576);
   return r;
 }
+/** A Related-video search result (studio.youtube_search): public video facts, optional model scores and a bounded trace.
+ * Without this reader the result fell through to the diagnostic reader and every search was rejected with "Invalid command". */
+export function readDeviceYoutubeSearchResult(value: unknown): Record<string, unknown> {
+  const parsed = relatedResultSchema.safeParse(object(value));
+  valid(parsed.success && JSON.stringify(parsed.data).length <= 30000);
+  return parsed.data as Record<string, unknown>;
+}
 export function readDeviceDiagnosticResult(value: unknown): Record<string, unknown> {
   const result = object(value);
   valid(Object.keys(result).every(key => ["ok", "workerId", "checkedAt", "provider", "model", "output", "summary", "durationMs"].includes(key)));
@@ -222,7 +230,7 @@ export function readDeviceCommand(operation: DeviceOperation, value: unknown): R
   if (operation === "video_transcript_chunk") return { ...out, ...readTranscriptChunk(v) };
   if (operation === "video_frames_reserve") return { ...out, ...readFramesReserve(v) };
   if (operation === "video_frames_verify") return { ...out, ...readFramesVerify(v) };
-  if (operation === "complete") { out.result = v.result && typeof v.result === "object" && "outcome" in v.result ? readVideoResult(v.result) : v.result && typeof v.result === "object" && "output" in v.result && typeof v.result.output === "object" ? readDeviceTextResult(v.result) : v.result && typeof v.result === "object" && "research" in v.result ? readDeviceResearchResult(v.result) : readDeviceDiagnosticResult(v.result); }
+  if (operation === "complete") { out.result = v.result && typeof v.result === "object" && "videos" in v.result ? readDeviceYoutubeSearchResult(v.result) : v.result && typeof v.result === "object" && "outcome" in v.result ? readVideoResult(v.result) : v.result && typeof v.result === "object" && "output" in v.result && typeof v.result.output === "object" ? readDeviceTextResult(v.result) : v.result && typeof v.result === "object" && "research" in v.result ? readDeviceResearchResult(v.result) : readDeviceDiagnosticResult(v.result); }
   if (operation === "fail") {
     const f = object(v.failure); valid(typeof f.code === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(f.code));
     valid(typeof f.message === "string" && f.message.length <= 500 && typeof f.retryable === "boolean");

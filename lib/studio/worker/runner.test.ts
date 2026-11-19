@@ -151,3 +151,16 @@ test("failed claims back off up to the failure cap", async () => {
   const caps = [200, 400, 800, 800, 800, 800];
   delays.forEach((ms, i) => assert.ok(ms >= caps[i] / 2 && ms <= caps[i], `delay ${i}: ${ms} not within ${caps[i]}`));
 });
+
+test("an unclassified failure logs where it happened (the completion call, or the error class) and never its message", async () => {
+  const logs: Array<Record<string, unknown>> = [];
+  const { queue } = fakeQueue([]);
+  queue.complete = async () => { throw new Error("device_complete_failed"); };
+  await runStudioJob(job("a"), { queue, handlers: { "studio.diagnostic": async () => ({ ok: true }) }, workerId: "w1", log: event => logs.push(event) });
+  const { queue: q2 } = fakeQueue([]);
+  await runStudioJob(job("b", "crash"), { queue: q2, handlers: { crash: async () => { throw new TypeError("sk-secret in message"); } }, workerId: "w1", log: event => logs.push(event) });
+  const { queue: q3 } = fakeQueue([]);
+  await runStudioJob(job("c", "bad"), { queue: q3, handlers: { bad: async () => { throw new StudioJobError("invalid_input", "Bad", false); } }, workerId: "w1", log: event => logs.push(event) });
+  assert.deepEqual(logs.filter(l => l.event === "job_failed").map(l => [l.jobId, l.code, l.stage]), [["a", "unexpected_error", "device_complete_failed"], ["b", "unexpected_error", "TypeError"], ["c", "invalid_input", undefined]]);
+  assert.ok(!JSON.stringify(logs).includes("sk-secret"));
+});

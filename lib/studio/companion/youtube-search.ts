@@ -22,6 +22,17 @@ export async function findChrome(env: NodeJS.ProcessEnv = process.env, exists: (
   for (const path of [env.STUDIO_YOUTUBE_CHROME?.trim(), ...CHROME_PATHS]) if (path && await exists(path)) return path;
   return null;
 }
+/** Which stage of the browser search failed, from the error class only (messages can contain local paths and are never reported). */
+export function classifyBrowserError(error: unknown): "profile_in_use" | "browser_launch" | "timeout" | "navigation" | "browser_closed" | "page_data" {
+  const name = error instanceof Error ? error.name : "";
+  const message = error instanceof Error ? error.message : "";
+  if (/ProcessSingleton|user data directory is already in use|profile .* in use/i.test(message)) return "profile_in_use";
+  if (/Executable doesn't exist|Failed to launch|browserType\.launch|spawn /i.test(message)) return "browser_launch";
+  if (/Target (page, context or browser )?has been closed|Browser has been closed|Target closed/i.test(message)) return "browser_closed";
+  if (/net::ERR|ERR_[A-Z_]+|NS_ERROR/.test(message)) return "navigation";
+  if (name === "TimeoutError" || /Timeout \d+ms exceeded|timed out/i.test(message)) return /waitForFunction|ytInitialData/i.test(message) ? "page_data" : "timeout";
+  return "page_data";
+}
 export interface YoutubeBrowser { search(query: string, limit: number, signal: AbortSignal): Promise<MacSearchResult> }
 export interface YoutubeSearchReport { ready: boolean; signedIn?: boolean }
 
@@ -130,7 +141,7 @@ function createRelatedHandler(deps: { browser: () => Promise<YoutubeBrowser | nu
       catch (error) {
         if (error instanceof StudioJobError) throw error;
         if (context.signal.aborted) throw new StudioJobError("youtube_search_cancelled", "The Mac stopped before finishing this search.", false);
-        throw new StudioJobError("youtube_search_failed", "The Mac could not read YouTube results. Check its internet connection and search again.", false);
+        throw new StudioJobError("youtube_search_failed", `The Mac could not read YouTube results (${classifyBrowserError(error)}). Search again; if it keeps failing, close other heavy apps or Chrome windows using the Studio profile.`, false);
       }
     };
 

@@ -28,7 +28,11 @@ export async function readMacYoutubeSearch(access: Actor, jobId: unknown): Promi
   }
   // No phone relay either: the Mac's own reason is the actionable one.
   if (job.last_error_code === "youtube_no_device" && job.payload.macReason && macSearchMessages[job.payload.macReason]) return { status: "failed", message: macSearchMessages[job.payload.macReason] };
-  return { status: "failed", message: job.last_error_message || (job.status === "cancelled" ? "The search was cancelled because the Mac's settings changed. Search again." : "The Mac could not finish this search. Search again.") };
+  const ref = ` (ref ${jobId.slice(0, 8)})`;
+  // The runner's generic text says "It will retry", which is false for a search: it is never retried automatically.
+  if (job.last_error_code === "unexpected_error") return { status: "failed", message: `The Mac finished the search but the result could not be saved. It was not retried; search again.${ref}` };
+  if (job.last_error_code === "worker_lease_expired") return { status: "failed", message: `The Mac stopped (or went to sleep) before finishing this search. Search again.${ref}` };
+  return { status: "failed", message: (job.last_error_message || (job.status === "cancelled" ? "The search was cancelled because the Mac's settings changed. Search again." : "The Mac could not finish this search. Search again.")) + ref };
 }
 
 /** Keep the reasoning of a run (route, queries, prompts, model, scores). Idempotent per job; a failure to log never hides the results. */

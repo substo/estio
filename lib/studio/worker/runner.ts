@@ -57,7 +57,10 @@ export async function runStudioJob(job: StudioJob, options: Pick<StudioWorkerOpt
       ? { code: error.code, message: error.message, retryable: error.retryable, retryAfterSeconds: error.retryAfterSeconds }
       : { code: "unexpected_error", message: "The worker hit an unexpected error. It will retry.", retryable: true };
     const outcome = await queue.fail(job.id, workerId, failure, job.lease_token).catch(() => "report_failed");
-    log({ event: "job_failed", jobId: job.id, kind: job.kind, code: failure.code, outcome });
+    // Where an unclassified failure happened, without its content: the fixed device-call code (for example the server refusing a
+    // completion) or the error class. Messages can carry secrets and are never logged.
+    const stage = error instanceof StudioJobError ? undefined : error instanceof Error && /^device_[a-z0-9_]+_failed$/.test(error.message) ? error.message : error instanceof Error ? error.name : "unknown";
+    log({ event: "job_failed", jobId: job.id, kind: job.kind, code: failure.code, outcome, ...(stage ? { stage } : {}) });
   } finally { finished = true; clearTimeout(renewal); clearTimeout(deadline!); }
 }
 
