@@ -13,14 +13,18 @@ import { StudioTextProviderChoice } from "./text-provider-choice";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
 
 type Intent = "discuss" | "rewrite_note" | "propose_idea";
+type Mode = Intent | "knowledge" | "template";
+export type KnowledgeInput = { inputId: string; mode: string; label: string };
 type AiState = { reviewId: string; run: SourceAssistRun | null; error: string | null; waited: boolean; intent: Intent };
-type Entry = { id: number; role: "you" | "assistant" | "ai"; text: string; saved?: boolean; tone?: "error"; ai?: AiState };
+type Entry = { id: number; role: "you" | "assistant" | "ai"; text: string; saved?: boolean; tone?: "error"; ai?: AiState; link?: { href: string; label: string } };
 type Recognition = { start(): void; stop(): void; continuous: boolean; interimResults: boolean; lang: string; onresult: ((event: any) => void) | null; onerror: ((event: any) => void) | null; onend: (() => void) | null };
 export const RELATED_SEARCH_EVENT = "studio:related-search";
-const INTENTS: Array<{ value: Intent; label: string; hint: string }> = [
+const INTENTS: Array<{ value: Mode; label: string; hint: string }> = [
   { value: "discuss", label: "Discuss", hint: "Answer about this video" },
-  { value: "rewrite_note", label: "Rewrite as note", hint: "Tidy my words into a note" },
-  { value: "propose_idea", label: "Propose idea", hint: "Draft a linked idea" },
+  { value: "rewrite_note", label: "Notes", hint: "Tidy my words into a note" },
+  { value: "propose_idea", label: "Idea", hint: "Draft a linked idea" },
+  { value: "knowledge", label: "Knowledge", hint: "Extract cited takeaways for review" },
+  { value: "template", label: "Script template", hint: "Extract reusable writing beats for review" },
 ];
 const clock = (seconds: number) => new Date(seconds * 1000).toISOString().slice(seconds >= 3600 ? 11 : 14, 19);
 
@@ -38,7 +42,7 @@ function IdeaDraft({ locationId, sourceId, ideaId, initial, onCancel }: { locati
   </form>;
 }
 
-export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ideaId, canRelated, archived, hasEvidence }: { locationId: string; sourceId: string; sourceTitle: string; version: number; ideaId: string; canRelated: boolean; archived: boolean; hasEvidence: boolean }) {
+export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ideaId, canRelated, archived, hasEvidence, knowledgeInput, canTemplate }: { knowledgeInput: KnowledgeInput | null; canTemplate: boolean; locationId: string; sourceId: string; sourceTitle: string; version: number; ideaId: string; canRelated: boolean; archived: boolean; hasEvidence: boolean }) {
   const router = useRouter();
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
   const [open, setOpen] = useState(false);
@@ -49,9 +53,10 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, id
   const [listening, setListening] = useState(false);
   const [dictationNote, setDictationNote] = useState("");
   const [canDictate, setCanDictate] = useState(false);
-  const [intent, setIntent] = useState<Intent>("discuss");
+  const [mode, setMode] = useState<Mode>("discuss");
+  const taskMode = mode === "knowledge" || mode === "template";
+  const intent: Intent = taskMode ? "discuss" : mode;
   const [provider, setProvider] = useState<StudioTextProvider>("subscription");
-  const [authorized, setAuthorized] = useState(false);
   const [asking, setAsking] = useState(false);
   const recognition = useRef<Recognition | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
@@ -116,18 +121,39 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, id
       } catch (error) { patchAi(entryId, { error: error instanceof Error ? error.message : "Could not read the answer." }); return; }
     }
   }
+  async function runTask() {
+    if (asking) return;
+    const knowledge = mode === "knowledge";
+    if (knowledge && !knowledgeInput) { push({ role: "assistant", text: "Knowledge needs a saved transcript or source text first.", tone: "error" }); return; }
+    requestKey.current ??= crypto.randomUUID();
+    setAsking(true);
+    try {
+      const url = knowledge ? "/studio/knowledge/extractions/api" : "/studio/content/templates/from-video/api";
+      const body = knowledge
+        ? { action: "enqueueOutline", requestId: requestKey.current, sourceId, expectedVersion: version, inputId: knowledgeInput!.inputId, mode: knowledgeInput!.mode, provider, confirmPaid: provider === "openai", confirmSubscription: provider === "subscription" }
+        : { requestId: requestKey.current, sourceId, expectedVersion: version, provider, confirmPaid: provider === "openai", confirmSubscription: provider === "subscription" };
+      const response = await fetch(url, { method: "POST", headers: { "X-Studio-Tenant": tenant, "Content-Type": "application/json" }, signal: AbortSignal.timeout(30_000), body: JSON.stringify(body) });
+      const data = await response.json();
+      if (!response.ok) { if (response.status < 500) requestKey.current = null; push({ role: "assistant", text: data.error || "The task could not start.", tone: "error" }); return; }
+      requestKey.current = null;
+      const id = knowledge ? data.outlineId : data.reviewId;
+      push({ role: "assistant", text: knowledge ? "Knowledge extraction started on " + (provider === "subscription" ? "your Mac" : "the Location OpenAI key") + ". Review the cited takeaways when it finishes:" : "Script template extraction started. Review the beats when it finishes:", link: { href: knowledge ? `/studio/knowledge/extractions/${id}` : `/studio/content/templates/from-video/${id}`, label: knowledge ? "Open knowledge review" : "Open template review" } });
+      router.refresh();
+    } catch { push({ role: "assistant", text: "The outcome is unconfirmed. Press Run again to check this same request.", tone: "error" }); }
+    finally { setAsking(false); }
+  }
   async function ask() {
+    if (taskMode) { await runTask(); return; }
     const message = text.trim();
     if (!message || asking) return;
-    if (!authorized) { push({ role: "assistant", text: provider === "subscription" ? "Tick the box to authorize this request on your Mac subscription." : "Tick the box to authorize paid processing with the Location OpenAI key.", tone: "error" }); return; }
     requestKey.current ??= crypto.randomUUID();
     setAsking(true);
     try {
       const response = await fetch("/studio/assistant/api", { method: "POST", headers: { "X-Studio-Tenant": tenant, "Content-Type": "application/json" }, signal: AbortSignal.timeout(30_000),
-        body: JSON.stringify({ requestId: requestKey.current, sourceId, expectedVersion: version, provider, intent, message, confirmPaid: provider === "openai" && authorized, confirmSubscription: provider === "subscription" && authorized }) });
+        body: JSON.stringify({ requestId: requestKey.current, sourceId, expectedVersion: version, provider, intent, message, confirmPaid: provider === "openai", confirmSubscription: provider === "subscription" }) });
       const data = await response.json();
       if (!response.ok) { if (response.status < 500) requestKey.current = null; push({ role: "assistant", text: data.error || "The assistant could not start.", tone: "error" }); return; }
-      requestKey.current = null; setAuthorized(false); recognition.current?.stop(); setText("");
+      requestKey.current = null; recognition.current?.stop(); setText("");
       push({ role: "you", text: message });
       const entryId = push({ role: "ai", text: "", ai: { reviewId: data.reviewId, run: null, error: null, waited: false, intent } });
       void poll(entryId, data.reviewId);
@@ -152,36 +178,35 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, id
 
   const body = (variant: string) => <>
     <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3" role="log" aria-live="polite" aria-label="Conversation">
-      {log.length === 0 ? <div className="space-y-2 text-muted-foreground"><p>Tell me your reaction to this video, then pick what to do with it.</p><ul className="list-disc space-y-1 pl-5 text-xs"><li><strong className="font-medium text-foreground">Discuss</strong> or <strong className="font-medium text-foreground">Rewrite as note</strong> or <strong className="font-medium text-foreground">Propose idea</strong> — answered from this source only.</li><li><strong className="font-medium text-foreground">Save as written</strong> keeps your exact words in My notes, no AI.</li><li>Related videos search uses your Mac.</li></ul></div> : null}
+      {log.length === 0 ? <p className="text-muted-foreground">Pick what to work on, then tell me your reaction. Everything is answered from this source only, and nothing is saved until you choose.</p> : null}
       {log.map(entry => entry.role === "you"
         ? <div key={entry.id} className="ml-6 space-y-1 rounded-lg bg-primary/10 p-3"><p className="whitespace-pre-wrap break-words">{entry.text}</p>{entry.saved ? <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Saved to My notes</p> : <button type="button" disabled={saving || archived} onClick={() => void saveNote(entry.text, entry.id)} className="inline-flex min-h-9 items-center text-xs font-medium text-primary hover:underline disabled:opacity-50">Save to My notes as written</button>}</div>
         : entry.role === "ai" ? <AiAnswer key={entry.id} entry={entry} />
-        : <p key={entry.id} role={entry.tone === "error" ? "alert" : undefined} className={`mr-6 whitespace-pre-wrap break-words rounded-lg bg-muted p-3 ${entry.tone === "error" ? "text-destructive" : ""}`}>{entry.text}</p>)}
+        : <p key={entry.id} role={entry.tone === "error" ? "alert" : undefined} className={`mr-6 whitespace-pre-wrap break-words rounded-lg bg-muted p-3 ${entry.tone === "error" ? "text-destructive" : ""}`}>{entry.text}{entry.link ? <> <a href={entry.link.href} className="font-medium text-primary underline">{entry.link.label}</a></> : null}</p>)}
       {idea ? <IdeaDraft key={`${idea.title}:${idea.summary}`} locationId={locationId} sourceId={sourceId} ideaId={ideaId} initial={idea} onCancel={() => setIdea(null)} /> : null}
     </div>
     <div className="space-y-2 border-t p-3">
       {archived ? <p className="text-xs text-muted-foreground">This source is archived, so notes and ideas are read-only.</p> : null}
-      <label htmlFor={`${fieldId}-${variant}`} className="text-xs font-medium">Your reaction</label>
-      <textarea id={`${fieldId}-${variant}`} data-assistant-field value={text} maxLength={REACTION_LIMIT} rows={3} disabled={archived} placeholder="What stood out? What would you do differently?" onChange={event => setText(event.target.value)}
-        onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing || event.keyCode === 229) return; event.preventDefault(); if (!event.repeat && text.trim()) { takeText(); push({ role: "assistant", text: "Added. Choose Ask, or Save as written to keep it in My notes." }); } }}
+      <label htmlFor={`${fieldId}-${variant}`} className="sr-only">Your reaction</label>
+      <textarea id={`${fieldId}-${variant}`} data-assistant-field value={text} maxLength={REACTION_LIMIT} rows={2} disabled={archived} placeholder={taskMode ? "Optional: nothing to type for this task." : "What stood out? What would you do differently?"} onChange={event => setText(event.target.value)}
+        onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing || event.keyCode === 229) return; event.preventDefault(); if (!event.repeat && text.trim()) { takeText(); push({ role: "assistant", text: "Added. Choose Ask, or Save as written." }); } }}
         className="block w-full resize-none rounded-md border bg-background p-2 text-sm" />
-      <fieldset className="space-y-1" disabled={archived || !hasEvidence}>
-        <legend className="text-xs font-medium">Ask the assistant to</legend>
-        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Assistant action">{INTENTS.map(item => <label key={item.value} title={item.hint} className={`inline-flex min-h-9 cursor-pointer items-center rounded-full border px-3 text-xs font-medium has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary ${intent === item.value ? "border-primary bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}><input type="radio" className="sr-only" name={`intent-${variant}`} checked={intent === item.value} onChange={() => setIntent(item.value)} />{item.label}</label>)}</div>
+      <fieldset disabled={archived || !hasEvidence}>
+        <legend className="sr-only">Assistant mode</legend>
+        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Assistant mode">{INTENTS.filter(item => item.value !== "template" || canTemplate).map(item => <label key={item.value} title={item.hint} className={`inline-flex min-h-9 cursor-pointer items-center rounded-full border px-3 text-xs font-medium transition-colors duration-150 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary ${mode === item.value ? "border-primary bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}><input type="radio" className="sr-only" name={`mode-${variant}`} checked={mode === item.value} onChange={() => setMode(item.value)} />{item.label}</label>)}</div>
       </fieldset>
-      {hasEvidence ? <details className="rounded-md border p-2 text-xs"><summary className="cursor-pointer font-medium">Processing: {provider === "subscription" ? "my Mac subscription" : "Location OpenAI key (paid)"}</summary><div className="mt-2"><StudioTextProviderChoice sourceAssist provider={provider} onChange={value => { setProvider(value); setAuthorized(false); }} /></div></details>
-        : <p className="text-xs text-muted-foreground">The assistant needs a saved transcript or description. Transcribe on your Mac or add text in Edit source, then ask.</p>}
-      {hasEvidence ? <label className="flex items-start gap-2 text-xs"><input type="checkbox" className="mt-0.5 h-4 w-4" checked={authorized} disabled={archived} onChange={event => setAuthorized(event.target.checked)} />{provider === "subscription" ? "I authorize this request on my paired Mac subscription." : "I authorize paid processing with the Location OpenAI key."}</label> : null}
+      {hasEvidence ? <StudioTextProviderChoice sourceAssist compact provider={provider} onChange={setProvider} />
+        : <p className="text-xs text-muted-foreground">The assistant needs a saved transcript or description. Transcribe on your Mac first.</p>}
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" onClick={() => void ask()} disabled={asking || archived || !hasEvidence || !text.trim()} className="min-h-10">{asking ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles aria-hidden="true" className="mr-2 h-4 w-4" />}Ask</Button>
-        <Button type="button" variant="outline" onClick={() => void saveAsWritten()} disabled={saving || archived || !text.trim()} className="min-h-10"><NotebookPen aria-hidden="true" className="mr-2 h-4 w-4" />Save as written</Button>
-        {canDictate ? <Button type="button" variant="outline" onClick={toggleDictation} aria-pressed={listening} disabled={archived} className="min-h-10">{listening ? <MicOff aria-hidden="true" className="mr-2 h-4 w-4" /> : <Mic aria-hidden="true" className="mr-2 h-4 w-4" />}{listening ? "Stop" : "Dictate"}</Button> : null}
+        <Button type="button" onClick={() => void ask()} disabled={asking || archived || !hasEvidence || (taskMode ? (mode === "knowledge" && !knowledgeInput) : !text.trim())} className="min-h-10">{asking ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles aria-hidden="true" className="mr-2 h-4 w-4" />}{taskMode ? (mode === "knowledge" ? "Extract knowledge" : "Extract template") : "Ask"}</Button>
+        {taskMode ? null : <Button type="button" variant="outline" onClick={() => void saveAsWritten()} disabled={saving || archived || !text.trim()} className="min-h-10"><NotebookPen aria-hidden="true" className="mr-2 h-4 w-4" />Save as written</Button>}
+        {canDictate ? <Button type="button" variant="outline" size="icon" onClick={toggleDictation} aria-pressed={listening} aria-label={listening ? "Stop dictation" : "Dictate"} disabled={archived} className="h-10 w-10">{listening ? <MicOff aria-hidden="true" className="h-4 w-4" /> : <Mic aria-hidden="true" className="h-4 w-4" />}</Button> : null}
       </div>
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="ghost" onClick={draftIdea} disabled={archived} className="min-h-9 px-2 text-xs"><Lightbulb aria-hidden="true" className="mr-1.5 h-4 w-4" />Draft idea from my words</Button>
         {canRelated ? <Button type="button" variant="ghost" onClick={() => findRelated()} className="min-h-9 px-2 text-xs"><Search aria-hidden="true" className="mr-1.5 h-4 w-4" />Find related videos</Button> : null}
       </div>
-      <p role="status" className="text-xs text-muted-foreground">{listening ? "Listening… speech is converted by your browser's own speech service." : dictationNote || (canDictate ? "Enter adds your words; Shift+Enter starts a new line." : "Dictation isn't available in this browser; typing works everywhere.")}</p>
+      <p role="status" className="text-xs text-muted-foreground">{listening ? "Listening…" : dictationNote}</p>
     </div>
   </>;
   const header = <div className="min-w-0"><h2 className="font-semibold">Assistant</h2><p className="truncate text-xs text-muted-foreground">Only this source: {sourceTitle}</p></div>;

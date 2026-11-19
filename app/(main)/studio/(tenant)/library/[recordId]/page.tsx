@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ExternalLink } from "lucide-react";
+import { Check, ExternalLink } from "lucide-react";
 import { libraryPresentation, platformLabels } from "@/lib/studio/library-presentation";
 import { validatedYoutubeCreator } from "@/lib/studio/library-import-metadata";
 import { studioRouteParams } from "@/lib/studio/route-context";
 import { listPendingStudioUploads } from "@/lib/studio/uploads";
-import { getLatestKnowledgeOutline } from "@/lib/studio/knowledge-extraction";
+import { getKnowledgeExtractionInputs, getLatestKnowledgeOutline } from "@/lib/studio/knowledge-extraction";
 import { getStudioLibraryRecord } from "@/lib/studio/library";
 import { getVideoStatus } from "@/lib/studio/video-transcription";
 import { canonicalYoutubeVideo } from "@/lib/studio/video-transcription-policy";
@@ -20,12 +20,11 @@ import { RelatedYoutubeVideos } from "../../../_components/related-youtube-video
 import { LibraryPlatformIcon } from "../../../_components/library-cards";
 import { SourcePlayer } from "../../../_components/source-player";
 import { ExpandableText } from "../../../_components/expandable-text";
-import { SourceSectionNav } from "../../../_components/source-section-nav";
+import { SourceTabs, type SourceTab } from "../../../_components/source-tabs";
+import { InfoTip } from "../../../_components/info-tip";
 import { SourceAssistant } from "../../../_components/source-assistant";
 
 export const dynamic = "force-dynamic";
-const linkButton = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md border bg-background px-4 text-sm font-medium transition-colors hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
-const primaryLink = "inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
 const card = "scroll-mt-16 space-y-3 rounded-xl border bg-card p-4 md:p-5";
 
 export default async function StudioLibraryRecordPage({ params }: { params: Promise<{ recordId: string }> }) {
@@ -39,10 +38,11 @@ export default async function StudioLibraryRecordPage({ params }: { params: Prom
   const youtube = canonicalYoutubeVideo(view.url);
   const isSource = record.kind === "reference";
   const active = isSource && !record.archived;
-  const [pendingUploads, latestOutline, videoStatus] = await Promise.all([
+  const [pendingUploads, latestOutline, videoStatus, knowledgeInputs] = await Promise.all([
     listPendingStudioUploads(locationId, recordId),
     active ? getLatestKnowledgeOutline(locationId, recordId) : null,
     active && youtube ? getVideoStatus(locationId, recordId).catch(() => null) : null,
+    active ? getKnowledgeExtractionInputs(locationId, recordId).catch(() => null) : null,
   ]);
   const hasTranscript = Boolean(value('transcript').trim());
   const contentLinks = links.filter(link => link.kind === "content");
@@ -80,57 +80,61 @@ export default async function StudioLibraryRecordPage({ params }: { params: Prom
     {contentLinks.length ? null : null}{edit}{footer}
   </main>;
 
-  return <main className="mx-auto w-full min-w-0 max-w-7xl space-y-4 p-4 pb-24 md:p-6 lg:pb-6">
+  const statusChip = (ok: boolean, text: string) => <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${ok ? "bg-emerald-50 text-emerald-700" : "bg-muted text-muted-foreground"}`}>{ok ? <Check aria-hidden="true" className="h-3.5 w-3.5" /> : null}{text}</span>;
+  const summaryText = value('aiSummary') || summaryNote;
+  const basis = value('summaryBasis') === 'transcript' ? 'Based on the saved transcript excerpt (first 20,000 characters) and description.' : value('summaryBasis') === 'description' ? 'Based on the description only; the video was not watched.' : 'Basis not recorded; verify against the source.';
+  const panelHead = (title: string, status: React.ReactNode, tip?: React.ReactNode, action?: React.ReactNode) => <div className="flex flex-wrap items-center gap-2"><h2 className="font-semibold">{title}</h2>{status}{tip}<div className="ml-auto flex items-center gap-2">{action}</div></div>;
+
+  const transcriptPanel = <div className="space-y-4">
+    {panelHead("Transcript", statusChip(hasTranscript, hasTranscript ? "Saved" : "Not saved"), <InfoTip label="About the transcript">A transcript is what the video actually says. Check it against the original before relying on its claims.</InfoTip>)}
+    {videoStatus ? <VideoTranscriptionPanel locationId={locationId} recordId={recordId} canTranscribe status={videoStatus} hasTranscript={hasTranscript} /> : null}
+    {hasTranscript ? <p className="whitespace-pre-wrap break-words rounded-lg border bg-card p-4 text-sm leading-relaxed">{value('transcript')}</p>
+      : <details className="rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Paste a transcript instead</summary><div className="mt-3"><LibraryRecordForm locationId={locationId} recordId={recordId} version={record.version} kind={record.kind} title={record.title} payload={record.payload} /></div></details>}
+    <div className="space-y-2 border-t pt-4">
+      {panelHead("AI summary", summaryText ? <InfoTip label="About the summary">{value('aiSummary') ? basis : 'Not generated by AI.'}</InfoTip> : null, null, view.url && active ? <LibrarySourceAction locationId={locationId} url={view.url} label={summaryText ? "Update summary" : "Summarize"} /> : null)}
+      <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">{summaryText || view.statusMessage || "No summary yet."}</p>
+    </div>
+  </div>;
+  const scriptPanel = <div className="space-y-3">
+    {panelHead("Script", null, <InfoTip label="About scripts">Ideas keep this source linked as research; nothing is copied or approved. Use the assistant's Idea or Script template modes to create them.</InfoTip>)}
+    {contentLinks.length ? <ul className="space-y-1 text-sm">{contentLinks.map(linked => <li key={linked.id}><Link className="text-primary hover:underline" href={`/studio/content/${linked.id}`}>{linked.title}</Link></li>)}</ul> : <p className="text-sm text-muted-foreground">No ideas or scripts from this source yet.</p>}
+  </div>;
+  const knowledgePanel = <div className="space-y-3">
+    {panelHead("Knowledge", null, <InfoTip label="About knowledge">Cited takeaways you approve before they are kept. Use the assistant's Knowledge mode to extract them.</InfoTip>, latestOutline ? <Link href={`/studio/knowledge/extractions/${latestOutline.id}`} className="text-sm font-medium text-primary hover:underline">Latest review</Link> : null)}
+    {findings.length ? <ul className="space-y-2 break-words text-sm">{findings.map(finding => <li key={finding.id}><Link href={`/studio/knowledge/${finding.id}`} className="text-primary hover:underline">{finding.statement}</Link> <span className="text-muted-foreground">({finding.status})</span></li>)}</ul> : <p className="text-sm text-muted-foreground">No knowledge saved for this source.</p>}
+    {hasMoreFindings ? <Link href="/studio/knowledge?status=all" className="block text-sm text-primary hover:underline">Browse more</Link> : null}
+  </div>;
+  const notesPanel = <div className="space-y-2">
+    {panelHead("My notes", null, <InfoTip label="About notes">Your own notes on this source. Use the assistant to dictate, rewrite and save them.</InfoTip>)}
+    {notes ? <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{notes}</p> : <p className="text-sm text-muted-foreground">Nothing yet. Tell the assistant your reaction.</p>}
+  </div>;
+  const moreLinks = <details className="rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Linked records and files</summary><div className="mt-3 space-y-5">{footer}</div></details>;
+  const tabs: SourceTab[] = [
+    { id: "transcript", label: "Transcript", badge: hasTranscript ? undefined : undefined, panel: transcriptPanel },
+    ...(active ? [
+      { id: "script", label: "Script", badge: contentLinks.length ? String(contentLinks.length) : undefined, panel: scriptPanel },
+      { id: "knowledge", label: "Knowledge", badge: findings.length ? String(findings.length) : undefined, panel: knowledgePanel },
+      { id: "related", label: "Related videos", panel: <RelatedYoutubeVideos key={`${locationId}:${recordId}`} anchorId={recordId} /> },
+    ] : []),
+    { id: "notes", label: "My notes", panel: notesPanel },
+    { id: "more", label: "Files", panel: moreLinks },
+  ];
+
+  return <main className="mx-auto w-full min-w-0 max-w-7xl space-y-3 p-4 pb-24 md:p-6 lg:pb-6">
     {breadcrumb}
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
-      <div className="min-w-0 space-y-5">
-        <SourcePlayer title={record.title} thumbnail={view.thumbnail} videoId={youtube?.videoId ?? null} url={view.url} portrait={view.portrait} />
-        {header}
-        <ExpandableText text={value('description')} empty="No source description saved. Refresh the source or add evidence through Edit." />
-        {view.url ? <div className="flex flex-wrap gap-2"><LibrarySourceAction locationId={locationId} url={view.url} />{creator && !links.some(link => link.kind === 'channel') ? <LibrarySourceAction locationId={locationId} url={creator.channelUrl} sourceId={recordId} sourceVersion={record.version} /> : null}</div> : null}
-        <SourceSectionNav only={active ? undefined : ["transcript", "notes"]} />
-
-        <section id="transcript" aria-labelledby="h-transcript" className={card}>
-          <h2 id="h-transcript" className="font-semibold">Transcript</h2>
-          {hasTranscript ? <><p className="text-sm text-muted-foreground">Saved. Check it against the original before using its claims.</p><details className="rounded-lg border p-3"><summary className="cursor-pointer text-sm font-medium">Read saved transcript</summary><p className="mt-3 max-h-[60dvh] overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed">{value('transcript')}</p></details></>
-            : <p className="text-sm text-muted-foreground">No transcript saved. A link or description does not establish what the video says. {youtube ? "Transcribe it on your Mac, or " : ""}add a verbatim transcript through Edit.</p>}
-          {videoStatus ? <VideoTranscriptionPanel locationId={locationId} recordId={recordId} canTranscribe status={videoStatus} hasTranscript={hasTranscript} /> : null}
-          <h3 className="pt-2 text-sm font-medium">AI summary</h3>
-          <p className="whitespace-pre-wrap break-words text-sm">{value('aiSummary') || view.statusMessage || 'No AI summary saved. Request a summary after saving source evidence.'}</p>
-          {value('aiSummary') ? <p className="text-xs text-muted-foreground">Basis: {value('summaryBasis') === 'transcript' ? 'Saved transcript excerpt (first 20,000 characters), with available description.' : value('summaryBasis') === 'description' ? 'Source description only; video contents were not watched.' : 'Basis not recorded; verify against the source.'}</p> : null}
-        </section>
-
-        {active ? <>
-          <section id="script" aria-labelledby="h-script" className={card}>
-            <h2 id="h-script" className="font-semibold">Script</h2>
-            <p className="text-sm text-muted-foreground">Turn what works here into your own script. Ideas keep this source linked as research; nothing is copied or approved.</p>
-            <div className="flex flex-wrap gap-2">
-              {youtube ? <Link href={`/studio/library/${recordId}/template`} className={hasTranscript ? primaryLink : linkButton}>Extract script template</Link> : null}
-              <a href="#source-assistant" className={linkButton}>Draft an idea with the assistant</a>
-            </div>
-            {contentLinks.length ? <div><h3 className="text-sm font-medium">Ideas and scripts from this source</h3><ul className="mt-1 space-y-1 text-sm">{contentLinks.map(linked => <li key={linked.id}><Link className="text-primary hover:underline" href={`/studio/content/${linked.id}`}>{linked.title}</Link></li>)}</ul></div> : <p className="text-sm text-muted-foreground">No ideas created from this source yet.</p>}
-          </section>
-
-          <section id="knowledge" aria-labelledby="h-knowledge" className={card}>
-            <h2 id="h-knowledge" className="font-semibold">Knowledge</h2>
-            <p className="text-sm text-muted-foreground">Explore topics and cited takeaways, then approve what you want to keep.</p>
-            <div className="flex flex-wrap gap-2">{latestOutline ? <Link href={`/studio/knowledge/extractions/${latestOutline.id}`} className={primaryLink}>Open knowledge review</Link> : <Link href={`/studio/records/${recordId}/extract`} className={hasTranscript ? primaryLink : linkButton}>Extract knowledge</Link>}</div>
-            {findings.length ? <ul className="space-y-2 break-words text-sm">{findings.map(finding => <li key={finding.id}><Link href={`/studio/knowledge/${finding.id}`} className="text-primary hover:underline">{finding.statement}</Link> <span className="text-muted-foreground">({finding.status})</span></li>)}</ul> : <p className="text-sm text-muted-foreground">No knowledge findings saved for this source.</p>}
-            {hasMoreFindings ? <Link href="/studio/knowledge?status=all" className="block text-sm text-primary hover:underline">Browse more knowledge findings</Link> : null}
-          </section>
-
-          <section id="related" aria-label="Related videos" className="scroll-mt-16"><RelatedYoutubeVideos key={`${locationId}:${recordId}`} anchorId={recordId} /></section>
-        </> : null}
-
-        <section id="notes" aria-labelledby="h-notes" className={card}>
-          <h2 id="h-notes" className="font-semibold">My notes</h2>
-          {notes ? <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{notes}</p> : <p className="text-sm text-muted-foreground">Nothing yet. Tell the assistant your reaction and choose Save to My notes, or write here through Edit.</p>}
-          {summaryNote ? <div><h3 className="text-xs font-medium text-muted-foreground">Saved summary note</h3><p className="whitespace-pre-wrap break-words text-sm">{summaryNote}</p></div> : null}
-        </section>
-        {edit}
-        {footer}
+      <div className="flex min-w-0 flex-col gap-4">
+        <div className="grid gap-4 md:grid-cols-[minmax(0,320px)_minmax(0,1fr)] md:items-start">
+          <SourcePlayer title={record.title} thumbnail={view.thumbnail} videoId={youtube?.videoId ?? null} url={view.url} portrait={view.portrait} />
+          <div className="min-w-0 space-y-3">
+            {header}
+            {creator && !links.some(link => link.kind === 'channel') && view.url ? <LibrarySourceAction locationId={locationId} url={creator.channelUrl} sourceId={recordId} sourceVersion={record.version} /> : null}
+            <ExpandableText text={value('description')} empty="none saved." />
+          </div>
+        </div>
+        <SourceTabs tabs={tabs} />
       </div>
-      <SourceAssistant locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} ideaId={randomUUID()} canRelated={active} archived={record.archived} />
+      <SourceAssistant locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} ideaId={randomUUID()} canRelated={active} archived={record.archived} knowledgeInput={knowledgeInputs?.inputs[0] ?? null} canTemplate={Boolean(youtube) && hasTranscript} />
     </div>
   </main>;
 }
