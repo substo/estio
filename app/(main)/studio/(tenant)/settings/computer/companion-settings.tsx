@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import { useStudioCommand } from "@/app/(main)/studio/_components/use-studio-command";
 import type { StudioDeviceCommandSummary, StudioDeviceSummary } from "@/lib/studio/devices";
 import { DeviceSetupForm } from "./device-setup-form";
-import { buttonClass, endpoint, inputClass, providerReport, record, type Provider } from "./shared";
+import { buttonClass, endpoint, inputClass, primaryButtonClass, providerReport, record, type Provider } from "./shared";
+import { computerTasks, type ComputerTask } from "@/lib/studio/computer-readiness-policy";
 import { videoSetupCommand, videoSetupGuide, videoToolLabels, VIDEO_TOOL_NAMES, type VideoToolName } from "@/lib/studio/video-transcription-policy";
 import { companionRefreshDelay, DEVICE_WORK_KINDS, deviceWorkLabels, type DeviceWorkKind } from "@/lib/studio/devices-policy";
 
@@ -172,6 +173,27 @@ function ProviderConnection({ device, provider, canManage }: { device: StudioDev
   </div>;
 }
 
+/** Plain-language tasks first: what this Mac can do for you, and the one step that unblocks anything that cannot. */
+function TaskChecklist({ device, canManage }: { device: StudioDeviceSummary; canManage: boolean }) {
+  const tasks = computerTasks(device);
+  const anchor: Record<string, string> = { "Start the companion": `#companion-${device.id}`, "Open Setup": `#setup-${device.id}`, "Connect your subscription": `#providers-${device.id}`,
+    "Install transcription tools": `#diagnostics-${device.id}`, "Install Google Chrome": `#diagnostics-${device.id}`, "Update the companion": `#diagnostics-${device.id}` };
+  const fix = (task: ComputerTask) => {
+    if (!task.fix || !canManage && task.fix !== "Start the companion") return null;
+    if (task.fix === "Resume") return <ActionButton label="Resume" pendingLabel="Saving…" className={primaryButtonClass} command={{ action: "set_paused", deviceId: device.id, paused: false }} />;
+    if (task.fix === "Turn processing on") return <ActionButton label="Turn processing on" pendingLabel="Saving…" className={primaryButtonClass} command={{ action: "set_processing", deviceId: device.id, enabled: true }} confirm={`Use ${device.name} to process this Business's work?`} />;
+    return anchor[task.fix] ? <a href={anchor[task.fix]} className="font-medium text-primary hover:underline">{task.fix}</a> : null;
+  };
+  return <section aria-label="What this computer can do" className="space-y-2">
+    <h4 className="font-medium">What this Mac can do for you</h4>
+    <ul className="divide-y rounded-lg border">{tasks.map(task => <li key={task.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 p-3">
+      <span aria-hidden="true" className={`h-2.5 w-2.5 shrink-0 rounded-full ${task.ready ? "bg-emerald-500" : "bg-amber-500"}`} />
+      <span className="min-w-0 flex-1"><span className="font-medium">{task.label}</span><span className="sr-only">{task.ready ? ": ready" : ": needs attention"}</span><span className="block text-muted-foreground">{task.detail}</span></span>
+      {fix(task)}
+    </li>)}</ul>
+  </section>;
+}
+
 function DeviceCard({ device, canManage }: { device: StudioDeviceSummary; canManage: boolean }) {
   const revoked = Boolean(device.revoked_at);
   return <article className="space-y-4 rounded-lg border p-4">
@@ -183,31 +205,34 @@ function DeviceCard({ device, canManage }: { device: StudioDeviceSummary; canMan
       : device.online ? `Companion running · last seen ${device.last_seen_at ? sinceText(device.last_seen_at) : "just now"}`
       : device.last_seen_at ? `Companion not running · last seen ${sinceText(device.last_seen_at)} (${when(device.last_seen_at)})` : "Paired, but the companion has never connected"}</p>
     {revoked ? null : <>
-      {!device.online && device.processingEnabled ? <div role="status" className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
+      {!device.online && device.processingEnabled ? <div id={`companion-${device.id}`} role="status" className="scroll-mt-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
         <p className="font-medium">Processing is on, but nothing will run until the Studio companion is running on this Mac.</p>
         <p className="text-muted-foreground">On the Mac, in this app&apos;s source checkout, run <code className="rounded bg-muted px-1">{companionRunCommand}</code> once. It starts the companion now and at every login, and restarts it if it stops.</p>
       </div> : null}
-      <Capabilities device={device} />
-      <Hardware device={device} />
+      <TaskChecklist device={device} canManage={canManage} />
       <div className="space-y-2">
         <p className="font-medium">Use this computer for processing?</p>
         <p className="text-muted-foreground">When On, this Mac may run Business research (onboarding) and Library summaries on its own Codex or Claude subscription while the companion is running, with no paid API fallback. Library summaries also need &quot;Text work&quot; in Setup. Off by default. Mac checks work either way.</p>
         <p>Processing: <span className="font-medium">{device.processingEnabled ? "On" : "Off"}</span>{device.paused ? " · Paused (nothing will be picked up, including checks)" : ""}</p>
         {canManage ? <div className="flex flex-wrap gap-2">
-          <ActionButton label={device.processingEnabled ? "Turn processing off" : "Turn processing on"} pendingLabel="Saving…" command={{ action: "set_processing", deviceId: device.id, enabled: !device.processingEnabled }}
+          <ActionButton label={device.processingEnabled ? "Turn processing off" : "Turn processing on"} pendingLabel="Saving…" className={device.processingEnabled ? buttonClass : primaryButtonClass} command={{ action: "set_processing", deviceId: device.id, enabled: !device.processingEnabled }}
             confirm={device.processingEnabled ? undefined : `Use ${device.name} to process this Business's work?`} />
           <ActionButton label={device.paused ? "Resume" : "Pause"} pendingLabel="Saving…" command={{ action: "set_paused", deviceId: device.id, paused: !device.paused }} />
           <ActionButton label="Revoke" pendingLabel="Revoking…" className={`${buttonClass} text-destructive`} command={{ action: "revoke", deviceId: device.id }}
             confirm={`Revoke ${device.name}? It will stop working until you pair it again.`} />
         </div> : null}
       </div>
-      <div className="space-y-2">
+      <div id={`providers-${device.id}`} className="scroll-mt-4 space-y-2">
         <h4 className="font-medium">Codex and Claude</h4>
         <p className="text-muted-foreground">Uses the CLI sign-in already on this Mac. Connect runs the CLI&apos;s own sign-in on the Mac; your credentials stay there.</p>
         {(["codex", "claude"] as const).map(provider => <ProviderConnection key={provider} device={device} provider={provider} canManage={canManage} />)}
       </div>
-      {canManage ? <div className="space-y-4"><DeviceCheck device={device} /><DeviceCheck device={device} cli /></div> : null}
-      <DeviceSetupForm device={device} canManage={canManage} />
+      <div id={`setup-${device.id}`} className="scroll-mt-4"><DeviceSetupForm device={device} canManage={canManage} /></div>
+      <details id={`diagnostics-${device.id}`} open={computerTasks(device).some(task => !task.ready && task.fix !== null && /tools|Chrome|Update/.test(task.fix))} className="scroll-mt-4 space-y-3 rounded-lg border p-3">
+        <summary className="cursor-pointer font-medium">Details and checks</summary>
+        <div className="mt-3 space-y-4"><Capabilities device={device} /><Hardware device={device} />
+          {canManage ? <div className="space-y-4"><DeviceCheck device={device} /><DeviceCheck device={device} cli /></div> : null}</div>
+      </details>
     </>}
   </article>;
 }
@@ -247,7 +272,7 @@ function PairingApproval({ code, businessName, canManage }: { code: string; busi
         <label className="flex items-start gap-2"><input type="checkbox" className="mt-1" checked={processing} onChange={event => setProcessing(event.target.checked)} disabled={decide.pending} />
           <span>Also turn processing on: this Mac may run Business research and Library summaries on its own Codex or Claude subscription. You can turn it off at any time.</span></label>
         <div className="flex flex-wrap gap-2">
-          <button type="button" className={buttonClass} disabled={decide.pending || enable.pending} onClick={async () => {
+          <button type="button" className={primaryButtonClass} disabled={decide.pending || enable.pending} onClick={async () => {
             const result = await decide.run({ action: "approve_pairing", userCode, requestId: crypto.randomUUID() });
             if (!result?.ok || !result.data.ok) return;
             const deviceId = (result.data.data as { deviceId?: string } | undefined)?.deviceId;
@@ -269,7 +294,7 @@ function CodeEntry() {
   const [code, setCode] = useState("");
   return <form className="flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); router.push(`/studio/settings/computer?code=${encodeURIComponent(formatCode(code))}`); }}>
     <label className="block">Pairing code<input className={`${inputClass} font-mono uppercase`} value={code} onChange={event => setCode(formatCode(event.target.value))} placeholder="XXXX-XXXX" required minLength={9} maxLength={9} autoComplete="off" spellCheck={false} /></label>
-    <button className={buttonClass}>Continue</button>
+    <button className={primaryButtonClass}>Continue</button>
   </form>;
 }
 

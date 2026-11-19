@@ -56,3 +56,26 @@ test("note save reports a version conflict and a generic failure without saving 
   assert.match(other.ok ? "" : other.error, /try again/);
   assert.equal((await saveSourceNote(deps().deps, "l", "r", "   ")).ok, false);
 });
+
+import { computerTasks, type ComputerTaskInput } from "./computer-readiness-policy";
+const device = (over: Partial<ComputerTaskInput> = {}): ComputerTaskInput => ({ status: "online", processingEnabled: true,
+  config: { version: 3, appliedVersion: 3, status: "applied", value: { textProvider: "codex", features: { text: true, transcription: true } } },
+  capabilities: { handlers: ["studio.text_run", "studio.video_transcribe"], codex: { authenticated: true, ready: true }, video: { ready: true }, youtubeSearch: { ready: true } },
+  research: { ready: true, reason: null }, ...over });
+test("every task is ready on a fully set up Mac", () => {
+  assert.deepEqual(computerTasks(device()).map(t => t.ready), [true, true, true, true]);
+});
+test("a stopped, paused or switched-off Mac blocks tasks with the single next step", () => {
+  const offline = computerTasks(device({ status: "offline" })).filter(t => !t.ready);
+  assert.ok(offline.every(t => t.fix === "Start the companion"));
+  const off = computerTasks(device({ processingEnabled: false, capabilities: {} }));
+  assert.ok(off.every(t => t.fix === "Turn processing on"));
+});
+test("setup gaps give a specific fix", () => {
+  const tasks = Object.fromEntries(computerTasks(device({ config: { version: 3, appliedVersion: 2, status: "pending", value: { textProvider: "codex", features: { text: true, transcription: false } } },
+    capabilities: { handlers: ["studio.text_run", "studio.video_transcribe"], codex: { authenticated: false }, video: { ready: true } }, research: { ready: false, reason: "Paused" } })).map(t => [t.id, t]));
+  assert.equal(tasks.transcribe.fix, "Open Setup");
+  assert.match(tasks.assistant.detail, /apply/);
+  assert.equal(tasks.related.fix, "Install Google Chrome");
+  assert.equal(tasks.research.detail, "Paused");
+});

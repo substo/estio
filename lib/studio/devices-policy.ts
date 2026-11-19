@@ -86,6 +86,7 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
     if (typeof v[key] === "string" && /^[A-Za-z0-9._:/ -]{1,100}$/.test(v[key])) result[key] = v[key];
   for (const key of ["healthy", "draining"]) if (typeof v[key] === "boolean") result[key] = v[key];
   if (v.videoTemplateVersion === 1) result.videoTemplateVersion = 1;
+  if (v.sourceAssistVersion === 1) result.sourceAssistVersion = 1;
   if (v.knowledgeOutlineVersion === 2) result.knowledgeOutlineVersion = 2;
   if (Array.isArray(v.handlers)) result.handlers = v.handlers.filter((x, i, all) => (DEVICE_WORK_KINDS as readonly unknown[]).includes(x) && all.indexOf(x) === i);
   if (v.capacity && typeof v.capacity === "object" && !Array.isArray(v.capacity)) {

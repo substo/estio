@@ -2,6 +2,10 @@
 
 Updated 2026-11-08. This is the task/status source of truth; [architecture and decisions](how-the-app-works.md) owns product rules. Historical checkpoints do not override this page.
 
+## Studio UX overhaul and source assistant (2026-11-19, local candidate, not deployed)
+
+Library source detail is media-first (player/thumbnail, title, platform/channel, compact Description, section navigation) with a single-source assistant: typed/dictated reactions, explicit Save to My notes, reviewed linked idea, existing related-video search, and a bounded Discuss / Rewrite as note / Propose idea text operation over the same source (see [Source assistant](ai-workflows.md#source-assistant-2026-11-19-local-candidate)). The mobile drawer is a Radix Sheet (focus trap, Escape, focus return). Studio entry and Library show a connected-computer line; Connected computer leads with what the Mac can do and one fix per blocker. Needs migration `20261119140000_studio_source_assistant` and an updated companion (`sourceAssistVersion`) before the AI actions work; Save as written, idea drafts and related search work without them. No live provider call, signed-in browser acceptance or deployment has happened.
+
 ## Release
 
 Live release, 2026-11-08 17:57 UTC: `c557b3cc4353dc2437454fda12784e744259aa1e`, blue, build `5Kniv9sNQz5VlzVjCQu0K`, fingerprint `61b6010b1199a0845230002c3cdf5e17bc66da2d2ebbbdd028631aa1c129bdf0`. Explicit owner-approved combined release includes the conversation-owned Build workflow, onboarding merge `f599c8fd`, and the lease-heartbeat fix. Owned migrate-only deployment exited 0; fresh build, upload, no-pending-migrations check, Caddy validation and soak passed. Public health/version and serving manifest match; required services are online with zero restarts; no rollback. Existing build/dependency warnings remain. Log: `/tmp/estio-thread-workflow-lease-fixed-20261108-deploy.log`.

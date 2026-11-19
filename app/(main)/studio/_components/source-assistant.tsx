@@ -1,22 +1,35 @@
 "use client";
 import { useActionState, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Lightbulb, Loader2, MessageSquare, Mic, MicOff, Search, Send, X, NotebookPen } from "lucide-react";
+import { Lightbulb, Loader2, MessageSquare, Mic, MicOff, NotebookPen, Search, Send, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { createSourceIdeaAction } from "../(tenant)/content/actions";
 import { saveSourceNoteAction } from "../(tenant)/library/note-actions";
 import { draftIdeaFromReactions, relatedSearchPhrase, REACTION_LIMIT } from "@/lib/studio/source-assistant-policy";
+import type { SourceAssistRun } from "@/lib/studio/source-assist";
+import type { StudioTextProvider } from "@/lib/studio/text-provider";
+import { StudioTextProviderChoice } from "./text-provider-choice";
+import { useStudioTenantHeaders } from "./studio-tenant-context";
 
-type Entry = { id: number; role: "you" | "assistant"; text: string; saved?: boolean; tone?: "error" };
+type Intent = "discuss" | "rewrite_note" | "propose_idea";
+type AiState = { reviewId: string; run: SourceAssistRun | null; error: string | null; waited: boolean; intent: Intent };
+type Entry = { id: number; role: "you" | "assistant" | "ai"; text: string; saved?: boolean; tone?: "error"; ai?: AiState };
 type Recognition = { start(): void; stop(): void; continuous: boolean; interimResults: boolean; lang: string; onresult: ((event: any) => void) | null; onerror: ((event: any) => void) | null; onend: (() => void) | null };
 export const RELATED_SEARCH_EVENT = "studio:related-search";
+const INTENTS: Array<{ value: Intent; label: string; hint: string }> = [
+  { value: "discuss", label: "Discuss", hint: "Answer about this video" },
+  { value: "rewrite_note", label: "Rewrite as note", hint: "Tidy my words into a note" },
+  { value: "propose_idea", label: "Propose idea", hint: "Draft a linked idea" },
+];
+const clock = (seconds: number) => new Date(seconds * 1000).toISOString().slice(seconds >= 3600 ? 11 : 14, 19);
 
-function IdeaDraft({ locationId, sourceId, ideaId, initial, onCancel }: { locationId: string; sourceId: string; ideaId: string; initial: { title: string; summary: string }; onCancel: () => void }) {
+function IdeaDraft({ locationId, sourceId, ideaId, initial, onCancel }: { locationId: string; sourceId: string; ideaId: string; initial: { title: string; summary: string; ai?: boolean }; onCancel: () => void }) {
   const [state, action, pending] = useActionState(createSourceIdeaAction.bind(null, locationId, sourceId, ideaId), {});
   const titleId = useId();
   return <form action={action} className="space-y-3 rounded-lg border bg-background p-3 text-sm">
     <p className="font-medium">Review the idea before it is created</p>
-    <p className="text-xs text-muted-foreground">Assembled from your own words, not generated. This source is linked as research; nothing is copied or approved.</p>
+    <p className="text-xs text-muted-foreground">{initial.ai ? "Proposed by the assistant from this source. Edit freely." : "Assembled from your own words, not generated."} This source is linked as research; nothing is copied or approved.</p>
     <label className="block text-xs font-medium" htmlFor={titleId}>Idea title</label>
     <input id={titleId} name="title" required maxLength={180} defaultValue={initial.title} className="block w-full rounded-md border bg-background p-2 text-sm" />
     <label className="block text-xs font-medium">Concept and audience promise<textarea name="summary" required maxLength={20_000} rows={5} defaultValue={initial.summary} className="mt-1 block w-full rounded-md border bg-background p-2 text-sm" /></label>
@@ -25,25 +38,32 @@ function IdeaDraft({ locationId, sourceId, ideaId, initial, onCancel }: { locati
   </form>;
 }
 
-export function SourceAssistant({ locationId, sourceId, sourceTitle, ideaId, canRelated, archived }: { locationId: string; sourceId: string; sourceTitle: string; ideaId: string; canRelated: boolean; archived: boolean }) {
+export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ideaId, canRelated, archived, hasEvidence }: { locationId: string; sourceId: string; sourceTitle: string; version: number; ideaId: string; canRelated: boolean; archived: boolean; hasEvidence: boolean }) {
   const router = useRouter();
+  const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
   const [open, setOpen] = useState(false);
   const [log, setLog] = useState<Entry[]>([]);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
-  const [idea, setIdea] = useState<{ title: string; summary: string } | null>(null);
+  const [idea, setIdea] = useState<{ title: string; summary: string; ai?: boolean } | null>(null);
   const [listening, setListening] = useState(false);
   const [dictationNote, setDictationNote] = useState("");
   const [canDictate, setCanDictate] = useState(false);
+  const [intent, setIntent] = useState<Intent>("discuss");
+  const [provider, setProvider] = useState<StudioTextProvider>("subscription");
+  const [authorized, setAuthorized] = useState(false);
+  const [asking, setAsking] = useState(false);
   const recognition = useRef<Recognition | null>(null);
-  const field = useRef<HTMLTextAreaElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
   const counter = useRef(0);
+  const requestKey = useRef<string | null>(null);
+  const alive = useRef(true);
   const fieldId = useId();
   useEffect(() => { setCanDictate(typeof window !== "undefined" && Boolean((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)); }, []);
-  useEffect(() => () => recognition.current?.stop(), []);
-  useEffect(() => { if (!open) return; field.current?.focus(); const key = (event: KeyboardEvent) => { if (event.key === "Escape" && window.matchMedia("(max-width: 1023px)").matches) { setOpen(false); opener.current?.focus(); } }; window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key); }, [open]);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; recognition.current?.stop(); }; }, []);
   const push = useCallback((entry: Omit<Entry, "id">) => { const id = ++counter.current; setLog(previous => [...previous, { ...entry, id }]); return id; }, []);
+  const patchAi = (id: number, patch: Partial<AiState>) => setLog(previous => previous.map(item => item.id === id && item.ai ? { ...item, ai: { ...item.ai, ...patch } } : item));
   const reactions = log.filter(entry => entry.role === "you").map(entry => entry.text);
 
   function toggleDictation() {
@@ -59,56 +79,135 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, ideaId, can
     try { engine.start(); } catch { setListening(false); setDictationNote("Dictation could not start. You can type instead."); }
   }
   function takeText() { const value = text.trim(); if (!value) return null; recognition.current?.stop(); push({ role: "you", text: value }); setText(""); return value; }
-  function addReaction() { if (takeText()) push({ role: "assistant", text: "Added to this conversation. Nothing is saved until you choose Save to My notes." }); }
-  async function saveNote(entryId?: number) {
-    const entry = entryId ? log.find(item => item.id === entryId) : undefined;
-    const value = entry ? entry.text : takeText();
-    if (!value) { push({ role: "assistant", text: "Write or dictate a reaction first.", tone: "error" }); return; }
+  async function saveNote(value: string | null, entryId?: number) {
+    if (!value) { push({ role: "assistant", text: "Write or dictate a reaction first.", tone: "error" }); return false; }
     setSaving(true);
     const result = await saveSourceNoteAction(locationId, sourceId, value).catch(() => ({ ok: false as const, error: "Could not reach Studio. Your words are still here; try again." }));
     setSaving(false);
-    if (result.ok) { setLog(previous => previous.map(item => item.role === "you" && (entry ? item.id === entry.id : item.text === value && !item.saved) ? { ...item, saved: true } : item)); push({ role: "assistant", text: "Saved to My notes exactly as you wrote it." }); router.refresh(); }
-    else { push({ role: "assistant", text: result.error, tone: "error" }); if (!entry) setText(value); }
+    if (result.ok) { if (entryId) setLog(previous => previous.map(item => item.id === entryId ? { ...item, saved: true } : item)); push({ role: "assistant", text: "Saved to My notes." }); router.refresh(); return true; }
+    push({ role: "assistant", text: result.error, tone: "error" }); return false;
   }
-  function draftIdea() { const spoken = text.trim() ? [...reactions, text.trim()] : reactions; if (!spoken.length) { push({ role: "assistant", text: "Tell me your reaction first; the idea is built from your words.", tone: "error" }); return; } takeText(); setIdea(draftIdeaFromReactions(sourceTitle, spoken)); }
-  function findRelated() {
-    const phrase = relatedSearchPhrase(text.trim() ? [...reactions, text.trim()] : reactions, sourceTitle);
+  async function saveAsWritten() { const value = text.trim() || null; if (await saveNote(value)) { const saved = takeText(); if (saved) setLog(previous => previous.map(item => item.role === "you" && item.text === saved && !item.saved ? { ...item, saved: true } : item)); } }
+  function draftIdea() { const spoken = text.trim() ? [...reactions, text.trim()] : reactions; if (!spoken.length) { push({ role: "assistant", text: "Tell me your reaction first, or use Propose idea to ask the assistant.", tone: "error" }); return; } takeText(); setIdea(draftIdeaFromReactions(sourceTitle, spoken)); }
+  function findRelated(phrase?: string) {
+    const query = phrase || relatedSearchPhrase(text.trim() ? [...reactions, text.trim()] : reactions, sourceTitle);
     takeText(); setOpen(false);
-    document.getElementById("related")?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
-    window.dispatchEvent(new CustomEvent(RELATED_SEARCH_EVENT, { detail: { phrase } }));
-    push({ role: "assistant", text: `Searching related videos for “${phrase}”. Your Mac does the ranking; results appear under Related videos.` });
+    window.setTimeout(() => {
+      document.getElementById("related")?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+      window.dispatchEvent(new CustomEvent(RELATED_SEARCH_EVENT, { detail: { phrase: query } }));
+    }, 50);
+    push({ role: "assistant", text: `Searching related videos for “${query}”. Your Mac ranks them; results appear under Related videos.` });
   }
 
-  return <>
-    <button ref={opener} type="button" onClick={() => setOpen(true)} aria-expanded={open} aria-controls="source-assistant" className="fixed bottom-4 right-4 z-30 inline-flex min-h-12 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground shadow-lg lg:hidden"><MessageSquare aria-hidden="true" className="h-4 w-4" />Assistant</button>
-    {open ? <div className="fixed inset-0 z-30 bg-black/40 lg:hidden" aria-hidden="true" onClick={() => setOpen(false)} /> : null}
-    <aside id="source-assistant" aria-label="Source assistant" className={`${open ? "fixed inset-x-0 bottom-0 z-40 flex max-h-[88dvh] rounded-t-2xl shadow-2xl" : "hidden"} min-h-0 flex-col border bg-card text-sm lg:sticky lg:top-4 lg:z-auto lg:flex lg:max-h-[calc(100dvh-2rem)] lg:rounded-xl lg:shadow-none`}>
-      <header className="flex items-center justify-between gap-2 border-b px-4 py-3"><div className="min-w-0"><h2 className="font-semibold">Assistant</h2><p className="truncate text-xs text-muted-foreground">Only this source: {sourceTitle}</p></div><button type="button" onClick={() => { setOpen(false); opener.current?.focus(); }} aria-label="Close assistant" className="inline-flex h-11 w-11 items-center justify-center rounded-md hover:bg-muted lg:hidden"><X aria-hidden="true" className="h-4 w-4" /></button></header>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3" role="log" aria-live="polite" aria-label="Conversation">
-        {log.length === 0 ? <div className="space-y-2 text-muted-foreground"><p>Tell me your reaction to this video. Type it, or dictate it.</p><ul className="list-disc space-y-1 pl-5 text-xs"><li>Save it to <strong className="font-medium text-foreground">My notes</strong>, word for word.</li><li>Turn it into a linked idea you review first.</li><li>Ask for related videos to research.</li></ul></div> : null}
-        {log.map(entry => entry.role === "you"
-          ? <div key={entry.id} className="ml-6 space-y-1 rounded-lg bg-primary/10 p-3"><p className="whitespace-pre-wrap break-words">{entry.text}</p>{entry.saved ? <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Saved to My notes</p> : <button type="button" disabled={saving} onClick={() => void saveNote(entry.id)} className="inline-flex min-h-9 items-center text-xs font-medium text-primary hover:underline disabled:opacity-50">Save to My notes</button>}</div>
-          : <p key={entry.id} role={entry.tone === "error" ? "alert" : undefined} className={`mr-6 whitespace-pre-wrap break-words rounded-lg bg-muted p-3 ${entry.tone === "error" ? "text-destructive" : ""}`}>{entry.text}</p>)}
-        {idea ? <IdeaDraft locationId={locationId} sourceId={sourceId} ideaId={ideaId} initial={idea} onCancel={() => setIdea(null)} /> : null}
+  async function poll(entryId: number, reviewId: string) {
+    const started = Date.now();
+    while (alive.current) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      if (!alive.current) return;
+      try {
+        const response = await fetch(`/studio/assistant/api?reviewId=${encodeURIComponent(reviewId)}`, { headers: { "X-Studio-Tenant": tenant }, cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Could not read the answer.");
+        const run = data.run as SourceAssistRun;
+        patchAi(entryId, { run });
+        if (run.status === "done" || run.status === "failed") return;
+        if (Date.now() - started > 20_000) patchAi(entryId, { waited: true });
+        if (Date.now() - started > 3 * 60_000) { patchAi(entryId, { error: "Your Mac did not answer yet. It keeps the request; check Connected computer, then ask again if needed." }); return; }
+      } catch (error) { patchAi(entryId, { error: error instanceof Error ? error.message : "Could not read the answer." }); return; }
+    }
+  }
+  async function ask() {
+    const message = text.trim();
+    if (!message || asking) return;
+    if (!authorized) { push({ role: "assistant", text: provider === "subscription" ? "Tick the box to authorize this request on your Mac subscription." : "Tick the box to authorize paid processing with the Location OpenAI key.", tone: "error" }); return; }
+    requestKey.current ??= crypto.randomUUID();
+    setAsking(true);
+    try {
+      const response = await fetch("/studio/assistant/api", { method: "POST", headers: { "X-Studio-Tenant": tenant, "Content-Type": "application/json" }, signal: AbortSignal.timeout(30_000),
+        body: JSON.stringify({ requestId: requestKey.current, sourceId, expectedVersion: version, provider, intent, message, confirmPaid: provider === "openai" && authorized, confirmSubscription: provider === "subscription" && authorized }) });
+      const data = await response.json();
+      if (!response.ok) { if (response.status < 500) requestKey.current = null; push({ role: "assistant", text: data.error || "The assistant could not start.", tone: "error" }); return; }
+      requestKey.current = null; setAuthorized(false); recognition.current?.stop(); setText("");
+      push({ role: "you", text: message });
+      const entryId = push({ role: "ai", text: "", ai: { reviewId: data.reviewId, run: null, error: null, waited: false, intent } });
+      void poll(entryId, data.reviewId);
+    } catch { push({ role: "assistant", text: "The outcome is unconfirmed. Press Ask again to check this same request.", tone: "error" }); }
+    finally { setAsking(false); }
+  }
+
+  function AiAnswer({ entry }: { entry: Entry }) {
+    const ai = entry.ai!; const run = ai.run; const result = run?.result;
+    if (ai.error || run?.status === "failed") return <div role="alert" className="mr-6 space-y-1 rounded-lg bg-muted p-3 text-destructive"><p>{ai.error || run?.error}</p><p className="text-xs text-muted-foreground">Nothing was saved or created. You can ask again.</p></div>;
+    if (!result) return <p role="status" className="mr-6 flex items-center gap-2 rounded-lg bg-muted p-3 text-muted-foreground"><Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />{run?.status === "running" ? "Your Mac is working on it…" : ai.waited ? "Waiting for your Mac… It must be on with the Studio companion running." : "Queued."}</p>;
+    return <div className="mr-6 space-y-3 rounded-lg bg-muted p-3">
+      <p className="whitespace-pre-wrap break-words">{result.reply}</p>
+      {result.citations.length ? <ul className="space-y-1 border-l-2 pl-3 text-xs text-muted-foreground">{result.citations.map((c, i) => <li key={i}>“{c.quote}”{run!.citedAt[c.unitId] != null ? <span className="ml-1 tabular-nums">· {clock(run!.citedAt[c.unitId]!)}</span> : null}</li>)}</ul> : null}
+      {result.limitations.length ? <ul className="list-disc pl-5 text-xs text-muted-foreground">{result.limitations.map((item, i) => <li key={i}>{item}</li>)}</ul> : null}
+      {result.note ? <ProposedNote key={entry.id} note={result.note} disabled={saving || archived} onSave={value => saveNote(value)} /> : null}
+      {result.ideaTitle && result.ideaConcept ? <Button type="button" variant="secondary" disabled={archived} onClick={() => setIdea({ title: result.ideaTitle!, summary: result.ideaConcept!, ai: true })}><Lightbulb aria-hidden="true" className="mr-2 h-4 w-4" />Review proposed idea</Button> : null}
+      {result.relatedQuery && canRelated ? <Button type="button" variant="outline" onClick={() => findRelated(result.relatedQuery!)}><Search aria-hidden="true" className="mr-2 h-4 w-4" />Search “{result.relatedQuery}”</Button> : null}
+      <p className="text-xs text-muted-foreground">{run!.provider === "subscription" ? "Your Mac subscription" : "Location OpenAI key (paid)"} · {run!.model.replace(/^mac_/, "")} · {run!.evidence.kind === "description" ? "from the saved description only" : `${run!.evidence.selected} of ${run!.evidence.total} saved passages read`}{run!.stale ? " · source changed since" : ""}. Nothing is saved until you choose.</p>
+    </div>;
+  }
+
+  const body = (variant: string) => <>
+    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3" role="log" aria-live="polite" aria-label="Conversation">
+      {log.length === 0 ? <div className="space-y-2 text-muted-foreground"><p>Tell me your reaction to this video, then pick what to do with it.</p><ul className="list-disc space-y-1 pl-5 text-xs"><li><strong className="font-medium text-foreground">Discuss</strong> or <strong className="font-medium text-foreground">Rewrite as note</strong> or <strong className="font-medium text-foreground">Propose idea</strong> — answered from this source only.</li><li><strong className="font-medium text-foreground">Save as written</strong> keeps your exact words in My notes, no AI.</li><li>Related videos search uses your Mac.</li></ul></div> : null}
+      {log.map(entry => entry.role === "you"
+        ? <div key={entry.id} className="ml-6 space-y-1 rounded-lg bg-primary/10 p-3"><p className="whitespace-pre-wrap break-words">{entry.text}</p>{entry.saved ? <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Saved to My notes</p> : <button type="button" disabled={saving || archived} onClick={() => void saveNote(entry.text, entry.id)} className="inline-flex min-h-9 items-center text-xs font-medium text-primary hover:underline disabled:opacity-50">Save to My notes as written</button>}</div>
+        : entry.role === "ai" ? <AiAnswer key={entry.id} entry={entry} />
+        : <p key={entry.id} role={entry.tone === "error" ? "alert" : undefined} className={`mr-6 whitespace-pre-wrap break-words rounded-lg bg-muted p-3 ${entry.tone === "error" ? "text-destructive" : ""}`}>{entry.text}</p>)}
+      {idea ? <IdeaDraft key={`${idea.title}:${idea.summary}`} locationId={locationId} sourceId={sourceId} ideaId={ideaId} initial={idea} onCancel={() => setIdea(null)} /> : null}
+    </div>
+    <div className="space-y-2 border-t p-3">
+      {archived ? <p className="text-xs text-muted-foreground">This source is archived, so notes and ideas are read-only.</p> : null}
+      <label htmlFor={`${fieldId}-${variant}`} className="text-xs font-medium">Your reaction</label>
+      <textarea id={`${fieldId}-${variant}`} data-assistant-field value={text} maxLength={REACTION_LIMIT} rows={3} disabled={archived} placeholder="What stood out? What would you do differently?" onChange={event => setText(event.target.value)}
+        onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing || event.keyCode === 229) return; event.preventDefault(); if (!event.repeat && text.trim()) { takeText(); push({ role: "assistant", text: "Added. Choose Ask, or Save as written to keep it in My notes." }); } }}
+        className="block w-full resize-none rounded-md border bg-background p-2 text-sm" />
+      <fieldset className="space-y-1" disabled={archived || !hasEvidence}>
+        <legend className="text-xs font-medium">Ask the assistant to</legend>
+        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Assistant action">{INTENTS.map(item => <label key={item.value} title={item.hint} className={`inline-flex min-h-9 cursor-pointer items-center rounded-full border px-3 text-xs font-medium has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary ${intent === item.value ? "border-primary bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}><input type="radio" className="sr-only" name={`intent-${variant}`} checked={intent === item.value} onChange={() => setIntent(item.value)} />{item.label}</label>)}</div>
+      </fieldset>
+      {hasEvidence ? <details className="rounded-md border p-2 text-xs"><summary className="cursor-pointer font-medium">Processing: {provider === "subscription" ? "my Mac subscription" : "Location OpenAI key (paid)"}</summary><div className="mt-2"><StudioTextProviderChoice sourceAssist provider={provider} onChange={value => { setProvider(value); setAuthorized(false); }} /></div></details>
+        : <p className="text-xs text-muted-foreground">The assistant needs a saved transcript or description. Transcribe on your Mac or add text in Edit source, then ask.</p>}
+      {hasEvidence ? <label className="flex items-start gap-2 text-xs"><input type="checkbox" className="mt-0.5 h-4 w-4" checked={authorized} disabled={archived} onChange={event => setAuthorized(event.target.checked)} />{provider === "subscription" ? "I authorize this request on my paired Mac subscription." : "I authorize paid processing with the Location OpenAI key."}</label> : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" onClick={() => void ask()} disabled={asking || archived || !hasEvidence || !text.trim()} className="min-h-10">{asking ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles aria-hidden="true" className="mr-2 h-4 w-4" />}Ask</Button>
+        <Button type="button" variant="outline" onClick={() => void saveAsWritten()} disabled={saving || archived || !text.trim()} className="min-h-10"><NotebookPen aria-hidden="true" className="mr-2 h-4 w-4" />Save as written</Button>
+        {canDictate ? <Button type="button" variant="outline" onClick={toggleDictation} aria-pressed={listening} disabled={archived} className="min-h-10">{listening ? <MicOff aria-hidden="true" className="mr-2 h-4 w-4" /> : <Mic aria-hidden="true" className="mr-2 h-4 w-4" />}{listening ? "Stop" : "Dictate"}</Button> : null}
       </div>
-      <div className="space-y-2 border-t p-3">
-        {archived ? <p className="text-xs text-muted-foreground">This source is archived, so notes and ideas are read-only.</p> : null}
-        <label htmlFor={fieldId} className="text-xs font-medium">Your reaction</label>
-        <textarea id={fieldId} ref={field} value={text} maxLength={REACTION_LIMIT} rows={3} disabled={archived} placeholder="What stood out? What would you do differently?" onChange={event => setText(event.target.value)}
-          onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing || event.keyCode === 229) return; event.preventDefault(); if (!event.repeat) addReaction(); }}
-          className="block w-full resize-none rounded-md border bg-background p-2 text-sm" />
-        <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" onClick={() => void saveNote()} disabled={saving || archived} className="min-h-10">{saving ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : <NotebookPen aria-hidden="true" className="mr-2 h-4 w-4" />}Save to My notes</Button>
-          <Button type="button" variant="outline" onClick={addReaction} disabled={archived || !text.trim()} className="min-h-10"><Send aria-hidden="true" className="mr-2 h-4 w-4" />Add</Button>
-          {canDictate ? <Button type="button" variant="outline" onClick={toggleDictation} aria-pressed={listening} disabled={archived} className="min-h-10">{listening ? <MicOff aria-hidden="true" className="mr-2 h-4 w-4" /> : <Mic aria-hidden="true" className="mr-2 h-4 w-4" />}{listening ? "Stop" : "Dictate"}</Button> : null}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="secondary" onClick={draftIdea} disabled={archived} className="min-h-10"><Lightbulb aria-hidden="true" className="mr-2 h-4 w-4" />Draft an idea</Button>
-          {canRelated ? <Button type="button" variant="secondary" onClick={findRelated} className="min-h-10"><Search aria-hidden="true" className="mr-2 h-4 w-4" />Find related videos</Button> : null}
-        </div>
-        <p role="status" className="text-xs text-muted-foreground">{listening ? "Listening… speech is converted by your browser's own speech service." : dictationNote || (canDictate ? "Enter adds; Shift+Enter starts a new line." : "Dictation isn't available in this browser; typing works everywhere.")}</p>
-        <p className="text-xs text-muted-foreground">No AI rewriting here yet: your words are kept exactly as written. Mac research uses your paired subscription only, never a paid fallback.</p>
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="ghost" onClick={draftIdea} disabled={archived} className="min-h-9 px-2 text-xs"><Lightbulb aria-hidden="true" className="mr-1.5 h-4 w-4" />Draft idea from my words</Button>
+        {canRelated ? <Button type="button" variant="ghost" onClick={() => findRelated()} className="min-h-9 px-2 text-xs"><Search aria-hidden="true" className="mr-1.5 h-4 w-4" />Find related videos</Button> : null}
       </div>
-    </aside>
+      <p role="status" className="text-xs text-muted-foreground">{listening ? "Listening… speech is converted by your browser's own speech service." : dictationNote || (canDictate ? "Enter adds your words; Shift+Enter starts a new line." : "Dictation isn't available in this browser; typing works everywhere.")}</p>
+    </div>
   </>;
+  const header = <div className="min-w-0"><h2 className="font-semibold">Assistant</h2><p className="truncate text-xs text-muted-foreground">Only this source: {sourceTitle}</p></div>;
+  return <>
+    <button ref={opener} type="button" onClick={() => setOpen(true)} aria-haspopup="dialog" className="fixed bottom-4 right-4 z-30 inline-flex min-h-12 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground shadow-lg lg:hidden"><MessageSquare aria-hidden="true" className="h-4 w-4" />Assistant</button>
+    <aside id="source-assistant" aria-label="Source assistant" className="sticky top-4 hidden max-h-[calc(100dvh-2rem)] min-h-0 flex-col rounded-xl border bg-card text-sm lg:flex">
+      <header className="border-b px-4 py-3">{header}</header>
+      {body("side")}
+    </aside>
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetContent side="bottom" className="flex max-h-[88dvh] flex-col gap-0 rounded-t-2xl p-0 text-sm lg:hidden" ref={sheetRef} onOpenAutoFocus={event => { event.preventDefault(); sheetRef.current?.querySelector<HTMLTextAreaElement>("[data-assistant-field]")?.focus(); }}
+        onCloseAutoFocus={event => { event.preventDefault(); opener.current?.focus(); }}>
+        <div className="border-b px-4 py-3 pr-12"><SheetTitle className="text-base">Assistant</SheetTitle><SheetDescription className="truncate text-xs">Only this source: {sourceTitle}</SheetDescription></div>
+        {open ? body("sheet") : null}
+      </SheetContent>
+    </Sheet>
+  </>;
+}
+
+function ProposedNote({ note, disabled, onSave }: { note: string; disabled: boolean; onSave: (value: string) => Promise<boolean> }) {
+  const [value, setValue] = useState(note);
+  const [saved, setSaved] = useState(false);
+  const id = useId();
+  return <div className="space-y-2 rounded-md border bg-background p-2">
+    <label htmlFor={id} className="text-xs font-medium">Proposed note (edit before saving)</label>
+    <textarea id={id} value={value} rows={4} maxLength={REACTION_LIMIT} onChange={event => { setValue(event.target.value); setSaved(false); }} className="block w-full resize-none rounded-md border bg-background p-2 text-sm" />
+    <Button type="button" disabled={disabled || saved || !value.trim()} onClick={async () => setSaved(await onSave(value))}><NotebookPen aria-hidden="true" className="mr-2 h-4 w-4" />{saved ? "Saved to My notes" : "Save to My notes"}</Button>
+  </div>;
 }

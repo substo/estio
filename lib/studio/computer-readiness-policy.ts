@@ -11,3 +11,38 @@ export function summarizeComputerReadiness(devices: readonly ComputerReadinessDe
   if (paused) return { tone: "attention", label: `${paused.name} is paused`, detail: "Requests wait until processing is turned on in Setup.", action: "Open Setup" };
   return { tone: "attention", label: `${active[0].name} is offline`, detail: "Requests wait and start by themselves when the companion reconnects.", action: "Check connection" };
 }
+
+export interface ComputerTaskInput {
+  status: "online" | "busy" | "paused" | "offline" | "revoked"; processingEnabled: boolean;
+  config: { version: number; appliedVersion: number; status: string; value: { textProvider: string | null; features: { text: boolean; transcription: boolean } } };
+  capabilities: Record<string, unknown>; research: { ready: boolean; reason: string | null };
+}
+export interface ComputerTask { id: "transcribe" | "assistant" | "related" | "research"; label: string; ready: boolean; detail: string; fix: string | null }
+const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+const handles = (caps: Record<string, unknown>, kind: string) => Array.isArray(caps.handlers) && (caps.handlers as unknown[]).includes(kind);
+
+/** What this computer can do for the user right now, and the single next step for each thing that cannot. */
+export function computerTasks(device: ComputerTaskInput): ComputerTask[] {
+  const caps = device.capabilities;
+  const blocked = device.status === "offline" ? { detail: "The Studio companion isn't running on this Mac.", fix: "Start the companion" }
+    : device.status === "paused" ? { detail: "This Mac is paused.", fix: "Resume" }
+    : !device.processingEnabled ? { detail: "Processing is off.", fix: "Turn processing on" } : null;
+  const task = (id: ComputerTask["id"], label: string, ready: boolean, detail: string, fix: string | null, okDetail: string): ComputerTask =>
+    blocked ? { id, label, ready: false, ...blocked } : { id, label, ready, detail: ready ? okDetail : detail, fix: ready ? null : fix };
+  const video = record(caps.video); const search = record(caps.youtubeSearch);
+  const provider = device.config.value.textProvider;
+  const report = provider ? record(caps[provider]) : {};
+  const textReady = device.config.value.features.text && Boolean(provider) && device.config.version === device.config.appliedVersion && device.config.status === "applied"
+    && report.authenticated === true && report.ready === true && handles(caps, "studio.text_run");
+  const textDetail = !handles(caps, "studio.text_run") ? "Update the Studio companion on this Mac." : !device.config.value.features.text ? "Text work is off in Setup." : !provider ? "Choose Codex or Claude in Setup."
+    : device.config.version !== device.config.appliedVersion ? "Waiting for the Mac to apply Setup." : "Sign in to your chosen subscription below.";
+  const textFix = !handles(caps, "studio.text_run") ? "Update the companion" : !device.config.value.features.text || !provider ? "Open Setup" : device.config.version !== device.config.appliedVersion ? null : "Connect your subscription";
+  return [
+    task("transcribe", "Transcribe videos", handles(caps, "studio.video_transcribe") && device.config.value.features.transcription && video.ready === true,
+      !handles(caps, "studio.video_transcribe") ? "Update the Studio companion on this Mac." : !device.config.value.features.transcription ? "Video transcription is off in Setup." : "Transcription tools are missing on this Mac.",
+      !handles(caps, "studio.video_transcribe") ? "Update the companion" : !device.config.value.features.transcription ? "Open Setup" : "Install transcription tools", "Local Parakeet, with YouTube captions as the only fallback."),
+    task("assistant", "Assistant, summaries and idea reviews", textReady, textDetail, textFix, `Ready on your ${provider === "claude" ? "Claude" : "Codex"} subscription.`),
+    task("related", "Find related videos", search.ready === true, "Chrome isn't ready on this Mac.", "Install Google Chrome", "Searches in this Mac's own Chrome."),
+    task("research", "Business research", device.research.ready, device.research.reason ?? "Not available yet.", /signed in|capacity/i.test(device.research.reason ?? "") ? "Connect your subscription" : "Open Setup", "Ready on your signed-in subscription."),
+  ];
+}

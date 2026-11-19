@@ -23,3 +23,7 @@ Inspect populated and empty views on desktop and phone, including wrapped filter
 [Nielsen Norman Group: Progressive Disclosure](https://www.nngroup.com/articles/progressive-disclosure/) supports keeping secondary options available without overwhelming the primary task. It informs the Library's on-demand add flow; it does not mandate dialogs on every page.
 
 [WAI-ARIA APG: Modal Dialog Pattern](https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/) describes focus containment, Escape, labelling and focus return when a modal is used. Use these interaction requirements with the existing component rather than creating a parallel modal implementation.
+
+## Media detail and assistants
+
+Source detail screens lead with the media (player or thumbnail), then title, platform/channel and a compact expandable description; section navigation uses real anchors. A page assistant is scoped to the one source, sits beside the content on desktop and in a Radix Sheet on small screens (focus moves in, is trapped, Escape closes and focus returns to the opener). Anything the model proposes is shown for review; saving or creating is a separate, explicit action, and the funding route and consent are visible before each request.

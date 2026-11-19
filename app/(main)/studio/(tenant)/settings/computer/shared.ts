@@ -1,6 +1,7 @@
 import type { StudioDeviceSummary } from "@/lib/studio/devices";
 
 export const buttonClass = "rounded-md border px-3 py-2 text-sm disabled:opacity-50";
+export const primaryButtonClass = "rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50";
 export const inputClass = "mt-1 w-full rounded-md border bg-background p-2";
 export const endpoint = "/studio/settings/devices/api";
 export type Provider = "codex" | "claude";

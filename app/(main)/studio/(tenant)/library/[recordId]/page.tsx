@@ -130,7 +130,7 @@ export default async function StudioLibraryRecordPage({ params }: { params: Prom
         {edit}
         {footer}
       </div>
-      <SourceAssistant locationId={locationId} sourceId={recordId} sourceTitle={record.title} ideaId={randomUUID()} canRelated={active} archived={record.archived} />
+      <SourceAssistant locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} ideaId={randomUUID()} canRelated={active} archived={record.archived} />
     </div>
   </main>;
 }
