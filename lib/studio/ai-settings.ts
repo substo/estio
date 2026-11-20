@@ -2,8 +2,8 @@ import "server-only";
 import { auth } from "@clerk/nextjs/server";
 import { getStudioAccess } from "./access";
 import { canManageStudioAi, keyHint, verifyOpenAiKey } from "./ai-settings-policy";
-import { Prisma } from "@prisma/client";
 import { studioDb } from "./studio-db";
+import { getLocationAiBudget } from "@/lib/ai/routing-service";
 import db from "@/lib/db";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
@@ -19,28 +19,14 @@ async function openAiKeySummary(locationId: string) {
 
 export class StudioAiSettingsError extends Error {}
 
-function currentMonth() { const now = new Date(); return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`; }
-
-/** Read-only summary for any workspace member; the key itself is never returned. */
+/** Read-only summary for any workspace member; the key itself is never returned. Budget is the shared Location AI cap. */
 export async function getStudioAiSettings(locationId: string) {
   const access = await getStudioAccess(locationId);
   if (!access) return null;
-  const workspace = access.locationId;
-  const [openai, settings, usage] = await Promise.all([
-    openAiKeySummary(workspace),
-    studioDb.rows<{ monthly_budget_micros: number }>(Prisma.sql`
-      select monthly_budget_micros from studio.studio_location_ai_settings where location_id = ${workspace} limit 1`),
-    studioDb.one<{ spent: number; held: number }>(Prisma.sql`
-      select coalesce(sum(cost_micros) filter (where status = 'settled'), 0) as spent,
-        coalesce(sum(reserved_micros) filter (where status = 'reserved'), 0) as held
-      from studio.studio_ai_usage where location_id = ${workspace} and usage_month = ${currentMonth()}::date
-      and status in ('reserved', 'settled')`),
-  ]);
-  const spent = Number(usage?.spent ?? 0);
-  const held = Number(usage?.held ?? 0);
+  const [openai, budget] = await Promise.all([openAiKeySummary(access.locationId), getLocationAiBudget(access.locationId)]);
   return { access, canManage: canManageStudioAi(access), encryptionReady: true,
     openai,
-    monthlyBudgetMicros: Number(settings[0]?.monthly_budget_micros ?? 0), spentMicros: spent, heldMicros: held };
+    monthlyBudgetMicros: budget.capMicros, spentMicros: budget.spentMicros, heldMicros: budget.heldMicros };
 }
 
 async function requireManager(locationId: string) {

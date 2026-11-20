@@ -7,6 +7,7 @@ import { AiAutomationConfigSchema } from "@/lib/ai/automation/config";
 import { contactProfileVerificationConfigSchema } from "@/lib/ai/contact-profile-verification/config";
 import { GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { DEFAULT_REPLY_LANGUAGE, normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
+import { aiRoutingSettingsSchema } from "@/lib/ai/routing";
 
 const nullableTrimmedString = z.string().trim().nullish().transform((v) => v ?? null);
 const hexColor = z.string().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, "Expected hex color");
@@ -110,6 +111,8 @@ const aiSchema = z.object({
     viewingSessionTranslationModel: nullableTrimmedString,
     viewingSessionInsightsModel: nullableTrimmedString,
     viewingSessionSummaryModel: nullableTrimmedString,
+    /** Ordered AI fallback chain and per-task models shared by Estio and Studio (lib/ai/routing.ts). */
+    aiRouting: aiRoutingSettingsSchema.optional(),
 }).passthrough();
 
 const locationIntegrationsSchema = z.object({

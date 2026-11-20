@@ -39,6 +39,7 @@ test("the direct Gemini Live Assist prompt contains bundled capability guidance 
   const prompt = buildLiveAssistantPrompt({ language: "en", contact: "Fixture contact", property: "Fixture property", reference: "A-1", recentConversation: "Agent: Hello", request: "Help with a reply" });
   assert.ok(prompt.includes(AI_WORKFLOW_CONTRACT_VERSION));
   assert.match(prompt, /crm_live_assistant/);
+  assert.match(prompt, /Paid API steps run only when an admin put them in the chain/);
   assert.match(prompt, /Substo connectivity does not unlock Estio property\/viewing workflows/);
   assert.match(prompt, /Fixture contact/);
   assert.match(prompt, /Help with a reply/);

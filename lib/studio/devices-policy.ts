@@ -1,6 +1,7 @@
 import { StudioCommandError } from "./command-error";
 import { relatedResultSchema } from "./related-search-policy";
 import { readFramesReserve, readFramesVerify, readTranscriptChunk, readVideoResult, VIDEO_TOOL_NAMES } from "./video-transcription-policy";
+import { usageSpec } from "../build/contract";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const modelPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
 export const deviceOperations = ["heartbeat", "claim", "extend", "complete", "fail", "command", "video_transcript_chunk", "video_frames_reserve", "video_frames_verify"] as const;
@@ -90,6 +91,13 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
   if (v.sourceAssistVersion === 1) result.sourceAssistVersion = 1;
   if (v.knowledgeCurationVersion === 1) result.knowledgeCurationVersion = 1;
   if (v.knowledgeOutlineVersion === 2) result.knowledgeOutlineVersion = 2;
+  // Route-aware companion: runs the provider/model each job carries instead of only Setup's (lib/ai/routing.ts).
+  if (v.textRouteVersion === 1) result.textRouteVersion = 1;
+  // QuotaCell readings (remaining % and reset time per window), so the server can say when a limit resets.
+  if (v.usage && typeof v.usage === "object" && !Array.isArray(v.usage)) {
+    const usage = usageSpec.safeParse(Object.fromEntries(Object.entries(v.usage as Record<string, unknown>).filter(([k]) => k === "codex" || k === "claudeAgent")));
+    if (usage.success && Object.keys(usage.data).length) result.usage = usage.data;
+  }
   if (Array.isArray(v.handlers)) result.handlers = v.handlers.filter((x, i, all) => (DEVICE_WORK_KINDS as readonly unknown[]).includes(x) && all.indexOf(x) === i);
   if (v.capacity && typeof v.capacity === "object" && !Array.isArray(v.capacity)) {
     const c = v.capacity as Record<string, unknown>;

@@ -68,7 +68,7 @@ test("actual native CLI outbound input contains the bundled capability contract 
   return { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(extraction) } }) + '\n' + JSON.stringify({ type: "turn.completed" }), stderr: "" };
  });
  await handler(() => native)(job, context);
- assert.ok(input.includes(AI_WORKFLOW_CONTRACT_VERSION));assert.match(input, /Subscriptions do not unlock audio, realtime, vision/);
+ assert.ok(input.includes(AI_WORKFLOW_CONTRACT_VERSION));assert.match(input, /Subscriptions do not unlock audio, realtime, vision/);assert.match(input, /never replayed on another step/);assert.match(input, /only the requesting person.s own paired Mac/);
  assert.match(input, /onboarding typed answers require a server connection/);
  assert.ok(!input.includes("api_key_secret"));
 });

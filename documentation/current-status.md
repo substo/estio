@@ -2,6 +2,10 @@
 
 Updated 2026-11-08. This is the task/status source of truth; [architecture and decisions](how-the-app-works.md) owns product rules. Historical checkpoints do not override this page.
 
+## Unified AI settings, phase A: one routing backend (2026-11-20, local candidate, not deployed)
+
+Branch `feature/unified-ai-settings`. Each Location has one ordered AI fallback chain, shared by Estio and Studio, with per-task models, the existing monthly cap, connection status (ready / limit reached with reset time / unavailable / not connected / offline) and model lists. The pure decision is `resolveAiRoute`. Studio text admission and pre-generation switching run in SQL under additive migration `20261120100000_ai_route_chain`. The read/save API is `/api/studio/ai-routing`. See [AI workflows](ai-workflows.md#ordered-fallback-chain-2026-11-20-local-candidate). Next phases: the shared settings UI at `/admin/settings/ai` and `/studio/settings/ai`; companion `textRouteVersion: 1` and `models` from Codex `model/list`; and per-feature requests that follow the order.
+
 ## Studio UX overhaul and source assistant (2026-11-19, local candidate, not deployed)
 
 Library source detail is media-first (player/thumbnail, title, platform/channel, compact Description, section navigation) with a single-source assistant: typed/dictated reactions, explicit Save to My notes, reviewed linked idea, existing related-video search, and a bounded Discuss / Rewrite as note / Propose idea text operation over the same source (see [Source assistant](ai-workflows.md#source-assistant-2026-11-19-local-candidate)). The mobile drawer is a Radix Sheet (focus trap, Escape, focus return). Studio entry and Library show a connected-computer line; Connected computer leads with what the Mac can do and one fix per blocker. Needs migration `20261119140000_studio_source_assistant` and an updated companion (`sourceAssistVersion`) before the AI actions work; Save as written, idea drafts and related search work without them. No live provider call, signed-in browser acceptance or deployment has happened.
