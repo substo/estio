@@ -211,7 +211,9 @@ function StatusIcon({ topic }: { topic: TopicView }) {
 function Timeline({ view, active, editing, busy, canEdit, onSelect, onEdit, onCancel, onSave, onConfirm, suggestWritingInstructions }: {
   view: OnboardingView; active: string | undefined; editing: Editing; busy: boolean; canEdit: boolean;
   onSelect: (id: string) => void; onEdit: (topic: string, field: string) => void; onCancel: () => void;
-  onSave: (topic: string, field: string, value: unknown) => void; onConfirm: (topic: string, field: string) => void }) {
+  onSave: (topic: string, field: string, value: unknown) => void; onConfirm: (topic: string, field: string) => void;
+  suggestWritingInstructions?: () => Promise<string>;
+}) {
   return <ol aria-label="Profile topics" className="relative space-y-1 rounded-xl border bg-card p-3">
     {view.topics.map((t, i) => {
       const open = t.id === active || t.fields.some(f => f.status !== "empty");

@@ -134,9 +134,9 @@ export type AiSettingsInitialData = {
     viewingSessionAiDisclosureRequired?: boolean;
     viewingSessionRawAudioStorageEnabled?: boolean;
     viewingSessionAiDisclosureVersion?: string;
-    viewingSessionTranslationModel?: string;
-    viewingSessionInsightsModel?: string;
-    viewingSessionSummaryModel?: string;
+    viewingSessionTranslationModel?: string | null;
+    viewingSessionInsightsModel?: string | null;
+    viewingSessionSummaryModel?: string | null;
     precisionRemoveEnabled?: boolean;
     outreachConfig?: {
         enabled?: boolean;
