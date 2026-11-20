@@ -6,7 +6,7 @@ import { SettingsVersionConflictError } from "@/lib/settings/errors";
 import { AiRoutingError, getLocationAiRouting, saveLocationAiRouting } from "@/lib/ai/routing-service";
 
 /**
- * The active Location's AI routing for both apps (Estio /admin/settings/ai and Studio /studio/settings/ai).
+ * The active Location's AI routing for both apps (the shared /settings/ai page for Estio CRM and Studio).
  * GET: { connections, chain, taskDefaults, saved, version, budget, canManage } for any Location member.
  * PUT: { chain, taskDefaults?, version, monthlyCap? ("25.50" dollars) }, AI managers only; send X-Studio-Tenant.
  */

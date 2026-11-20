@@ -10,7 +10,7 @@ export type ConnectLink = { label: string; description: string; href: string };
 export function connectLinks(app: "estio" | "substo"): ConnectLink[] {
   const mac = { label: "A Mac with Codex or Claude", description: "Research on your own ChatGPT or Claude subscription: pair a Mac, turn processing on and keep the Studio companion running.", href: "/studio/settings/computer" };
   if (app === "substo") return [
-    { label: "OpenAI API key", description: "Add your own OpenAI key and a monthly budget.", href: "/studio/settings/ai" },
+    { label: "OpenAI API key", description: "Add your own OpenAI key and a monthly budget.", href: "/settings/ai?from=studio" },
     mac,
   ];
   return [

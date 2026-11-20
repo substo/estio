@@ -6,6 +6,7 @@ import { studioDb } from "@/lib/studio/studio-db";
 import { safeDeviceCapabilities } from "@/lib/studio/devices-policy";
 import { WORKER_ONLINE_SECONDS } from "@/lib/studio/jobs";
 import { CHATGPT_SUBSCRIPTION_TEXT_MODELS, stripChatGptSubscriptionModelPrefix } from "./chatgpt-subscription";
+import type { SafeChatGptUsageLimits } from "./codex-device-auth";
 import { getStoredProviderModelOptions } from "./provider-model-catalog";
 import { assembleAiConnections, type AiConnectionInputs, type AiConnections, type AiModelOption } from "./connections-model";
 
@@ -30,7 +31,7 @@ export async function getAiConnections(locationId: string): Promise<AiConnection
   const [geminiKey, openAiKey, integrations, accessToken, authCache, devices, catalogs] = await Promise.all([
     secret(SETTINGS_DOMAINS.LOCATION_AI, SETTINGS_SECRET_KEYS.GOOGLE_AI_API_KEY),
     secret(SETTINGS_DOMAINS.LOCATION_AI, SETTINGS_SECRET_KEYS.OPENAI_API_KEY),
-    settingsService.getDocument<{ chatGptSubscription?: { enabled?: boolean; health?: string } }>({ scopeType: "LOCATION", scopeId: locationId, domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS }).catch(() => null),
+    settingsService.getDocument<{ chatGptSubscription?: { enabled?: boolean; health?: string; usageLimits?: SafeChatGptUsageLimits | null } }>({ scopeType: "LOCATION", scopeId: locationId, domain: SETTINGS_DOMAINS.LOCATION_INTEGRATIONS }).catch(() => null),
     secret(SETTINGS_DOMAINS.LOCATION_INTEGRATIONS, SETTINGS_SECRET_KEYS.CHATGPT_CODEX_ACCESS_TOKEN),
     secret(SETTINGS_DOMAINS.LOCATION_INTEGRATIONS, SETTINGS_SECRET_KEYS.CHATGPT_CODEX_AUTH_CACHE),
     studioDb.rows<{ id: string; name: string; created_by: string; revoked_at: string | null; paused: boolean; processing_enabled: boolean; seen_at: string | null; report: Record<string, unknown> }>(Prisma.sql`
@@ -39,11 +40,19 @@ export async function getAiConnections(locationId: string): Promise<AiConnection
     locationModelCatalog(locationId),
   ]);
   const chatGpt = integrations?.payload?.chatGptSubscription;
+  const now = Date.now();
+  const usage = [chatGpt?.usageLimits?.primary, chatGpt?.usageLimits?.secondary]
+    .flatMap(window => {
+      if (!window || !Number.isFinite(window.usedPercent) || !window.resetsAt) return [];
+      const reset = new Date(window.resetsAt * 1000);
+      return reset.getTime() > now ? [{ remainingPercent: 100 - Math.min(100, Math.max(0, window.usedPercent)), usageResetsAt: reset.toISOString() }] : [];
+    })
+    .sort((a, b) => a.remainingPercent - b.remainingPercent)[0];
   return assembleAiConnections({
     geminiKey, openAiKey,
-    chatGpt: { enabled: chatGpt?.enabled === true, health: chatGpt?.health ?? null, hasCredential: accessToken || authCache },
+    chatGpt: { enabled: chatGpt?.enabled === true, health: chatGpt?.health ?? null, hasCredential: accessToken || authCache, usage },
     devices: devices.map(d => ({ id: d.id, name: d.name, createdBy: d.created_by, revoked: !!d.revoked_at, paused: d.paused, processingEnabled: d.processing_enabled,
       seenAt: d.seen_at, draining: d.report?.draining === true, capabilities: safeDeviceCapabilities(d.report) })),
     catalogs,
-  }, Date.now(), WORKER_ONLINE_SECONDS);
+  }, now, WORKER_ONLINE_SECONDS);
 }

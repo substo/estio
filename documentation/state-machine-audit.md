@@ -403,7 +403,7 @@ One link per file; use the JSON output for all matching lines and categories. Hi
 - [app/(main)/studio/(tenant)/schedules/run-now-form.tsx](../app/(main)/studio/(tenant)/schedules/run-now-form.tsx)
 - [app/(main)/studio/(tenant)/schedules/schedule-form.tsx](../app/(main)/studio/(tenant)/schedules/schedule-form.tsx)
 - [app/(main)/studio/(tenant)/schedules/youtube-schedule-form.tsx](../app/(main)/studio/(tenant)/schedules/youtube-schedule-form.tsx)
-- [app/(main)/studio/(tenant)/settings/ai/actions.ts](../app/(main)/studio/(tenant)/settings/ai/actions.ts)
+- [components/ai-settings/actions.ts](../components/ai-settings/actions.ts)
 - [app/(main)/studio/(tenant)/settings/computer/companion-settings.tsx](../app/(main)/studio/(tenant)/settings/computer/companion-settings.tsx)
 - [app/(main)/studio/(tenant)/settings/computer/device-setup-form.tsx](../app/(main)/studio/(tenant)/settings/computer/device-setup-form.tsx)
 - [app/(main)/studio/(tenant)/youtube/discovery.tsx](../app/(main)/studio/(tenant)/youtube/discovery.tsx)
