@@ -191,6 +191,26 @@ test("relevance waits for subscription capacity and fails visibly (no replay, no
   await assert.rejects(createVideoTranscribeHandler({ ...noProvider.deps(), config: () => ({ ...config, textProvider: null }) })(job({ gate }), context()), (e: unknown) => e instanceof StudioJobError && e.code === "local_policy");
 });
 
+test("routed relevance switches before generation and reports the actual local subscription", async () => {
+  const f = fixture();
+  const deps = f.deps(async request => request.validate({ relevant: false, score: 10, reason: "Low match", matches: [] }));
+  const codex = deps.adapter("codex");
+  const reports: unknown[] = [];
+  const handler = createVideoTranscribeHandler({
+    ...deps,
+    usage: async () => ({ ...await usage(), codex: { remaining: 1, windows: [], at: new Date().toISOString() } }),
+    adapter: provider => {
+      assert.equal(provider, "claude");
+      return { ...codex, provider, readiness: async () => ({ installed: true, ready: true, authenticated: true, loginMethod: "claudeai", models: [] }) };
+    },
+    reportRoute: (_id, { provider, model, switchReason }) => reports.push({ provider, model, switchReason }),
+  });
+  const result = await handler({ ...job({ gate }), route: { actual: { kind: "device_codex" }, candidates: [{ kind: "device_claude", model: "haiku" }] } }, context());
+  assert.equal(result.outcome, "relevance_skipped");
+  assert.equal(f.generated[0]?.model, "haiku");
+  assert.deepEqual(reports, [{ provider: "claude", model: "haiku", switchReason: "Codex limit reached → Claude" }]);
+});
+
 test("actual native CLI input for the relevance call carries the capability contract, title/description/channel, captions, library titles, pinned knowledge and profile", async () => {
   let input = ""; let args: string[] = [];
   const native = createLocalTextAdapter("codex", async request => {

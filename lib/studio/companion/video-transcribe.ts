@@ -6,7 +6,7 @@ import { z } from "zod";
 import { StudioJobError, type StudioJobHandler } from "../worker/handlers";
 import type { StudioDeviceConfig } from "../devices-policy";
 import type { Usage } from "../../build/contract";
-import { summaryProviders } from "./library-summary";
+import { localRoute, runLocalRoute, type ReportLocalRoute } from "./route";
 import { runNativeProcess, CompanionProcessError, type ProcessRunner } from "./process";
 import type { LocalProvider, LocalTextAdapter } from "./providers";
 import { videoProcessEnvironment, type VideoTools } from "./video-tools";
@@ -31,6 +31,9 @@ export interface VideoTranscribeDeps {
   config: () => StudioDeviceConfig;
   adapter: (provider: LocalProvider) => LocalTextAdapter;
   usage: () => Promise<Usage>;
+  /** This Mac's device id, so a route step pinned to another Mac is left to the server. */
+  deviceId?: string;
+  reportRoute?: ReportLocalRoute;
   scriptsDir: string;
   run?: ProcessRunner;
   tmpRoot?: string;
@@ -101,18 +104,23 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
       let relevance: (RelevanceResult & { band?: RelevanceBand }) | undefined;
       if (payload.gate) {
         const thresholds = payload.gate.thresholds;
-        const provider = config.textProvider;
-        if (!provider) fail("local_policy", "Choose a text subscription provider in Mac Setup so relevance can be checked.", true, 900);
-        const adapter = deps.adapter(provider);
-        const ready = await adapter.readiness(signal);
-        if (!summaryProviders(await deps.usage()).includes(provider) || !ready.ready || !ready.authenticated || ready.loginMethod !== (provider === "codex" ? "chatgpt" : "claudeai"))
-          fail("video_provider_waiting", "Waiting for the selected subscription's sign-in and fresh capacity.", true, 300);
-        const captions = await captionText(exec, tools, video.url, work, read, signal).catch(() => undefined);
-        const candidate: VideoCandidate = { title: meta.title, description: meta.description, channel: meta.channel, ...(captions ? { captions } : {}) };
-        try {
-          relevance = await adapter.generate({ workflowContext: "video_relevance", signal, model: config.textModel ?? undefined, prompt: buildRelevancePrompt(candidate, payload.gate.context as RelevanceContext, thresholds),
+        // The Location order supplied with the job; without one, Setup's provider only.
+        const defaultModel = (p: LocalProvider) => p === config.textProvider ? config.textModel ?? undefined : undefined;
+        const routed = localRoute(job, { deviceId: deps.deviceId, defaultModel });
+        if (!routed && !config.textProvider) fail("local_policy", "Choose a text subscription provider in Mac Setup so relevance can be checked.", true, 900);
+        const steps = routed?.steps ?? [{ provider: config.textProvider!, model: defaultModel(config.textProvider!) }];
+        let candidate: VideoCandidate | undefined;
+        const attempt = await runLocalRoute(steps, { adapter: deps.adapter, usage: deps.usage }, signal, async (adapter, step) => {
+          if (!candidate) {
+            const captions = await captionText(exec, tools, video.url, work, read, signal).catch(() => undefined);
+            candidate = { title: meta.title, description: meta.description, channel: meta.channel, ...(captions ? { captions } : {}) };
+          }
+          return adapter.generate({ workflowContext: "video_relevance", signal, model: step.model, prompt: buildRelevancePrompt(candidate, payload.gate!.context as RelevanceContext, thresholds),
             jsonSchema: relevanceJsonSchema as unknown as Record<string, unknown>, validate: value => relevanceResultSchema.parse(value), timeoutMs: 120_000, maxResultBytes: 4096 });
-        } catch { fail("video_relevance_failed", "Relevance could not be scored with your subscription. Use Transcribe on your Mac to run it anyway."); }
+        }, () => fail("video_relevance_failed", "Relevance could not be scored with your subscription. Use Transcribe on your Mac to run it anyway."));
+        if (!attempt) fail("video_provider_waiting", "Waiting for a subscription in this Location's order to be signed in with fresh capacity.", true, 300);
+        deps.reportRoute?.(job.id, attempt);
+        relevance = attempt.value;
         const band = relevanceBand(relevance!, thresholds);
         relevance = { ...relevance!, band };
         if (band !== "high") return { outcome: gateOutcome(band), relevance: stripBand(relevance) };
@@ -144,7 +152,7 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
         } catch (error) { if (error instanceof StudioJobError) throw error; /* both routes failed */ }
         if (!segments.length) {
           const network = audioFailure instanceof CompanionProcessError && ["cli_timeout"].includes(audioFailure.code);
-          fail(network ? "video_network" : "video_no_transcript", network ? "Downloading the audio timed out. It will be retried." : "No local transcript could be produced and YouTube has no English captions for this video.", network, 600);
+          fail(network ? "video_network" : "video_no_transcript", network ? (relevance ? "Downloading the audio timed out after scoring relevance." : "Downloading the audio timed out. It will be retried.") : "No local transcript could be produced and YouTube has no English captions for this video.", network && !relevance, 600);
         }
       }
 
@@ -153,7 +161,7 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
       if (!chunks.length || chunks.length > VIDEO_LIMITS.maxChunks) fail("video_transcript_too_large", "The transcript is larger than a Library source can hold.");
       for (const [index, chunk] of chunks.entries()) {
         if (signal.aborted) fail("worker_lease_lost", "The Mac lost its job lease.", true);
-        await deps.api.chunk(lease, index, chunk).catch(() => fail("video_network", "Could not reach Studio to save the transcript. It will be retried.", true, 120));
+        await deps.api.chunk(lease, index, chunk).catch(() => fail("video_network", "Could not reach Studio to save the transcript.", !relevance, 120));
       }
 
       // 5. Slides: scene detection + Tesseract with ±15s transcript context. Any failure here leaves a usable transcript (partial).

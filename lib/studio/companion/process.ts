@@ -12,13 +12,15 @@ export function completedRateLimit(stdout: string, exitCode: number | null): boo
   try {
     const events = stdout.trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
     return events.length > 0 && events.every(e => e && typeof e === "object") &&
-      !events.some(e => e.type === "turn.completed" || e.type === "item.completed" || e.type === "assistant") &&
+      !events.some(e => e.type === "turn.completed" || e.type === "assistant" || e.type === "stream_event" || String(e.type).startsWith("item.")) &&
       events.some(e => e.type === "error" && e.error?.code === "rate_limit_exceeded");
   } catch { return false; }
 }
 export interface ProcessRequest {
   command: string; args: string[]; cwd: string; input?: string; signal?: AbortSignal;
   timeoutMs?: number; maxOutputBytes?: number; env?: NodeJS.ProcessEnv;
+  /** Interactive servers (Codex app-server): keep stdin open and stop the process once stdout satisfies this. */
+  until?: (stdout: string) => boolean;
 }
 export type ProcessRunner = (request: ProcessRequest) => Promise<{ stdout: string; stderr: string }>;
 /** Allowlist only local runtime/login locations. No API keys, endpoint overrides, inherited
@@ -36,7 +38,7 @@ export const runNativeProcess: ProcessRunner = request => new Promise((resolve, 
   if (request.signal?.aborted) return reject(new CompanionProcessError("cli_cancelled"));
   const child = spawn(request.command, request.args, { cwd: request.cwd, env: nativeLoginEnvironment(request.env),
     shell: false, detached: true, stdio: ["pipe", "pipe", "pipe"] });
-  let failure: CompanionProcessError | undefined;
+  let failure: CompanionProcessError | undefined; let satisfied = false;
   let stdout = "", stderr = "", size = 0;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
   const killGroup = (signal: NodeJS.Signals) => {
@@ -55,12 +57,14 @@ export const runNativeProcess: ProcessRunner = request => new Promise((resolve, 
       size += chunk.length;
       if (size > (request.maxOutputBytes ?? 256 * 1024)) { stop("cli_output_limit"); return; }
       if (isOut) stdout += chunk.toString("utf8"); else stderr += chunk.toString("utf8");
+      if (isOut && request.until && !satisfied && !failure && request.until(stdout)) { satisfied = true; child.stdin.end(); killGroup("SIGTERM"); }
     });
   }
   child.stdin.on("error", () => {}); // An early CLI exit may close stdin before the prompt is written.
-  child.stdin.end(request.input ?? "");
+  if (request.until) child.stdin.write(request.input ?? ""); else child.stdin.end(request.input ?? "");
   const cleanup = () => { clearTimeout(timer); clearTimeout(killTimer); request.signal?.removeEventListener("abort", abort); killGroup("SIGKILL"); };
   child.once("error", () => { cleanup(); reject(new CompanionProcessError("cli_unavailable")); });
   child.once("close", code => { cleanup(); if (failure) reject(failure);
+    else if (request.until) { if (satisfied) resolve({ stdout, stderr }); else reject(new CompanionProcessError("cli_failed")); }
     else if (code !== 0) reject(completedRateLimit(stdout, code) ? new StudioProviderRejectedError("rate_limited", "Subscription rejected the request due to a rate limit.", true) : new CompanionProcessError("cli_failed")); else resolve({ stdout, stderr }); });
 });

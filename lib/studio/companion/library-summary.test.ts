@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { summaryProviders, createLibrarySummaryHandler } from "./library-summary";
+import { createLibrarySummaryHandler } from "./library-summary";
+import { summaryProviders } from "./route";
 import { StudioProviderRejectedError } from "../worker/handlers";
 import type { LocalProvider, LocalTextAdapter } from "./providers";
 const now = Date.now();
@@ -35,6 +36,7 @@ test('rate limit requires explicit completed native rejection metadata',async()=
  assert.equal(completedRateLimit('{"type":"error","error":{"code":"rate_limit_exceeded"}}',1),true);
  assert.equal(completedRateLimit('{"type":"error","error":{"code":"rate_limit_exceeded"}}',0),false);
  assert.equal(completedRateLimit('{"type":"assistant","text":"rate_limit_exceeded"}',1),false);
+ assert.equal(completedRateLimit('{"type":"item.started"}\n{"type":"error","error":{"code":"rate_limit_exceeded"}}',1),false);
  // A real child exits nonzero: classification occurs after its close event.
  await assert.rejects(runNativeProcess({command:process.execPath,args:['-e','process.stdout.write(JSON.stringify({type:"error",error:{code:"rate_limit_exceeded"}}));process.exitCode=1'],cwd:process.cwd()}),e=>e instanceof StudioProviderRejectedError && e.code==='rate_limited');
 });
