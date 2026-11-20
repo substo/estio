@@ -262,7 +262,11 @@ function PairingApproval({ code, businessName, canManage }: { code: string; busi
     <h2 id="pairing-heading" className="text-lg font-medium">Approve this computer?</h2>
     <p>Code <code className="rounded bg-muted px-1 font-mono">{userCode}</code> · Business: <span className="font-medium">{businessName}</span></p>
     {!canManage ? <p className="text-muted-foreground">Only a Business admin can approve a computer. Ask a Business admin to open this page with the code.</p>
-      : outcome === "approved" ? <p role="status">Approved. The companion on your Mac finishes setup on its own.</p>
+      : outcome === "approved" ? <>
+        <p role="status">Approved. The companion on your Mac finishes setup on its own.</p>
+        {enable.error ? <p role="alert" className="text-destructive">Processing could not be confirmed: {enable.error}</p> : null}
+        <button type="button" className={buttonClass} onClick={() => done("approved")}>Back to computers</button>
+      </>
       : outcome === "denied" ? <p role="status">Denied. The Mac was not connected.</p>
       : lookup.pending ? <p className="text-muted-foreground">Looking up code…</p>
       : lookup.error ? <p role="alert" className="text-destructive">{lookup.error}</p>
@@ -276,7 +280,13 @@ function PairingApproval({ code, businessName, canManage }: { code: string; busi
             const result = await decide.run({ action: "approve_pairing", userCode, requestId: crypto.randomUUID() });
             if (!result?.ok || !result.data.ok) return;
             const deviceId = (result.data.data as { deviceId?: string } | undefined)?.deviceId;
-            if (processing && deviceId) await enable.run({ action: "set_processing", deviceId, enabled: true });
+            if (processing && deviceId) {
+              const enabled = await enable.run({ action: "set_processing", deviceId, enabled: true });
+              if (!enabled?.ok || !enabled.data.ok) {
+                setOutcome("approved");
+                return;
+              }
+            }
             done("approved");
           }}>{decide.pending || enable.pending ? "Saving…" : decide.retry ? "Retry approve" : "Approve"}</button>
           <button type="button" className={`${buttonClass} text-destructive`} disabled={decide.pending || decide.retry} onClick={async () => {
@@ -284,7 +294,6 @@ function PairingApproval({ code, businessName, canManage }: { code: string; busi
           }}>Deny</button>
         </div>
         {decide.error ? <p role="alert" className="text-destructive">{decide.error}</p> : null}
-        {enable.error ? <p role="alert" className="text-destructive">Approved, but processing could not be turned on: {enable.error}</p> : null}
       </> : null}
   </section>;
 }

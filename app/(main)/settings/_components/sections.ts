@@ -1,14 +1,14 @@
 import { isSubstoSettingsPage } from "@/lib/auth/settings-route-policy";
 
-export type SettingsSection = { href: string; label: string; description: string; adminOnly?: boolean; firstPartyOnly?: boolean };
+export type SettingsSection = { href: string; label: string; description: string; adminOnly?: boolean; adminOnlyIn?: "estio" | "substo"; firstPartyOnly?: boolean };
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/settings/general", label: "General", description: "Business profile and name." },
   { href: "/settings/ai", label: "AI", description: "Connections, models, fallback order, and usage limits.", firstPartyOnly: true },
   { href: "/settings/computer", label: "Connected computer", description: "Pair and manage the Mac that runs Studio jobs.", firstPartyOnly: true },
-  { href: "/settings/team", label: "Team", description: "Members, roles, and invitations." },
+  { href: "/settings/team", label: "Team", description: "Members, roles, and invitations.", adminOnlyIn: "estio" },
   { href: "/settings/notifications", label: "Notifications", description: "Task reminders, quiet hours, and browser push." },
-  { href: "/settings/website", label: "Website", description: "Theme, contact details, and site navigation." },
+  { href: "/settings/website", label: "Website", description: "Theme, contact details, and site navigation.", adminOnlyIn: "substo" },
   { href: "/settings/integrations", label: "Integrations", description: "CRM, messaging, and workspace connections." },
   { href: "/settings/conversations", label: "Conversations", description: "Drafting and transcription controls.", adminOnly: true },
   { href: "/settings/contacts", label: "Contacts", description: "Contact classification and enrichment.", adminOnly: true },
@@ -23,5 +23,5 @@ export function visibleSettingsSections(app: "estio" | "substo", role: "ADMIN" |
   return SETTINGS_SECTIONS.filter((section) =>
     (app !== "substo" || isSubstoSettingsPage(section.href))
     && (!tenantHost || !section.firstPartyOnly)
-    && (!(section.adminOnly || (app === "estio" && section.href === "/settings/team")) || role === "ADMIN"));
+    && (!(section.adminOnly || section.adminOnlyIn === app) || role === "ADMIN"));
 }
