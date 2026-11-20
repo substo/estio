@@ -3,7 +3,7 @@
 This document contains the raw prompts used in the AI Property Extraction flow.
 Variables are enclosed in `{{ VARIABLE_NAME }}` syntax for clarity. These are injected dynamically at runtime.
 
-> **Note on Configuration**: The models used for these prompts (Stage 1 vs Stage 2) are configured in **[AI Settings](ai-configuration.md)** (`/admin/settings/ai`).
+> **Note on Configuration**: The models used for these prompts (Stage 1 vs Stage 2) are configured in the previous CRM AI editor. See [AI configuration](ai-configuration.md).
 
 ---
 

@@ -15357,7 +15357,7 @@ export async function updateAiAutomationConfig(locationId: string, config: unkno
         });
     }
 
-    revalidatePath("/admin/settings/ai");
+    revalidatePath("/settings/ai");
 
     return {
         success: true as const,
@@ -15543,7 +15543,7 @@ export async function upsertSkillPolicy(locationId: string, skillId: string, pol
         });
     }
 
-    revalidatePath("/admin/settings/ai");
+    revalidatePath("/settings/ai");
 
     return {
         success: true as const,
@@ -15865,7 +15865,7 @@ export async function runAiRuntimeNow(locationId: string, options?: { plannerOnl
             source: options?.source || "automation",
         });
 
-        revalidatePath("/admin/settings/ai");
+        revalidatePath("/settings/ai");
         return { success: true as const, stats };
     } catch (error: any) {
         return { success: false as const, error: error?.message || "Failed to run AI runtime." };
@@ -15928,7 +15928,7 @@ export async function submitAgentLearningProposalAction(input: {
         actorUserId: actor.userId,
         actorClerkUserId: actor.clerkUserId,
     });
-    revalidatePath("/admin/settings/ai");
+    revalidatePath("/settings/ai");
     return result;
 }
 
@@ -15984,7 +15984,7 @@ export async function approveAgentLearningProposalAction(input: {
         proposalId: input.proposalId,
         actorUserId: actor.userId,
     });
-    revalidatePath("/admin/settings/ai");
+    revalidatePath("/settings/ai");
     return result;
 }
 
@@ -16003,7 +16003,7 @@ export async function dismissAgentLearningProposalAction(input: {
         locationId: targetLocationId,
         proposalId: input.proposalId,
     });
-    revalidatePath("/admin/settings/ai");
+    revalidatePath("/settings/ai");
     return result;
 }
 
@@ -16026,7 +16026,7 @@ export async function revertLocationAiPromptAction(input: {
         actorUserId: actor.userId,
         versionId: input.versionId || null,
     });
-    revalidatePath("/admin/settings/ai");
+    revalidatePath("/settings/ai");
     return result;
 }
 

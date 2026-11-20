@@ -240,7 +240,7 @@ Admin actions/pages (settings now routed through `SettingsService`):
 - `/admin/site-settings`
 - `/admin/site-settings/navigation`
 - `/admin/content/*` settings writes
-- `/admin/settings/ai`
+- `/settings/ai`
 - `/admin/settings/crm`
 - `/admin/settings/integrations/google`
 - `/admin/settings/integrations/whatsapp`

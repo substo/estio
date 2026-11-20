@@ -392,7 +392,7 @@ export function SiteSettingsForm({
                     <div>
                         <h4 className="font-semibold text-sm">AI Configuration</h4>
                         <p className="text-xs text-muted-foreground">
-                            Manage AI models, API keys, and brand voice in the dedicated <Link href="/admin/settings/ai" className="text-indigo-600 hover:underline">AI Settings</Link> page.
+                            Manage AI connections, models and limits in the shared <Link href="/settings/ai?from=crm" className="text-indigo-600 hover:underline">AI Settings</Link> page.
                         </p>
                     </div>
                 </div>

@@ -77,7 +77,7 @@ The latest updates in this implementation cycle focused on the following practic
 
 11. **Precision Remove UI gating fix**
    - The front end now shows Precision Remove based on the location AI settings value, rather than hiding it behind strict local infrastructure checks.
-   - This keeps the feature visible when it is enabled in `/admin/settings/ai`, while server-side validation still protects execution-time failures.
+   - This keeps the feature visible when it is enabled in the previous CRM AI editor, while server-side validation still protects execution-time failures.
 
 12. **Precision Remove model selection and iterative editing**
    - Precision Remove now has its own generation model selector, using the same location-aware model catalog approach as the Polish flow.
@@ -313,7 +313,7 @@ Precision Remove now uses the same location-level Google AI API key resolution a
 
 Per-location feature availability is controlled in:
 
-- `/admin/settings/ai` -> `Enable Precision Remove`
+- Turn on `Enable Precision Remove` in the previous CRM AI editor.
 
 ## Security and Guardrails
 

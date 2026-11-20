@@ -45,7 +45,7 @@ export function studioNavGroups(app: ShellApp, studioLocationId: string | null, 
   }
   const settings: AdminNavGroup["items"] = []
   if (base) settings.push(
-    { href: `${base}/settings/ai`, label: "AI settings", icon: Sparkles, activePath: (pathname) => pathname.startsWith(`${base}/settings/ai`) },
+    { href: "/settings/ai?from=studio", label: "AI settings", icon: Sparkles, activePath: (pathname) => pathname.startsWith("/settings/ai") },
     { href: `${base}/settings/computer`, label: "Connected computer", icon: Laptop, activePath: (pathname) => pathname.startsWith(`${base}/settings/computer`) },
   )
   settings.push({ href: "/account/connections", label: "My connections", icon: PlugZap, activePath: (pathname) => pathname.startsWith("/account/connections") })

@@ -155,3 +155,10 @@ test("Clerk's absolute same-origin return preserves CRM while cross-app/open red
   assert.equal(safeAuthRedirect("https://estio.co/admin", "substo", "https://substo.com"), "/studio");
   for (const target of ["https://evil.example/admin", "//evil.example/admin", "https://evil.example@substo.com/admin", "https://substo.com/admin/properties", "javascript:alert(1)", "/\\evil.example/admin"]) assert.equal(safeAuthRedirect(target, "substo", "https://substo.com"), "/studio");
 });
+
+test("Substo reaches the shared /settings pages and may return to them after sign-in", () => {
+  assert.equal(classifySubstoRoute("/settings"), "settings");
+  assert.equal(classifySubstoRoute("/settings/ai"), "settings");
+  assert.equal(classifySubstoRoute("/settings-malicious"), "blocked");
+  assert.equal(safeAuthRedirect("/settings/ai?from=studio", "substo"), "/settings/ai?from=studio");
+});

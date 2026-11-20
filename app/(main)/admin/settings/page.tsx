@@ -43,8 +43,8 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     title: "AI Configuration",
-    description: "Manage AI models, API keys, and brand voice settings.",
-    href: "/admin/settings/ai",
+    description: "AI connections, models per task, fallback order, and usage and limits.",
+    href: "/settings/ai?from=crm",
     actionLabel: "Manage AI",
   },
   {

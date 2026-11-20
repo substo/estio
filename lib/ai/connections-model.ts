@@ -22,6 +22,8 @@ export type AiConnection = {
   resetsAt?: string;
   /** Lowest remaining percentage across usage windows, when a fresh reading exists. */
   remainingPercent?: number;
+  /** Reset of the usage window shown with remainingPercent, when reported. */
+  usageResetsAt?: string;
   paid: boolean;
   deviceId?: string;
   /** Clerk user id of the Mac's owner. Server-only routing input: strip it before sending to a browser (see toClientConnection). */
@@ -33,10 +35,11 @@ export type AiConnection = {
 };
 export type AiConnections = { available: boolean; sources: AiConnectionSource[]; connections?: AiConnection[] };
 
+type SubscriptionUsage = Pick<AiConnection, "remainingPercent" | "usageResetsAt">;
 export type AiConnectionInputs = {
   geminiKey: boolean;
   openAiKey: boolean;
-  chatGpt: { enabled: boolean; health: string | null; hasCredential: boolean };
+  chatGpt: { enabled: boolean; health: string | null; hasCredential: boolean; usage?: SubscriptionUsage };
   devices: {
     id?: string; name: string; createdBy?: string; revoked: boolean; paused: boolean; processingEnabled?: boolean; seenAt: string | null; draining: boolean;
     capabilities: Record<string, unknown>;
@@ -61,13 +64,14 @@ const usageBucket: Record<"codex" | "claude", string> = { codex: "codex", claude
 const providerName: Record<"codex" | "claude", string> = { codex: "Codex", claude: "Claude" };
 
 /** Limit/reset facts from the Mac's QuotaCell reading; readings older than 30 minutes or in the future are ignored. */
-export function usageFacts(usage: unknown, bucket: string, now = Date.now()): { remaining?: number; resetsAt?: string } {
+export function usageFacts(usage: unknown, bucket: string, now = Date.now()): { remaining?: number; resetsAt?: string; usageResetsAt?: string } {
   const parsed = usageSpec.safeParse(usage ?? {});
   const reading = parsed.success ? parsed.data[bucket] : undefined;
   const at = reading ? Date.parse(reading.at) : NaN;
   if (!reading || !Number.isFinite(at) || at > now || now - at >= 30 * 60_000) return {};
   const exhausted = reading.windows.filter(w => w.remaining <= usageFloor && w.resetsAt && Number.isFinite(Date.parse(w.resetsAt))).map(w => w.resetsAt!).sort();
-  return { remaining: reading.remaining, ...(exhausted[0] ? { resetsAt: exhausted[0] } : {}) };
+  const usageResetsAt = reading.windows.filter(w => w.remaining === reading.remaining && w.resetsAt && Date.parse(w.resetsAt) > now).map(w => w.resetsAt!).sort()[0];
+  return { remaining: reading.remaining, ...(exhausted[0] ? { resetsAt: exhausted[0] } : {}), ...(usageResetsAt ? { usageResetsAt } : {}) };
 }
 
 function deviceModels(provider: "codex" | "claude", report: ProviderReport): Pick<AiConnection, "models" | "modelsSource"> {
@@ -98,6 +102,7 @@ function deviceConnection(device: AiConnectionInputs["devices"][number], provide
     id: `device_${provider}:${device.id ?? device.name}`, kind: provider === "codex" ? "device_codex" : "device_claude", scope: "device",
     label: `${provider === "codex" ? "Codex (ChatGPT)" : "Claude"} on ${device.name}`, status, ...(reason ? { reason } : {}),
     ...(usage.resetsAt && status === "limit_reached" ? { resetsAt: usage.resetsAt } : {}), ...(usage.remaining !== undefined ? { remainingPercent: usage.remaining } : {}),
+    ...(usage.usageResetsAt ? { usageResetsAt: usage.usageResetsAt } : {}),
     paid: false, ...(device.id ? { deviceId: device.id } : {}), ...(device.createdBy ? { ownerUserId: device.createdBy } : {}),
     ...models, defaultModel: null,
   };
@@ -114,8 +119,8 @@ export function assembleLocationAiConnections(input: AiConnectionInputs, now = D
   const connections: AiConnection[] = [
     location("gemini_key", "Google Gemini API key", input.geminiKey ? "ready" : "not_connected", input.geminiKey ? undefined : "Not saved"),
     location("openai_key", "OpenAI API key", input.openAiKey ? "ready" : "not_connected", input.openAiKey ? undefined : "Not saved"),
-    location("chatgpt_subscription", "ChatGPT subscription", chatGptReady ? "ready" : input.chatGpt.hasCredential ? "unavailable" : "not_connected",
-      chatGptReady ? undefined : input.chatGpt.hasCredential ? "Needs reconnecting" : "Not connected"),
+    { ...location("chatgpt_subscription", "ChatGPT subscription", chatGptReady ? "ready" : input.chatGpt.hasCredential ? "unavailable" : "not_connected",
+      chatGptReady ? undefined : input.chatGpt.hasCredential ? "Needs reconnecting" : "Not connected"), ...(chatGptReady ? input.chatGpt.usage : undefined) },
   ];
   for (const device of input.devices.filter(d => !d.revoked))
     for (const provider of ["codex", "claude"] as const) {

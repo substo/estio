@@ -26,6 +26,6 @@ export function StudioTextProviderChoice({ provider, onChange, fullSource = fals
     </select></label>
     <p role="status">{state?.[provider]?.reason ?? "Readiness is checked before queuing. Refresh this page after changing AI or Mac settings."}</p>
     <p className="text-muted-foreground">{provider === "subscription" ? "Uses your selected Codex or Claude subscription on your Mac. Text work, processing, sign-in and fresh capacity are required. No paid API fallback." : fullSource ? "Uses the Location key and budget. Each batch reserves $0.01 and settles metered usage. A full extraction can use up to 48 batches." : "Uses the Location key and budget. Reserves $0.01 and settles metered usage; uncertain outcomes retain the hold for manager review."}</p>
-    <a className="underline" href={provider === "subscription" ? "/studio/settings/computer" : "/studio/settings/ai"}>Connection settings</a>
+    <a className="underline" href={provider === "subscription" ? "/studio/settings/computer" : "/settings/ai?from=studio"}>Connection settings</a>
   </div>;
 }

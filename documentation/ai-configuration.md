@@ -11,7 +11,7 @@ For canonical AI automation runtime architecture (policies, decisions, jobs, sug
 
 ## AI Settings Page
 
-**Path:** `/admin/settings/ai`
+**Shared page:** `/settings/ai` (`components/ai-settings/`). Both apps use it for connections, task models, fallback order and usage limits. The previous CRM editor remains in place for Phase D to migrate its feature-specific settings.
 
 The AI settings page manages Google Gemini model/runtime settings, brand voice, transcription, automation, and skill runtime configuration. It now keeps OpenAI-specific connection controls out of this page.
 
@@ -167,7 +167,7 @@ If not configured:
 
 ### UI Consumers
 
-- `/admin/settings/ai` loads picker defaults from `getAiModelPickerDefaultsAction()`.
+- The previous CRM AI editor loads picker defaults from `getAiModelPickerDefaultsAction()`.
 - The shared conversation composer (`conversation-composer.tsx`) uses `getAiDraftModelPickerStateAction()` for both chats mode and deal mode.
 - Property photo enhancement uses `getPropertyImageEnhancementModelCatalogAction()` so the modal can show one dropdown for analysis models and a separate dropdown for generation models.
 - Under `workspaceV2`, the selected thread still uses the same shared composer/model picker path, so the performance rollout does not introduce a second conversation-model source of truth.
@@ -228,8 +228,8 @@ It uses the per-location Google AI API key from AI Settings, resolved through `r
 
 ### Required Setting
 
-- `/admin/settings/ai` -> `Google Gemini AI API Key`
-- `/admin/settings/ai` -> `Enable Precision Remove`
+- Open `/settings/ai` and follow the Google Gemini connection link.
+- Turn on `Enable Precision Remove` in the previous CRM AI editor.
 
 Vertex AI / Imagen service-account credentials are not required for the current Polish, Precision Remove, or output-settings flows. Google documents Imagen generation models as deprecated with a shutdown date, so new property image work should stay on Gemini image models unless a separately approved Vertex-only feature is introduced.
 
@@ -242,7 +242,7 @@ The location enable toggle is evaluated in:
 The mode is usable only when:
 
 1. the current location has a Google Gemini AI API key
-2. the current location has `Precision Remove` enabled in `/admin/settings/ai`
+2. the current location has `Precision Remove` enabled in the previous CRM AI editor
 
 ### Quick Verification Checklist
 

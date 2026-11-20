@@ -80,7 +80,7 @@ async function mutateProvider(provider: "gemini" | "openai", formData: FormData)
             await settingsService.clearSecret({ scopeType: "LOCATION", scopeId: locationId, domain: SETTINGS_DOMAINS.LOCATION_AI, secretKey, actorUserId });
             await recordProviderStatus({ locationId, actorUserId, provider, operation, health: "disconnected" });
             revalidatePath(`/admin/settings/integrations/${provider === "gemini" ? "gemini" : "openai-api"}`);
-            revalidatePath("/admin/settings/ai");
+            revalidatePath("/settings/ai");
             return { success: true, message: "Connection removed." };
         }
 
@@ -100,7 +100,7 @@ async function mutateProvider(provider: "gemini" | "openai", formData: FormData)
         }
         await recordProviderStatus({ locationId, actorUserId, provider, operation, health: "connected" });
         revalidatePath(`/admin/settings/integrations/${provider === "gemini" ? "gemini" : "openai-api"}`);
-        revalidatePath("/admin/settings/ai");
+        revalidatePath("/settings/ai");
         return { success: true, message: operation === "test" ? "Connection test succeeded." : "Connection saved and tested." };
     } catch {
         return { error: "The connection could not be updated. Try again." };

@@ -161,7 +161,7 @@ Response must be valid JSON with structured reasoning:
 
 ### AI Settings Page
 
-**Location**: `/admin/settings/ai`
+These outreach controls remain in the previous CRM AI editor pending the Phase D migration.
 
 *   Toggle "Outreach Assistant" on/off.
 *   Configure custom prompts for Vision ID, Icebreaker, and Qualifier (legacy extraction mode).
