@@ -39,13 +39,34 @@ test("selected CLI receives exact schema, bounded evidence, model and no tools, 
  const bad = handler(() => adapter(async request => request.validate({ findings: [{ ...extraction.findings[0], quote: "invented quote" }] })));
  await assert.rejects(bad(job, context), /Automatic replay stopped/);
 });
-test("provider/model/config changes, missing capacity, API login and unsupported versions stop before execution", async () => {
+test("config changes, invalid payloads, missing capacity, API login and unsupported versions stop before execution", async () => {
  let calls = 0; const get = () => adapter(async () => { calls++; throw Error(); });
- for (const patch of [{ provider: "claude" }, { configVersion: 1 }, { model: "other" }, { promptVersion: "old" }, { workflow: "image_generation" }])
+ for (const patch of [{ provider: "gemini" }, { configVersion: 1 }, { model: "bad model" }, { promptVersion: "old" }, { workflow: "image_generation" }])
   await assert.rejects(handler(get)({ ...job, payload: { ...job.payload, ...patch } }, context));
- await assert.rejects(handler(get, { usage: async () => ({}) })(job, context), /fresh capacity/);
+ await assert.rejects(handler(get, { config: () => ({ ...config, features: { text: false, transcription: false } }) })(job, context), /settings changed/);
+ await assert.rejects(handler(get, { usage: async () => ({}) })(job, context), (e: Error & { code?: string; retryable?: boolean }) => e.code === "subscription_capacity" && e.retryable === true);
  await assert.rejects(handler(() => ({ ...get(), readiness: async () => ({ installed: true, authenticated: true, ready: true, loginMethod: "api_key", models: [] }) }))(job, context));
  assert.equal(calls, 0);
+});
+test("route-aware: runs the provider/model the server admitted, not Setup's, and reports them", async () => {
+ const claude = (): LocalTextAdapter => ({ provider: "claude", readiness: async () => ({ installed: true, authenticated: true, ready: true, loginMethod: "claudeai", models: [] }),
+  generate: async request => { assert.equal(request.model, "sonnet"); return request.validate(extraction); } });
+ const routed = { ...job, payload: { ...job.payload, provider: "claude", model: "sonnet" }, route: { actual: { kind: "device_claude", model: "sonnet" }, candidates: [] } };
+ assert.deepEqual(await handler(p => { assert.equal(p, "claude"); return claude(); })(routed, context), { output: extraction, provider: "claude", model: "sonnet" });
+ const nativeDefault = { ...job, payload: { ...job.payload, model: null }, route: { actual: { kind: "device_codex", model: null } } };
+ assert.deepEqual(await handler(() => adapter(async request => { assert.equal(request.model, undefined); return request.validate(extraction); }))(nativeDefault, context),
+  { output: extraction, provider: "codex", model: "native-default" });
+});
+test("a limit before generation (no capacity, or a completed rate-limit rejection) is a capacity wait the server re-routes; nothing else is", async () => {
+ const { StudioProviderRejectedError } = await import("../worker/handlers");
+ const calls: string[] = [];
+ const limited = handler(p => { calls.push(p); return adapter(async () => { throw new StudioProviderRejectedError("rate_limited", "limit", true); }); });
+ await assert.rejects(limited(job, context), (e: Error & { code?: string; retryable?: boolean }) => e.code === "subscription_capacity" && e.retryable === true);
+ // The Mac never runs the other provider itself: the result must match the admitted step.
+ assert.deepEqual(calls, ["codex"]);
+ await assert.rejects(handler(() => adapter(async () => { throw Error("provider_not_ready"); }))(job, context),
+  (e: Error & { code?: string; retryable?: boolean }) => e.code === "subscription_capacity" && e.retryable === true);
+ await assert.rejects(handler(() => adapter(async () => { throw Error("timeout"); }))(job, context), (e: Error & { code?: string }) => e.code === "text_execution_uncertain");
 });
 test("uncertain subscription execution never tries the other subscription", async () => {
  const calls: string[] = [];
@@ -142,7 +163,7 @@ test("source assistant runs one tool-free request with its own prompt, treats ev
 test("failed subscription execution names a sanitized stage and never replays", async () => {
  const { CompanionProcessError } = await import("./process");
  const cases: Array<[Error, string]> = [
-  [new Error("provider_not_ready"), "cli_not_ready"], [new CompanionProcessError("cli_timeout"), "cli_timeout"],
+  [new CompanionProcessError("cli_timeout"), "cli_timeout"],
   [new CompanionProcessError("cli_failed"), "cli_failed"], [new Error("invalid_provider_result"), "result_parse"],
   [new Error("result_validation_failed"), "result_validation"], [new Error("secret evidence text"), "unknown"]];
  for (const [error, stage] of cases) {

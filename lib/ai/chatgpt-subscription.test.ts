@@ -100,7 +100,7 @@ test("buildCodexCliCommand passes a strict output schema to Codex", () => {
 test("buildCodexTextPrompt forbids filesystem/tool behavior", () => {
     const prompt = buildCodexTextPrompt("Be concise.", "Write a reply.");
     assert.match(prompt, /Do not inspect files, run commands, edit code/);
-    assert.match(prompt, /ai-workflows.2026-11-20.v4/);
+    assert.match(prompt, /ai-workflows.2026-11-20.v5/);
     assert.match(prompt, /Be concise\./);
     assert.match(prompt, /User input:\nWrite a reply\./);
 });

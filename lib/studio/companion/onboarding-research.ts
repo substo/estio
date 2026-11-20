@@ -4,8 +4,8 @@ import { findTopic } from "../../onboarding/topics";
 import { researchInput, researchOutputJsonSchema, researchOutputSchema, researchPrompt } from "../../onboarding/research-contract";
 import { pageExcerptSchema } from "../../onboarding/state";
 import { DEVICE_RESEARCH_RESULT_BYTES } from "../devices-policy";
-import { StudioJobError, StudioProviderRejectedError, type StudioJobHandler } from "../worker/handlers";
-import { summaryProviders } from "./library-summary";
+import { StudioJobError, type StudioJobHandler } from "../worker/handlers";
+import { localRoute, runLocalRoute, summaryProviders, type ReportLocalRoute } from "./route";
 import type { LocalProvider, LocalTextAdapter } from "./providers";
 
 /**
@@ -24,14 +24,13 @@ export const researchPayloadSchema = z.object({
 /** Room for the provider/model keys inside the device result bound. */
 const replyBytes = DEVICE_RESEARCH_RESULT_BYTES - 200;
 export const researchTimeoutMs = 8 * 60_000;
-const subscriptionLogin: Record<LocalProvider, string> = { codex: "chatgpt", claude: "claudeai" };
 /** Which subscriptions have fresh capacity now, for the heartbeat (the server routes research only to a Mac with capacity). */
 export function subscriptionCapacity(usage: Usage, now = Date.now()): Record<LocalProvider, boolean> {
   const ok = summaryProviders(usage, now);
   return { codex: ok.includes("codex"), claude: ok.includes("claude") };
 }
 
-export function createOnboardingResearchHandler(deps: { adapter: (p: LocalProvider) => LocalTextAdapter; usage: () => Promise<Usage>; enabled: () => boolean }): StudioJobHandler {
+export function createOnboardingResearchHandler(deps: { adapter: (p: LocalProvider) => LocalTextAdapter; usage: () => Promise<Usage>; enabled: () => boolean; deviceId?: string; reportRoute?: ReportLocalRoute }): StudioJobHandler {
   return async (job, context) => {
     if (!deps.enabled()) throw new StudioJobError("local_policy", "Waiting for the computer's processing settings.", true, 300);
     const parsed = researchPayloadSchema.safeParse(job.payload);
@@ -39,20 +38,17 @@ export function createOnboardingResearchHandler(deps: { adapter: (p: LocalProvid
     if (!parsed.success || !topic) throw new StudioJobError("invalid_research", "This research request is not valid for this companion version.", false);
     const data = parsed.data;
     const prompt = `${researchPrompt(topic, { ...data.input, ...data.context, app: data.app, webSearch: true })}\n\n${researchInput({ ...data.input, pages: data.pages })}`;
-    for (const provider of summaryProviders(await deps.usage())) {
-      const adapter = deps.adapter(provider), ready = await adapter.readiness(context.signal);
-      // Subscription logins only: an API-key login would bill a different account.
-      if (!ready.ready || !ready.authenticated || ready.loginMethod !== subscriptionLogin[provider]) continue;
-      try {
-        const research = await adapter.generate({ workflowContext: "onboarding_research", signal: context.signal, prompt, webSearch: true, timeoutMs: researchTimeoutMs, maxResultBytes: replyBytes,
-          jsonSchema: researchOutputJsonSchema as unknown as Record<string, unknown>, validate: value => researchOutputSchema.parse(value) });
-        return { research: researchOutputSchema.parse(research), provider, model: "native-default" };
-      } catch (error) {
-        // Only an explicit, completed rejection moves on to the other subscription.
-        if (error instanceof StudioProviderRejectedError && error.code === "rate_limited") continue;
-        const code = error instanceof Error && error.message === "invalid_provider_result" ? "research_invalid" : "research_failed";
-        throw new StudioJobError(code, code === "research_invalid" ? "The Mac's reply was not valid research." : "Research on the Mac did not finish (check the CLI sign-in and limits).", code === "research_failed", 60);
-      }
+    // The Location order supplied with the job; without one, whichever subscription has more fresh capacity first.
+    const steps = localRoute(job, { deviceId: deps.deviceId })?.steps ?? ((capacity: LocalProvider[]) => capacity.map(provider => ({ provider, model: undefined })));
+    const attempt = await runLocalRoute(steps, deps, context.signal, (adapter, step) => adapter.generate({ workflowContext: "onboarding_research", signal: context.signal, prompt, webSearch: true, timeoutMs: researchTimeoutMs, maxResultBytes: replyBytes,
+      model: step.model, jsonSchema: researchOutputJsonSchema as unknown as Record<string, unknown>, validate: value => researchOutputSchema.parse(value) }),
+    error => {
+      const code = error instanceof Error && error.message === "invalid_provider_result" ? "research_invalid" : "research_failed";
+      throw new StudioJobError(code, code === "research_invalid" ? "The Mac's reply was not valid research." : "Research on the Mac did not finish (check the CLI sign-in and limits).", false);
+    });
+    if (attempt) {
+      deps.reportRoute?.(job.id, attempt);
+      return { research: researchOutputSchema.parse(attempt.value), provider: attempt.provider, model: attempt.model ?? "native-default" };
     }
     throw new StudioJobError("subscription_capacity", "Waiting for fresh subscription capacity on the Mac.", true, 300);
   };

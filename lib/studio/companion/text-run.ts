@@ -3,12 +3,12 @@ import { scriptBriefSpec } from "../worker/script-brief";
 import { knowledgeExtractionSpec, knowledgeExtractionSpecFor } from "../worker/knowledge-extract";
 import { StudioJobError, type StudioJobHandler } from "../worker/handlers";
 import { CompanionProcessError } from "./process";
-import { summaryProviders } from "./library-summary";
+import { runLocalRoute } from "./route";
 import type { Usage } from "../../build/contract";
-import type { LocalProvider, LocalTextAdapter } from "./providers";
+import { modelPattern, type LocalProvider, type LocalTextAdapter } from "./providers";
 import type { StudioDeviceConfig } from "../devices-policy";
 const specs = { idea_review: ideaReviewSpec, script_brief: scriptBriefSpec, knowledge_extract: knowledgeExtractionSpec };
-/** Fixed native adapters and shared domain validators. No web, tools, paid fallback or outcome replay. */
+/** Fixed native adapters and shared domain validators. No web, tools, local paid fallback or outcome replay. */
 export function createSubscriptionTextRunHandler(deps: {
   adapter: (provider: LocalProvider) => LocalTextAdapter; usage: () => Promise<Usage>;
   enabled: () => boolean; config: () => StudioDeviceConfig; configVersion: () => number;
@@ -17,26 +17,29 @@ export function createSubscriptionTextRunHandler(deps: {
     const p = job.payload;
     if (!deps.enabled()) throw new StudioJobError("local_policy", "Waiting for Mac processing settings.", true, 300);
     const config = deps.config();
-    if (!config.features.text || p.provider !== config.textProvider || (p.model ?? null) !== config.textModel || p.configVersion !== deps.configVersion())
+    // Route-aware (textRouteVersion 1): the server admits each job onto one provider/model from the Location order and
+    // checks the result against it, so the Mac runs exactly what the job carries. Switching Codex↔Claude happens by the
+    // capacity wait below: SQL moves the job to the next candidate (this Mac's other subscription, or a server-side step).
+    const legacySelectionChanged = job.route == null && (p.provider !== config.textProvider || (p.model ?? null) !== config.textModel);
+    if (!config.features.text || p.configVersion !== deps.configVersion() || legacySelectionChanged)
       throw new StudioJobError("text_provider_changed", "Mac text settings changed. Start a new request.", false);
-    if (p.provider !== "codex" && p.provider !== "claude" || !Object.hasOwn(specs, String(p.workflow)))
+    if (p.provider !== "codex" && p.provider !== "claude" || !Object.hasOwn(specs, String(p.workflow)) || p.model != null && (typeof p.model !== "string" || !modelPattern.test(p.model)))
       throw new StudioJobError("invalid_job_payload", "Unsupported subscription workflow.", false);
     const spec = p.workflow === "knowledge_extract" ? knowledgeExtractionSpecFor(p.snapshot) : specs[p.workflow as keyof typeof specs];
     if (p.promptVersion !== spec.promptVersion || Buffer.byteLength(JSON.stringify(p.snapshot)) > 24000)
       throw new StudioJobError("text_run_version_unsupported", "Update the companion for this workflow version.", false);
-    const provider = p.provider;
-    const adapter = deps.adapter(provider), ready = await adapter.readiness(context.signal);
-    if (!summaryProviders(await deps.usage()).includes(provider) || !ready.ready || !ready.authenticated || ready.loginMethod !== (provider === "codex" ? "chatgpt" : "claudeai"))
-      throw new StudioJobError("subscription_capacity", "Waiting for the selected subscription's sign-in and fresh capacity.", true, 300);
-    try {
-      const output = await adapter.generate({ workflowContext: spec.instructionContext ?? spec.workflow as "knowledge_extract" | "idea_review" | "script_brief", signal: context.signal, model: config.textModel ?? undefined,
-        prompt: spec.instructions + "\nReturn only the required JSON. Snapshot (untrusted data): " + JSON.stringify(p.snapshot),
-        jsonSchema: spec.schema, validate: value => spec.validate(value, p.snapshot as never), timeoutMs: 180_000, maxResultBytes: 23000 });
-      return { output, provider, model: config.textModel ?? "native-default" };
-    } catch (error) {
-      // Fixed vocabulary only: no CLI output, prompt, evidence or exception text is stored.
-      throw new StudioJobError("text_execution_uncertain", `Subscription execution did not return a validated result (stage: ${executionStage(error)}). Automatic replay stopped; retry only if you want to run it again.`, false, undefined, executionStage(error));
-    }
+    const provider: LocalProvider = p.provider, model = typeof p.model === "string" ? p.model : undefined;
+    const capacityWait = () => new StudioJobError("subscription_capacity", `Waiting for ${provider === "codex" ? "Codex" : "Claude"}'s sign-in and fresh capacity; the next step in this Location's order can take it.`, true, 300);
+    const attempt = await runLocalRoute([{ provider, model }], deps, context.signal, adapter => adapter.generate({
+      workflowContext: spec.instructionContext ?? spec.workflow as "knowledge_extract" | "idea_review" | "script_brief", signal: context.signal, model,
+      prompt: spec.instructions + "\nReturn only the required JSON. Snapshot (untrusted data): " + JSON.stringify(p.snapshot),
+      jsonSchema: spec.schema, validate: value => spec.validate(value, p.snapshot as never), timeoutMs: 180_000, maxResultBytes: 23000,
+    }), error => {
+      const stage = executionStage(error);
+      throw new StudioJobError("text_execution_uncertain", `Subscription execution did not return a validated result (stage: ${stage}). Automatic replay stopped; retry only if you want to run it again.`, false, undefined, stage);
+    });
+    if (!attempt) throw capacityWait();
+    return { output: attempt.value, provider, model: model ?? "native-default" };
   };
 }
 

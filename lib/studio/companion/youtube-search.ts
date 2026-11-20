@@ -12,7 +12,7 @@ import { isSignedInTopbar, macVideoSchema, parseYoutubeSearchData, youtubeSearch
 import { applyRankings, buildPlanPrompt, buildRankPrompt, fitResultSize, planJsonSchema, planSchema, rankJsonSchema, rankSchema, relatedPayloadSchema, relatedResultSchema, relatedTraceSchema,
   type RankedCandidate, type RelatedCandidate, type RelatedTrace } from "../related-search-policy";
 import type { LocalProvider, LocalTextAdapter } from "./providers";
-import { summaryProviders } from "./library-summary";
+import { summaryProviders } from "./route";
 
 const CHROME_PATHS = ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium"];
 export function youtubeBrowserProfile(home = homedir(), env: NodeJS.ProcessEnv = process.env) {

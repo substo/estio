@@ -4,7 +4,9 @@ import { appOrigin, deviceTokenPattern, type DeviceCredentials } from "./config"
 
 const job = z.object({ id: z.string().uuid(), location_id: z.string().min(1).max(255), kind: z.enum(["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search"]),
   payload: z.record(z.unknown()), lease_token: z.string().uuid(), lease_expires_at: z.string().datetime({ offset: true }),
-  attempts: z.number().int().nonnegative(), max_attempts: z.number().int().positive() });
+  attempts: z.number().int().nonnegative(), max_attempts: z.number().int().positive(),
+  /** The server-supplied Location AI order (validated where it is used, lib/studio/companion/route.ts). */
+  route: z.unknown().optional() });
 export const providerCommand = z.object({ id: z.string().uuid(), kind: z.enum(["provider_login", "provider_logout"]), provider: z.enum(["codex", "claude"]) });
 export type ProviderCommand = z.infer<typeof providerCommand>;
 export const heartbeatState = z.object({ processingEnabled: z.boolean(), paused: z.boolean(),

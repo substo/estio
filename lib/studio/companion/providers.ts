@@ -1,4 +1,5 @@
 import { withAiWorkflowInstructions } from "../../ai/workflow-capabilities";
+import { CLAUDE_MODELS } from "../../ai/connections-model";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,11 +32,34 @@ export interface TextRequest<T> {
 export const claudeResearchTools = "WebSearch,WebFetch";
 export interface LocalTextAdapter {
   provider: LocalProvider;
-  readiness(signal?: AbortSignal): Promise<CliReadiness>;
+  /** `listModels` adds the advisory model list (capability reports only; job readiness checks skip it). */
+  readiness(signal?: AbortSignal, options?: { listModels?: boolean }): Promise<CliReadiness>;
   generate<T>(request: TextRequest<T>): Promise<T>;
 }
 export const modelPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
 const object = z.record(z.unknown());
+const MAX_MODELS = 50;
+/** Claude Code has no list call: the curated aliases and current full ids (shared with the server's fallback list). */
+export const claudeModelIds = CLAUDE_MODELS.map(m => m.id).filter(id => modelPattern.test(id));
+/** JSON-RPC lines for `codex app-server`: initialize, initialized, then `model/list` (verified against
+ * `codex app-server generate-json-schema` for codex-cli 0.171.0: ModelListParams { limit, includeHidden }, ModelListResponse { data: [{ id, hidden }] }). */
+export const codexModelListInput = [
+  { jsonrpc: "2.0", id: 1, method: "initialize", params: { clientInfo: { name: "studio-companion", version: "1" } } },
+  { jsonrpc: "2.0", method: "initialized" },
+  { jsonrpc: "2.0", id: 2, method: "model/list", params: { limit: MAX_MODELS, includeHidden: false } },
+].map(line => JSON.stringify(line)).join("\n") + "\n";
+const modelListReply = z.object({ id: z.literal(2), result: z.object({ data: z.array(z.object({ id: z.unknown(), hidden: z.unknown().optional() }).passthrough()) }).passthrough() }).passthrough();
+const lines = (stdout: string) => stdout.split("\n").map(line => { try { return object.parse(JSON.parse(line)); } catch { return null; } });
+/** Stop as soon as request 2 is answered, with a result or an error. */
+export const codexModelListAnswered = (stdout: string) => lines(stdout).some(line => line?.id === 2 && ("result" in line || "error" in line));
+const findModelListReply = (stdout: string) => stdout.split("\n").map(line => { try { return modelListReply.parse(JSON.parse(line)); } catch { return null; } }).find(Boolean) ?? null;
+/** Visible, pattern-valid ids from the app-server reply; [] for anything else. Advisory only: listing does not prove entitlement. */
+export function parseCodexModelList(stdout: string): string[] {
+  const reply = findModelListReply(stdout);
+  if (!reply) return [];
+  const ids = reply.result.data.filter(m => m.hidden !== true).map(m => m.id).filter((id): id is string => typeof id === "string" && modelPattern.test(id));
+  return [...new Set(ids)].slice(0, MAX_MODELS);
+}
 async function isolated<T>(work: (cwd: string) => Promise<T>) {
   const cwd = await mkdtemp(join(tmpdir(), "studio-companion-"));
   try { return await work(cwd); } finally { await rm(cwd, { recursive: true, force: true }); }
@@ -45,7 +69,15 @@ async function isolated<T>(work: (cwd: string) => Promise<T>) {
  * exec and print flags below are verified against the installed native CLIs' help. */
 export function createLocalTextAdapter(provider: LocalProvider, run: ProcessRunner = runNativeProcess): LocalTextAdapter {
   if (provider !== "codex" && provider !== "claude") throw new Error("unsupported_provider");
-  const readiness = (signal?: AbortSignal): Promise<CliReadiness> => isolated(async cwd => {
+  const listModels = async (cwd: string, signal?: AbortSignal): Promise<string[]> => {
+    if (provider === "claude") return [...claudeModelIds];
+    try {
+      const { stdout } = await run({ command: "codex", args: ["app-server", "-c", 'model_provider="openai"', "-c", 'forced_login_method="chatgpt"'], cwd, input: codexModelListInput, signal, timeoutMs: 15_000, maxOutputBytes: 512 * 1024,
+        until: codexModelListAnswered });
+      return parseCodexModelList(stdout);
+    } catch { return []; }
+  };
+  const readiness = (signal?: AbortSignal, options: { listModels?: boolean } = {}): Promise<CliReadiness> => isolated(async cwd => {
     const result: CliReadiness = { installed: false, authenticated: false, ready: false, models: [] };
     try {
       const version = await run({ command: provider, args: ["--version"], cwd, signal, timeoutMs: 10_000, maxOutputBytes: 8192 });
@@ -60,6 +92,8 @@ export function createLocalTextAdapter(provider: LocalProvider, run: ProcessRunn
       // Only subscription logins count: API-key/Console logins would bill a different account.
       result.authenticated = result.loginMethod === (provider === "codex" ? "chatgpt" : "claudeai");
       result.ready = result.authenticated && supported && Boolean(result.version);
+      // Never blocks readiness: a failed or slow list reports [] and the server uses its curated list.
+      if (options.listModels && result.ready) result.models = await listModels(cwd, signal);
     } catch { /* No raw CLI output or credential-bearing auth data leaves this function. */ }
     return result;
   });

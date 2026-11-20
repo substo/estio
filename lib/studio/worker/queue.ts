@@ -4,6 +4,8 @@ export interface StudioJob {
   id: string; location_id: string; kind: string; payload: Record<string, unknown>;
   lease_token: string; lease_expires_at?: string;
   attempts: number; max_attempts: number;
+  /** Location AI order the server admitted this job on (`{ requested, actual, candidates, skipped }`), when it has one. */
+  route?: unknown;
 }
 export interface StudioWorkerReport { instanceId: string; handlers: string[]; healthy: boolean; draining: boolean }
 export interface StudioQueue {
