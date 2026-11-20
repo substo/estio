@@ -17,6 +17,8 @@ export const GET = withStudioRoute(async (request, { params }) => {
     from studio.studio_devices where location_id=${access.locationId} and app=${access.app} and created_by=${access.userId} and revoked_at is null order by seen_at desc nulls last limit 20`);
   const workflow = new URL(request.url).searchParams.get("workflow");
   const devices = rows.map(d => {
+    if (workflow === "staged_creation" && d.report?.stagedCreationVersion !== 1)
+      return { ready: false, reason: "Update and restart the Studio companion for staged creation." };
     if (workflow === "video_template" && d.report?.videoTemplateVersion !== 1)
       return { ready: false, reason: "Update and restart the Studio companion for video template extraction." };
     if (workflow === "selected_idea" && (d.report?.sourceAssistVersion !== 1 || d.report?.knowledgeCurationVersion !== 1))

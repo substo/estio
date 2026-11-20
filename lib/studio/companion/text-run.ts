@@ -1,5 +1,5 @@
 import { ideaReviewSpec } from "../worker/openai-idea-review";
-import { scriptBriefSpec } from "../worker/script-brief";
+import { scriptBriefSpec, scriptBriefSpecFor } from "../worker/script-brief";
 import { knowledgeExtractionSpec, knowledgeExtractionSpecFor } from "../worker/knowledge-extract";
 import { StudioJobError, type StudioJobHandler } from "../worker/handlers";
 import { CompanionProcessError } from "./process";
@@ -21,7 +21,8 @@ export function createSubscriptionTextRunHandler(deps: {
       throw new StudioJobError("text_provider_changed", "Mac text settings changed. Start a new request.", false);
     if (p.provider !== "codex" && p.provider !== "claude" || !Object.hasOwn(specs, String(p.workflow)))
       throw new StudioJobError("invalid_job_payload", "Unsupported subscription workflow.", false);
-    const spec = p.workflow === "knowledge_extract" ? knowledgeExtractionSpecFor(p.snapshot) : specs[p.workflow as keyof typeof specs];
+    const spec = p.workflow === "knowledge_extract" ? knowledgeExtractionSpecFor(p.snapshot)
+      : p.workflow === "script_brief" ? scriptBriefSpecFor(p.snapshot) : ideaReviewSpec;
     if (p.promptVersion !== spec.promptVersion || Buffer.byteLength(JSON.stringify(p.snapshot)) > 24000)
       throw new StudioJobError("text_run_version_unsupported", "Update the companion for this workflow version.", false);
     const provider = p.provider;

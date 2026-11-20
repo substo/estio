@@ -33,10 +33,11 @@ export default async function StudioContentRecordPage({ params }: { params: Prom
       <section aria-label="Script next steps" className="space-y-3 rounded-xl border p-5 text-sm">
         <h2 className="font-medium">Next steps for this piece</h2>
         <p>{next.message}</p>
+        {!record.archived && record.payload.creation ? <Link href={`/studio/content/create?draft=${recordId}`} className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-accent">Continue in Studio</Link> : null}
         {inspirationId ? <Link href={`/studio/knowledge/extractions/${inspirationId}`} className="inline-block text-primary underline">Open cited inspiration</Link> : null}
         <p className="text-muted-foreground">{links.length} outgoing linked records · {links.filter(link => link.hasScriptEvidence).length} with text available to the script service. Evidence availability is not factual verification or approval.</p>
         {!record.archived ? <div className="flex flex-wrap gap-4">
-          {next.kind === "generate" ? <Link href={`/studio/content/${recordId}/script-briefs`} className="text-primary hover:underline">Generate a source-backed script brief</Link> : null}
+          {next.kind === "generate" && !record.payload.creation ? <Link href={`/studio/content/${recordId}/script-briefs`} className="text-primary hover:underline">Generate a source-backed script brief</Link> : null}
           <Link href={`/studio/records/${recordId}/links?kind=reference`} className="text-primary hover:underline">Choose research / optional reference videos</Link>
           <Link href="/studio/library" className="text-primary hover:underline">Browse or save another source</Link>
         </div> : null}

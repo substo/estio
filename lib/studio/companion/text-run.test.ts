@@ -155,3 +155,25 @@ test("failed subscription execution names a sanitized stage and never replays", 
   assert.equal(calls, 1);
  }
 });
+
+test("staged creation uses the native script route and sends the selected span as bounded data", async () => {
+ const output = { options: [], text: "a clear opening", rationale: "Simpler wording.", evidenceIds: [], verification: [] };
+ let input = "";
+ const native = createLocalTextAdapter("codex", async request => {
+  if (request.args[0] === "--version") return { stdout: "1.2.3", stderr: "" };
+  if (request.args.includes("--help")) return { stdout: "--ignore-user-config --ignore-rules --ephemeral --output-schema --json", stderr: "" };
+  if (request.args[0] === "login") return { stdout: "Logged in using ChatGPT", stderr: "" };
+  input = request.input!;
+  assert.ok(request.args.includes('web_search="disabled"'));
+  return { stdout: [JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(output) } }),
+    JSON.stringify({ type: "turn.completed" })].join("\n"), stderr: "" };
+ });
+ const staged = { ...job, payload: { ...job.payload, workflow: "script_brief", promptVersion: "studio.creation.v1",
+  snapshot: { mode: "staged_creation", operation: { kind: "rewrite", stage: "Hook", selection: { start: 5, end: 24, text: "a luminous opening" } },
+   direction: { publisher: "Substo", viewer: "First-time creators" }, evidence: [] } } };
+ assert.deepEqual(await handler(() => native)(staged, context), { output, provider: "codex", model: "test-model" });
+ assert.match(input, /only the replacement/);
+ assert.match(input, /"text":"a luminous opening"/);
+ assert.match(input, /"viewer":"First-time creators"/);
+ assert.ok(input.includes(AI_WORKFLOW_CONTRACT_VERSION));
+});
