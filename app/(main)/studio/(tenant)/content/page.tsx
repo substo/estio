@@ -1,11 +1,9 @@
 import { studioRouteParams } from "@/lib/studio/route-context";
 import Link from "next/link";
-import { randomUUID } from "node:crypto";
 import { notFound } from "next/navigation";
 import { listStudioContent } from "@/lib/studio/content";
 import { CONTENT_STAGES, contentStageForDisplay, contentStageLabel, filterContentSummaries, readContentFilters } from "@/lib/studio/content-policy";
-import { ContentRecordForm } from "../../_components/content-record-form";
-import { getStudioScriptTemplateChoices } from "@/lib/studio/script-templates";
+import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
 
@@ -17,14 +15,17 @@ export default async function StudioContentPage({ params, searchParams }: {
   const query = await searchParams;
   const filters = readContentFilters(query);
   const { search, showArchived, stage: selectedStage } = filters;
-  const [result, templates] = await Promise.all([listStudioContent(locationId, showArchived), getStudioScriptTemplateChoices(locationId)]);
+  const result = await listStudioContent(locationId, showArchived);
   if (!result) notFound();
   const records = filterContentSummaries(result.records, filters);
   const stages = selectedStage === "all" ? [...CONTENT_STAGES, "unclassified"] as const : [selectedStage];
   const root = `/studio`;
   return (
     <main className="mx-auto max-w-6xl space-y-8 p-6 md:p-10">
-      <header className="space-y-2"><nav className="flex flex-wrap gap-4 text-sm"><Link href={root} className="text-muted-foreground hover:underline">{result.access.locationName}</Link><Link href={`${root}/library`} className="text-muted-foreground hover:underline">Research library</Link></nav><h1 className="text-3xl font-semibold tracking-tight">Content pipeline</h1><p className="text-muted-foreground">Develop ideas, write scripts, and move each piece through production to review.</p></header>
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div className="space-y-2"><nav className="flex flex-wrap gap-4 text-sm"><Link href={root} className="text-muted-foreground hover:underline">{result.access.locationName}</Link><Link href={`${root}/library`} className="text-muted-foreground hover:underline">Research library</Link></nav><h1 className="text-3xl font-semibold tracking-tight">Content pipeline</h1><p className="text-muted-foreground">Develop ideas and move them through production to review.</p></div>
+        <Button asChild className="min-h-11"><Link href="/studio/content/create">Create with Studio</Link></Button>
+      </header>
       <Link href={`${root}/content/idea-reviews`} className="inline-block text-sm text-primary hover:underline">Review saved ideas with AI</Link>
       <Link href={`${root}/content/script-briefs`} className="ml-4 inline-block text-sm text-primary hover:underline">Recent script briefs</Link>
       <Link href={`${root}/content/templates`} className="ml-4 inline-block text-sm text-primary hover:underline">Script templates</Link>
@@ -53,9 +54,7 @@ export default async function StudioContentPage({ params, searchParams }: {
           </section>;
         })}
       </div>
-      <details open={result.records.length === 0} className="max-w-4xl space-y-4"><summary className="cursor-pointer text-xl font-medium">Add an idea or content piece</summary>
-        <ContentRecordForm locationId={locationId} recordId={randomUUID()} version={0} templateOptions={templates.options} canSelectTemplate={templates.canSelect} />
-      </details>
+
     </main>
   );
 }

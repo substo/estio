@@ -137,6 +137,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
           <SourcePlayer title={record.title} thumbnail={view.thumbnail} videoId={youtube?.videoId ?? null} url={view.url} portrait={view.portrait} />
           <div className="min-w-0 space-y-3">
             {header}
+            {active && record.kind === "reference" ? <Link href={`/studio/content/create?source=${recordId}`} className="inline-flex min-h-11 items-center rounded-md border bg-background px-3 text-sm font-medium hover:bg-accent">Create with Studio</Link> : null}
             {creator && !links.some(link => link.kind === 'channel') && view.url ? <LibrarySourceAction locationId={locationId} url={creator.channelUrl} sourceId={recordId} sourceVersion={record.version} /> : null}
             <ExpandableText text={value('description')} empty="none saved." />
           </div>

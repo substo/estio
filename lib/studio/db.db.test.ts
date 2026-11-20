@@ -162,3 +162,28 @@ test("confirmed selected idea retains exact citation provenance before any Knowl
       selections: inspiration!.findings.map(f => ({ reviewId: f.reviewId, index: f.findingIndex })), confirmApproval: true } });
   assert.deepEqual(await db.one(Prisma.sql`select status from studio.studio_knowledge_insights where location_id=${loc}`), { status: "approved" });
 });
+
+test("two Studio views cannot overwrite edits to the same staged creation version", { skip: process.env.STUDIO_TEST_CURATION !== "1" }, async () => {
+  const id = "ab000000-0000-4000-8000-0000000000e1";
+  const state = {
+    schema: 1, brief: "Compare two openings",
+    direction: { publisher: "Substo", viewer: "First-time creators", goal: "Compare two openings", angle: "", choice: "custom" },
+    source: null, stages: { Concept: { text: "Keep this concept", approved: true, shortlist: [] } }, history: [],
+  };
+  const save = (version: number, patch: object) => db.call<{ version: number; payload: { creation: typeof state; script?: string } }>("studio_save_creation", {
+    p_location: location, p_app: "substo", p_actor: "db-owner", p_id: id, p_version: version,
+    p_title: "Two openings", p_patch: patch, p_template_selected: false, p_template_id: null,
+    p_source_id: null, p_source_version: null, p_review_id: null,
+  });
+  await save(0, { creation: state, stage: "idea" });
+  const results = await Promise.allSettled([save(1, { script: "First writer" }), save(1, { script: "Second writer" })]);
+  const saved = results.find(result => result.status === "fulfilled");
+  const rejected = results.find(result => result.status === "rejected");
+  assert.ok(saved?.status === "fulfilled" && rejected?.status === "rejected");
+  assert.equal(saved.value.version, 2);
+  assert.deepEqual(saved.value.payload.creation.stages.Concept, state.stages.Concept);
+  assert.ok(rejected.reason instanceof StudioDbError && rejected.reason.code === "40001");
+  const current = await db.one<{ script: string }>(Prisma.sql`
+    select payload->>'script' as script from studio.studio_records where location_id=${location} and id=${id}::uuid`);
+  assert.equal(current?.script, saved.value.payload.script);
+});

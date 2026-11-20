@@ -4,7 +4,7 @@ import { StudioCommandError } from "./command-error";
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
 /** Shared same-origin, bounded, retry-aware HTTP boundary for paid commands. */
 export async function studioCommandResponse<T>(request: Request, deps: {
-  profile(): Promise<{ origin: string } | null>; parse(value: unknown): T; execute(command: T): Promise<unknown>;
+  profile(): Promise<{ origin: string } | null>; parse(value: unknown): T; execute(command: T): Promise<unknown>; maxBytes?: number;
 }): Promise<Response> {
   try {
     const profile = await deps.profile();
@@ -14,7 +14,7 @@ export async function studioCommandResponse<T>(request: Request, deps: {
     const reader = request.body?.getReader(); if (!reader) return json({ error: "Missing command." }, 400);
     const chunks: Uint8Array[] = []; let bytes = 0;
     try { while (true) { const part = await reader.read(); if (part.done) break; bytes += part.value.byteLength;
-      if (bytes > 16384) { await reader.cancel(); throw new StudioCommandError("Command too large.", 413); } chunks.push(part.value); }
+      if (bytes > (deps.maxBytes ?? 16384)) { await reader.cancel(); throw new StudioCommandError("Command too large.", 413); } chunks.push(part.value); }
     } finally { reader.releaseLock(); }
     let body: unknown;
     try { body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))); }

@@ -19,7 +19,7 @@ export async function getStudioTextRun<T>(locationId: string, reviewId: string, 
   if (!access || !/^[0-9a-f-]{36}$/i.test(reviewId)) return null;
   const review = await studioDb.one<StudioTextRun<T>>(Prisma.sql`
     select id,job_id,model,prompt_version,snapshot,result,created_at,completed_at,stale_at_completion
-    from studio.studio_idea_reviews where location_id=${access.locationId} and workflow=${workflow} and id=${reviewId}::uuid`);
+    from studio.studio_idea_reviews where location_id=${access.locationId} and workflow=${workflow} and prompt_version<>'studio.creation.v1' and id=${reviewId}::uuid`);
   if (!review) return null;
   const snapshots = review.snapshot.ideas.flatMap(i => [i, ...i.sources]);
   const [jobs, records] = await Promise.all([
@@ -36,7 +36,7 @@ export async function listStudioTextRuns(locationId: string, workflow: "idea_rev
   const access = await getStudioAccess(locationId); if (!access) return null;
   const reviews = await studioDb.rows<{ id: string; created_at: string; completed_at: string | null }>(Prisma.sql`
     select id,created_at,completed_at from studio.studio_idea_reviews
-    where workflow=${workflow} and location_id=${access.locationId} order by created_at desc,id asc limit 20`);
+    where workflow=${workflow} and prompt_version<>'studio.creation.v1' and location_id=${access.locationId} order by created_at desc,id asc limit 20`);
   return { reviews };
 }
 
