@@ -48,11 +48,13 @@ test("an exact replacement changes just the selected UTF-16 range and ambiguity 
 });
 
 test("staged rewrite captures only the authorized structured prompt and rejects invented evidence", async () => {
-  const operation = { kind: "rewrite", stage: "Hook", feedback: "Use plain wording.", instruction: "Simplify",
+  const operation = { includeReferences: true, linkedDraft: { id, version: 2, purpose: "compare" }, kind: "rewrite", stage: "Hook", feedback: "Use plain wording.", instruction: "Simplify",
     selection: { start: 8, end: 21, text: "retain viewers" }, before: "We will ", after: " today" } as const;
   const snapshot: CreationSnapshot = { mode: "staged_creation", operation, sourceConcept: source, focus: "", ideas: [], brief: "Teach creators to improve their videos",
     accepted: { Title: "How to improve your first video" }, direction: confirmDirection("promote", proposeDirection("", "Substo", source, "promote"), ""),
     evidence: [{ id: "citation", sourceId: source.id, version: 1, title: source.title, statement: null, quote: "Keep your promise.", type: "speech", start: null }],
+    priorDraft: { id, version: 2, title: "Explicit comparison", purpose: "compare", text: "Historic script excerpt", truncated: true },
+    inputLimits: ["Saved source and historical draft notes omitted."],
     profile: { version: 3, context: { tone: "Plain", audience: "Service owners" } }, template: { id, name: "Promise first", version: 2, purpose: "Earn attention", beats: [] } };
   const result = { options: [], text: "keep people watching", rationale: "Uses direct wording.", evidenceIds: [], verification: [] };
   let captured: Record<string, unknown> = {};

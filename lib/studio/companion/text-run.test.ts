@@ -170,10 +170,13 @@ test("staged creation uses the native script route and sends the selected span a
  });
  const staged = { ...job, payload: { ...job.payload, workflow: "script_brief", promptVersion: "studio.creation.v1",
   snapshot: { mode: "staged_creation", operation: { kind: "rewrite", stage: "Hook", selection: { start: 5, end: 24, text: "a luminous opening" } },
-   direction: { publisher: "Substo", viewer: "First-time creators" }, evidence: [] } } };
+   direction: { publisher: "Substo", viewer: "First-time creators" }, evidence: [],
+   priorDraft: { id, version: 4, purpose: "compare", text: "Only this prior draft" } } } };
  assert.deepEqual(await handler(() => native)(staged, context), { output, provider: "codex", model: "test-model" });
  assert.match(input, /only the replacement/);
  assert.match(input, /"text":"a luminous opening"/);
  assert.match(input, /"viewer":"First-time creators"/);
+ const rawSnapshot = input.split("Snapshot (untrusted data): ").at(-1);
+ assert.deepEqual(JSON.parse(rawSnapshot!), staged.payload.snapshot);
  assert.ok(input.includes(AI_WORKFLOW_CONTRACT_VERSION));
 });

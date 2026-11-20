@@ -2,7 +2,7 @@
 ALTER TABLE public.settings_documents ADD COLUMN IF NOT EXISTS version integer NOT NULL DEFAULT 1;
 DO $$
 DECLARE loc text:='studio-creation'; actor text:='creation-owner'; outsider text:='creation-other';
-  source uuid:='291af992-3d9a-4178-b730-8b33fb04c596'; draft uuid:=gen_random_uuid(); blank uuid:=gen_random_uuid();
+  source uuid:='291af992-3d9a-4178-b730-8b33fb04c596'; draft uuid:=gen_random_uuid(); blank uuid:=gen_random_uuid(); old_a uuid:=gen_random_uuid(); old_b uuid:=gen_random_uuid();
   template uuid:=gen_random_uuid(); template_version uuid:=gen_random_uuid(); finding uuid:=gen_random_uuid(); citation uuid:=gen_random_uuid(); device uuid; job uuid; review uuid;
   claim jsonb; snapshot jsonb; cmd jsonb; saved jsonb; queued jsonb; output jsonb; fenced jsonb;
   patch jsonb:='{"title":"Two openings","stage":"idea","approved":false,"creation":{"schema":1,"brief":"Show two openings, then Studio.","direction":{"choice":"promote","publisher":"Substo","viewer":"First-time creators","goal":"Teach creators how to improve their videos and briefly show Studio","angle":"Compare openings"},"stages":{"Title":{"text":"Two openings","approved":true,"shortlist":[]},"Hook":{"text":"Improve your video","approved":true,"shortlist":[]}},"history":[]}}';
@@ -36,9 +36,28 @@ BEGIN
     'creation','{"kind":"suggest","stage":"Concept","feedback":""}'::jsonb)),'','script_brief');
   IF snapshot->'evidence'<>'[]' OR snapshot#>>'{direction,publisher}'<>'Substo' THEN RAISE EXCEPTION 'Invalid source-free snapshot'; END IF;
 
+  INSERT INTO studio.studio_records(location_id,id,kind,title,payload) VALUES
+    (loc,old_a,'content','Early draft A',jsonb_build_object('script',repeat('Early text A. ',400),'notes','Private source note for A')),
+    (loc,old_b,'content','Early draft B','{"script":"Distinct old script B","notes":"Private source note for B"}');
+  PERFORM studio.studio_change_record_link(loc,draft,old_a,'add',2,'substo',actor);
+  PERFORM studio.studio_change_record_link(loc,draft,old_b,'add',3,'substo',actor);
+  snapshot:=studio.studio_build_selected_text_snapshot(loc,jsonb_build_array(jsonb_build_object('id',draft,'version',4,
+    'creation','{"kind":"draft","stage":"Script","feedback":"","includeReferences":false}'::jsonb)),'','script_brief');
+  IF snapshot->'evidence'<>'[]'::jsonb OR snapshot->'priorDraft'<>'null'::jsonb
+    OR snapshot::text LIKE '%Early text A%' OR snapshot::text LIKE '%Distinct old script B%' THEN
+    RAISE EXCEPTION 'Default prior drafts or excluded reference leaked';
+  END IF;
+  snapshot:=studio.studio_build_selected_text_snapshot(loc,jsonb_build_array(jsonb_build_object('id',draft,'version',4,
+    'creation',jsonb_build_object('kind','draft','stage','Script','feedback','A deliberate comparison','linkedDraft',jsonb_build_object('id',old_a,'version',1,'purpose','compare')))),'','script_brief');
+  IF snapshot#>>'{priorDraft,id}'<>old_a::text OR snapshot#>>'{priorDraft,version}'<>'1'
+    OR snapshot#>>'{priorDraft,purpose}'<>'compare' OR snapshot#>>'{priorDraft,truncated}'<>'true'
+    OR char_length(snapshot#>>'{priorDraft,text}')<>3000
+    OR snapshot::text LIKE '%Distinct old script B%' OR snapshot::text LIKE '%Private source note%' THEN
+    RAISE EXCEPTION 'Explicit comparison input mixed with other drafts or saved notes';
+  END IF;
   device:=pg_temp.pair_text_device(loc,actor,'CREATEAA',repeat('7',64));
   cmd:=jsonb_build_object('requestId',gen_random_uuid(),'provider','subscription','confirmSubscription',true,'focus','',
-    'ideas',jsonb_build_array(jsonb_build_object('id',draft,'version',2,'creation','{"kind":"draft","stage":"Script","feedback":"Use a practical exercise"}'::jsonb)));
+    'ideas',jsonb_build_array(jsonb_build_object('id',draft,'version',4,'creation','{"kind":"draft","stage":"Script","feedback":"Use a practical exercise"}'::jsonb)));
   BEGIN
     PERFORM studio.studio_enqueue_routed_text_run(loc,'substo',actor,'script_brief',cmd);
     RAISE EXCEPTION 'Outdated companion received a staged prompt';
@@ -50,7 +69,7 @@ BEGIN
   SELECT r.snapshot INTO snapshot FROM studio.studio_idea_reviews r WHERE id=review;
   IF (SELECT prompt_version FROM studio.studio_idea_reviews WHERE id=review)<>'studio.creation.v1'
     OR snapshot#>>'{direction,viewer}'<>'First-time creators' OR snapshot#>>'{accepted,Title}'<>'Two openings'
-    OR snapshot#>>'{profile,version}'<>'4' OR snapshot#>>'{template,versionId}'<>template_version::text
+    OR snapshot#>>'{profile,version}'<>'4' OR NOT (snapshot#>'{profile,unconfirmedFields}' ? 'audience') OR snapshot#>>'{template,versionId}'<>template_version::text
     OR snapshot#>>'{evidence,0,id}'<>citation::text OR snapshot#>>'{evidence,0,start}'<>'42'
     OR snapshot#>>'{evidence,0,quote}'<>'The title and opening set the promise.' OR snapshot::text LIKE '%fictional%' THEN
     RAISE EXCEPTION 'Staged snapshot mixed evidence, profile or objective: %',snapshot;
@@ -69,21 +88,30 @@ BEGIN
   IF (SELECT payload->>'script' FROM studio.studio_records WHERE id=draft) IS NOT NULL OR
     EXISTS(SELECT 1 FROM studio.studio_ai_attempts WHERE job_id=job) THEN RAISE EXCEPTION 'Auto-applied or billed a subscription'; END IF;
   BEGIN
-    PERFORM studio.studio_apply_script_brief(loc,'substo',actor,review,gen_random_uuid(),2,true);
+    PERFORM studio.studio_apply_script_brief(loc,'substo',actor,review,gen_random_uuid(),4,true);
     RAISE EXCEPTION 'Historical apply accepted staged run';
   EXCEPTION WHEN serialization_failure THEN NULL; END;
   UPDATE public.settings_documents SET version=5 WHERE scope_id=loc;
   BEGIN
-    PERFORM studio.studio_save_creation(loc,'substo',actor,draft,2,'Two openings',patch,false,NULL,NULL,NULL,review);
+    PERFORM studio.studio_save_creation(loc,'substo',actor,draft,4,'Two openings',patch,false,NULL,NULL,NULL,review);
     RAISE EXCEPTION 'Changed Business profile did not fence apply';
   EXCEPTION WHEN serialization_failure THEN NULL; END;
   UPDATE public.settings_documents SET version=4 WHERE scope_id=loc;
-  saved:=studio.studio_save_creation(loc,'substo',actor,draft,2,'Two openings',
+  saved:=studio.studio_save_creation(loc,'substo',actor,draft,4,'Two openings',
     patch||jsonb_build_object('script',output->>'text','stage','script'),false,NULL,NULL,NULL,review);
-  IF saved#>>'{payload,script}'<>output->>'text' OR (saved->>'version')::int<>3 THEN RAISE EXCEPTION 'Reviewed draft did not apply'; END IF;
+  IF saved#>>'{payload,script}'<>output->>'text' OR (saved->>'version')::int<>5 THEN RAISE EXCEPTION 'Reviewed draft did not apply'; END IF;
   BEGIN
-    PERFORM studio.studio_save_creation(loc,'substo',actor,draft,2,'Two openings',patch,false,NULL,NULL,NULL,review);
+    PERFORM studio.studio_save_creation(loc,'substo',actor,draft,4,'Two openings',patch,false,NULL,NULL,NULL,review);
     RAISE EXCEPTION 'Concurrent edit was overwritten';
   EXCEPTION WHEN serialization_failure THEN NULL; END;
-  IF NOT EXISTS(SELECT 1 FROM studio.studio_idea_reviews WHERE id=review AND result=output) THEN RAISE EXCEPTION 'Previous proposal disappeared'; END IF;
+  PERFORM studio.studio_change_record_link(loc,draft,old_a,'remove',5,'substo',actor);
+  BEGIN
+    PERFORM studio.studio_build_selected_text_snapshot(loc,jsonb_build_array(jsonb_build_object('id',draft,'version',6,
+      'creation',jsonb_build_object('kind','draft','stage','Script','feedback','',
+      'linkedDraft',jsonb_build_object('id',old_a,'version',1,'purpose','revise')))),'','script_brief');
+    RAISE EXCEPTION 'An unlinked draft entered context';
+  EXCEPTION WHEN serialization_failure THEN NULL; END;
+  IF NOT EXISTS(SELECT 1 FROM studio.studio_records WHERE id=old_a AND location_id=loc AND NOT archived)
+    OR NOT EXISTS(SELECT 1 FROM studio.studio_idea_reviews r WHERE r.id=review AND r.result=output AND r.snapshot->'priorDraft'='null'::jsonb)
+    THEN RAISE EXCEPTION 'Unlinking removed a record or earlier proposal'; END IF;
 END $$;

@@ -6,11 +6,12 @@ import { ArrowRight, Check, MessageSquare, Scissors, Sparkles, Undo2 } from "luc
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { CREATION_STAGES, REWRITE_ACTIONS, SELECTION_LIMIT, requestsDirectionChange, stageDraft, stageTextLimit, type CreationCommand, type CreationRecord, type CreationSource, type CreationStage, type Selection } from "@/lib/studio/creation-policy";
+import { CREATION_STAGES, REWRITE_ACTIONS, SELECTION_LIMIT, requestsDirectionChange, stageDraft, stageTextLimit, type CreationCommand, type CreationRecord, type CreationSource, type CreationStage, type LinkedDraft, type DraftContextChoice, type Selection } from "@/lib/studio/creation-policy";
 import type { CreationRun } from "@/lib/studio/creation-text-policy";
 import type { StudioTextProvider } from "@/lib/studio/text-provider";
 import { CreationDirection } from "./creation-direction";
 import { CreationFeedback } from "./creation-feedback";
+import { CreationNextContext, CreationRunContext } from "./creation-context";
 import { StudioTextProviderChoice } from "./text-provider-choice";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
 
@@ -30,9 +31,9 @@ type LocalCommand = CreationCommand extends infer T ? T extends CreationCommand 
 type Panel = "generate" | "selection" | "comment";
 type Rewrite = typeof REWRITE_ACTIONS[number];
 
-export function CreationWorkspace({ recordId, initial, initialStage = "Concept", source, publisher, templates, history }: {
+export function CreationWorkspace({ recordId, initial, initialStage = "Concept", source, publisher, templates, history, linkedDrafts = [] }: {
   recordId: string; initial: CreationRecord | null; initialStage?: CreationStage; source: CreationSource | null; publisher: string;
-  templates: TemplateChoice[]; history: HistoryItem[];
+  templates: TemplateChoice[]; history: HistoryItem[]; linkedDrafts?: LinkedDraft[];
 }) {
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
   const [record, setRecord] = useState(initial);
@@ -44,6 +45,9 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
   const [generationKind, setGenerationKind] = useState<"suggest" | "draft">("suggest");
   const [replacement, setReplacement] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [includeReferences, setIncludeReferences] = useState(true);
+  const [draftId, setDraftId] = useState("");
+  const [purpose, setPurpose] = useState<DraftContextChoice["purpose"]>("compare");
   const [provider, setProvider] = useState<StudioTextProvider>("subscription");
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -61,6 +65,7 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
   const directionChange = requestsDirectionChange(feedback);
   const dirty = Boolean(active && value !== active.text);
   const visibleRun = run?.operation.stage === stage ? run : null;
+  const latestStageRun = runs.find(item => item.stage === stage);
   const acceptedAngle = record ? stageDraft(record.state, "Angle") : null;
 
   const readRun = useCallback(async (id: string, signal: AbortSignal) => {
@@ -152,7 +157,7 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
   function openPanel(next: Panel, trigger: HTMLElement, kind: "suggest" | "draft" = "suggest") {
     setError("");
     if (dirty) { setError("Save this edit before using contextual actions."); return; }
-    const selected = next === "generate" ? null : currentSelection();
+    const selected = next === "generate" ? null : currentSelection() ?? selection;
     if (next === "selection" && (!selected?.text.trim() || selected.text.length > SELECTION_LIMIT)) {
       setError("Select the exact words to change, up to 1,800 characters.");
       input.current?.focus();
@@ -160,10 +165,13 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
     }
     setSelection(selected);
     panelTrigger.current = trigger;
+    setDraftId(""); setPurpose("compare"); setIncludeReferences(true);
     setFeedback(""); setReplacement(""); setRewrite(null); setGenerationKind(kind); setPanel(next);
   }
   async function generate() {
-    const route = { provider, confirmPaid: provider === "openai", confirmSubscription: provider === "subscription" };
+    const selected = linkedDrafts.find(draft => draft.id === draftId);
+    const linkedDraft = selected ? { id: selected.id, version: selected.version, purpose } : null;
+    const route = { provider, confirmPaid: provider === "openai", confirmSubscription: provider === "subscription", includeReferences, linkedDraft };
     const parameters = rewrite && selection
       ? { ...route, action: "generate" as const, kind: "rewrite" as const, stage, feedback, selection, instruction: rewrite }
       : { ...route, action: "generate" as const, kind: generationKind, stage, feedback };
@@ -219,6 +227,10 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
           </Button>
           {stage === "Script" && <Button type="button" variant="outline" className={stageControls} disabled={busy || pending} onClick={event => openPanel("generate", event.currentTarget, "draft")}>Draft full script</Button>}
         </div>
+        {latestStageRun && !visibleRun && !pending && <Button type="button" variant="link" className="min-h-11 px-0" disabled={busy || dirty}
+          onClick={() => { setRun(null); setActiveReview(latestStageRun.id); }}>
+          Inspect last run
+        </Button>}
         {stage === "Script" && <label className="flex flex-wrap items-center gap-2 text-sm font-medium">Pinned template
           <select className="min-h-11 max-w-full rounded-md border bg-background px-3 text-sm" value={record.templateId ?? ""} disabled={busy || dirty}
             onChange={event => void send({ action: "template", templateId: event.target.value || null })}>
@@ -234,7 +246,9 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
           </Button>
           {dirty && <><Button type="button" variant="outline" className={stageControls} disabled={busy} onClick={() => void send({ action: "save", stage, text: value })}>Save edit</Button>
             <Button type="button" variant="ghost" className={stageControls} onClick={() => { setValue(active?.text ?? ""); setSelection(null); setError(""); }}>Discard edit</Button></>}
-          <Button type="button" variant="ghost" className={`${stageControls} gap-2 ${selection ? "bg-accent" : ""}`} disabled={busy} onClick={event => openPanel("selection", event.currentTarget)}>
+          <Button type="button" variant="ghost" className={`${stageControls} gap-2 ${selection ? "bg-accent" : ""}`} disabled={busy}
+            onMouseDown={event => { if (currentSelection()) event.preventDefault(); }}
+            onClick={event => openPanel("selection", event.currentTarget)}>
             <Scissors aria-hidden="true" className="size-4" /> Selection actions
           </Button>
           <Button type="button" variant="ghost" className={`${stageControls} gap-2`} disabled={busy} onClick={event => openPanel("comment", event.currentTarget)}>
@@ -243,7 +257,7 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
           {active?.previous && !dirty && <Button type="button" variant="ghost" className={`${stageControls} gap-2`} disabled={busy} onClick={() => void send({ action: "undo", stage })}><Undo2 aria-hidden="true" className="size-4" /> Undo last edit</Button>}
         </div>
         {visibleRun && <Proposal run={visibleRun} stale={visibleRun.stale || visibleRun.version !== record.version}
-          disabled={busy || dirty} onApply={candidate => void send({ action: "apply", stage, reviewId: visibleRun.id, candidate })}
+          applied={record.state.history.some(item => item.reviewId === visibleRun.id)} disabled={busy || dirty} onApply={candidate => void send({ action: "apply", stage, reviewId: visibleRun.id, candidate })}
           onShortlist={text => void send({ action: "shortlist", stage, text })} />}
         {active?.shortlist.length ? <details className="rounded-lg border p-3">
           <summary className="cursor-pointer text-sm font-medium">Shortlist ({active.shortlist.length})</summary>
@@ -309,6 +323,8 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
         {panel === "comment" && <Button type="button" className={stageControls} disabled={!feedback.trim() || busy}
           onClick={async () => { if (await send({ action: "comment", stage, selection, text: feedback })) setPanel(null); }}>Save comment</Button>}
         {(panel === "generate" || rewrite) && <div className="space-y-3">
+          <CreationNextContext recordId={recordId} drafts={linkedDrafts} includeReferences={includeReferences} onReferences={setIncludeReferences}
+            draftId={draftId} onDraft={setDraftId} purpose={purpose} onPurpose={setPurpose} />
           <StudioTextProviderChoice stagedCreation provider={provider} onChange={setProvider} />
           {directionChange && <p role="status" className="text-sm">Confirm the new video direction before generating. <Button type="button" variant="link" className={stageControls}
             onClick={() => { setPanel(null); setDirectionOpen(true); }}>Review direction</Button></p>}
@@ -331,8 +347,8 @@ function SourceSummary({ source }: { source: CreationSource }) {
   </div>;
 }
 
-function Proposal({ run, stale, disabled, onApply, onShortlist }: {
-  run: CreationRun; stale: boolean; disabled: boolean; onApply: (index: number | null) => void; onShortlist: (text: string) => void;
+function Proposal({ run, stale, applied, disabled, onApply, onShortlist }: {
+  run: CreationRun; stale: boolean; applied: boolean; disabled: boolean; onApply: (index: number | null) => void; onShortlist: (text: string) => void;
 }) {
   if (run.state === "failed") return <p role="alert" className="break-words rounded-lg border p-3 text-sm text-destructive">{run.error}</p>;
   if (!run.result) return <p role="status" className="text-sm text-muted-foreground">{run.state === "queued" ? "Queued for the selected provider." : "Generating proposal…"}</p>;
@@ -340,7 +356,8 @@ function Proposal({ run, stale, disabled, onApply, onShortlist }: {
   const selected = run.operation.kind === "rewrite" ? run.operation.selection.text : null;
   return <section aria-label="Proposal preview" className="min-w-0 space-y-3 rounded-xl border bg-muted/30 p-4">
     <h3 className="font-semibold">{result.options.length ? `${result.options.length} ${result.options.length === 1 ? "suggestion" : "suggestions"}` : selected ? "Rewrite preview" : "Script draft preview"}</h3>
-    {stale && <p className="text-sm text-muted-foreground">Draft or source changed since this proposal. Generate a fresh one to apply it.</p>}
+    {applied ? <p className="text-sm text-muted-foreground">Applied in an earlier edit. You’re viewing the saved proposal.</p>
+      : stale && <p className="text-sm text-muted-foreground">Draft or source changed since this proposal. Generate a fresh one to apply it.</p>}
     <p className="break-words text-sm text-muted-foreground">{result.rationale}</p>
     {result.options.length ? <ol className="space-y-2">
       {result.options.map((option, index) => <li key={option.text} className="min-w-0 space-y-2 rounded-lg border bg-card p-3">
@@ -357,6 +374,7 @@ function Proposal({ run, stale, disabled, onApply, onShortlist }: {
       <Button className="min-h-11" type="button" disabled={stale || disabled} onClick={() => onApply(null)}>{selected ? "Apply rewrite" : "Use script"}</Button>
     </div>}
     {result.verification.length > 0 && <div className="space-y-1 text-sm"><strong>Verify before filming</strong><ul className="list-disc space-y-1 pl-4">{result.verification.map((item, i) => <li className="break-words" key={i}>{item}</li>)}</ul></div>}
+    <CreationRunContext run={run} />
     <details className="text-sm">
       <summary className="min-h-11 cursor-pointer py-3 font-medium">Generation evidence</summary>
       <p className="break-words text-muted-foreground">{[run.model, run.profileVersion ? `Business profile v${run.profileVersion}` : null, run.template].filter(Boolean).join(" · ")}</p>

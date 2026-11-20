@@ -7,6 +7,7 @@ CREATE FUNCTION studio.studio_build_selected_text_snapshot(p_location_id text,p_
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE item jsonb:=p_selection->0; operation jsonb:=item->'creation'; record studio.studio_records%rowtype;
   state jsonb; accepted jsonb; sources jsonb; evidence jsonb; profile jsonb; snapshot jsonb;
+  prior_choice jsonb:=operation->'linkedDraft'; prior_draft jsonb;
 BEGIN
   IF p_workflow IS DISTINCT FROM 'script_brief' OR operation IS NULL THEN
     RETURN studio.studio_build_selected_snapshot_before_creation(p_location_id,p_selection,p_focus,p_workflow);
@@ -35,6 +36,7 @@ BEGIN
     SELECT s.* FROM studio.studio_record_links l JOIN studio.studio_records s
       ON s.location_id=l.location_id AND s.id=l.target_id
     WHERE l.location_id=p_location_id AND l.source_id=record.id AND s.kind='reference' AND NOT s.archived
+      AND operation->>'includeReferences' IS DISTINCT FROM 'false'
     ORDER BY (s.id::text IS NOT DISTINCT FROM state#>>'{source,id}') DESC, s.id LIMIT 3
   )
   SELECT coalesce(jsonb_agg(jsonb_build_object('id',s.id,'version',s.version,'title',s.title,
@@ -70,21 +72,47 @@ BEGIN
   SELECT coalesce(jsonb_agg(jsonb_build_object('id',id,'version',version,'sourceId',source_id,'title',title,
     'statement',statement,'quote',quote,'type',type,'start',start) ORDER BY priority,id),'[]'::jsonb) INTO evidence FROM selected;
 
-  SELECT jsonb_build_object('version',d.version,'context',
-    coalesce((SELECT jsonb_object_agg(f.key,left(d.payload#>>f.value,400))
+  SELECT jsonb_build_object('version',d.version,'context',f.context,'truncatedFields',f.truncated,'unconfirmedFields',f.unconfirmed)
+  INTO profile FROM public.settings_documents d CROSS JOIN LATERAL (
+    SELECT coalesce(jsonb_object_agg(fields.key,left(fields.value,400)),'{}'::jsonb) AS context,
+      coalesce(jsonb_agg(fields.key ORDER BY fields.key) FILTER (WHERE char_length(fields.value)>400),'[]'::jsonb) AS truncated,
+      coalesce(jsonb_agg(fields.key ORDER BY fields.key) FILTER (WHERE fields.confirmed_at IS NULL),'[]'::jsonb) AS unconfirmed
+    FROM (
+      SELECT k.key,d.payload#>>k.path AS value,d.payload#>>(k.path[1:2]||ARRAY['confirmedAt']) AS confirmed_at
       FROM (VALUES ('summary',ARRAY['identity','summary','value']),('offer',ARRAY['offer','description','value']),
         ('audience',ARRAY['audienceMarket','audience','value']),('tone',ARRAY['brandVoice','tone','value']),
         ('voiceInstructions',ARRAY['brandVoice','instructions','value']),('preferredWords',ARRAY['brandVoice','preferredWords','value']),
-        ('avoidedWords',ARRAY['brandVoice','avoidedWords','value']),('contentPillars',ARRAY['brandVoice','contentPillars','value'])) f(key,value)
-      WHERE d.payload#>>(f.value[1:2]||ARRAY['status'])='known' AND d.payload#>f.value IS NOT NULL),'{}'::jsonb))
-  INTO profile FROM public.settings_documents d
-    WHERE d.scope_type::text='LOCATION' AND d.scope_id=p_location_id AND d.domain='location.business';
+        ('avoidedWords',ARRAY['brandVoice','avoidedWords','value']),('contentPillars',ARRAY['brandVoice','contentPillars','value'])) k(key,path)
+      WHERE d.payload#>>(k.path[1:2]||ARRAY['status'])='known' AND d.payload#>k.path IS NOT NULL
+    ) fields
+  ) f WHERE d.scope_type::text='LOCATION' AND d.scope_id=p_location_id AND d.domain='location.business';
+
+  IF prior_choice IS NOT NULL AND prior_choice<>'null'::jsonb THEN
+    IF jsonb_typeof(prior_choice) IS DISTINCT FROM 'object'
+      OR coalesce(prior_choice->>'purpose','') NOT IN ('compare','revise') THEN
+      RAISE EXCEPTION 'Choose an explicit use for the prior draft' USING ERRCODE='22023';
+    END IF;
+    SELECT jsonb_build_object('id',d.id,'version',d.version,'title',d.title,'purpose',prior_choice->>'purpose',
+        'text',left(d.payload->>'script',3000),'truncated',char_length(d.payload->>'script')>3000)
+    INTO prior_draft FROM studio.studio_records d JOIN studio.studio_record_links l ON l.location_id=d.location_id AND l.target_id=d.id
+    WHERE d.location_id=p_location_id AND l.source_id=record.id AND d.id=(prior_choice->>'id')::uuid
+      AND d.version=(prior_choice->>'version')::bigint AND d.kind='content' AND NOT d.archived
+      AND nullif(btrim(d.payload->>'script'),'') IS NOT NULL FOR SHARE OF d;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Linked draft changed or unavailable' USING ERRCODE='40001'; END IF;
+  END IF;
 
   snapshot:=jsonb_build_object('focus','','mode','staged_creation','operation',operation,
     'ideas',jsonb_build_array(jsonb_build_object('id',record.id,'version',record.version,'title',record.title,
       'summary','','notes','','excerpted',false,'sources',sources)),
     'brief',state->>'brief','direction',state->'direction','accepted',accepted,
-    'profile',profile,'template',studio.studio_script_template_snapshot(p_location_id,record.id),'evidence',evidence,
+    'profile',profile,'template',studio.studio_script_template_snapshot(p_location_id,record.id),'evidence',evidence,'priorDraft',prior_draft,
+    'inputLimits',to_jsonb(array_remove(ARRAY['Saved source and historical draft notes omitted.',
+      CASE WHEN operation->>'includeReferences'='false' THEN 'Linked reference evidence excluded by the author.'
+        ELSE 'Linked reference evidence limited to three active references and up to eight current approved quotes or sampled transcript excerpts.' END,
+      CASE WHEN prior_draft IS NULL THEN 'Historic linked scripts excluded.' WHEN prior_draft->>'truncated'='true' THEN 'Selected linked script truncated to 3,000 characters.' END,
+      CASE WHEN profile IS NULL THEN 'No saved Business profile.' ELSE 'Unknown and inapplicable Business profile fields omitted.' END,
+      CASE WHEN char_length(state#>>'{stages,Script,text}')>5000 AND accepted ? 'Script' THEN 'Accepted Script stage truncated to 5,000 characters.' END
+    ],NULL)),
     'sourceConcept',CASE WHEN EXISTS (SELECT 1 FROM jsonb_array_elements(sources) link WHERE link->>'id'=state#>>'{source,id}')
       THEN (state->'source')-'version'::text ELSE NULL END);
   -- The original brief appears once even when the author confirmed it verbatim.

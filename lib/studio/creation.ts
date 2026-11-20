@@ -6,7 +6,7 @@ import { StudioCommandError } from "./command-error";
 import { StudioDbError } from "./db";
 import { requireOwnStudioCommandLocation } from "./paid-workspace";
 import { studioDb } from "./studio-db";
-import { replaceSelection, stageDraft, stageTextLimit, type CreationCommand, type CreationRecord, type CreationSource, type CreationState, type StageDraft } from "./creation-policy";
+import { replaceSelection, stageDraft, stageTextLimit, type CreationCommand, type CreationRecord, type CreationSource, type CreationState, type LinkedDraft, type StageDraft } from "./creation-policy";
 import { CREATION_PROMPT, readCreationTextResult, type CreationRun, type CreationRunInput, type CreationSnapshot } from "./creation-text-policy";
 
 type StoredRecord = { id: string; title: string; version: number; payload: Record<string, unknown>; script_template_version_id: string | null };
@@ -49,7 +49,13 @@ export async function getCreationPage(locationId: string, id?: string, sourceId?
       AND created_by_clerk_user_id=${access.userId} AND workflow='script_brief' AND prompt_version=${CREATION_PROMPT}
       AND snapshot#>>'{ideas,0,id}'=${id}
     ORDER BY created_at DESC LIMIT 30`) : [];
-  return { record, source, publisher: access.locationName, runs };
+  const linkedDrafts = id ? await studioDb.rows<LinkedDraft>(Prisma.sql`
+    SELECT s.id,s.version,s.title FROM studio.studio_record_links l
+    JOIN studio.studio_records s ON s.location_id=l.location_id AND s.id=l.target_id
+    WHERE l.location_id=${access.locationId} AND l.source_id=${id}::uuid AND s.kind='content' AND NOT s.archived
+      AND nullif(btrim(s.payload->>'script'),'') IS NOT NULL
+    ORDER BY s.updated_at DESC,s.id LIMIT 30`) : [];
+  return { record, source, publisher: access.locationName, runs, linkedDrafts };
 }
 async function loadRun(access: StudioAccess, reviewId: string) {
   return studioDb.one<StoredRun>(Prisma.sql`
@@ -57,7 +63,10 @@ async function loadRun(access: StudioAccess, reviewId: string) {
       (r.stale_at_completion IS TRUE OR c.id IS NULL OR c.archived OR c.version::text<>r.snapshot#>>'{ideas,0,version}'
         OR EXISTS(SELECT 1 FROM jsonb_array_elements(r.snapshot#>'{ideas,0,sources}') s
           WHERE NOT EXISTS(SELECT 1 FROM studio.studio_records source WHERE source.location_id=r.location_id
-            AND source.id=(s->>'id')::uuid AND NOT source.archived AND source.version::text=s->>'version'))) AS stale
+            AND source.id=(s->>'id')::uuid AND NOT source.archived AND source.version::text=s->>'version'))
+        OR (r.snapshot#>>'{priorDraft,id}' IS NOT NULL AND NOT EXISTS(SELECT 1 FROM studio.studio_records d
+          WHERE d.location_id=r.location_id AND d.id=(r.snapshot#>>'{priorDraft,id}')::uuid AND NOT d.archived
+            AND d.version::text=r.snapshot#>>'{priorDraft,version}'))) AS stale
     FROM studio.studio_idea_reviews r JOIN studio.studio_jobs j ON j.location_id=r.location_id AND j.id=r.job_id
     LEFT JOIN studio.studio_records c ON c.location_id=r.location_id AND c.id=(r.snapshot#>>'{ideas,0,id}')::uuid
     WHERE r.id=${reviewId}::uuid AND r.location_id=${access.locationId} AND r.actor_app=${access.app}
@@ -70,7 +79,7 @@ export async function getCreationRun(locationId: string, reviewId: string): Prom
   const { snapshot } = row;
   const state = row.result ? "done" : ["failed", "dead", "cancelled"].includes(row.status) ? "failed" : row.status === "running" ? "running" : "queued";
   return { id: row.id, recordId: snapshot.ideas[0].id, version: snapshot.ideas[0].version, operation: snapshot.operation,
-    state, stale: row.stale, error: state === "failed" ? row.last_error_message ?? "Generation stopped." : null,
+    state, snapshot, stale: row.stale, error: state === "failed" ? row.last_error_message ?? "Generation stopped." : null,
     result: row.result ? readCreationTextResult(row.result, snapshot) : null, model: row.model, evidence: snapshot.evidence,
     profileVersion: snapshot.profile?.version ?? null,
     template: snapshot.template ? `${snapshot.template.name} · version ${snapshot.template.version}` : null };
@@ -107,15 +116,16 @@ export async function executeCreationCommand(locationId: string, command: Creati
   if (row.version !== version) throw new StudioCommandError("This draft changed in another view. Reload before applying an edit.", 409);
   const { state } = expose(row);
   if (command.action === "generate") {
-    const { kind, stage, feedback } = command;
+    const { kind, stage, feedback, includeReferences, linkedDraft } = command;
+    const context = { includeReferences, linkedDraft };
     let operation: CreationRunInput;
     if (kind === "rewrite") {
       const text = stageDraft(state, stage).text;
       replaceSelection(text, command.selection, command.selection.text);
       const { start, end } = command.selection;
-      operation = { kind, stage, feedback, selection: command.selection, instruction: command.instruction,
+      operation = { ...context, kind, stage, feedback, selection: command.selection, instruction: command.instruction,
         before: text.slice(Math.max(0, start - 280), start), after: text.slice(end, end + 280) };
-    } else operation = { kind, stage, feedback };
+    } else operation = { ...context, kind, stage, feedback };
     try {
       return await studioDb.call<{ reviewId: string }>("studio_enqueue_routed_text_run", {
         p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_workflow: "script_brief",

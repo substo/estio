@@ -13,6 +13,9 @@ export const DIRECTION_CHOICES = [
 ] as const;
 export type DirectionChoice = typeof DIRECTION_CHOICES[number]["id"] | "brief" | "custom";
 export type ConfirmedDirection = Direction & { choice: DirectionChoice; rationale: string };
+export type LinkedDraft = { id: string; version: number; title: string };
+export type DraftContextChoice = Pick<LinkedDraft, "id" | "version"> & { purpose: "compare" | "revise" };
+export type NextRunContext = { includeReferences: boolean; linkedDraft: DraftContextChoice | null };
 export type Selection = { start: number; end: number; text: string };
 export type StageDraft = { text: string; approved: boolean; shortlist: string[]; previous?: { text: string; approved: boolean } };
 export type CreationState = {
@@ -78,9 +81,9 @@ export function stageDraft(state: CreationState, stage: CreationStage) {
 
 type Versioned = { recordId: string; version: number };
 type DirectionInput = { brief: string; direction: ConfirmedDirection };
-type GenerationInput =
+type GenerationInput = NextRunContext & (
   | { kind: "draft" | "suggest"; stage: CreationStage; feedback: string }
-  | { kind: "rewrite"; stage: CreationStage; feedback: string; selection: Selection; instruction: typeof REWRITE_ACTIONS[number] };
+  | { kind: "rewrite"; stage: CreationStage; feedback: string; selection: Selection; instruction: typeof REWRITE_ACTIONS[number] });
 
 export type CreationCommand =
   | ({ action: "create"; sourceId: string | null; sourceVersion: number | null; templateId: string | null } & Versioned & DirectionInput)
@@ -144,7 +147,11 @@ export function readCreationCommand(value: unknown): CreationCommand {
     if (provider === "openai" ? b.confirmPaid !== true : b.confirmSubscription !== true) throw new StudioCommandError("Authorize the selected processing route.");
     const feedback = text(b.feedback, 1200).trim();
     if (requestsDirectionChange(feedback)) throw new StudioCommandError("Confirm the new video direction before generating.");
-    const run = { ...target, action, requestId: id(b.requestId), provider, confirmPaid: provider === "openai", confirmSubscription: provider === "subscription", feedback } as const;
+    const linked = b.linkedDraft == null ? null : object(b.linkedDraft);
+    if (linked && linked.purpose !== "compare" && linked.purpose !== "revise") throw new StudioCommandError("Choose how to use the linked draft.");
+    if (b.includeReferences !== undefined && typeof b.includeReferences !== "boolean") throw new StudioCommandError("Choose whether to include reference evidence.");
+    const linkedDraft: DraftContextChoice | null = linked ? { id: id(linked.id), version: integer(linked.version, 1), purpose: linked.purpose as DraftContextChoice["purpose"] } : null;
+    const run = { ...target, action, includeReferences: b.includeReferences !== false, linkedDraft, requestId: id(b.requestId), provider, confirmPaid: provider === "openai", confirmSubscription: provider === "subscription", feedback } as const;
     if (b.kind === "suggest" || (b.kind === "draft" && stage === "Script")) return { ...run, kind: b.kind };
     if (b.kind === "rewrite" && REWRITE_ACTIONS.includes(b.instruction as typeof REWRITE_ACTIONS[number])) {
       return { ...run, kind: b.kind, selection: selection(b.selection), instruction: b.instruction as typeof REWRITE_ACTIONS[number] };

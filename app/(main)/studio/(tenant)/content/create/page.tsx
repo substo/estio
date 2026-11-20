@@ -30,6 +30,6 @@ export default async function CreateWithStudio({ params, searchParams }: {
       <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight sm:text-3xl"><Sparkles aria-hidden="true" className="size-5 text-primary" /> Create with Studio</h1>
     </header>
     <CreationWorkspace key={draft ?? source ?? "new"} recordId={draft ?? randomUUID()} initial={data.record} initialStage={initialStage} source={data.source} publisher={data.publisher}
-      templates={options.map(({ id, name, version }) => ({ id, name, version }))} history={data.runs} />
+      templates={options.map(({ id, name, version }) => ({ id, name, version }))} history={data.runs} linkedDrafts={data.linkedDrafts} />
   </main>;
 }
