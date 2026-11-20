@@ -9,7 +9,7 @@ function load(options: { denied?: boolean; actor?: boolean; replay?: { id: strin
   let fetches = 0, reads = 0;
   const module = { exports: {} as any };
   const deps: Record<string,unknown> = {
-    'server-only': {}, './library-summary': {enqueueLibrarySummary:async()=>null}, './source-transcription': {requestSourceTranscription:async()=>({status:'queued'})}, '../google/profile-youtube-credentials': {}, './studio-db': {}, 'node:crypto': { randomUUID: () => 'record-id' }, '@prisma/client': {Prisma},
+    'server-only': {}, './library-summary': {enqueueLibrarySummary:async()=>null}, '../google/profile-youtube-credentials': {}, './studio-db': {}, 'node:crypto': { randomUUID: () => 'record-id' }, '@prisma/client': {Prisma},
     '@clerk/nextjs/server': { auth: async () => ({actor: options.actor ? {} : null}) },
     '../db': {default: {$queryRaw: async () => {reads++;return options.replay ?? [];},$transaction:async(fn:any)=>fn({$queryRaw:async()=>[{id:'member'}]})}},
     './access': { getStudioAccess: async () => options.denied ? null : {locationId:'location',userId:'person',app:'substo'} },
@@ -39,7 +39,6 @@ function serviceFixture(options: { revoked?: boolean; oauth?: boolean; changed?:
     './access':{getStudioAccess:async()=>({locationId:'location',app:'substo',userId:'person'})},
     '@clerk/nextjs/server':{auth:async()=>({actor:null})}, './merge-gate':{assertStudioMergeReady:()=>{}},
     './studio-db':{studioDb:{}}, '../google/profile-youtube-credentials':{readProfileYoutubeConnection:async()=>({version:'one'})},
-    './source-transcription':{requestSourceTranscription:async()=>({status:'queued'})},
     './library-summary':{enqueueLibrarySummary:async()=>{if(options.summaryFails)throw Error('offline');return {summaryStatus:'waiting_for_device'};}},
     './library-import-youtube':{readLibraryYoutubeMetadata:async()=>options.oauth?{connectionVersion:'one'}:null},
     './library-import-metadata':{LibraryImportError,libraryImportTarget,validatedYoutubeCreator,fetchLibraryImportMetadata:async(target:any)=>{network++;return {kind:'reference',title:'Fetched title',payload:{url:target.url,thumbnailUrl:'https://example.com/thumb',channelName:'Fetched creator',description:'Fetched description',summaryStatus:'not_generated',platform:'youtube',format:target.format,importEvidence:{method:'test'}}};}},

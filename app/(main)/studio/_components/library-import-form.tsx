@@ -21,7 +21,7 @@ export function LibraryImportForm({ locationId, inputRef }: { locationId: string
     event.preventDefault();
     if (pending) return;
     setPending(true); setError(""); setSuccess("");
-    const body = { input: input.trim(), ...(ambiguous ? { platform } : {}) };
+    const body = { input: input.trim(), ...(ambiguous ? { platform } : {}), transcribe: true };
     const fingerprint = JSON.stringify(body);
     try {
       if (request.current?.fingerprint !== fingerprint) request.current = { fingerprint, key: crypto.randomUUID() };
@@ -31,11 +31,12 @@ export function LibraryImportForm({ locationId, inputRef }: { locationId: string
       const summaryNotice = typeof result.summaryError === "string" && result.summaryError.trim()
         ? result.summaryError
         : result.summaryStatus === "no_evidence" ? "Source description or transcript unavailable for a summary." : "";
+      const transcription = result.transcription as { status?: string; message?: string } | undefined;
+      const transcriptionNotice = !transcription ? "" : transcription.status === "not_queued" ? ` ${transcription.message ?? ""}`
+        : transcription.status === "queued" || transcription.status === "reused" ? " Transcription queued on your Mac; it waits there if the Mac is offline." : "";
       // Retain the successful request key: re-entering the same source can retry
       // summary enqueue without repeating the metadata mutation.
-      const transcriptNotice = result.transcriptionStatus === "queued" || result.transcriptionStatus === "running" ? " Your Mac will transcribe it; a queued request waits if the Mac is offline."
-        : result.transcriptionStatus === "no_device" ? " No Mac is set up for transcription yet: pair one and turn Transcription on in Mac Setup, then paste the link again." : "";
-      setInput(""); setPlatform(""); setSuccess(`Source saved.${summaryNotice ? ` ${summaryNotice}` : ""}${transcriptNotice}`); router.refresh();
+      setInput(""); setPlatform(""); setSuccess(`Source saved.${summaryNotice ? ` ${summaryNotice}` : ""}${transcriptionNotice}`); router.refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not connect. Try again with the same source."); }
     finally { setPending(false); }
   }

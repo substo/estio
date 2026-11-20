@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPlatformProfile } from "@/lib/platform/profile";
 import { getStudioAccess } from "@/lib/studio/access";
@@ -16,7 +17,8 @@ export default async function StudioConnectedComputerPage({ params, searchParams
     <main className="mx-auto max-w-3xl space-y-8 p-6 md:p-10">
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">Connected computer</h1>
-        <p className="text-muted-foreground">Connect a Mac to this Business, choose what it may do, and see its status.</p>
+        <p className="text-muted-foreground">Your own Mac does the transcribing, summarising and searching, using your Codex or Claude subscription. See what works, fix what does not, and connect another computer.</p>
+        <Link href="/studio/library" className="inline-block text-sm font-medium text-primary hover:underline">Back to Research library</Link>
       </header>
       <CompanionSettings {...devices} origin={profile?.origin ?? "https://substo.com"} businessName={access.locationName} code={code} />
     </main>

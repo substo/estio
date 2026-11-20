@@ -1,6 +1,5 @@
 import 'server-only';
 import { enqueueLibrarySummary } from './library-summary';
-import { requestSourceTranscription } from './source-transcription';
 import { readProfileYoutubeConnection } from '../google/profile-youtube-credentials';
 import { studioDb } from './studio-db';
 import { readLibraryYoutubeMetadata } from './library-import-youtube';
@@ -24,14 +23,10 @@ export async function importStudioLibrary(locationId: string, command: { input: 
   const requestKey = `${access.app}:${access.userId}:${command.idempotencyKey}`;
   const sameSource = (url: string) => { try { return libraryImportTarget(url).url === target.url; } catch { return false; } };
   const finish = async (recordId: string) => {
-    // A pasted video is transcribed by the paired Mac through the same job every other entry point uses. It never blocks the save:
-    // with no Mac the source records that, and re-pasting the same link retries it.
-    const transcription = target.platform === 'youtube' && target.kind === 'reference'
-      ? await requestSourceTranscription(locationId, recordId, 'user').then(r => r.status).catch(() => 'pending' as const) : undefined;
     try {
       const result = await enqueueLibrarySummary(locationId, recordId) as {summaryStatus?: string} | null;
-      return {recordId, summaryStatus: result?.summaryStatus || 'pending', ...(transcription ? {transcriptionStatus: transcription} : {})};
-    } catch { return {recordId, summaryStatus:'pending', summaryError:'Summary request is pending; retry this import to schedule it.', ...(transcription ? {transcriptionStatus: transcription} : {})}; }
+      return {recordId, summaryStatus: result?.summaryStatus || 'pending'};
+    } catch { return {recordId, summaryStatus:'pending', summaryError:'Summary request is pending; retry this import to schedule it.'}; }
   };
   const link = async (tx: Prisma.TransactionClient, channelId: string) => {
     if (!command.sourceId) return;

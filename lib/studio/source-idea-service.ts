@@ -11,7 +11,7 @@ export function createSourceIdeaService(deps: {
   isImpersonating: () => Promise<boolean>;
   transaction: <T>(run: (db: StudioDb) => Promise<T>) => Promise<T>;
 }) {
-  return async (locationId: string, sourceId: string, ideaId: string, title: string, summary: string) => {
+  return async (locationId: string, sourceId: string, ideaId: string, title: string, summary: string, draftReviewId?: string) => {
     const access = await deps.authorize(locationId);
     if (!access || await deps.isImpersonating()) throw new Error("Use your own authorized account to create an idea.");
     title = title.trim(); summary = summary.trim();
@@ -23,9 +23,13 @@ export function createSourceIdeaService(deps: {
         select id from studio.studio_records where location_id=${access.locationId}
         and id=${sourceId}::uuid and kind='reference' and archived=false for share`);
       if (!source) throw new Error("Choose an active library source in this Location.");
+      if (draftReviewId && !recordLinkId(draftReviewId)) throw new Error("Choose a valid idea draft.");
+      const inspiration = draftReviewId ? await db.call("studio_selected_idea_evidence", {
+        p_location: access.locationId, p_app: access.app, p_actor: access.userId, p_source: sourceId, p_draft: draftReviewId,
+      }) : undefined;
       const idea = await db.call<{ version: number }>("studio_save_record", {
         p_location_id: access.locationId, p_record_id: ideaId, p_kind: "content", p_title: title,
-        p_payload_patch: { title, summary, stage: "idea", level: "discover", approved: false, archived: false },
+        p_payload_patch: { title, summary, stage: "idea", level: "discover", approved: false, archived: false, ...(inspiration ? { knowledgeInspiration: inspiration } : {}) },
         p_expected_version: 0, p_clerk_user_id: access.userId,
       });
       const links = createRecordLinkService({ authorize: async () => access, isImpersonating: deps.isImpersonating, db });

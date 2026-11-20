@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { StudioQueue } from "../worker/queue";
 import { appOrigin, deviceTokenPattern, type DeviceCredentials } from "./config";
 
-const job = z.object({ id: z.string().uuid(), location_id: z.string().min(1).max(255), kind: z.enum(["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.source_transcribe"]),
+const job = z.object({ id: z.string().uuid(), location_id: z.string().min(1).max(255), kind: z.enum(["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search"]),
   payload: z.record(z.unknown()), lease_token: z.string().uuid(), lease_expires_at: z.string().datetime({ offset: true }),
   attempts: z.number().int().nonnegative(), max_attempts: z.number().int().positive() });
 export const providerCommand = z.object({ id: z.string().uuid(), kind: z.enum(["provider_login", "provider_logout"]), provider: z.enum(["codex", "claude"]) });
@@ -49,8 +49,10 @@ export function createDeviceStudioQueue(credentials: DeviceCredentials, options:
   summaryReady?: () => boolean;
   /** Local gate and subscription capacity allow onboarding research now. */
   researchReady?: () => boolean;
-  /** Local gate, tools and the owner's transcription opt-in allow video transcription now. */
-  transcribeReady?: () => boolean;
+  /** Video tools are installed, Setup's Video transcription is on, and the local gate allows processing. */
+  videoReady?: () => boolean;
+  /** A local browser is installed and the local gate allows processing. */
+  youtubeReady?: () => boolean;
   capabilities?: () => Record<string, unknown>;
   /** Pending config acknowledgement to piggyback on the next heartbeat. */
   configAck?: () => ConfigAck | undefined;
@@ -62,7 +64,7 @@ export function createDeviceStudioQueue(credentials: DeviceCredentials, options:
   if (!deviceTokenPattern.test(token)) throw new Error("invalid_device_token");
   const call = <T>(operation: string, body: unknown, schema: z.ZodType<T>) => deviceCall(origin, token, operation, body, schema, options);
   return {
-    claim: (workerId, limit, leaseSeconds) => call("claim", { workerId, limit, leaseSeconds, textReady: options.textReady?.() === true, summaryReady: options.summaryReady?.() === true, researchReady: options.researchReady?.() === true, transcribeReady: options.transcribeReady?.() === true }, z.array(job).max(50)),
+    claim: (workerId, limit, leaseSeconds) => call("claim", { workerId, limit, leaseSeconds, textReady: options.textReady?.() === true, summaryReady: options.summaryReady?.() === true, researchReady: options.researchReady?.() === true, videoReady: options.videoReady?.() === true, youtubeReady: options.youtubeReady?.() === true }, z.array(job).max(50)),
     extend: (jobId, workerId, leaseSeconds, leaseToken) => call("extend", { jobId, workerId, leaseSeconds, leaseToken }, z.boolean()),
     complete: (jobId, workerId, result, leaseToken) => call("complete", { jobId, workerId, result, leaseToken }, z.boolean()),
     fail: (jobId, workerId, failure, leaseToken) => call("fail", { jobId, workerId, failure, leaseToken }, z.enum(["retry_scheduled", "failed", "lease_lost"])),

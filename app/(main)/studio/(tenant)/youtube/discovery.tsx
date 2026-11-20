@@ -12,6 +12,7 @@ export function YoutubeDiscovery({ locationId, channels: initialChannels, canMan
   const [lastRequest, setLastRequest] = useState<Record<string, unknown>>({}); const [error, setError] = useState(""); const [pending, setPending] = useState(false);
   const [label, setLabel] = useState(""); const [newChannel, setNewChannel] = useState(""); const [titles, setTitles] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState<Record<string, string>>({});
   async function call(body: Record<string, unknown>) {
     const response = await fetch(`/studio/youtube/api`, { method: "POST", headers: { ...tenantHeaders, "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const data = await response.json(); if (!response.ok) throw new Error(data.error || "Request failed."); return data;
@@ -23,7 +24,7 @@ export function YoutubeDiscovery({ locationId, channels: initialChannels, canMan
   }
   async function save(id: string, ticket: string) {
     setError(""); setPending(true);
-    try { const data = await call({ action: "save", ticket, title: titles[id] ?? "" }); setSaved(s => ({ ...s, [id]: data.recordId })); }
+    try { const data = await call({ action: "save", ticket, title: titles[id] ?? "" }); setSaved(s => ({ ...s, [id]: data.recordId })); setNotes(n => ({ ...n, [id]: data.transcription?.status === "not_queued" ? data.transcription.message : data.transcription?.status === "queued" || data.transcription?.status === "reused" ? "Transcription queued on your Mac; it waits there if the Mac is offline." : "" })); }
     catch (e) { setError((e as Error).message); } finally { setPending(false); }
   }
   async function approve(remove: boolean, id = newChannel) {
@@ -50,7 +51,7 @@ export function YoutubeDiscovery({ locationId, channels: initialChannels, canMan
         <h2 className="font-medium"><a href={`https://www.youtube.com/watch?v=${v.id}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{v.title}</a></h2>
         <p className="text-sm text-muted-foreground">{v.channelTitle} · {v.publishedAt}</p>
         <label className="block text-sm">Your research title<input value={titles[v.id] ?? ""} maxLength={180} onChange={e => setTitles(t => ({ ...t, [v.id]: e.target.value }))} className="mt-1 w-full rounded-md border bg-background p-2" /></label>
-        {saved[v.id] ? <Link href={`/studio/library/${saved[v.id]}`} className="text-sm text-primary underline">Open saved research link</Link> : <button disabled={pending} onClick={() => void save(v.id, v.ticket)} className="rounded-md border px-3 py-2 text-sm disabled:opacity-50">Save public link to workspace</button>}
+        {saved[v.id] ? <span className="block space-y-1"><Link href={`/studio/library/${saved[v.id]}`} className="text-sm text-primary underline">Open saved research link</Link>{notes[v.id] ? <span role="status" className="block text-sm text-muted-foreground">{notes[v.id]}</span> : null}</span> : <button disabled={pending} onClick={() => void save(v.id, v.ticket)} className="rounded-md border px-3 py-2 text-sm disabled:opacity-50">Save public link to workspace</button>}
       </article>)}
       {!results.channels?.length && !results.videos?.length ? <p className="text-sm">No available results on this page.</p> : null}
       {results.nextPageToken ? <button disabled={pending} onClick={() => void browse({ ...lastRequest, pageToken: results.nextPageToken })} className="text-sm text-primary">Next results</button> : null}

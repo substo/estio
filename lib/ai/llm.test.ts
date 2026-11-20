@@ -72,7 +72,7 @@ test("callLLMWithMetadata routes openai-prefixed models through Responses API", 
 
         const body = JSON.parse(String(requests[0].init?.body || "{}"));
         assert.equal(body.model, "gpt-test");
-        assert.match(body.instructions, /ai-workflows.2026-11-18.v1/);
+        assert.match(body.instructions, /ai-workflows.2026-11-18.v3/);
         assert.ok(body.instructions.endsWith("System instructions"));
         assert.equal(body.input, "User input");
         assert.equal(body.max_output_tokens, 64);

@@ -114,3 +114,43 @@ test("a Mac is research-capable only while running, opted in, allowed, signed in
   assert.match(reason({}, { capacity: { codex: false } })!, /capacity/);
   assert.match(reason({}, { capacity: undefined })!, /capacity/);
 });
+
+test("YouTube Mac search capability is whitelisted and the claim flag is boolean-only", () => {
+  const safe = safeDeviceCapabilities({ handlers: ["studio.youtube_search", "x"], youtubeSearch: { ready: true, signedIn: false, path: "/Applications/secret" } });
+  assert.deepEqual(safe, { handlers: ["studio.youtube_search"], youtubeSearch: { ready: true, rank: false, signedIn: false } });
+  assert.deepEqual(safeDeviceCapabilities({ youtubeSearch: { ready: "yes", rank: true } }), { youtubeSearch: { ready: false, rank: true } });
+});
+
+/* Regression: a search result was rejected by the device HTTP route ("Invalid command") because it fell through to the diagnostic reader,
+ * so no Related-video search ever completed in production. These run the real result shapes through the route's own policy. */
+const completeBody = (result: unknown) => ({ workerId: "mac:a01a0d5e:1", jobId: "11111111-1111-4111-8111-111111111111", leaseToken: "22222222-2222-4222-8222-222222222222", result });
+const aVideo = (i: number) => ({ id: `v${String(i).padStart(10, "0")}`, title: `Candidate ${i} ${"t".repeat(60)}`, channelId: `UC${"a".repeat(22)}`, channelTitle: "Channel", publishedText: "2 years ago", viewsText: "1,234 views", description: "d".repeat(180),
+  score: 80 - i, reason: "Same subject as the source.", band: "relevant" as const });
+const aTrace = (videos: Array<{ id: string; score?: number | null; band?: string }>) => ({ version: 1 as const, route: "mac_browser" as const, mode: "plan_search_rank" as const, focus: "what the source is about",
+  queries: [{ query: "how professionals start a YouTube channel", by: "model" as const, found: 8 }],
+  planner: { provider: "codex" as const, model: "native-default", prompt: "p".repeat(8900), response: "{\"queries\":[]}", ms: 8000 }, ranker: { provider: "codex" as const, model: "native-default", prompt: "r".repeat(8900), response: "{\"rankings\":[]}", ms: 25000 },
+  notes: ["note"], candidates: videos.map(v => ({ id: v.id, score: v.score ?? null, band: (v.band ?? "unranked") as "relevant" | "unranked" })) });
+
+test("device route accepts a plain Related-video search result unchanged", () => {
+  const result = { videos: [{ id: "aaaaaaaaaaa", title: "A video" }], signedIn: false };
+  assert.deepEqual((readDeviceCommand("complete", completeBody(result)) as { result: unknown }).result, result);
+  assert.deepEqual((readDeviceCommand("complete", completeBody({ videos: [] })) as { result: unknown }).result, { videos: [] });
+});
+test("device route accepts a full ranked result with prompts and a trace, without stripping anything", () => {
+  const videos = Array.from({ length: 18 }, (_, i) => aVideo(i));
+  const result = { videos, signedIn: false, trace: aTrace(videos) };
+  assert.ok(JSON.stringify(result).length > 20000 && JSON.stringify(result).length <= 30000, `fixture is ${JSON.stringify(result).length} bytes`);
+  assert.deepEqual((readDeviceCommand("complete", completeBody(result)) as { result: unknown }).result, result);
+});
+test("device route still rejects malformed, oversize or foreign-shaped search results", () => {
+  const videos = Array.from({ length: 3 }, (_, i) => aVideo(i));
+  for (const bad of [{ videos: [{ id: "short", title: "x" }] }, { videos: [], extra: true }, { videos: [{ ...aVideo(1), score: 101 }] }, { videos: [{ ...aVideo(1), band: "great" }] },
+    { videos: [], trace: { secret: "x" } }, { videos, trace: { ...aTrace(videos), planner: { ...aTrace(videos).planner, prompt: "p".repeat(9001) } } },
+    { videos: Array.from({ length: 25 }, (_, i) => aVideo(i)) }]) assert.throws(() => readDeviceCommand("complete", completeBody(bad)), /Invalid command/);
+  const huge = Array.from({ length: 24 }, (_, i) => ({ ...aVideo(i), title: "t".repeat(300), description: "d".repeat(400), reason: "r".repeat(240), channelTitle: "c".repeat(200) }));
+  assert.throws(() => readDeviceCommand("complete", completeBody({ videos: huge })), /Invalid command/);
+});
+test("other result kinds are routed as before (diagnostic still works, a diagnostic cannot smuggle a search)", () => {
+  assert.deepEqual((readDeviceCommand("complete", completeBody({ ok: true, workerId: "mac", checkedAt: "2026-11-19T10:00:00.000Z" })) as { result: unknown }).result, { ok: true, workerId: "mac", checkedAt: "2026-11-19T10:00:00.000Z" });
+  assert.throws(() => readDeviceCommand("complete", completeBody({ ok: true, trace: {} })), /Invalid command/);
+});

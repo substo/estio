@@ -7,6 +7,7 @@ import { maskIpAddress, verifyDeviceTunnelToken } from "../lib/device-tunnel/aut
 import { authorizeDeviceTunnelGatewayConnection } from "../lib/device-tunnel/gateway-authorization";
 import { BoundedJtiReplayCache } from "../lib/device-tunnel/jti-replay-cache";
 import { isAllowedTunnelTarget, parseAllowedTunnelSuffixes } from "../lib/device-tunnel/policy";
+import { countsTowardSendProof, isAllowedStudioEgressTarget, STUDIO_EGRESS_IDLE_MS, STUDIO_EGRESS_MAX_STREAMS } from "../lib/device-tunnel/studio-egress-policy";
 import { calculateTunnelSendProof, type TunnelSendSnapshot } from "../lib/device-tunnel/send-proof";
 import { Socks5ConnectionState } from "../lib/device-tunnel/socks5-state";
 import {
@@ -122,6 +123,9 @@ type ConnectedDevice = {
     proxyServer: ReturnType<typeof createTcpServer>;
     proxyPort: number;
     proxyGeneration: string;
+    /** Streams opened by the Studio listener; excluded from WhatsApp send-proof byte counters. */
+    studioStreamIds: Set<string>;
+    studioProxy: { server: ReturnType<typeof createTcpServer>; port: number; idleTimer: NodeJS.Timeout } | null;
     streamHealth: DeviceTunnelStreamHealth;
     streams: Map<string, Socket>;
     pendingOpen: Map<string, NodeJS.Timeout>;
@@ -225,6 +229,7 @@ function runtimeLeaseFilter(device: ConnectedDevice) {
 function closeStream(device: ConnectedDevice, streamId: string, notifyDevice = true) {
     const stream = device.streams.get(streamId);
     device.streams.delete(streamId);
+    device.studioStreamIds.delete(streamId);
     const pending = device.pendingOpen.get(streamId);
     if (pending) clearTimeout(pending);
     device.pendingOpen.delete(streamId);
@@ -234,7 +239,16 @@ function closeStream(device: ConnectedDevice, streamId: string, notifyDevice = t
     }
 }
 
-function createSocksProxy(deviceBase: Omit<ConnectedDevice, "proxyServer" | "proxyPort">) {
+function closeStudioProxy(device: Pick<ConnectedDevice, "studioProxy" | "streams" | "studioStreamIds">) {
+    const studio = device.studioProxy;
+    if (!studio) return;
+    device.studioProxy = null;
+    clearTimeout(studio.idleTimer);
+    studio.server.close();
+}
+
+/** "whatsapp" is the session listener; "studio" is the isolated read-only YouTube listener (own allowlist, own caps, uncounted). */
+function createSocksProxy(deviceBase: Omit<ConnectedDevice, "proxyServer" | "proxyPort">, mode: "whatsapp" | "studio" = "whatsapp") {
     const proxyServer = createTcpServer((socket) => {
         socket.pause();
         void hasCurrentRuntimeOwnership(deviceBase as ConnectedDevice).then((owned) => {
@@ -255,8 +269,10 @@ function createSocksProxy(deviceBase: Omit<ConnectedDevice, "proxyServer" | "pro
                 const chunkBuffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
                 if (state.isStreaming) {
                     try {
-                        deviceBase.bytesToDevice += BigInt(chunkBuffer.length);
-                        deviceBase.lastBrowserTrafficAt = new Date();
+                        if (mode === "whatsapp") {
+                            deviceBase.bytesToDevice += BigInt(chunkBuffer.length);
+                            deviceBase.lastBrowserTrafficAt = new Date();
+                        }
                         sendFrame(deviceBase as ConnectedDevice, { type: "data", streamId, data: chunkBuffer.toString("base64") });
                     } catch {
                         fail();
@@ -288,11 +304,12 @@ function createSocksProxy(deviceBase: Omit<ConnectedDevice, "proxyServer" | "pro
                     const host = buffer.subarray(5, 5 + hostLength).toString("utf8");
                     const port = buffer.readUInt16BE(5 + hostLength);
                     buffer = buffer.subarray(requestLength);
-                    if (!isAllowedTunnelTarget({ host, port, allowedSuffixes: ALLOWED_SUFFIXES })) return fail(0x02);
-                    if (deviceBase.streams.size >= MAX_STREAMS_PER_DEVICE) return fail(0x01);
+                    if (!(mode === "studio" ? isAllowedStudioEgressTarget(host, port) : isAllowedTunnelTarget({ host, port, allowedSuffixes: ALLOWED_SUFFIXES }))) return fail(0x02);
+                    if (deviceBase.streams.size >= MAX_STREAMS_PER_DEVICE || (mode === "studio" && deviceBase.studioStreamIds.size >= STUDIO_EGRESS_MAX_STREAMS)) return fail(0x01);
 
                     streamId = randomUUID();
                     deviceBase.streams.set(streamId, socket);
+                    if (mode === "studio") deviceBase.studioStreamIds.add(streamId);
                     // SOCKS clients wait for the success response before sending TLS.
                     // Mark the request as a byte stream before resuming the socket so
                     // encrypted application data is never parsed as a second handshake.
@@ -335,6 +352,7 @@ async function disconnectDevice(device: ConnectedDevice, reason: string) {
     device.renewalFence.fence();
     for (const streamId of Array.from(device.streams.keys())) closeStream(device, streamId, false);
     device.proxyServer.close();
+    closeStudioProxy(device);
     if (device.ws.readyState === WebSocket.OPEN) {
         device.ws.close(
             device.runtimeLeaseEnforcement ? 4002 : 4003,
@@ -468,6 +486,8 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
         runtimeLeaseEnforcement,
         authorizationExpiresAt: distributedPlacement ? canary.authorizationExpiresAt : null,
         proxyGeneration: randomUUID(),
+        studioStreamIds: new Set<string>(),
+        studioProxy: null,
         streamHealth: new DeviceTunnelStreamHealth(3),
     };
     const proxyServer = createSocksProxy(base);
@@ -578,6 +598,7 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
             device.streamHealth.recordOpenResponse();
             if (!frame.ok) {
                 device.streams.delete(streamId);
+                device.studioStreamIds.delete(streamId);
                 socket.end(Buffer.from([0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0]));
                 return;
             }
@@ -588,7 +609,7 @@ async function acceptDevice(ws: WebSocket, req: IncomingMessage) {
         if (frame.type === "data" && frame.data) {
             const data = Buffer.from(frame.data, "base64");
             if (data.length > MAX_FRAME_BYTES) return closeStream(device, streamId);
-            device.bytesFromDevice += BigInt(data.length);
+            if (countsTowardSendProof(device.studioStreamIds, streamId)) device.bytesFromDevice += BigInt(data.length);
             socket.write(data);
             return;
         }
@@ -762,6 +783,31 @@ const server = createHttpServer(async (req, res) => {
             proxyGeneration: device.proxyGeneration,
             ...(device.ownership ? { ownership: device.ownership } : {}),
         });
+    }
+    if (url.pathname === "/studio/egress" && req.method === "POST") {
+        // Studio's read-only YouTube search borrows the Location's connected device network on an isolated listener.
+        if (!isInternalAuthorized(req)) return json(res, 401, { error: "Unauthorized" });
+        const body = await readSmallJson(req).catch(() => null) as { locationId?: unknown } | null;
+        const locationId = typeof body?.locationId === "string" ? body.locationId : "";
+        if (!locationId || locationId.length > 255) return json(res, 400, { error: "Invalid request" });
+        const device = Array.from(devicesByBridgeSession.values()).find(item => item.locationId === locationId && item.ws.readyState === WebSocket.OPEN);
+        if (!device || drainController.isDraining) return json(res, 503, { available: false, error: "No connected device network" });
+        if (!await hasCurrentRuntimeOwnership(device)) {
+            void disconnectDevice(device, "Runtime ownership was fenced");
+            return json(res, 503, { available: false, error: "Device tunnel runtime ownership is unavailable" });
+        }
+        if (!device.studioProxy) {
+            const server = createSocksProxy(device, "studio");
+            await new Promise<void>((resolve, reject) => { server.once("listening", resolve); server.once("error", reject); server.listen(0, "127.0.0.1"); });
+            const address = server.address();
+            if (!address || typeof address === "string") { server.close(); return json(res, 503, { available: false, error: "Studio proxy could not start" }); }
+            device.studioProxy = { server, port: address.port, idleTimer: setTimeout(() => undefined, 0) };
+        }
+        const studio = device.studioProxy;
+        clearTimeout(studio.idleTimer);
+        studio.idleTimer = setTimeout(() => closeStudioProxy(device), STUDIO_EGRESS_IDLE_MS);
+        studio.idleTimer.unref?.();
+        return json(res, 200, { available: true, proxyHost: "127.0.0.1", proxyPort: studio.port, gatewayGeneration: GATEWAY_GENERATION, idleMs: STUDIO_EGRESS_IDLE_MS });
     }
     return json(res, 404, { error: "Not found" });
 });

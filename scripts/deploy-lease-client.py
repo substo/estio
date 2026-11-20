@@ -56,12 +56,20 @@ def supervise(holder, parent, candidate, ready, command=None, heartbeat=3,
             if probe is not None:
                 expired = now - started >= timeout
                 if probe.poll() is not None or expired:
+                    elapsed = time.monotonic() - started
                     if expired:
                         stop_probe(probe)
-                        output, code = '', -1
+                        output, code, reason = '', -1, 'timeout'
                     else:
-                        output, _ = probe.communicate()
+                        output, stderr = probe.communicate()
                         code = probe.returncode
+                        # Avoid logging arbitrary Git/SSH output, which may contain credentials.
+                        reason = next((label for label, needle in (
+                            ('dns', 'could not resolve'),
+                            ('authentication', 'permission denied'),
+                            ('host key', 'host key verification failed'),
+                            ('connection', 'connection '),
+                        ) if needle in stderr.lower()), 'other stderr' if stderr else 'no stderr')
                     probe = None
                     if code == 0:
                         if output.split()[:1] != [candidate]:
@@ -76,8 +84,11 @@ def supervise(holder, parent, candidate, ready, command=None, heartbeat=3,
                         failures += 1
                         if failures >= 2:
                             raise RuntimeError('Canonical revision check failed twice; stopping deployment')
-                        print('Canonical revision check unavailable; retrying once with lease heartbeat active', file=sys.stderr)
-                    next_probe = time.monotonic() + heartbeat
+                        print(f'Canonical revision check unavailable after {elapsed:.2f}s '
+                              f'(exit {code}, {reason}); retrying once with lease heartbeat active',
+                              file=sys.stderr)
+                    # The retry spends the remaining verification budget immediately.
+                    next_probe = time.monotonic() + (heartbeat if code == 0 else 0)
             if probe is None and time.monotonic() >= next_probe:
                 probe = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                          text=True, start_new_session=True,

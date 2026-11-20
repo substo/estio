@@ -4,14 +4,12 @@ import { isStudioProviderUnavailable, STUDIO_UNAVAILABLE_MESSAGE, studioUnavaila
 export const deviceJson = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
 /** Heartbeats carry a whitelisted report of up to 16 KiB plus the envelope. */
 export const DEVICE_BODY_LIMIT = 32768;
-/** Only `complete` may carry a video transcript; its envelope is still validated per result type before SQL. */
-export const DEVICE_COMPLETE_BODY_LIMIT = 307200;
-export async function readDeviceJson(request: Request, limit = DEVICE_BODY_LIMIT): Promise<unknown> {
+export async function readDeviceJson(request: Request): Promise<unknown> {
   if (request.headers.get("content-type")?.split(";")[0].trim() !== "application/json") throw new StudioCommandError("Send JSON.", 415);
   const reader = request.body?.getReader(); if (!reader) throw new StudioCommandError("Missing command.");
   const chunks: Uint8Array[] = []; let bytes = 0;
   try { while (true) { const part = await reader.read(); if (part.done) break; bytes += part.value.byteLength;
-    if (bytes > limit) { await reader.cancel(); throw new StudioCommandError("Command too large.", 413); } chunks.push(part.value); }
+    if (bytes > DEVICE_BODY_LIMIT) { await reader.cancel(); throw new StudioCommandError("Command too large.", 413); } chunks.push(part.value); }
   } finally { reader.releaseLock(); }
   try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))); }
   catch { throw new StudioCommandError("Invalid JSON."); }

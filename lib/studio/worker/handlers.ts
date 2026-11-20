@@ -6,7 +6,7 @@ import type { StudioJob } from "./queue";
  * Messages are shown to workspace members, so never include secrets.
  */
 export class StudioJobError extends Error {
-  constructor(public readonly code: string, message: string, public readonly retryable: boolean, public readonly retryAfterSeconds?: number) {
+  constructor(public readonly code: string, message: string, public readonly retryable: boolean, public readonly retryAfterSeconds?: number, public readonly stage?: string) {
     super(message); this.name = "StudioJobError";
   }
 }
@@ -20,4 +20,4 @@ export type StudioJobHandler = (job: StudioJob, context: StudioJobContext) => Pr
 const diagnostic: StudioJobHandler = async (_job, context) => ({ ok: true, workerId: context.workerId, checkedAt: new Date().toISOString() });
 
 export const studioJobHandlers: Record<string, StudioJobHandler> = { "studio.diagnostic": diagnostic };
-export const studioJobKindLabels: Record<string, string> = { "studio.text_run": "Subscription text workflow", "studio.onboarding_fetch": "Business onboarding: reading your website", "studio.onboarding_research": "Business onboarding: research", "studio.onboarding_apply": "Business onboarding: saving research from your Mac", "studio.library_summary": "Library summary", "studio.brand_profile": "Brand profile", "studio.youtube_discovery": "YouTube discovery", "studio.knowledge_extract": "Knowledge extraction", "studio.script_brief": "Script brief", "studio.idea_review": "Idea review", "studio.diagnostic": "Worker check", "studio.transcribe_upload": "Transcribe upload" };
+export const studioJobKindLabels: Record<string, string> = { "studio.text_run": "Subscription text workflow", "studio.onboarding_fetch": "Business onboarding: reading your website", "studio.onboarding_research": "Business onboarding: research", "studio.onboarding_apply": "Business onboarding: saving research from your Mac", "studio.library_summary": "Library summary", "studio.brand_profile": "Brand profile", "studio.youtube_discovery": "YouTube discovery", "studio.knowledge_extract": "Knowledge extraction", "studio.script_brief": "Script brief", "studio.idea_review": "Idea review", "studio.diagnostic": "Worker check", "studio.youtube_search": "Related YouTube search (your Mac)", "studio.youtube_search_egress": "Related YouTube search (connected phone network)", "studio.transcribe_upload": "Transcribe upload" };

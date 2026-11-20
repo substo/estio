@@ -1,7 +1,9 @@
 import { StudioCommandError } from "./command-error";
+import { relatedResultSchema } from "./related-search-policy";
+import { readFramesReserve, readFramesVerify, readTranscriptChunk, readVideoResult, VIDEO_TOOL_NAMES } from "./video-transcription-policy";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const modelPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
-export const deviceOperations = ["heartbeat", "claim", "extend", "complete", "fail", "command"] as const;
+export const deviceOperations = ["heartbeat", "claim", "extend", "complete", "fail", "command", "video_transcript_chunk", "video_frames_reserve", "video_frames_verify"] as const;
 export type DeviceOperation = typeof deviceOperations[number];
 export const devicePairingOperations = ["start", "poll"] as const;
 export type DevicePairingOperation = typeof devicePairingOperations[number];
@@ -9,11 +11,11 @@ export type DeviceProvider = "codex" | "claude";
 /** A device counts as running while its last heartbeat is this recent (same window as hosted workers). */
 export const DEVICE_ONLINE_SECONDS = 90;
 /** Work a paired computer may run. Mac checks are always allowed; the others are granted while processing is On. */
-export const DEVICE_WORK_KINDS = ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.source_transcribe"] as const;
+export const DEVICE_WORK_KINDS = ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search"] as const;
 export type DeviceWorkKind = typeof DEVICE_WORK_KINDS[number];
 export const ONBOARDING_RESEARCH_KIND: DeviceWorkKind = "studio.onboarding_research";
 export const deviceWorkLabels: Record<DeviceWorkKind, string> = {
-  "studio.text_run": "Knowledge, idea reviews and script briefs", "studio.diagnostic": "Mac checks", "studio.library_summary": "Library summaries", "studio.onboarding_research": "Business research", "studio.source_transcribe": "Video transcripts",
+  "studio.text_run": "Knowledge, idea reviews and script briefs", "studio.diagnostic": "Mac checks", "studio.library_summary": "Library summaries", "studio.onboarding_research": "Business research", "studio.video_transcribe": "Video transcription (YouTube audio, captions, slides)", "studio.youtube_search": "Related YouTube search in your Mac's browser",
 };
 /** Local reasons a running companion is holding processing back (reported in its heartbeat). */
 export const DEVICE_BLOCK_REASONS = {
@@ -84,12 +86,28 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
   for (const key of ["instanceId", "platform", "arch", "version"])
     if (typeof v[key] === "string" && /^[A-Za-z0-9._:/ -]{1,100}$/.test(v[key])) result[key] = v[key];
   for (const key of ["healthy", "draining"]) if (typeof v[key] === "boolean") result[key] = v[key];
+  if (v.videoTemplateVersion === 1) result.videoTemplateVersion = 1;
+  if (v.sourceAssistVersion === 1) result.sourceAssistVersion = 1;
+  if (v.knowledgeCurationVersion === 1) result.knowledgeCurationVersion = 1;
+  if (v.knowledgeOutlineVersion === 2) result.knowledgeOutlineVersion = 2;
   if (Array.isArray(v.handlers)) result.handlers = v.handlers.filter((x, i, all) => (DEVICE_WORK_KINDS as readonly unknown[]).includes(x) && all.indexOf(x) === i);
   if (v.capacity && typeof v.capacity === "object" && !Array.isArray(v.capacity)) {
     const c = v.capacity as Record<string, unknown>;
     result.capacity = compact({ codex: typeof c.codex === "boolean" ? c.codex : undefined, claude: typeof c.claude === "boolean" ? c.claude : undefined });
   }
   if (Array.isArray(v.processingBlocked)) result.processingBlocked = v.processingBlocked.filter((x, i, all) => typeof x === "string" && x in DEVICE_BLOCK_REASONS && all.indexOf(x) === i);
+  if (v.video && typeof v.video === "object" && !Array.isArray(v.video)) {
+    const video = v.video as Record<string, unknown>;
+    const names = (VIDEO_TOOL_NAMES as readonly string[]);
+    const tools = video.tools && typeof video.tools === "object" && !Array.isArray(video.tools)
+      ? Object.fromEntries(Object.entries(video.tools as Record<string, unknown>).filter(([k, x]) => names.includes(k) && typeof x === "string" && /^[A-Za-z0-9._+ -]{1,60}$/.test(x))) : {};
+    result.video = { ready: video.ready === true, missing: Array.isArray(video.missing) ? video.missing.filter((x, i, all) => typeof x === "string" && names.includes(x) && all.indexOf(x) === i) : [], tools,
+      ...(typeof video.work === "string" && /^[a-z_]{1,40}$/.test(video.work) ? { work: video.work } : {}) };
+  }
+  if (v.youtubeSearch && typeof v.youtubeSearch === "object" && !Array.isArray(v.youtubeSearch)) {
+    const search = v.youtubeSearch as Record<string, unknown>;
+    result.youtubeSearch = { ready: search.ready === true, rank: search.rank === true, ...(typeof search.signedIn === "boolean" ? { signedIn: search.signedIn } : {}) };
+  }
   if (v.hardware && typeof v.hardware === "object" && !Array.isArray(v.hardware)) {
     const h = v.hardware as Record<string, unknown>;
     const power = h.power && typeof h.power === "object" && !Array.isArray(h.power) ? h.power as Record<string, unknown> : null;
@@ -103,7 +121,7 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
   }
   if (v.runtimes && typeof v.runtimes === "object" && !Array.isArray(v.runtimes)) {
     const r = v.runtimes as Record<string, unknown>;
-    result.runtimes = compact(Object.fromEntries(["ollama", "lmstudio", "mlx", "whispercpp", "python", "ffmpeg", "ytdlp", "tesseract", "parakeet"].map(key => [key, safeText(r[key], /^[A-Za-z0-9._+ -]{1,60}$/)])));
+    result.runtimes = compact(Object.fromEntries(["ollama", "lmstudio", "mlx", "whispercpp", "python", "ffmpeg"].map(key => [key, safeText(r[key], /^[A-Za-z0-9._+ -]{1,60}$/)])));
   }
   if (Array.isArray(v.localModels)) result.localModels = v.localModels.filter(x => typeof x === "string" && modelPattern.test(x)).slice(0, 100);
   for (const provider of ["codex", "claude"]) {
@@ -123,31 +141,6 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
     if (!longest.length) break; longest.pop();
   }
   return result;
-}
-/** A finished video-transcription job may carry the transcript itself, so `complete` bodies get a larger bound. */
-export const DEVICE_SOURCE_RESULT_BYTES = 262144;
-export const SOURCE_DECISIONS = ["transcribed", "skipped", "needs_confirmation"] as const;
-export const SOURCE_METHODS = ["local-parakeet-tdt-v3", "youtube-captions-fallback"] as const;
-/** Mac video-transcription outcome. Text is untrusted source data; SQL re-checks every bound before saving it. */
-export function readDeviceSourceResult(value: unknown): Record<string, unknown> {
-  const r = object(value);
-  valid(Object.keys(r).every(key => ["source", "provider", "model"].includes(key)));
-  valid(r.provider === "mac_local" && r.model === "native-default");
-  const s = object(r.source);
-  valid(Object.keys(s).every(key => ["decision", "score", "reason", "method", "text", "timedText", "visualNotes", "durationSeconds", "language", "truncated", "frameCount"].includes(key)));
-  valid(typeof s.decision === "string" && (SOURCE_DECISIONS as readonly string[]).includes(s.decision));
-  valid(s.score === undefined || (Number.isInteger(s.score) && Number(s.score) >= 0 && Number(s.score) <= 100));
-  valid(s.reason === undefined || (typeof s.reason === "string" && s.reason.length <= 600));
-  if (s.decision === "transcribed") {
-    valid(typeof s.method === "string" && (SOURCE_METHODS as readonly string[]).includes(s.method));
-    valid(typeof s.text === "string" && s.text.trim().length > 0 && s.text.length <= 100_000);
-    valid(s.timedText === undefined || (typeof s.timedText === "string" && s.timedText.length <= 150_000));
-    valid(s.visualNotes === undefined || (typeof s.visualNotes === "string" && s.visualNotes.length <= 20_000));
-    valid(s.durationSeconds === undefined || (typeof s.durationSeconds === "number" && s.durationSeconds >= 0 && s.durationSeconds <= 86_400));
-    valid(s.language === undefined || (typeof s.language === "string" && /^[A-Za-z-]{2,12}$/.test(s.language)));
-  }
-  valid(new TextEncoder().encode(JSON.stringify(r)).length <= DEVICE_SOURCE_RESULT_BYTES);
-  return r;
 }
 /** Largest research reply a Mac may return (the device request body is bounded at 32 KiB). */
 export const DEVICE_RESEARCH_RESULT_BYTES = 24576;
@@ -169,6 +162,13 @@ export function readDeviceTextResult(value: unknown): Record<string, unknown> {
   object(r.output);
   valid(new TextEncoder().encode(JSON.stringify(r)).byteLength <= 24576);
   return r;
+}
+/** A Related-video search result (studio.youtube_search): public video facts, optional model scores and a bounded trace.
+ * Without this reader the result fell through to the diagnostic reader and every search was rejected with "Invalid command". */
+export function readDeviceYoutubeSearchResult(value: unknown): Record<string, unknown> {
+  const parsed = relatedResultSchema.safeParse(object(value));
+  valid(parsed.success && JSON.stringify(parsed.data).length <= 30000);
+  return parsed.data as Record<string, unknown>;
 }
 export function readDeviceDiagnosticResult(value: unknown): Record<string, unknown> {
   const result = object(value);
@@ -225,10 +225,13 @@ export function readDeviceCommand(operation: DeviceOperation, value: unknown): R
     valid(Number.isInteger(v.leaseSeconds) && Number(v.leaseSeconds) >= 10 && Number(v.leaseSeconds) <= 3600);
     out.leaseSeconds = v.leaseSeconds;
   }
-  if (operation === "claim") { valid(Number.isInteger(v.limit) && Number(v.limit) >= 1 && Number(v.limit) <= 50); return { ...out, limit: v.limit, textReady: v.textReady === true, summaryReady: v.summaryReady === true, researchReady: v.researchReady === true, transcribeReady: v.transcribeReady === true }; }
+  if (operation === "claim") { valid(Number.isInteger(v.limit) && Number(v.limit) >= 1 && Number(v.limit) <= 50); return { ...out, limit: v.limit, textReady: v.textReady === true, summaryReady: v.summaryReady === true, researchReady: v.researchReady === true, videoReady: v.videoReady === true, youtubeReady: v.youtubeReady === true }; }
   valid(typeof v.jobId === "string" && uuid.test(v.jobId) && typeof v.leaseToken === "string" && uuid.test(v.leaseToken));
   Object.assign(out, { jobId: v.jobId, leaseToken: v.leaseToken });
-  if (operation === "complete") { out.result = v.result && typeof v.result === "object" && "output" in v.result && typeof v.result.output === "object" ? readDeviceTextResult(v.result) : v.result && typeof v.result === "object" && "source" in v.result ? readDeviceSourceResult(v.result) : v.result && typeof v.result === "object" && "research" in v.result ? readDeviceResearchResult(v.result) : readDeviceDiagnosticResult(v.result); }
+  if (operation === "video_transcript_chunk") return { ...out, ...readTranscriptChunk(v) };
+  if (operation === "video_frames_reserve") return { ...out, ...readFramesReserve(v) };
+  if (operation === "video_frames_verify") return { ...out, ...readFramesVerify(v) };
+  if (operation === "complete") { out.result = v.result && typeof v.result === "object" && "videos" in v.result ? readDeviceYoutubeSearchResult(v.result) : v.result && typeof v.result === "object" && "outcome" in v.result ? readVideoResult(v.result) : v.result && typeof v.result === "object" && "output" in v.result && typeof v.result.output === "object" ? readDeviceTextResult(v.result) : v.result && typeof v.result === "object" && "research" in v.result ? readDeviceResearchResult(v.result) : readDeviceDiagnosticResult(v.result); }
   if (operation === "fail") {
     const f = object(v.failure); valid(typeof f.code === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(f.code));
     valid(typeof f.message === "string" && f.message.length <= 500 && typeof f.retryable === "boolean");

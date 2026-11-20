@@ -7,7 +7,7 @@ import { defaultDeviceConfig, isIanaTimeZone, type StudioDeviceConfig } from "@/
 import type { StudioDeviceSummary } from "@/lib/studio/devices";
 import { buttonClass, endpoint, inputClass, providerReport } from "./shared";
 
-const laterReason = "Text work uses the selected subscription provider and model for Library summaries, knowledge extraction, idea reviews and script briefs. Transcription runs a pasted or approved YouTube video through this Mac's own yt-dlp, Parakeet, ffmpeg and tesseract (install with scripts/studio-companion-install-transcription.sh), using no AI subscription and no paid API";
+const laterReason = "Text work uses the selected subscription provider and model for Library summaries, knowledge extraction, idea reviews and script briefs. Transcription lets this Mac transcribe YouTube videos you choose (and approved channels after a relevance check) locally, never through a paid service";
 const launchReason = "Needs the installed Mac app (not built yet)";
 const list = (value: string) => value.split(/[\s,]+/).map(item => item.trim()).filter(Boolean);
 const configStatus: Record<StudioDeviceSummary["config"]["status"], string> = {
@@ -45,7 +45,7 @@ export function DeviceSetupForm({ device, canManage }: { device: StudioDeviceSum
     <fieldset disabled={!canManage || command.pending} className="space-y-4">
       <fieldset className="space-y-1">
         <legend className="font-medium">Features</legend>
-        <label className="flex items-center gap-2"><input type="checkbox" checked={config.features.transcription} onChange={event => set({ features: { ...config.features, transcription: event.target.checked } })} />Transcribe saved YouTube videos on this Mac</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={config.features.transcription} onChange={event => set({ features: { ...config.features, transcription: event.target.checked } })} />Video transcription (YouTube audio, captions fallback, slides)</label>
         <label className="flex items-center gap-2"><input type="checkbox" checked={config.features.text} onChange={event => set({ features: { ...config.features, text: event.target.checked } })} />Text work (summaries, reviews)</label>
         <p className="text-muted-foreground">{laterReason}.</p>
       </fieldset>

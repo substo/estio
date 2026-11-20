@@ -7,6 +7,7 @@ import { getStudioAccess } from "./access";
 import { requireOwnStudioCommandLocation } from "./paid-workspace";
 import { StudioCommandError } from "./command-error";
 import { StudioDbError } from "./db";
+import { executeVideoFrameOperation } from "./video-transcription";
 import { authorizeEstioSchedule, currentEstioScheduleAuthority } from "./schedule-authority";
 import {
   defaultDeviceConfig, deviceOnline, deviceResearchReadiness, type DeviceResearchReadiness, formatPairingCode, isAllowedProviderLoginUrl, PAIRING_CODE_ALPHABET, safeDeviceCapabilities,
@@ -114,8 +115,10 @@ export async function executeStudioDeviceCommand(token: string, brand: "estio" |
     if (!identity || !await authorizeEstio(identity.locationId, identity.approvedBy)) throw new StudioCommandError("Access denied.", 403);
     estioAuthorizedBy = identity.approvedBy;
   }
-  // Outermost device entry point: video transcription, then text workflows, onboarding research, then Library summaries, then the base device protocol.
-  return studioDb.call<unknown>("studio_transcribe_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy });
+  // Outermost device entry point: YouTube search in the Mac's browser, video transcription, then Mac text runs, onboarding research, Library summaries and the base device protocol.
+  const call = (observed?: unknown) => studioDb.call<unknown>("studio_youtube_search_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy, p_observed: observed });
+  if (operation === "video_frames_reserve" || operation === "video_frames_verify") return executeVideoFrameOperation(operation, call);
+  return call();
 }
 
 export const PAIRING_POLL_SECONDS = 5;

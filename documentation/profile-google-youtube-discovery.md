@@ -86,6 +86,23 @@ implement the applicable refresh/deletion policy and review the production
 consent/privacy presentation. The current slice does not claim production API
 policy approval or live OAuth verification.
 
+## Related videos on a saved source or idea
+
+The Related YouTube videos section runs one bounded public search as it comes
+near the viewport. It uses the record title and available saved topic text to
+prepare search phrases. Explore more opens an editable search and can offer an
+alternate phrase. Only the phrase goes to YouTube. The section shows up to
+three results initially and ten on request, in YouTube search order, excluding
+the starting video. Counts come from YouTube and description previews quote the
+publisher. The same public search quota and connection rules apply.
+
+Preview opens an embedded player on demand. Skip hides a result for that
+search during the visit. Add as reference saves or reuses the public Library
+bookmark and creates an audited outgoing link from the starting record in one
+transaction. After the save succeeds, Studio requests the existing paired Mac
+transcription. Unapproved public channels are eligible for search and manual
+selection. Channel approvals and scheduled tracking use the existing workflow.
+
 ## Runtime setup and activation
 
 Apply the new additive migration after the existing Studio migrations:
@@ -187,3 +204,100 @@ Primary implementation references: [Google web-server OAuth](https://developers.
 [playlistItems.list](https://developers.google.com/youtube/v3/docs/playlistItems/list),
 [search.list](https://developers.google.com/youtube/v3/docs/search/list), and
 [YouTube data handling policies](https://developers.google.com/youtube/terms/developer-policies).
+
+## Related videos: the paired Mac's browser (2026-11-18 owner decision)
+
+"Related YouTube videos" on a Library source or idea does **not** call the YouTube Data API. It queues a
+`studio.youtube_search` job on the requesting account's own paired Mac, which searches
+`youtube.com/results` (videos only, read-only) in its own Chrome profile, headless, and returns public
+title/channel/age/views text. The profile is `~/Library/Application Support/Estio Studio/youtube-browser`
+(override `STUDIO_YOUTUBE_PROFILE`). Run `npm run start:studio-companion -- youtube-login` once to sign in to
+YouTube in that profile (normal Chrome, no automation flags). Searching works signed out too; the profile only
+carries the owner's preferences. No YouTube cookies reach the server.
+
+- Needs Mac processing On, Google Chrome installed and companion `studio-companion-8` or newer. The job waits while
+  the Mac is offline (page shows "Waiting for your Mac…" and gives up after 3 minutes); a lease lost mid-search fails
+  instead of replaying; consent withdrawal cancels queued searches.
+- Browser failures (captcha, consent walls, layout change) fail the search with a plain message and are not retried
+  in another path.
+- Choosing a result is unchanged: it saves a research link and queues the paired-Mac transcription from Gap 1.
+- Provenance on saved links is `provider: "mac_browser"`.
+
+### Tier 2: the Location's connected device network (built 2026-11-19)
+
+If the account's own Mac cannot search (no paired Mac, processing off, no Chrome, or an old companion), Related videos
+queues a hosted `studio.youtube_search_egress` job instead. The hosted Studio worker asks the device-tunnel gateway
+(`POST /studio/egress`, internal secret, loopback only) for the Location's isolated Studio listener and runs the same
+read-only search in the server's headless Chrome with `--proxy-server=socks5://127.0.0.1:<port>` and DNS forced through
+the proxy, so the request leaves from the connected Android device's network.
+
+- **Only while the device is connected.** If the Location has no online bound Android device the job fails at once and
+  the page shows the Mac's own reason (for example "Pair your Mac in Setup"). It never searches from the server's IP.
+- **Isolated from WhatsApp.** The Studio listener is a second SOCKS port per connected device with its own allowlist
+  (`youtube.com`, `ytimg.com`, `gstatic.com`, `google.com`, `googleapis.com`, `ggpht.com`, `googleusercontent.com`, port
+  443 only; never WhatsApp hosts), a 16-stream cap, a 2-minute idle close, and its bytes are excluded from WhatsApp
+  send-proof counters (`lib/device-tunnel/studio-egress-policy.ts`). It reuses the existing runtime-ownership checks.
+- **Authority** is unchanged: Business member with AI-manager authority, 20 searches per minute, read-only, one attempt.
+- Saved links record `provider: "device_network_browser"` and the page says the search used the connected phone's network.
+- It consumes the phone's mobile data (a results page is roughly 1–2 MB).
+- Needs `DEVICE_TUNNEL_INTERNAL_SECRET` (and optionally `DEVICE_TUNNEL_GATEWAY_URL`) in the Studio worker's environment.
+  Without it the job fails with "not configured on this server".
+- Deploying this changes the gateway, so the owned deploy script restarts it and the WhatsApp browser briefly reconnects.
+
+### Tier 3: YouTube Data API fallback (2026-11-19 owner instruction)
+
+When the Mac is not ready and no connected device network is online (the normal case for a Substo workspace with only a
+Mac), Related videos falls back to the YouTube Data API, using the profile's own YouTube connection or the server key.
+The Settings page tells the owner why the Mac was not used (for example "update the companion"), and an API failure
+reports both reasons. Rate limits and missing authority never fall back.
+
+- Every API call goes through the existing per-workspace discovery cap (50 operations per UTC day, `studio_youtube_request_slot`),
+  which is the usage record.
+- **Scheduled, not built:** usage pricing on top of the flat fee (per-operation price, balance, invoicing). Until it exists
+  the cap is the only control.
+
+## Related videos: planning, relevance ranking and the reasoning log (2026-11-19)
+
+The first version only turned the source title plus its most frequent words into one keyword query and showed whatever YouTube
+returned, so results shared words with the source without covering its subject (for example "doctor lawyer" pulling clickbait
+about fake followers). A model never judged relevance. Now:
+
+1. **Plan.** The Mac's own signed-in Codex/Claude subscription (the model chosen in Setup, workflow `related_video_search`)
+   reads the source title/summary, the Business profile, pinned knowledge and approved Library titles and writes 2–4 search
+   queries around the source's core subject.
+2. **Search.** Each query runs in the Mac's Chrome (tier 1). If the Mac cannot search but can still run a model, the Data API
+   finds candidates from the keyword query and the Mac **ranks** them (rank-only job, no browser needed).
+3. **Rank.** The model scores every candidate 0–100 with a one-sentence reason (subject match, not popularity). 60+ shows,
+   40–59 and below go under "Less relevant", and each card shows its score and reason.
+4. **No model, no guess.** If no signed-in subscription model with capacity exists, results are shown collapsed under "Not
+   checked for relevance" with the reason (for example "update the Studio companion"). No paid API is used for judging.
+
+**The reasoning log.** Every run is stored in `studio.studio_related_runs` (service-only; written by
+`studio_record_related_run`, idempotent per job) and shown at `/studio/related-history/<source or idea id>` ("How these were
+chosen" under Related videos): route, which queries came from the model vs keywords vs you, the exact planner and ranker
+prompts (plus the capability-contract version prepended by the Mac), the provider and model, the model's raw reply, timings,
+notes about any degraded step, and every candidate's score, band and reason. Prompts are shortened if a result would exceed
+the Mac's 32 KB reply limit.
+
+Needs companion `studio-companion-8` (reports `youtubeSearch.rank`); Settings → Connected computer shows readiness. The
+device-network tier only searches; it cannot rank, so it is labelled unchecked.
+
+### Diagnosing a failed Related search (2026-11-19)
+
+Every search runs as one job (`studio.youtube_search`), so the stage is recoverable from three places that share the job id
+(the page shows `ref <first 8 characters>`): `studio.studio_jobs` / `studio_job_events` (queued, started, failed, with the code),
+the Mac log `~/Library/Logs/Estio/studio-companion.log` (`job_failed` with `code` and, for an unclassified failure, `stage`:
+`device_complete_failed` means the server refused the Mac's result; an error class such as `TypeError` means the handler threw),
+and the run log page `/studio/related-history/<id>` for runs that completed.
+
+Failure stages and their codes: **queue/route** (`unexpected_error` with `stage: device_complete_failed`: the device HTTP route
+rejected the result), **SQL** (`22023` Invalid command from `studio_youtube_search_device_command`), **browser**
+(`youtube_search_failed (timeout | navigation | profile_in_use | browser_launch | browser_closed | page_data)`, `youtube_blocked`,
+`youtube_browser_missing`), **provider** (a model step never fails the search; it adds a note and the results are shown unranked),
+**parser** (`related_internal_error (<field path>: <issue>)`), **lease** (`worker_lease_expired`: the Mac stopped or slept).
+
+**Root cause fixed:** the device HTTP route validates a job's `complete` result with a per-kind reader
+(`readDeviceCommand` in `lib/studio/devices-policy.ts`). A search result matched none of them and fell through to the diagnostic
+reader (allowed keys `ok/workerId/checkedAt/provider/model/output/summary/durationMs`, at most 4 KB), so the route answered
+"Invalid command" and no Related search ever completed in production. `readDeviceYoutubeSearchResult` now validates it with the
+strict shared schema. Searches are never retried automatically; a failure always says so and carries the `ref`.

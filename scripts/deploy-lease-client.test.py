@@ -30,13 +30,13 @@ class Holder:
 
 
 class LeaseTests(unittest.TestCase):
-    def run_watch(self, source, holder=None, local_check=lambda: REV, timeout=.5, max_age=1):
+    def run_watch(self, source, holder=None, local_check=lambda: REV, timeout=.5, max_age=1, heartbeat=.03):
         holder = holder or Holder()
         with tempfile.TemporaryDirectory() as directory:
             ready = Path(directory) / 'ready'
             with self.assertRaises(RuntimeError) as failure:
                 lease.supervise(holder, os.getpid(), REV, ready,
-                    command=[sys.executable, '-c', source], heartbeat=.03,
+                    command=[sys.executable, '-c', source], heartbeat=heartbeat,
                     timeout=timeout, max_age=max_age, poll=.005, local_check=local_check)
             return str(failure.exception), holder, ready.exists()
 
@@ -59,6 +59,27 @@ class LeaseTests(unittest.TestCase):
         self.assertIn('failed twice', message)
         self.assertGreaterEqual(len(holder.beats), 3)
         self.assertFalse(ready)
+
+    def test_timed_out_probe_retries_within_remaining_freshness_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            counter = Path(directory) / 'count'
+            source = f"""
+from pathlib import Path
+import time
+counter = Path({str(counter)!r})
+count = int(counter.read_text()) + 1 if counter.exists() else 1
+counter.write_text(str(count))
+if count == 2:
+    time.sleep(5)
+elif count == 3:
+    time.sleep(.08)
+print({REV!r})
+"""
+            message, _, ready = self.run_watch(source, Holder(1.25),
+                timeout=.35, max_age=.75, heartbeat=.22)
+            self.assertTrue(ready)
+            self.assertIn('lease lost', message)
+            self.assertGreaterEqual(int(counter.read_text()), 3)
 
     def test_stale_verification_stops_even_before_probe_timeout(self):
         message, _, ready = self.run_watch('import time; time.sleep(5)', timeout=.5, max_age=.08)

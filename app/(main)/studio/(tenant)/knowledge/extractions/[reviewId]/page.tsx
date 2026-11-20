@@ -1,13 +1,18 @@
 import { studioRouteParams } from "@/lib/studio/route-context";
 import Link from "next/link";
-import {notFound} from "next/navigation";
-import {getKnowledgeExtraction} from "@/lib/studio/knowledge-extraction";
+import {notFound,redirect} from "next/navigation";
+import {getKnowledgeExtraction,getKnowledgeOutline} from "@/lib/studio/knowledge-extraction";
 import {safeStudioSourceUrl} from "@/lib/studio/library-policy";
 import {RefreshIdeaReview} from "../../../content/idea-reviews/start-form";
+import {KnowledgeOutlineDetail} from "../outline-detail";
 import {ExtractionApplyForm} from "../extraction-forms";
 export const dynamic="force-dynamic";
-export default async function ExtractionDetail({params}:{params: Promise<{ reviewId:string }>}){
- const {locationId,reviewId}=await studioRouteParams(params);const data=await getKnowledgeExtraction(locationId,reviewId);if(!data)notFound();const {review,state,job}=data;const snapshot=review.snapshot;
+export default async function ExtractionDetail({params,searchParams}:{params: Promise<{ reviewId:string }>; searchParams: Promise<{ passage?: string; transcript?: string }>}){
+ const {locationId,reviewId}=await studioRouteParams(params);
+ const outline=await getKnowledgeOutline(locationId,reviewId);
+ if(outline)return <KnowledgeOutlineDetail outline={outline} query={await searchParams} />;
+ const data=await getKnowledgeExtraction(locationId,reviewId);if(!data)notFound();const {review,state,job}=data;const snapshot=review.snapshot;
+ if(snapshot.mode==="outline")redirect(`/studio/knowledge/extractions/${snapshot.inputId}`);
  const available=review.result?.findings.map((f,index)=>({index,statement:f.statement})).filter(f=>!state.findings.some(a=>a.findingIndex===f.index))??[];
  const url=safeStudioSourceUrl(snapshot.source.url);
  return <main className="mx-auto max-w-4xl space-y-6 p-6 md:p-10"><header className="space-y-2"><Link href={`/studio/knowledge/extractions`} className="text-sm text-primary hover:underline">Knowledge extractions</Link>
