@@ -16,6 +16,7 @@ Before any production mutation:
 3. Follow [release workflow](../../../documentation/release-workflow.md). Require `release/studio-go-live` equal to the freshly fetched remote tip, containing the production manifest revision. All tracked inputs must be committed; untracked/ignored uploaded inputs are refused. Task worktrees merge first. Never deploy a sibling branch or dirty root.
 4. Confirm `Caddyfile` and `.env.prod` exist without printing secrets. Check that required local dependencies are available.
 5. Run targeted tests appropriate to the changed area. The deployment script performs the production build itself; avoid a redundant full build unless the risk or recent failure justifies it.
+6. Check available space with `df -h .` from the canonical checkout before building or acquiring the lease. Allow room for dependencies, the production build, and the release artifact. If space is tight, use the read-only inventory in [local worktree closeout](../../../documentation/release-workflow.md#local-worktree-closeout) to identify reviewed cleanup candidates before proceeding.
 
 If the branch, commit, or dirty-tree scope is surprising, stop before mutation and obtain direction.
 
@@ -60,6 +61,8 @@ After a successful script exit, verify proportionately:
 - changed user-facing or operational behavior passes a focused smoke test.
 
 Return a concise report containing the deployed commit and dirty-tree state, schema mode, checks run, active slot or process when known, health/version results, service state, warnings, and rollback status. Never include secret values.
+
+After deployment and verification have finished and the lease has been released, check local free space again. Review the completed task worktrees using the [closeout procedure](../../../documentation/release-workflow.md#local-worktree-closeout). Keep the canonical checkout, required release artifacts, and any checkout still in use by the paired Mac companion. Record any cleanup or why it was deferred.
 
 ## Mandatory server guards
 

@@ -1,5 +1,14 @@
 # One canonical release
 
+## Local worktree closeout
+
+1. **Inventory first.** Check free space with `df -h` on the build volume and list registered checkouts with `git worktree list --porcelain`. Use `du -sh` on existing task checkouts' `.next` and `node_modules` paths to find the largest candidates. Treat symlinked dependencies as links. List each candidate's path, size, and reason to keep or clean it before making changes.
+2. **Confirm the checkout can be retired.** Verify the task's commits are pushed and the work is present in the intended integration branch. Run `git -C <path> status --short --untracked-files=all` and inspect ignored files as well (`git -C <path> status --short --ignored`). Preserve local evidence, configuration, and any other non-regenerable files. Check that no T3 session, editor, build, dev server, deploy, or companion is using the path. Protect the shared root and canonical release checkout. If ownership, integration, or use is uncertain, keep the checkout and record why.
+3. **Reclaim only reviewed space.** Use `git worktree remove <path>` without `--force` for a confirmed clean, idle, integrated task checkout. This leaves the branch intact. If the checkout is still needed, remove only verified regenerable output such as `.next` after its processes stop. Keep artifacts needed for an active or pending release. Never follow a dependency symlink into a shared install or use broad `git clean` against a checkout.
+4. **Report and defer.** Check free space again and record what was reclaimed and what remains protected. Use `git worktree prune --dry-run --verbose` to identify metadata for directories already gone. Pruning that metadata is separate from reclaiming build space. Use manual, reviewed cleanup at closeout or when space is tight, with no automatic deletion.
+
+## Release procedure
+
 Tasks run in their own worktrees. Merge reviewed work into `release/studio-go-live` using Build's existing merge flow or a reviewed Git merge; preserve both parents' behavior and migrations. This is the only deployable branch, and its candidate must equal the freshly fetched remote tip. The canonical clean checkout is `/tmp/estio-combined-release-20261105`; the shared root is a working checkout on `work/shared-root-20261105`, retaining SIMRelay. Never deploy a task branch or copy a sibling tree over production.
 
 Run focused checks and commit/push all release inputs, then run `PRISMA_SCHEMA_SYNC_MODE=migrate-only ./deploy-local-build.sh` from the canonical checkout. The owned script builds once. No detached/background deploy or manual Caddy/PM2 cutover. Production authorization must cover the concrete release; existing explicit authorization persists. Do not interpret a test/build request as deployment approval.
