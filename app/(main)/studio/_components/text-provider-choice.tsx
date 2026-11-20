@@ -1,9 +1,10 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { StudioTextProvider } from "@/lib/studio/text-provider";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
 type Readiness = Record<StudioTextProvider, { ready: boolean; reason: string }>;
 export function StudioTextProviderChoice({ provider, onChange, fullSource = false, videoTemplate = false, sourceAssist = false, selectedIdea = false, stagedCreation = false, compact = false }: { provider: StudioTextProvider; onChange: (value: StudioTextProvider) => void; fullSource?: boolean; videoTemplate?: boolean; sourceAssist?: boolean; selectedIdea?: boolean; stagedCreation?: boolean; compact?: boolean }) {
+  const controlId = useId();
   const headers = useStudioTenantHeaders();
   const tenant = headers["X-Studio-Tenant"];
   const [state, setState] = useState<Readiness | null>(null);
@@ -14,8 +15,8 @@ export function StudioTextProviderChoice({ provider, onChange, fullSource = fals
     return () => controller.abort();
   }, [tenant, fullSource, videoTemplate, sourceAssist, selectedIdea, stagedCreation]);
   if (compact) return <div className="flex flex-wrap items-center gap-2 text-xs">
-    <label className="sr-only" htmlFor="assistant-model">Process with</label>
-    <select id="assistant-model" className="min-h-9 rounded-md border bg-background px-2 text-xs" value={provider} onChange={e => onChange(e.target.value as StudioTextProvider)}>
+    <label className="sr-only" htmlFor={controlId}>Process with</label>
+    <select id={controlId} className="min-h-9 rounded-md border bg-background px-2 text-xs" value={provider} onChange={e => onChange(e.target.value as StudioTextProvider)}>
       <option value="subscription">My Mac subscription</option><option value="openai">Location OpenAI API (paid)</option>
     </select>
     <span role="status" className={state?.[provider]?.ready === false ? "text-destructive" : "text-muted-foreground"}>{state ? (state[provider]?.ready ? "Ready" : state[provider]?.reason) : failed ? "Could not check readiness. You can still try; the server will say if it is not ready." : "Checking…"}</span>

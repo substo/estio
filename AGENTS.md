@@ -23,6 +23,10 @@ Read [AI workflows](documentation/ai-workflows.md) before changing providers, AI
 
 - `video-editor/` is the native macOS video editor (Swift, SwiftPM) used by both apps. It is not part of the Next.js build or the server deploy. Follow `video-editor/AGENTS.md` when working there.
 
+## Studio product direction
+
+Read [Studio product concept](documentation/studio-product-concept.md) before changing Studio navigation, Assistant modes, or creation. Source-led research and creation share the source page and its Assistant.
+
 ## UI design
 
 Follow [UI design principles](documentation/ui-design-principles.md). The first viewport serves the page's primary task: collection screens put existing content and browsing controls first, with secondary creation disclosed through compact actions. This does not require every form to be a modal. Verify populated/empty/mobile and keyboard disclosure states; do not surface idle automation telemetry.

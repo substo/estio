@@ -8,8 +8,9 @@ import { listStudioRecordUploads } from "./uploads";
 export async function getStudioRecordRelations(access: StudioAccess, recordId: string, includeIncoming = false) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(recordId)) throw new Error("Invalid Studio record identifier.");
   const locationId = access.locationId;
-  const links = await studioDb.rows<{ id: string; title: string; kind: string; hasScriptEvidence: boolean }>(Prisma.sql`
-    select distinct r.id, r.title, r.kind,
+  const links = await studioDb.rows<{ id: string; title: string; kind: string; hasScriptEvidence: boolean; stagedSourceId: string | null; archived: boolean }>(Prisma.sql`
+    select distinct r.id, r.title, r.kind, r.archived,
+      r.payload#>>'{creation,source,id}' AS "stagedSourceId",
       btrim(left(coalesce(nullif(r.payload->>'transcript',''),nullif(r.payload->>'notes',''),r.summary,''),600)) <> '' as "hasScriptEvidence"
     from studio.studio_record_links l
     join studio.studio_records r on r.id = case when ${includeIncoming} and l.target_id = ${recordId}::uuid then l.source_id else l.target_id end and r.location_id = l.location_id

@@ -1,5 +1,7 @@
 # Staged Studio creation
 
+See the [Studio product concept](studio-product-concept.md) for the source workspace interaction and acceptance criteria.
+
 Open **Create with Studio** in Content or on an active Library reference. Both entries open the same editor. The confirmed brief saves as a Content piece in the active Location. Reference entry creates the research link in that same transaction. Use **Continue in Studio** from the Content record to reopen it.
 
 The first decision keeps the publisher, intended viewer, goal, and angle separate. Selecting **Use my brief as written** keeps a rich brief intact. The reference is a separate inspiration input. A blank brief needs a confirmed direction before generation. An explicit audience, publisher, goal, or angle change in generation feedback returns the user to the direction decision. An approved Angle stage records a specific creative angle within the existing direction.

@@ -1,3 +1,7 @@
+import { CreationWorkspace } from "../../../_components/creation-workspace";
+import { getCreationPage } from "@/lib/studio/creation";
+import { CREATION_STAGES } from "@/lib/studio/creation-policy";
+import { getStudioScriptTemplateChoices } from "@/lib/studio/script-templates";
 import { randomUUID } from "node:crypto";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -22,7 +26,7 @@ import { SourcePlayer } from "../../../_components/source-player";
 import { ExpandableText } from "../../../_components/expandable-text";
 import { SourceTabs, type SourceTab } from "../../../_components/source-tabs";
 import { KnowledgeOutlineDetail } from "../../knowledge/extractions/outline-detail";
-import { SourceWorkspaceProvider } from "../../../_components/source-workspace";
+import { SourceWorkArea, SourceWorkspaceProvider } from "../../../_components/source-workspace";
 import { NotesPanel } from "../../../_components/notes-panel";
 import { IdeaPanel } from "../../../_components/idea-panel";
 import { SourceTemplatePanel } from "../../../_components/source-template-panel";
@@ -32,7 +36,7 @@ import { SourceAssistant } from "../../../_components/source-assistant";
 export const dynamic = "force-dynamic";
 const card = "scroll-mt-16 space-y-3 rounded-xl border bg-card p-4 md:p-5";
 
-export default async function StudioLibraryRecordPage({ params, searchParams }: { params: Promise<{ recordId: string }>; searchParams: Promise<{ knowledgeReview?: string }> }) {
+export default async function StudioLibraryRecordPage({ params, searchParams }: { params: Promise<{ recordId: string }>; searchParams: Promise<{ knowledgeReview?: string; draft?: string; mode?: string; stage?: string }> }) {
   const { locationId, recordId } = await studioRouteParams(params);
   const result = await getStudioLibraryRecord(locationId, recordId);
   if (!result) notFound();
@@ -43,13 +47,23 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
   const youtube = canonicalYoutubeVideo(view.url);
   const isSource = record.kind === "reference";
   const active = isSource && !record.archived;
-  const [pendingUploads, latestOutline, videoStatus, knowledgeInputs] = await Promise.all([
+  const query = await searchParams;
+  const draftId = links.find(link => link.id === query.draft && link.kind === "content")?.id;
+  const creationData = async () => {
+    if (!active) return null;
+    const data = await getCreationPage(locationId, draftId, recordId) ?? (draftId ? await getCreationPage(locationId, undefined, recordId) : null);
+    if (!data) return null;
+    const { options } = await getStudioScriptTemplateChoices(locationId, data.record?.templateId);
+    return { ...data, templates: options.map(({ id, name, version }) => ({ id, name, version })) };
+  };
+  const [pendingUploads, latestOutline, videoStatus, knowledgeInputs, creation] = await Promise.all([
     listPendingStudioUploads(locationId, recordId),
     active ? getLatestKnowledgeOutline(locationId, recordId) : null,
     active && youtube ? getVideoStatus(locationId, recordId).catch(() => null) : null,
     active ? getKnowledgeExtractionInputs(locationId, recordId).catch(() => null) : null,
+    creationData(),
   ]);
-  const requestedReview = (await searchParams).knowledgeReview;
+  const requestedReview = query.knowledgeReview;
   const requestedOutline = active && typeof requestedReview === "string" && requestedReview !== latestOutline?.id
     ? await getKnowledgeOutline(locationId, requestedReview).catch(() => null) : null;
   const outline = requestedOutline?.sourceId === recordId ? requestedOutline
@@ -107,7 +121,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
   const scriptPanel = <div className="space-y-4">
     {panelHead("Script", null, <InfoTip label="About scripts">Ideas keep this source linked as research; nothing is copied or approved. Use the assistant's Idea or Script template modes to create them.</InfoTip>)}
     <IdeaPanel locationId={locationId} sourceId={recordId} ideaId={randomUUID()} archived={record.archived} />
-    {contentLinks.length ? <ul className="space-y-1 text-sm">{contentLinks.map(linked => <li key={linked.id}><Link className="text-primary hover:underline" href={`/studio/content/${linked.id}`}>{linked.title}</Link></li>)}</ul> : <p className="text-sm text-muted-foreground">No ideas or scripts from this source yet.</p>}
+    {contentLinks.length ? <ul className="space-y-1 text-sm">{contentLinks.map(linked => <li key={linked.id}><Link className="text-primary hover:underline" href={creation && !linked.archived && linked.stagedSourceId === recordId ? `?mode=create&draft=${linked.id}` : `/studio/content/${linked.id}`}>{linked.title}</Link></li>)}</ul> : <p className="text-sm text-muted-foreground">No ideas or scripts from this source yet.</p>}
     {youtube ? <SourceTemplatePanel locationId={locationId} sourceId={recordId} /> : null}
   </div>;
   const knowledgePanel = <div className="space-y-3">
@@ -129,22 +143,25 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     { id: "more", label: "Files", panel: moreLinks },
   ];
 
-  return <SourceWorkspaceProvider><main className="mx-auto w-full min-w-0 max-w-7xl space-y-3 p-4 pb-24 md:p-6 lg:pb-6">
+  return <SourceWorkspaceProvider startInCreation={Boolean(creation) && query.mode === "create"} draftId={creation?.record?.id}><main className="mx-auto w-full min-w-0 max-w-7xl space-y-3 p-4 pb-24 md:p-6 lg:pb-6">
     {breadcrumb}
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
-      <div className="flex min-w-0 flex-col gap-4">
+      <SourceWorkArea creation={creation && <CreationWorkspace key={creation.record?.id ?? recordId}
+        recordId={creation.record?.id ?? randomUUID()} initial={creation.record} source={creation.source}
+        initialStage={CREATION_STAGES.find(stage => stage.toLowerCase() === query.stage)}
+        templates={creation.templates} publisher={creation.publisher} history={creation.runs} linkedDrafts={creation.linkedDrafts} />}
+        research={<div className="flex min-w-0 flex-col gap-4">
         <div className="grid gap-4 md:grid-cols-[minmax(0,320px)_minmax(0,1fr)] md:items-start">
           <SourcePlayer title={record.title} thumbnail={view.thumbnail} videoId={youtube?.videoId ?? null} url={view.url} portrait={view.portrait} />
           <div className="min-w-0 space-y-3">
             {header}
-            {active && record.kind === "reference" ? <Link href={`/studio/content/create?source=${recordId}`} className="inline-flex min-h-11 items-center rounded-md border bg-background px-3 text-sm font-medium hover:bg-accent">Create with Studio</Link> : null}
             {creator && !links.some(link => link.kind === 'channel') && view.url ? <LibrarySourceAction locationId={locationId} url={creator.channelUrl} sourceId={recordId} sourceVersion={record.version} /> : null}
             <ExpandableText text={value('description')} empty="none saved." />
           </div>
         </div>
         <SourceTabs tabs={tabs} />
-      </div>
-      <SourceAssistant locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} canRelated={active} archived={record.archived} knowledgeInputs={knowledgeInputs?.inputs ?? []} canTemplate={Boolean(youtube) && hasTranscript} />
+      </div>} />
+      <SourceAssistant canCreate={Boolean(creation)} locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} canRelated={active} archived={record.archived} knowledgeInputs={knowledgeInputs?.inputs ?? []} canTemplate={Boolean(youtube) && hasTranscript} />
     </div>
   </main></SourceWorkspaceProvider>;
 }

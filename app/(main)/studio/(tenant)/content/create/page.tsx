@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { studioRouteParams } from "@/lib/studio/route-context";
 import { CREATION_STAGES } from "@/lib/studio/creation-policy";
 import { recordLinkId } from "@/lib/studio/record-link-policy";
@@ -18,8 +18,14 @@ export default async function CreateWithStudio({ params, searchParams }: {
   const { draft, source, stage } = await searchParams;
   const initialStage = CREATION_STAGES.find(item => item.toLowerCase() === stage);
   if ((draft && (typeof draft !== "string" || !recordLinkId(draft))) || (source && (typeof source !== "string" || !recordLinkId(source))) || (draft && source)) notFound();
-  const data = await getCreationPage(locationId, draft, source);
+  if (source) redirect(`/studio/library/${source}?mode=create`);
+  const data = await getCreationPage(locationId, draft);
   if (!data) notFound();
+  if (draft && data.source) {
+    const query = new URLSearchParams({ mode: "create", draft });
+    if (initialStage) query.set("stage", initialStage.toLowerCase());
+    redirect(`/studio/library/${data.source.id}?${query}`);
+  }
   const { options } = await getStudioScriptTemplateChoices(locationId, data.record?.templateId);
   return <main className="mx-auto w-full min-w-0 max-w-5xl space-y-5 px-4 py-6 sm:px-8 sm:py-9">
     <header className="space-y-3">
