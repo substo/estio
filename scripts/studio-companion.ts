@@ -21,8 +21,11 @@ import { readUsage } from "../lib/build/usage";
 import { createLibrarySummaryHandler } from "../lib/studio/companion/library-summary";
 import { createOnboardingResearchHandler, subscriptionCapacity } from "../lib/studio/companion/onboarding-research";
 import { DEVICE_BLOCK_REASONS } from "../lib/studio/devices-policy";
+import { createSourceTranscribeHandler } from "../lib/studio/companion/source-transcribe";
+import { probeTranscriptionTools, resolveMediaTools, transcribeYoutube, youtubeMetadata } from "../lib/studio/companion/source-media";
+import { runNativeProcess } from "../lib/studio/companion/process";
 
-const version = "studio-companion-4";
+const version = "studio-companion-5";
 const quotaMs = 5 * 60_000;
 const quotaHelper = () => path.join(os.homedir(), "Applications/QuotaCell.app/Contents/Helpers/CodexBarCLI");
 const rediscoverMs = 10 * 60_000;
@@ -62,7 +65,13 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
   try {
     const adapters = { codex: createLocalTextAdapter("codex"), claude: createLocalTextAdapter("claude") };
     const readiness = async () => ({ codex: await adapters.codex.readiness(controller.signal), claude: await adapters.claude.readiness(controller.signal) });
-    let [providers, discovery]: [Awaited<ReturnType<typeof readiness>>, Discovery] = await Promise.all([readiness(), discover()]);
+    // yt-dlp, Parakeet, ffmpeg and tesseract live in the companion's own environment; report versions and what is missing.
+    let transcription: Awaited<ReturnType<typeof probeTranscriptionTools>> = { ready: false, missing: [], runtimes: {} };
+    const discoverAll = async (): Promise<Discovery> => {
+      const [found, tools] = await Promise.all([discover(), probeTranscriptionTools()]);
+      transcription = tools; return { ...found, runtimes: { ...found.runtimes, ...tools.runtimes } };
+    };
+    let [providers, discovery]: [Awaited<ReturnType<typeof readiness>>, Discovery] = await Promise.all([readiness(), discoverAll()]);
     if (command === "readiness") { console.log(JSON.stringify({ ...providers, ...discovery })); return; }
     const { config, credentials, migrated } = await loadCredentials().catch(error => {
       throw error instanceof Error && error.message === "keychain_write_failed" ? error : new Error("not_paired"); });
@@ -76,7 +85,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const usageNow = async () => { if (Date.now() - quotaAt >= quotaMs) { quota = await readUsage(quotaHelper()).catch(() => ({})); quotaAt = Date.now(); } return quota; };
     await usageNow();
     const gate = () => localGate({ state: settings.state, config: settings.config, power: discovery.hardware.power, freeDiskGb: discovery.hardware.freeDiskGb });
-    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run"], ...providers, ...discovery,
+    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.source_transcribe"], ...providers, ...discovery,
       capacity: subscriptionCapacity(quota), processingBlocked: gate().reasons.filter(reason => reason in DEVICE_BLOCK_REASONS) });
     const researchReady = () => {
       const capacity = subscriptionCapacity(quota);
@@ -98,7 +107,8 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
         .finally(() => active.delete(cmd.provider));
       active.set(cmd.provider, task);
     };
-    const inner = createDeviceStudioQueue(credentials, { capabilities, textReady: () => settings.config.features.text && Boolean(settings.config.textProvider) && researchReady(), summaryReady: () => settings.config.features.text && gate().processing, researchReady, configAck: () => settings.pendingAck,
+    const inner = createDeviceStudioQueue(credentials, { capabilities, textReady: () => settings.config.features.text && Boolean(settings.config.textProvider) && researchReady(), summaryReady: () => settings.config.features.text && gate().processing, researchReady,
+      transcribeReady: () => settings.config.features.transcription && gate().processing && transcription.ready, configAck: () => settings.pendingAck,
       onHeartbeat: (state, sentAck) => {
         if (settings.update(state, sentAck)) { log({ event: "config_applied", version: settings.appliedVersion, status: settings.pendingAck?.status }); pulse(); }
         if (state && !once) for (const cmd of state.commands) runCommand(cmd);
@@ -121,7 +131,11 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const research = createOnboardingResearchHandler({ adapter: p => adapters[p], enabled: () => gate().processing, usage: usageNow });
     const withShutdown = (handler: StudioJobHandler): StudioJobHandler => (job, context) => handler(job, { ...context, signal: AbortSignal.any([context.signal, controller.signal]) });
     const textRun = createSubscriptionTextRunHandler({ adapter: p => adapters[p], usage: usageNow, enabled: () => gate().processing, config: () => settings.config, configVersion: () => settings.appliedVersion });
-    const handlers: Record<string, StudioJobHandler> = { "studio.text_run": withShutdown(textRun), "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
+    const sourceTranscribe = createSourceTranscribeHandler({ adapter: p => adapters[p], usage: usageNow, enabled: () => gate().processing, config: () => settings.config,
+      tools: async () => { transcription = await probeTranscriptionTools(); return transcription; },
+      metadata: (url, signal) => youtubeMetadata(url, { run: runNativeProcess, tools: resolveMediaTools(), signal }),
+      transcribe: (url, signal, progress) => transcribeYoutube(url, { run: runNativeProcess, tools: resolveMediaTools(), signal, progress }) });
+    const handlers: Record<string, StudioJobHandler> = { "studio.source_transcribe": withShutdown(sourceTranscribe), "studio.text_run": withShutdown(textRun), "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
     const report = { instanceId, handlers: Object.keys(handlers) };
     if (once) {
       const startedAt = new Date();
@@ -136,7 +150,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     // Rediscover hardware/runtimes/models/CLI login every 10 minutes; power and disk every minute for local gating.
     let refreshing = false;
     const refresh = setInterval(() => { if (!refreshing && !controller.signal.aborted) {
-      refreshing = true; void Promise.all([readiness(), discover()]).then(([p, d]) => { providers = p; discovery = d; }).catch(() => {}).finally(() => { refreshing = false; });
+      refreshing = true; void Promise.all([readiness(), discoverAll()]).then(([p, d]) => { providers = p; discovery = d; }).catch(() => {}).finally(() => { refreshing = false; });
     } }, rediscoverMs);
     const quick = setInterval(() => { if (!refreshing) void Promise.all([discoverPowerAndDisk().then(v => { discovery = { ...discovery, hardware: { ...discovery.hardware, ...v } }; }), usageNow()]).catch(() => {}); }, 60_000);
     try { await runStudioWorker({ queue, handlers, workerId, release: version, report, concurrency: 1,

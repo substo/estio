@@ -9,11 +9,11 @@ export type DeviceProvider = "codex" | "claude";
 /** A device counts as running while its last heartbeat is this recent (same window as hosted workers). */
 export const DEVICE_ONLINE_SECONDS = 90;
 /** Work a paired computer may run. Mac checks are always allowed; the others are granted while processing is On. */
-export const DEVICE_WORK_KINDS = ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run"] as const;
+export const DEVICE_WORK_KINDS = ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.source_transcribe"] as const;
 export type DeviceWorkKind = typeof DEVICE_WORK_KINDS[number];
 export const ONBOARDING_RESEARCH_KIND: DeviceWorkKind = "studio.onboarding_research";
 export const deviceWorkLabels: Record<DeviceWorkKind, string> = {
-  "studio.text_run": "Knowledge, idea reviews and script briefs", "studio.diagnostic": "Mac checks", "studio.library_summary": "Library summaries", "studio.onboarding_research": "Business research",
+  "studio.text_run": "Knowledge, idea reviews and script briefs", "studio.diagnostic": "Mac checks", "studio.library_summary": "Library summaries", "studio.onboarding_research": "Business research", "studio.source_transcribe": "Video transcripts",
 };
 /** Local reasons a running companion is holding processing back (reported in its heartbeat). */
 export const DEVICE_BLOCK_REASONS = {
@@ -103,7 +103,7 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
   }
   if (v.runtimes && typeof v.runtimes === "object" && !Array.isArray(v.runtimes)) {
     const r = v.runtimes as Record<string, unknown>;
-    result.runtimes = compact(Object.fromEntries(["ollama", "lmstudio", "mlx", "whispercpp", "python", "ffmpeg"].map(key => [key, safeText(r[key], /^[A-Za-z0-9._+ -]{1,60}$/)])));
+    result.runtimes = compact(Object.fromEntries(["ollama", "lmstudio", "mlx", "whispercpp", "python", "ffmpeg", "ytdlp", "tesseract", "parakeet"].map(key => [key, safeText(r[key], /^[A-Za-z0-9._+ -]{1,60}$/)])));
   }
   if (Array.isArray(v.localModels)) result.localModels = v.localModels.filter(x => typeof x === "string" && modelPattern.test(x)).slice(0, 100);
   for (const provider of ["codex", "claude"]) {
@@ -123,6 +123,31 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
     if (!longest.length) break; longest.pop();
   }
   return result;
+}
+/** A finished video-transcription job may carry the transcript itself, so `complete` bodies get a larger bound. */
+export const DEVICE_SOURCE_RESULT_BYTES = 262144;
+export const SOURCE_DECISIONS = ["transcribed", "skipped", "needs_confirmation"] as const;
+export const SOURCE_METHODS = ["local-parakeet-tdt-v3", "youtube-captions-fallback"] as const;
+/** Mac video-transcription outcome. Text is untrusted source data; SQL re-checks every bound before saving it. */
+export function readDeviceSourceResult(value: unknown): Record<string, unknown> {
+  const r = object(value);
+  valid(Object.keys(r).every(key => ["source", "provider", "model"].includes(key)));
+  valid(r.provider === "mac_local" && r.model === "native-default");
+  const s = object(r.source);
+  valid(Object.keys(s).every(key => ["decision", "score", "reason", "method", "text", "timedText", "visualNotes", "durationSeconds", "language", "truncated", "frameCount"].includes(key)));
+  valid(typeof s.decision === "string" && (SOURCE_DECISIONS as readonly string[]).includes(s.decision));
+  valid(s.score === undefined || (Number.isInteger(s.score) && Number(s.score) >= 0 && Number(s.score) <= 100));
+  valid(s.reason === undefined || (typeof s.reason === "string" && s.reason.length <= 600));
+  if (s.decision === "transcribed") {
+    valid(typeof s.method === "string" && (SOURCE_METHODS as readonly string[]).includes(s.method));
+    valid(typeof s.text === "string" && s.text.trim().length > 0 && s.text.length <= 100_000);
+    valid(s.timedText === undefined || (typeof s.timedText === "string" && s.timedText.length <= 150_000));
+    valid(s.visualNotes === undefined || (typeof s.visualNotes === "string" && s.visualNotes.length <= 20_000));
+    valid(s.durationSeconds === undefined || (typeof s.durationSeconds === "number" && s.durationSeconds >= 0 && s.durationSeconds <= 86_400));
+    valid(s.language === undefined || (typeof s.language === "string" && /^[A-Za-z-]{2,12}$/.test(s.language)));
+  }
+  valid(new TextEncoder().encode(JSON.stringify(r)).length <= DEVICE_SOURCE_RESULT_BYTES);
+  return r;
 }
 /** Largest research reply a Mac may return (the device request body is bounded at 32 KiB). */
 export const DEVICE_RESEARCH_RESULT_BYTES = 24576;
@@ -200,10 +225,10 @@ export function readDeviceCommand(operation: DeviceOperation, value: unknown): R
     valid(Number.isInteger(v.leaseSeconds) && Number(v.leaseSeconds) >= 10 && Number(v.leaseSeconds) <= 3600);
     out.leaseSeconds = v.leaseSeconds;
   }
-  if (operation === "claim") { valid(Number.isInteger(v.limit) && Number(v.limit) >= 1 && Number(v.limit) <= 50); return { ...out, limit: v.limit, textReady: v.textReady === true, summaryReady: v.summaryReady === true, researchReady: v.researchReady === true }; }
+  if (operation === "claim") { valid(Number.isInteger(v.limit) && Number(v.limit) >= 1 && Number(v.limit) <= 50); return { ...out, limit: v.limit, textReady: v.textReady === true, summaryReady: v.summaryReady === true, researchReady: v.researchReady === true, transcribeReady: v.transcribeReady === true }; }
   valid(typeof v.jobId === "string" && uuid.test(v.jobId) && typeof v.leaseToken === "string" && uuid.test(v.leaseToken));
   Object.assign(out, { jobId: v.jobId, leaseToken: v.leaseToken });
-  if (operation === "complete") { out.result = v.result && typeof v.result === "object" && "output" in v.result && typeof v.result.output === "object" ? readDeviceTextResult(v.result) : v.result && typeof v.result === "object" && "research" in v.result ? readDeviceResearchResult(v.result) : readDeviceDiagnosticResult(v.result); }
+  if (operation === "complete") { out.result = v.result && typeof v.result === "object" && "output" in v.result && typeof v.result.output === "object" ? readDeviceTextResult(v.result) : v.result && typeof v.result === "object" && "source" in v.result ? readDeviceSourceResult(v.result) : v.result && typeof v.result === "object" && "research" in v.result ? readDeviceResearchResult(v.result) : readDeviceDiagnosticResult(v.result); }
   if (operation === "fail") {
     const f = object(v.failure); valid(typeof f.code === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(f.code));
     valid(typeof f.message === "string" && f.message.length <= 500 && typeof f.retryable === "boolean");

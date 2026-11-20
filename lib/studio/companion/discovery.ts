@@ -9,7 +9,7 @@ export interface Hardware {
   chip: string; arch: string; osVersion: string; memoryGb: number; gpu: "apple-metal" | "none" | "unknown";
   freeDiskGb: number; totalDiskGb: number; power: { source: "ac" | "battery" | "unknown"; batteryPercent?: number }; timeZone: string;
 }
-export type Runtimes = Partial<Record<"ollama" | "lmstudio" | "mlx" | "whispercpp" | "python" | "ffmpeg", string>>;
+export type Runtimes = Partial<Record<"ollama" | "lmstudio" | "mlx" | "whispercpp" | "python" | "ffmpeg" | "ytdlp" | "tesseract" | "parakeet", string>>;
 export interface Discovery { hardware: Hardware; runtimes: Runtimes; localModels: string[] }
 
 const safeText = (value: string | undefined, fallback = "unknown") => {

@@ -307,7 +307,7 @@ const savedConfig = { ...defaultDeviceConfig, features: { transcription: true, t
   resources: { ...defaultDeviceConfig.resources, launchAtLogin: true, minFreeDiskGb: 30 } };
 test("desired config is validated with the shared validator and acknowledged with unsupported reasons", () => {
   assert.deepEqual(applyDesiredConfig({ version: 3, value: savedConfig }).ack, { version: 3, status: "applied", unsupported: {
-    "resources.launchAtLogin": "Needs the installed Mac app (not built yet)", "features.transcription": "Local workflow not built yet; settings saved for later" } });
+    "resources.launchAtLogin": "Needs the installed Mac app (not built yet)" } });
   assert.deepEqual(applyDesiredConfig({ version: 4, value: defaultDeviceConfig }).ack, { version: 4, status: "applied" });
   const bad = applyDesiredConfig({ version: 5, value: { ...savedConfig, extra: true } });
   assert.equal(bad.config, null); assert.equal(bad.ack.status, "error"); assert.ok(bad.ack.error!.length <= 300);

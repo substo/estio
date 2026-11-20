@@ -12,7 +12,7 @@
 
 ## Confirmed gaps
 
-- This slice does not fetch YouTube transcripts or discover related videos. Save verified transcript text or use existing authorized upload/transcription flows. Uploaded transcripts/source units can feed knowledge extraction but are not automatically copied into the record text consumed by script briefs.
+- **Update 2026-11-18 (local, not deployed):** a pasted/saved YouTube source can now be transcribed by the paired Mac into the saved transcript (see [AI workflows](ai-workflows.md#video-transcription-from-a-url)). The sentence below describes the earlier slice. This slice does not fetch YouTube transcripts or discover related videos. Save verified transcript text or use existing authorized upload/transcription flows. Uploaded transcripts/source units can feed knowledge extraction but are not automatically copied into the record text consumed by script briefs.
 - No approved-template selector/enforcement was found in the current Studio page/service flow. Writing a template name/review decision in notes is manual guidance, not enforced template approval.
 - Knowledge findings do not automatically become content concepts or feed the script snapshot. Review the findings, write the concept, and retain source text/links. Source/knowledge/content approvals remain distinct.
 - Script generation uses bounded saved excerpts and requires the existing key/budget/paid confirmation. No provider call was made for these checks.

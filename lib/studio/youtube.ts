@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { requestSourceTranscription } from "./source-transcription";
 import { studioDb } from "@/lib/studio/studio-db";
 import { sameYoutubePrincipal } from "./youtube-consumer-policy";
 import "server-only";
@@ -74,8 +75,11 @@ export async function saveStudioYoutubeLink(locationId: string, input: { ticket?
   if (typeof input.title !== "string" || !input.title.trim() || input.title.trim().length > 180) throw new YoutubeError("invalid_title", "Enter your own research title, up to 180 characters.");
   const selection = openYoutubeSelection(input.ticket, { locationId: access.locationId, brand: profile.brand, userId: profile.userId });
   if (!selection) throw new YoutubeError("invalid_selection", "This selection expired or belongs to another profile. Run discovery again.");
-  return studioDb.call<string>("studio_save_youtube_bookmark", { p_location: access.locationId, p_app: access.app, p_user: access.userId,
+  const recordId = await studioDb.call<string>("studio_save_youtube_bookmark", { p_location: access.locationId, p_app: access.app, p_user: access.userId,
     p_record: selection.recordId, p_video: selection.videoId, p_title: input.title.trim(), p_provenance: selection.provenance });
+  // The person chose this video, so their Mac transcribes it (no relevance gate). Never blocks saving; the source page shows the status and a retry.
+  await requestSourceTranscription(access.locationId, recordId, "user").catch(() => undefined);
+  return recordId;
 }
 export async function manageStudioYoutubeChannel(locationId: string, input: { channelId?: unknown; label?: unknown; remove?: unknown }) {
   const { access, profile } = await context(locationId, true);

@@ -33,7 +33,9 @@ export function LibraryImportForm({ locationId, inputRef }: { locationId: string
         : result.summaryStatus === "no_evidence" ? "Source description or transcript unavailable for a summary." : "";
       // Retain the successful request key: re-entering the same source can retry
       // summary enqueue without repeating the metadata mutation.
-      setInput(""); setPlatform(""); setSuccess(`Source saved.${summaryNotice ? ` ${summaryNotice}` : ""}`); router.refresh();
+      const transcriptNotice = result.transcriptionStatus === "queued" || result.transcriptionStatus === "running" ? " Your Mac will transcribe it; a queued request waits if the Mac is offline."
+        : result.transcriptionStatus === "no_device" ? " No Mac is set up for transcription yet: pair one and turn Transcription on in Mac Setup, then paste the link again." : "";
+      setInput(""); setPlatform(""); setSuccess(`Source saved.${summaryNotice ? ` ${summaryNotice}` : ""}${transcriptNotice}`); router.refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not connect. Try again with the same source."); }
     finally { setPending(false); }
   }

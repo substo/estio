@@ -30,3 +30,5 @@ Follow [UI design principles](documentation/ui-design-principles.md). The first 
 ## Release integration
 
 Follow [one canonical release](documentation/release-workflow.md). Task worktrees merge into `release/studio-go-live`; deploy only its clean, committed, freshly fetched tip through the owned migrate-only script. Never deploy a sibling feature or dirty root. Preserve both parent changes and migrations. The server lease, deployed revision ancestry, immutable-input checks and release manifest are mandatory; do not bypass or delete locks. The shared root is a working branch; the dedicated canonical checkout owns deployments.
+
+At task closeout, review the task worktree using the [local worktree closeout procedure](documentation/release-workflow.md#local-worktree-closeout). Once the work is pushed and integrated, retire the clean, idle task checkout or clear its verified build output if the checkout is still needed. Preserve active sessions, uncommitted or unpublished work, the shared root, the canonical checkout, and any running companion's checkout. Report what was reclaimed or why the checkout was kept.

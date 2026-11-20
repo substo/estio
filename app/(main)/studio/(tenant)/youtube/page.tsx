@@ -11,7 +11,7 @@ export default async function YoutubeDiscoveryPage({ params }: { params: Promise
     <Link href={`/studio`} className="text-sm text-primary hover:underline">Studio overview</Link>
     <h1 className="text-3xl font-semibold">YouTube discovery</h1>
     <p className="text-muted-foreground">Find public research links through search, approved channels, saved URLs, or channels from your own subscriptions. This is not a personalized home feed.</p>
-    <p className="text-sm text-muted-foreground">Saving shares your chosen link, research title, and discovery source with this location. It does not download video, obtain captions, authorize reuse, or start transcription. Existing saved notes are preserved when a video is saved again.</p>
+    <p className="text-sm text-muted-foreground">Saving shares your chosen link, research title, and discovery source with this location. It does not authorize reuse. Your paired Mac then downloads the audio and transcribes it locally (or waits until it is online); this uses no AI subscription or paid API. Existing saved notes are preserved when a video is saved again.</p>
     <YoutubeDiscovery locationId={result.access.locationId} channels={result.channels} canManage={result.canManage} connected={result.connected} />
   </main>;
 }

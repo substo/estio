@@ -8,6 +8,7 @@ import Link from "next/link";
 import { listPendingStudioUploads } from "@/lib/studio/uploads";
 import { notFound } from "next/navigation";
 import { StudioAttachments } from "../../../_components/studio-attachments";
+import { SourceTranscription } from "../../../_components/source-transcription";
 import { StudioUploadForm } from "../../../_components/studio-upload-form";
 import { StudioUploads } from "../../../_components/studio-uploads";
 import { getStudioLibraryRecord } from "@/lib/studio/library";
@@ -44,6 +45,7 @@ export default async function StudioLibraryRecordPage({ params }: { params: Prom
       {record.kind !== 'channel' ? <>
         <section><h2 className="font-medium">Source description</h2><p className="whitespace-pre-wrap text-sm">{value('description') || 'No source description saved. Refresh the source or add evidence through Edit.'}</p></section>
         <section><h2 className="font-medium">AI summary</h2><p className="whitespace-pre-wrap text-sm">{value('aiSummary') || view.statusMessage || 'No AI summary saved. Request a summary after saving source evidence.'}</p>{value('aiSummary') ? <p className="text-xs text-muted-foreground">Basis: {value('summaryBasis') === 'transcript' ? 'Saved transcript excerpt (first 20,000 characters), with available description.' : value('summaryBasis') === 'description' ? 'Source description only; video contents were not watched.' : 'Basis not recorded; verify against the source.'}</p> : null}</section>
+        {record.kind === 'reference' && !record.archived && /^https?:\/\/(www\.)?(youtube\.com\/(watch|shorts|live|embed)|youtu\.be\/)/i.test(view.url ?? '') ? <SourceTranscription locationId={locationId} recordId={recordId} status={value('transcriptionStatus')} message={value('transcriptionMessage')} method={typeof (record.payload.transcriptSource as {method?: unknown} | undefined)?.method === 'string' ? (record.payload.transcriptSource as {method: string}).method : undefined} score={typeof record.payload.relevanceScore === 'number' ? record.payload.relevanceScore : undefined} reason={value('relevanceReason')} hasTranscript={Boolean(value('transcript').trim())} /> : null}
         <section><h2 className="font-medium">Saved transcript</h2>{value('transcript') ? <details><summary>Read saved transcript</summary><p className="whitespace-pre-wrap text-sm">{value('transcript')}</p></details> : <p className="text-sm text-muted-foreground">No transcript saved on this source. Uploaded transcripts appear below; use Edit to save source text for analysis.</p>}</section>
         <section><h2 className="font-medium">Research notes</h2><p className="whitespace-pre-wrap text-sm">{[value('summary') || record.summary, value('notes')].filter(Boolean).join('\n\n') || 'No human research notes saved. Add notes through Edit.'}</p></section>
         {creator && !links.some(link => link.kind === 'channel') ? <LibrarySourceAction locationId={locationId} url={creator.channelUrl} sourceId={recordId} sourceVersion={record.version} /> : null}

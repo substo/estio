@@ -55,6 +55,8 @@ Canonical release remains the only deployment entrypoint. The shared working bra
 2. **Open, requires device:** sustained existing Mac companion diagnostics/local processing. A prior no-provider once-mode job succeeded and exited cleanly; that does not prove sustained processing. Use existing pairing only.
 3. **Blocked on bounded spend authorization:** real onboarding draft/review/save using a specified model and concrete cost ceiling. Mock/disposable access, persistence and ledger checks passed; no real provider run is authorized. Ask the parent for that decision before paid acceptance.
 
+4. **Local candidate, not deployed (2026-11-18): Mac video transcription from a URL.** One `studio.source_transcribe` device job (yt-dlp + Parakeet + captions fallback + scene/OCR notes) fed by pasted/saved links and a source-page button, with an advisory relevance gate for approved-channel finds. Needs the additive migration `20261118140000_studio_source_transcription`, companion `studio-companion-5` and the installer `scripts/studio-companion-install-transcription.sh`. Disposable PostgreSQL 17 and no-provider tests pass; signed-in acceptance and automatic creation of sources from scheduled discovery are not done. See [AI workflows](ai-workflows.md#video-transcription-from-a-url).
+
 Website editing/publishing and Clerk email delivery have no new live acceptance in this cleanup. Do not publish, invite or send messages merely to test. Substo CRM setup-pending is intentionally deferred. Free-form onboarding/search, more social integrations, billing, custom domains and proxy work are deferred.
 
 ## Verify and release
