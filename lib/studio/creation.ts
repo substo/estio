@@ -42,8 +42,14 @@ export async function getCreationPage(locationId: string, id?: string, sourceId?
   if (!access || session.actor || session.userId !== access.userId) return null;
   const saved = id ? await loadRecord(access, id) : null;
   const record = saved && expose(saved);
-  const source = record ? record.state.source : sourceId ? await loadSource(access, sourceId) : null;
-  if ((id && !record) || (sourceId && !source)) return null;
+  const original = record?.state.source;
+  const linked = original && await studioDb.one<{ id: string }>(Prisma.sql`
+    SELECT r.id FROM studio.studio_record_links l
+    JOIN studio.studio_records r ON r.id=l.target_id AND r.location_id=l.location_id
+    WHERE l.location_id=${access.locationId} AND l.source_id=${id}::uuid AND r.id=${original.id}::uuid
+      AND r.kind='reference' AND NOT r.archived LIMIT 1`);
+  const source = record ? linked ? original! : null : sourceId ? await loadSource(access, sourceId) : null;
+  if ((id && !record) || (sourceId && source?.id !== sourceId)) return null;
   const runs = id ? await studioDb.rows<{ id: string; stage: string; kind: string; created_at: string }>(Prisma.sql`
     SELECT id,snapshot#>>'{operation,stage}' AS stage,snapshot#>>'{operation,kind}' AS kind,created_at
     FROM studio.studio_idea_reviews WHERE location_id=${access.locationId} AND actor_app=${access.app}

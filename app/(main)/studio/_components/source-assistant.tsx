@@ -7,7 +7,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { saveSourceNoteAction } from "../(tenant)/library/note-actions";
 import { draftIdeaFromReactions, relatedSearchPhrase, REACTION_LIMIT } from "@/lib/studio/source-assistant-policy";
 import type { SourceAssistRun } from "@/lib/studio/source-assist";
-import { studioTextConsent, type StudioTextProvider } from "@/lib/studio/text-provider";
+import { studioTextConsent } from "@/lib/studio/text-provider";
 import { StudioTextProviderChoice } from "./text-provider-choice";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
 import { DRAFT_FROM_FINDINGS_EVENT, useSourceWorkspace } from "./source-workspace";
@@ -29,7 +29,7 @@ const INTENTS: Array<{ value: Mode; label: string; hint: string }> = [
 ];
 const clock = (seconds: number) => new Date(seconds * 1000).toISOString().slice(seconds >= 3600 ? 11 : 14, 19);
 
-export function SourceAssistant({ locationId, sourceId, sourceTitle, version, canRelated, archived, hasEvidence, knowledgeInputs, canTemplate }: { knowledgeInputs: KnowledgeInput[]; canTemplate: boolean; locationId: string; sourceId: string; sourceTitle: string; version: number; canRelated: boolean; archived: boolean; hasEvidence: boolean }) {
+export function SourceAssistant({ locationId, sourceId, sourceTitle, version, canRelated, archived, hasEvidence, knowledgeInputs, canTemplate, canCreate }: { knowledgeInputs: KnowledgeInput[]; canTemplate: boolean; canCreate?: boolean; locationId: string; sourceId: string; sourceTitle: string; version: number; canRelated: boolean; archived: boolean; hasEvidence: boolean }) {
   const router = useRouter();
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
   const [open, setOpen] = useState(false);
@@ -37,7 +37,7 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
   const [log, setLog] = useState<Entry[]>([]);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
-  const { setNoteProposal, setIdeaProposal, findingSelection, setFindingSelection } = useSourceWorkspace();
+  const { setNoteProposal, setIdeaProposal, findingSelection, setFindingSelection, provider, setProvider, creating, setCreating, setCreationControls } = useSourceWorkspace();
   const [inputChoice, setInputChoice] = useState(0);
   const knowledgeInput = knowledgeInputs[inputChoice] ?? null;
   const showIn = (tab: string, line: string) => {
@@ -55,6 +55,7 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
   const [mode, setMode] = useState<Mode>("discuss");
   useEffect(() => {
     const openDraft = (event: Event) => {
+      setCreating(false);
       setMode("propose_idea");
       if (window.matchMedia("(min-width: 1024px)").matches) {
         requestAnimationFrame(() => document.getElementById(`${fieldId}-side`)?.focus());
@@ -66,12 +67,11 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
     };
     window.addEventListener(DRAFT_FROM_FINDINGS_EVENT, openDraft);
     return () => window.removeEventListener(DRAFT_FROM_FINDINGS_EVENT, openDraft);
-  }, [fieldId]);
+  }, [fieldId, setCreating]);
 
   const taskMode = mode === "knowledge" || mode === "template";
   const selectedIdea = mode === "propose_idea" && findingSelection;
   const intent: Intent = taskMode ? "discuss" : mode;
-  const [provider, setProvider] = useState<StudioTextProvider>("location_order");
   const [asking, setAsking] = useState(false);
   const recognition = useRef<Recognition | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
@@ -199,15 +199,30 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
     </div>;
   }
 
+  function changeWorkspace(next: boolean) {
+    setCreating(next);
+    if (next) setOpen(false);
+    requestAnimationFrame(() => {
+      if (next) document.getElementById("source-assistant")?.focus();
+      else if (opener.current?.offsetParent) opener.current.focus();
+      else document.querySelector<HTMLButtonElement>("[data-create-entry]")?.focus();
+    });
+    const url = new URL(window.location.href);
+    if (next) url.searchParams.set("mode", "create");
+    else url.searchParams.delete("mode");
+    window.history.replaceState(null, "", url);
+  }
+
   const body = (variant: string) => <>
     <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3" role="log" aria-live="polite" aria-label="Conversation">
-      {log.length === 0 ? <p className="text-muted-foreground">Pick what to work on, then tell me your reaction. Everything is answered from this source only, and nothing is saved until you choose.</p> : null}
+      {!creating && log.length === 0 ? <p className="text-muted-foreground">Pick what to work on, then tell me your reaction. Everything is answered from this source only, and nothing is saved until you choose.</p> : null}
       {log.map(entry => entry.role === "you"
         ? <div key={entry.id} className="ml-6 space-y-1 rounded-lg bg-primary/10 p-3"><p className="whitespace-pre-wrap break-words">{entry.text}</p>{entry.saved ? <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Saved to My notes</p> : <button type="button" disabled={saving || archived} onClick={() => void saveNote(entry.text, entry.id)} className="inline-flex min-h-9 items-center text-xs font-medium text-primary hover:underline disabled:opacity-50">Save to My notes as written</button>}</div>
         : entry.role === "ai" ? <AiAnswer key={entry.id} entry={entry} />
         : <p key={entry.id} role={entry.tone === "error" ? "alert" : undefined} className={`mr-6 whitespace-pre-wrap break-words rounded-lg bg-muted p-3 ${entry.tone === "error" ? "text-destructive" : ""}`}>{entry.text}{entry.link ? <> <a href={entry.link.href} className="font-medium text-primary underline">{entry.link.label}</a></> : null}</p>)}
     </div>
-    <div className="space-y-2 border-t p-3">
+    {variant === "side" && <div ref={setCreationControls} hidden={!creating} className="min-h-0 shrink overflow-y-auto border-t px-4 py-3" />}
+    <div className={creating ? "hidden" : "space-y-2 border-t p-3"}>
       {archived ? <p className="text-xs text-muted-foreground">This source is archived, so notes and ideas are read-only.</p> : null}
       {selectedIdea ? <div className="flex flex-wrap items-center gap-2 rounded-md border px-2 text-sm">
         <span>{selectedIdea.selections.length} selected finding references</span>
@@ -235,23 +250,27 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
       </div>
       <p role="status" className="text-xs text-muted-foreground">{listening ? "Listening…" : dictationNote}</p>
     </div>
+    {canCreate && <div className="shrink-0 border-t p-3">
+      <Button type="button" variant={creating ? "outline" : "default"} className="min-h-11 w-full"
+        data-create-entry onClick={() => changeWorkspace(!creating)}>{creating ? "Back to source research" : "Create with Studio"}</Button>
+    </div>}
   </>;
-  const header = <div className="min-w-0"><h2 className="font-semibold">Assistant</h2><p className="truncate text-xs text-muted-foreground">Only this source: {sourceTitle}</p></div>;
+  const header = <div className="min-w-0"><h2 className="font-semibold">Assistant</h2><p className="truncate text-xs text-muted-foreground">{creating ? "Creating from: " : "Only this source: "}{sourceTitle}</p></div>;
   return <>
-    <button ref={opener} type="button" onClick={() => setOpen(true)} aria-haspopup="dialog" className="fixed bottom-4 right-4 z-30 inline-flex min-h-12 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground shadow-lg lg:hidden"><MessageSquare aria-hidden="true" className="h-4 w-4" />Assistant</button>
-    <aside id="source-assistant" aria-label="Source assistant" className="sticky top-4 hidden max-h-[calc(100dvh-2rem)] min-h-0 flex-col rounded-xl border bg-card text-sm lg:flex">
+    {!creating && <button ref={opener} type="button" onClick={() => setOpen(true)} aria-haspopup="dialog" className="fixed bottom-4 right-4 z-30 inline-flex min-h-12 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground shadow-lg lg:hidden"><MessageSquare aria-hidden="true" className="h-4 w-4" />Assistant</button>}
+    <aside id="source-assistant" tabIndex={-1} aria-label="Source assistant" className={`min-h-0 flex-col rounded-xl border bg-card text-sm lg:sticky lg:top-4 lg:flex lg:max-h-[calc(100dvh-2rem)] ${creating ? "flex" : "hidden"}`}>
       <header className="border-b px-4 py-3">{header}</header>
       {body("side")}
     </aside>
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetContent side="bottom" className="flex max-h-[88dvh] flex-col gap-0 rounded-t-2xl p-0 text-sm lg:hidden" ref={sheetRef} onOpenAutoFocus={event => { event.preventDefault(); sheetRef.current?.querySelector<HTMLTextAreaElement>("[data-assistant-field]")?.focus(); }}
+    <Sheet open={open && !creating} onOpenChange={setOpen}>
+      <SheetContent side="bottom" className="flex max-h-[88dvh] flex-col gap-0 rounded-t-2xl p-0 text-sm lg:hidden" ref={sheetRef} onOpenAutoFocus={event => { event.preventDefault(); sheetRef.current?.querySelector<HTMLElement>("[data-assistant-field]")?.focus(); }}
         onCloseAutoFocus={event => {
           event.preventDefault();
-          (draftOrigin.current?.isConnected ? draftOrigin.current : opener.current)?.focus();
+          (creating ? document.getElementById("source-assistant") : draftOrigin.current?.isConnected ? draftOrigin.current : opener.current)?.focus();
           draftOrigin.current = null;
         }}>
-        <div className="border-b px-4 py-3 pr-12"><SheetTitle className="text-base">Assistant</SheetTitle><SheetDescription className="truncate text-xs">Only this source: {sourceTitle}</SheetDescription></div>
-        {open ? body("sheet") : null}
+        <div className="border-b px-4 py-3 pr-12"><SheetTitle className="text-base">Assistant</SheetTitle><SheetDescription className="truncate text-xs">{creating ? "Creating from: " : "Only this source: "}{sourceTitle}</SheetDescription></div>
+        {open && !creating ? body("sheet") : null}
       </SheetContent>
     </Sheet>
   </>;

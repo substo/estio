@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { ArrowRight, Check, MessageSquare, Scissors, Sparkles, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,9 @@ import { CreationFeedback } from "./creation-feedback";
 import { CreationNextContext, CreationRunContext } from "./creation-context";
 import { StudioTextProviderChoice } from "./text-provider-choice";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
+
+import { useOptionalSourceWorkspace } from "./source-workspace";
+import { OPEN_TAB_EVENT } from "./source-tabs";
 
 const endpoint = "/studio/content/create/api";
 const stageHint: Record<CreationStage, string> = {
@@ -35,6 +39,8 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
   recordId: string; initial: CreationRecord | null; initialStage?: CreationStage; source: CreationSource | null; publisher: string;
   templates: TemplateChoice[]; history: HistoryItem[]; linkedDrafts?: LinkedDraft[];
 }) {
+  const sourceWorkspace = useOptionalSourceWorkspace();
+  const assistant = sourceWorkspace?.creationControls;
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
   const [record, setRecord] = useState(initial);
   const [stage, setStage] = useState<CreationStage>(initialStage);
@@ -44,16 +50,19 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
   const [rewrite, setRewrite] = useState<Rewrite | null>(null);
   const [generationKind, setGenerationKind] = useState<"suggest" | "draft">("suggest");
   const [replacement, setReplacement] = useState("");
+  const [firstFocus, setFirstFocus] = useState("");
   const [feedback, setFeedback] = useState("");
   const [includeReferences, setIncludeReferences] = useState(true);
   const [draftId, setDraftId] = useState("");
   const [purpose, setPurpose] = useState<DraftContextChoice["purpose"]>("compare");
-  const [provider, setProvider] = useState<StudioTextProvider>("location_order");
+  const [standaloneProvider, setStandaloneProvider] = useState<StudioTextProvider>("location_order");
+  const provider = sourceWorkspace?.provider ?? standaloneProvider;
+  const setProvider = sourceWorkspace?.setProvider ?? setStandaloneProvider;
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [activeReview, setActiveReview] = useState<string | null>(null);
+  const [activeReview, setActiveReview] = useState<string | null>(history.find(item => item.stage === initialStage)?.id ?? null);
   const [run, setRun] = useState<CreationRun | null>(null);
   const [runs, setRuns] = useState(history);
   const [directionOpen, setDirectionOpen] = useState(false);
@@ -100,13 +109,13 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
     return () => { controller.abort(); clearTimeout(timer); };
   }, [activeReview, readRun]);
 
-  async function send(command: LocalCommand) {
+  async function send(command: LocalCommand, baseRecord = record): Promise<false | { record?: CreationRecord }> {
     if (busyRef.current) return false;
     busyRef.current = true;
     setBusy(true); setError(""); setNotice("");
     try {
       const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json", "X-Studio-Tenant": tenant },
-        body: JSON.stringify({ ...command, recordId, version: record?.version ?? 0 }) });
+        body: JSON.stringify({ ...command, recordId, version: baseRecord?.version ?? 0 }) });
       const body = await response.json();
       if (!response.ok) {
         if (command.action === "generate" && response.status < 500) attempt.current = null;
@@ -116,9 +125,10 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
         const saved = body.record as CreationRecord;
         setRecord(saved); setValue(stageDraft(saved.state, stage).text); setSelection(null);
         if (command.action === "apply") { setRun(null); setActiveReview(null); }
-        if (!record) {
+        if (!baseRecord) {
           const url = new URL(window.location.href);
           url.searchParams.delete("source");
+          if (sourceWorkspace) url.searchParams.set("mode", "create");
           url.searchParams.set("draft", saved.id);
           window.history.replaceState(null, "", url);
         }
@@ -130,7 +140,7 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
         setRuns(previous => [{ id: body.reviewId, stage, kind: command.kind, created_at: new Date().toISOString() }, ...previous.filter(item => item.id !== body.reviewId)]);
         setNotice("Proposal queued.");
       }
-      return true;
+      return { record: body.record as CreationRecord | undefined };
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The request could not be confirmed.");
       return false;
@@ -142,6 +152,7 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
   function move(next: CreationStage) {
     if (!record || next === stage) return;
     if (dirty) { setError("Save or discard this edit before changing stages."); return; }
+    setFeedback("");
     setStage(next); setValue(stageDraft(record.state, next).text); setSelection(null); setError(""); setNotice("");
     const url = new URL(window.location.href);
     if (next === "Concept") url.searchParams.delete("stage");
@@ -168,16 +179,18 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
     setDraftId(""); setPurpose("compare"); setIncludeReferences(true);
     setFeedback(""); setReplacement(""); setRewrite(null); setGenerationKind(kind); setPanel(next);
   }
-  async function generate() {
+  async function generate(baseRecord = record, initialConcept = false, kind = generationKind) {
     const selected = linkedDrafts.find(draft => draft.id === draftId);
     const linkedDraft = selected ? { id: selected.id, version: selected.version, purpose } : null;
     const route = { ...studioTextConsent(provider, true), includeReferences, linkedDraft };
-    const parameters = rewrite && selection
+    const parameters = initialConcept
+      ? { ...route, action: "generate" as const, kind: "suggest" as const, stage: "Concept" as const, feedback: firstFocus }
+      : rewrite && selection && (!sourceWorkspace || panel === "selection")
       ? { ...route, action: "generate" as const, kind: "rewrite" as const, stage, feedback, selection, instruction: rewrite }
-      : { ...route, action: "generate" as const, kind: generationKind, stage, feedback };
-    const fingerprint = JSON.stringify([record?.version, parameters]);
+      : { ...route, action: "generate" as const, kind, stage, feedback };
+    const fingerprint = JSON.stringify([baseRecord?.version, parameters]);
     if (attempt.current?.fingerprint !== fingerprint) attempt.current = { fingerprint, requestId: crypto.randomUUID() };
-    if (await send({ ...parameters, requestId: attempt.current.requestId })) setPanel(null);
+    if (await send({ ...parameters, requestId: attempt.current.requestId }, baseRecord)) setPanel(null);
   }
   async function confirm(brief: string, direction: Parameters<React.ComponentProps<typeof CreationDirection>["onConfirm"]>[1]) {
     // The same shared parser canonicalizes rationale and confirms direction on the server.
@@ -185,17 +198,61 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
     const command: LocalCommand = record
       ? { action: "direction", brief, direction: directionInput }
       : { action: "create", brief, direction: directionInput, sourceId: source?.id ?? null, sourceVersion: source?.version ?? null, templateId: null };
-    if (await send(command)) setDirectionOpen(false);
+    const saved = await send(command);
+    if (!saved) return;
+    setDirectionOpen(false);
+    if (!record && sourceWorkspace && saved.record) {
+      setFeedback(firstFocus);
+      await generate(saved.record, true);
+    }
   }
 
   const pending = Boolean(activeReview && (!run || run.state === "running" || run.state === "queued"));
   const stageControls = "min-h-11";
+  const sourceDirection = !record && sourceWorkspace && assistant ? createPortal(
+    <div className="space-y-3">
+      <p>I’ll suggest original ideas using the saved evidence from this source.</p>
+      <Button type="button" variant="link" className="min-h-11 px-0" onClick={() => {
+        sourceWorkspace.setCreating(false);
+        const url = new URL(window.location.href);
+        url.searchParams.delete("mode");
+        window.history.replaceState(null, "", url);
+        window.dispatchEvent(new CustomEvent(OPEN_TAB_EVENT, { detail: "knowledge" }));
+        requestAnimationFrame(() => document.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus());
+      }}>Review source knowledge</Button>
+      <CreationDirection sourceFirst publisher={publisher} source={source} busy={busy} onConfirm={confirm}
+        submitLabel={provider === "openai" ? "Confirm and suggest ideas with paid API" : provider === "subscription" ? "Confirm and suggest ideas on my Mac" : "Confirm and suggest ideas"}>
+        <CreationFeedback id="source-creation-goal" label="Anything to focus on? (optional)" value={firstFocus} onChange={setFirstFocus} />
+        <StudioTextProviderChoice stagedCreation compact provider={provider} onChange={setProvider} />
+      </CreationDirection>
+      {error && <p role="alert" className="text-destructive">{error}</p>}
+    </div>, assistant) : null;
+  const sourceCoach = record && sourceWorkspace && assistant ? createPortal(
+    <section className="space-y-3" aria-label={`${stage} assistant`}>
+      <p className="font-medium">{stage}</p>
+      <p className="text-muted-foreground">{pending ? "Preparing a proposal…" : visibleRun?.state === "done" ? "Your suggestions are ready to review." : stageHint[stage]}</p>
+      <CreationFeedback id="source-creation-feedback" label="What should I focus on? (optional)" value={feedback} onChange={setFeedback} />
+      {directionChange ? <Button type="button" variant="outline" className={stageControls} onClick={() => setDirectionOpen(true)}>Confirm a new direction</Button> : null}
+      <CreationNextContext recordId={recordId} drafts={linkedDrafts} includeReferences={includeReferences} onReferences={setIncludeReferences}
+        draftId={draftId} onDraft={setDraftId} purpose={purpose} onPurpose={setPurpose} />
+      <StudioTextProviderChoice stagedCreation compact provider={provider} onChange={setProvider} />
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" className={stageControls} disabled={busy || pending || dirty || directionChange}
+          onClick={() => void generate(record, false, "suggest")}>{provider === "openai" ? "Get suggestions (paid)" : provider === "subscription" ? "Get suggestions on my Mac" : "Get suggestions"}</Button>
+        {stage === "Script" && <Button type="button" variant="outline" className={stageControls} disabled={busy || pending || dirty || directionChange}
+          onClick={() => void generate(record, false, "draft")}>{provider === "openai" ? "Draft script (paid)" : provider === "subscription" ? "Draft script on my Mac" : "Draft script"}</Button>}
+      </div>
+      {visibleRun?.state === "done" && <Button type="button" variant="link" className="min-h-11 px-0 lg:hidden" onClick={() => document.getElementById("creation-stage-heading")?.focus()}>Review proposal</Button>}
+      <p role="status" className="text-muted-foreground">{notice}</p>
+      {error && !panel && <p role="alert" className="text-destructive">{error}</p>}
+    </section>, assistant) : null;
   return <div className="min-w-0 space-y-4">
+    {sourceDirection}{sourceCoach}
     {!record ? <>
-      {source && <SourceSummary source={source} />}
-      <section className="rounded-xl border bg-card p-4 sm:p-6" aria-label="Video direction">
+      {source && <SourceSummary source={source} embedded={Boolean(sourceWorkspace)} />}
+      {!sourceWorkspace && <section className="rounded-xl border bg-card p-4 sm:p-6" aria-label="Video direction">
         <CreationDirection publisher={publisher} source={source} busy={busy} onConfirm={confirm} />
-      </section>
+      </section>}
     </> : <>
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-muted/30 px-4 py-2">
         <p className="min-w-0 break-words text-sm">
@@ -221,11 +278,11 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
       </nav>
       <section id="creation-stage" aria-labelledby="creation-stage-heading" className="min-w-0 space-y-4 rounded-xl border bg-card p-4 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1"><h2 id="creation-stage-heading" className="text-xl font-semibold">{stage}</h2><p className="text-sm text-muted-foreground">{stageHint[stage]}</p></div>
-          <Button type="button" variant="outline" className={`${stageControls} gap-2`} disabled={busy || pending} onClick={event => openPanel("generate", event.currentTarget)}>
+          <div className="space-y-1"><h2 id="creation-stage-heading" tabIndex={-1} className="text-xl font-semibold">{stage}</h2><p className="text-sm text-muted-foreground">{stageHint[stage]}</p></div>
+          {!sourceWorkspace && <Button type="button" variant="outline" className={`${stageControls} gap-2`} disabled={busy || pending} onClick={event => openPanel("generate", event.currentTarget)}>
             <Sparkles aria-hidden="true" className="size-4" /> Get suggestions
-          </Button>
-          {stage === "Script" && <Button type="button" variant="outline" className={stageControls} disabled={busy || pending} onClick={event => openPanel("generate", event.currentTarget, "draft")}>Draft full script</Button>}
+          </Button>}
+          {!sourceWorkspace && stage === "Script" && <Button type="button" variant="outline" className={stageControls} disabled={busy || pending} onClick={event => openPanel("generate", event.currentTarget, "draft")}>Draft full script</Button>}
         </div>
         {latestStageRun && !visibleRun && !pending && <Button type="button" variant="link" className="min-h-11 px-0" disabled={busy || dirty}
           onClick={() => { setRun(null); setActiveReview(latestStageRun.id); }}>
@@ -271,7 +328,7 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
         <details className="min-w-0 rounded-xl border p-3">
           <summary className="flex min-h-11 cursor-pointer items-center gap-2 font-medium">Evidence & direction <ArrowRight aria-hidden="true" className="size-3" /></summary>
           <div className="mt-2 space-y-3 text-sm">
-            {source && <SourceSummary source={source} />}
+            {source && <SourceSummary source={source} embedded={Boolean(sourceWorkspace)} />}
             <p><strong>Confirmed goal</strong><br />{record.state.direction.choice === "brief" ? "Follow the supplied brief." : record.state.direction.goal}</p>
             {(acceptedAngle?.approved || record.state.direction.angle) && <p className="whitespace-pre-wrap break-words"><strong>Confirmed angle</strong><br />{acceptedAngle?.approved ? acceptedAngle.text : record.state.direction.angle}</p>}
             <p>{record.state.direction.rationale}</p>
@@ -297,8 +354,8 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
         </details>
       </div>
     </>}
-    <div aria-live="polite" className="text-sm text-muted-foreground">{notice || (pending ? "Preparing a proposal…" : "")}</div>
-    {error && !panel && <p role="alert" className="text-sm text-destructive">{error} <Button type="button" onClick={() => window.location.reload()} className={stageControls} variant="link">Reload draft</Button></p>}
+    {!sourceWorkspace && <div aria-live="polite" className="text-sm text-muted-foreground">{notice || (pending ? "Preparing a proposal…" : "")}</div>}
+    {!sourceWorkspace && error && !panel && <p role="alert" className="text-sm text-destructive">{error} <Button type="button" onClick={() => window.location.reload()} className={stageControls} variant="link">Reload draft</Button></p>}
     <Sheet open={panel !== null} onOpenChange={open => { if (!open && !busy) setPanel(null); }}>
       <SheetContent side="bottom" className="mx-auto max-h-[90dvh] max-w-xl space-y-4 overflow-y-auto rounded-t-xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] motion-reduce:transition-none sm:bottom-auto sm:top-1/2 sm:max-h-[85dvh] sm:-translate-y-1/2 sm:rounded-xl [&>button:last-child]:grid [&>button:last-child]:size-11 [&>button:last-child]:place-items-center"
         onCloseAutoFocus={event => { event.preventDefault(); panelTrigger.current?.focus(); }}>
@@ -338,10 +395,10 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
   </div>;
 }
 
-function SourceSummary({ source }: { source: CreationSource }) {
+function SourceSummary({ source, embedded }: { source: CreationSource; embedded: boolean }) {
   return <div className="space-y-1 rounded-lg border bg-muted/30 p-3 text-sm">
     <p className="font-medium">Source concept</p>
-    <Link className="break-words text-primary underline" href={`/studio/library/${source.id}`}>{source.title}</Link>
+    {embedded ? <p className="break-words">{source.title}</p> : <Link className="break-words text-primary underline" href={`/studio/library/${source.id}`}>{source.title}</Link>}
     {source.concept !== source.title && <p className="break-words">{source.concept}</p>}
     <p className="text-xs text-muted-foreground">{source.basis} · source version {source.version}</p>
   </div>;
