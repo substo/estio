@@ -1,6 +1,5 @@
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { callLLMWithMetadata } from '@/lib/ai/llm';
-import { getModelForTask } from '@/lib/ai/model-router';
 import type { RawListing } from './listing-scraper';
 
 type RelevanceSource = 'cached' | 'rule' | 'ai' | 'fallback';
@@ -342,7 +341,7 @@ async function classifyWithAI(
         };
     }
 
-    const model = getModelForTask('listing_relevance_classification');
+    const model = null; // Location chain: text task model
 
     const systemPrompt = `You classify marketplace listings for a real-estate CRM.
 
@@ -378,7 +377,7 @@ Rules:
                     model,
                     systemPrompt,
                     JSON.stringify(payload),
-                    { jsonMode: true, temperature: 0.1, maxOutputTokens: 220, locationId: options.locationId }
+                    { jsonMode: true, temperature: 0.1, maxOutputTokens: 220, operation: "crm_extraction", locationId: options.locationId }
                 ).then(async result => {
                     // Record even if the caller's timeout already elapsed or business JSON is invalid.
                     await securelyRecordAiUsage({ locationId: options.locationId!, userId: null, resourceType: 'listing', featureArea: 'listing_relevance', action: 'classify',

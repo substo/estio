@@ -103,7 +103,7 @@ export async function analyzeContactRequirements(
 
         const result = await callLLMWithMetadata(modelName, prompt, undefined, {
             jsonMode: true,
-            locationId,
+            operation: "crm_extraction", locationId,
         });
         const responseText = result.text;
 

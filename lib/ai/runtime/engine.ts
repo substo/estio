@@ -1112,6 +1112,7 @@ function buildRuntimePrompt(args: {
 async function processClaimedRuntimeJob(job: Awaited<ReturnType<typeof claimNextPendingRuntimeJob>>, now: Date, textExecution?: TextExecutionContext): Promise<"completed" | "retry" | "dead" | "skipped"> {
   if (!job) return "skipped";
 
+  let generationDispatched = false;
   try {
     // Only the immediate authenticated request carries personal routing authority.
     // A background claimant must never turn an interrupted interactive draft into
@@ -1241,6 +1242,7 @@ async function processClaimedRuntimeJob(job: Awaited<ReturnType<typeof claimNext
       },
     });
 
+    generationDispatched = true;
     const orchestration = await orchestrate({
       conversationId: conversation.id,
       contactId: conversation.contactId,
@@ -1328,7 +1330,7 @@ async function processClaimedRuntimeJob(job: Awaited<ReturnType<typeof claimNext
     await finalizeRuntimeJobSuccess(job.id, now, orchestration.traceId || null);
     return "completed";
   } catch (error) {
-    const retryable = !(job.payload as { interactiveTextOnly?: boolean } | null)?.interactiveTextOnly;
+    const retryable = !generationDispatched && !(job.payload as { interactiveTextOnly?: boolean } | null)?.interactiveTextOnly;
     const failure = await finalizeRuntimeJobFailure({
       job,
       now,

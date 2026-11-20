@@ -4,7 +4,7 @@ import { resolveCrmWorkflowCapabilities } from "./crm-workflow-capabilities";
 import { isLikelyPropertyImageAnalysisModel, modelSupportsTask } from "./model-capabilities";
 import { quickAssistModelOptions } from "../viewings/sessions/quick-assist-models";
 import { buildLiveAssistantPrompt } from "../viewings/sessions/assistant-prompt";
-import { AI_WORKFLOW_CONTRACT_VERSION } from "./workflow-capabilities";
+import { AI_ROUTED_OPERATIONS, AI_WORKFLOW_CONTRACT_VERSION } from "./workflow-capabilities";
 
 test("eligible hosted text subscription cannot unlock API audio, vision or image adapters", () => {
   const sources = { hosted_subscription: { eligible: true } };
@@ -44,4 +44,15 @@ test("the direct Gemini Live Assist prompt contains bundled capability guidance 
   assert.match(prompt, /Fixture contact/);
   assert.match(prompt, /Help with a reply/);
   assert.match(prompt, /Unknown quota/);
+});
+
+test("CRM task families preserve text and media connection capabilities", () => {
+  assert.equal(AI_ROUTED_OPERATIONS.crm_translation.family, "translation");
+  assert.equal(AI_ROUTED_OPERATIONS.crm_extraction.family, "extraction");
+  assert.equal(AI_ROUTED_OPERATIONS.crm_summary.family, "summaries");
+  assert.equal(AI_ROUTED_OPERATIONS.onboarding_research.family, "research");
+  assert.ok(AI_ROUTED_OPERATIONS.crm_text.kinds.includes("device_codex"));
+  for (const operation of ["audio_transcription", "image_vision"] as const) {
+    assert.deepEqual(AI_ROUTED_OPERATIONS[operation].kinds, ["openai_key", "gemini_key"]);
+  }
 });

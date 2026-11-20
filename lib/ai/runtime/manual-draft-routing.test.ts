@@ -26,6 +26,7 @@ for (const name of names) test(`${name} preserves routing and stops uncertain/em
       resolveManualDraftSkillRouting: () => ({ forceSkillId: 'fixture', reason: 'fixture' }),
       normalizeDraftOutputLength: () => 'short', buildConversationalMessagingContract: () => '', getDraftOutputLengthInstruction: () => '',
       runAiSkillDecision: async (args: any) => {
+        assert.equal(args.locationId, 'loc');
         assert.equal(args.textExecution.model, 'selected-model');
         assert.equal(args.textExecution.executionMode, 'interactive');
         if (outcome === 'throw') throw new Error('uncertain execution');

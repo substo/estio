@@ -1,5 +1,4 @@
 import type { TextExecutionContext } from "./runtime/text-execution";
-import { getModelForTask } from "./model-router";
 import { callLLM } from "./llm";
 
 export interface SentimentResult {
@@ -28,14 +27,14 @@ Rules:
 Message: "{message}"`;
 
 export async function analyzeSentiment(message: string, locationId?: string, textExecution?: TextExecutionContext): Promise<SentimentResult> {
-    const model = textExecution?.model || getModelForTask("sentiment_analysis"); // Will default to Flash if not in map, but we'll update router next
+    const model = textExecution?.model || null; // requester pick, else the Location chain
 
     try {
         const response = await callLLM(
             model,
             SENTIMENT_PROMPT.replace("{message}", message),
             undefined,
-            { ...textExecution, jsonMode: true, locationId }
+            { executionMode: textExecution?.executionMode, jsonMode: true, locationId, modelSelection: textExecution?.model ? "explicit" : "hint" }
         );
         return JSON.parse(response);
     } catch (error) {

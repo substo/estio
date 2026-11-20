@@ -92,7 +92,6 @@ async function summarizeConversation(
     locationId?: string,
 ): Promise<string> {
     const { callLLM } = await import("../llm");
-    const { getModelForTask } = await import("../model-router");
 
     const conversationText = messages
         .map((m) => `[${m.direction}] ${m.body ?? ""}`)
@@ -111,10 +110,10 @@ Keep the summary concise but complete. Use bullet points.`;
     const userContent = `Summarize this conversation:\n\n${conversationText}`;
 
     try {
-        const modelId = getModelForTask("intent_classification");
+        const modelId = null; // Location chain: text task model
         const result = await callLLM(modelId, systemPrompt, userContent, {
             temperature: 0.3,
-            locationId,
+            operation: "crm_summary", locationId,
         });
         return result ?? "";
     } catch (error) {

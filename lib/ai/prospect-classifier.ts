@@ -1,6 +1,5 @@
 import { securelyRecordAiUsage } from "./usage-metering";
-import { callLLMWithMetadata } from './llm';
-import { getModelForTask } from './model-router';
+import { callLLMWithMetadata, routeUsageMetadata } from './llm';
 import db from '@/lib/db';
 import {
     type ProspectSellerType,
@@ -43,6 +42,7 @@ export interface ClassificationResult {
     isAgency: boolean;
     confidenceScore: number;
     reasoning: string;
+    ai?: { model: string; route: Record<string, unknown> };
 }
 
 export interface ProspectClassificationDecision {
@@ -301,7 +301,6 @@ export async function shouldRunProspectClassification(
  */
 export async function classifyProspect(input: ClassificationInput): Promise<ClassificationResult> {
     if (!input.locationId) throw new Error('A Location is required for paid prospect classification.');
-    const model = getModelForTask('prospect_classification');
 
     const signals: string[] = [];
     if (input.name) signals.push(`Name: "${input.name}"`);
@@ -341,15 +340,15 @@ export async function classifyProspect(input: ClassificationInput): Promise<Clas
     const userContent = `Classify this seller:\n\n${signals.join('\n')}`;
 
     try {
-        const aiResult = await callLLMWithMetadata(model, CLASSIFICATION_PROMPT, userContent, {
+        const aiResult = await callLLMWithMetadata(null, CLASSIFICATION_PROMPT, userContent, {
             jsonMode: true,
             temperature: 0.1,
-            locationId: input.locationId,
+            operation: "crm_extraction", locationId: input.locationId,
         });
 
         await securelyRecordAiUsage({ locationId: input.locationId, userId: null, resourceType: 'prospect', featureArea: 'prospect_classification', action: 'classify',
             provider: aiResult.provider, model: aiResult.model, inputTokens: aiResult.usage.promptTokens,
-            outputTokens: aiResult.usage.completionTokens + aiResult.usage.thoughtsTokens, fundingScope: aiResult.fundingScope, executionMode: 'background' });
+            outputTokens: aiResult.usage.completionTokens + aiResult.usage.thoughtsTokens, fundingScope: aiResult.fundingScope, executionMode: 'background', metadata: routeUsageMetadata(aiResult) });
         if (aiResult.text) {
             const parsed = JSON.parse(aiResult.text);
             const typedSellerType = normalizeProspectSellerType(parsed.sellerType);
@@ -360,6 +359,7 @@ export async function classifyProspect(input: ClassificationInput): Promise<Clas
                 isAgency: sellerTypeToLegacyAgencyFlag(resolvedSellerType),
                 confidenceScore: Math.min(100, Math.max(0, parseInt(parsed.confidenceScore) || 50)),
                 reasoning: parsed.reasoning || '',
+                ai: { model: aiResult.model, route: routeUsageMetadata(aiResult) },
             };
         }
     } catch (e: any) {
@@ -421,7 +421,6 @@ export async function classifyAndUpdateProspect(
         };
     }
 
-    const model = getModelForTask('prospect_classification');
     const result = await classifyProspect({ ...input, locationId });
 
     // Only auto-set sellerType if confidence is >= 70
@@ -447,25 +446,28 @@ export async function classifyAndUpdateProspect(
         console.warn(`[ProspectClassifier] Failed to stage agency/company match for ${prospectId}: ${e.message}`);
     }
 
-    // Log to enterprise AI usage ledger
+    // Only persist an AI execution trace when an adapter returned a result.
     try {
-        await db.agentExecution.create({
-            data: {
-                locationId,
-                sourceType: 'scraper',
-                sourceId: prospectId,
-                taskTitle: 'Prospect Agency Classification',
-                taskStatus: 'done',
-                status: 'success',
-                skillName: 'prospect_classifier',
-                intent: 'classification',
-                model,
-                promptTokens: 0,
-                completionTokens: 0,
-                totalTokens: 0,
-                cost: 0,
-            },
-        });
+        if (result.ai) {
+            await db.agentExecution.create({
+                data: {
+                    locationId,
+                    sourceType: 'scraper',
+                    sourceId: prospectId,
+                    taskTitle: 'Prospect Agency Classification',
+                    taskStatus: 'done',
+                    status: 'success',
+                    skillName: 'prospect_classifier',
+                    intent: 'classification',
+                    model: result.ai.model,
+                    thoughtSteps: [{ route: result.ai.route }] as any,
+                    promptTokens: 0,
+                    completionTokens: 0,
+                    totalTokens: 0,
+                    cost: 0,
+                },
+            });
+        }
     } catch (e) {
         // Non-critical — don't fail the classification
     }

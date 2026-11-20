@@ -22,10 +22,9 @@ import { securelyRecordAiUsage, securelyRecordConversationAiUsage } from "@/lib/
 import { normalizeReplyLanguage } from "@/lib/ai/reply-language-options";
 import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-language";
 import { z } from "zod";
-import { getModelForTask } from "@/lib/ai/model-router";
-import { callLLM, callLLMWithMetadata } from "@/lib/ai/llm";
+import { callLLM, callLLMWithMetadata, routeUsageMetadata, type LLMResultWithMetadata } from "@/lib/ai/llm";
 import { resolveReplyTranslationModel } from "@/lib/conversations/reply-translation-model";
-import { GEMINI_DRAFT_FAST_DEFAULT, GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_LATEST_ALIAS, GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
+import { GEMINI_DRAFT_FAST_DEFAULT, GEMINI_FLASH_LITE_LATEST_ALIAS, GEMINI_FLASH_LATEST_ALIAS } from "@/lib/ai/models";
 import { auth } from "@clerk/nextjs/server";
 import { Prisma } from "@prisma/client";
 import { revalidatePath, revalidateTag, unstable_cache } from "next/cache";
@@ -716,7 +715,7 @@ async function runMessageTranslationLLM(args: {
         String(args.sourceText || ""),
     ].join("\n\n");
 
-    const { text, usage, provider } = await callLLMWithMetadata(
+    const { text, usage, provider, model, route, fundingScope, executionMode } = await callLLMWithMetadata(
         modelId,
         systemPrompt,
         userPrompt,
@@ -724,6 +723,7 @@ async function runMessageTranslationLLM(args: {
             jsonMode: false,
             temperature: 0,
             maxOutputTokens: MESSAGE_TRANSLATION_MAX_OUTPUT_TOKENS,
+            operation: "crm_translation",
             locationId: args.locationId,
             executionMode: "interactive",
         }
@@ -735,7 +735,10 @@ async function runMessageTranslationLLM(args: {
         detectedSourceLanguage,
         confidence: detectedSourceLanguage ? 0.75 : null,
         provider,
-        model: modelId,
+        model,
+        route,
+        fundingScope,
+        executionMode,
         usage,
     };
 }
@@ -767,7 +770,7 @@ async function runReplyTranslationLLM(args: {
         String(args.sourceText || ""),
     ].join("\n\n");
 
-    const { text, usage, provider } = await callLLMWithMetadata(
+    const { text, usage, provider, model, route, fundingScope, executionMode } = await callLLMWithMetadata(
         modelId,
         systemPrompt,
         userPrompt,
@@ -775,6 +778,7 @@ async function runReplyTranslationLLM(args: {
             jsonMode: false,
             temperature: 0,
             maxOutputTokens: REPLY_TRANSLATION_MAX_OUTPUT_TOKENS,
+            operation: "crm_translation",
             locationId: args.locationId,
             executionMode: "interactive",
         }
@@ -785,7 +789,10 @@ async function runReplyTranslationLLM(args: {
         detectedSourceLanguage: null as string | null,
         confidence: null as number | null,
         provider,
-        model: modelId,
+        model,
+        route,
+        fundingScope,
+        executionMode,
         usage,
     };
 }
@@ -1580,6 +1587,8 @@ async function persistSelectionAiExecution(args: {
     intent: string;
     modelId: string;
     provider?: string | null;
+    route?: LLMResultWithMetadata["route"];
+    fundingScope?: LLMResultWithMetadata["fundingScope"];
     promptText: string;
     rawOutput: string;
     normalizedOutput: string;
@@ -1619,7 +1628,7 @@ async function persistSelectionAiExecution(args: {
                     step: 1,
                     description: "LLM request payload",
                     conclusion: "Captured full request prompt",
-                    data: { model: args.modelId, prompt: args.promptText },
+                    data: { model: args.modelId, prompt: args.promptText, ...routeUsageMetadata(args) },
                 },
                 {
                     step: 2,
@@ -1688,7 +1697,9 @@ async function persistSelectionAiExecution(args: {
         provider,
         model: args.modelId,
         inputTokens: args.usage.promptTokens || 0,
-        outputTokens: args.usage.completionTokens || 0,
+        outputTokens: (args.usage.completionTokens || 0) + (args.usage.thoughtsTokens || 0),
+        fundingScope: args.fundingScope,
+        metadata: routeUsageMetadata(args),
     });
 
     return estimatedCost.amount;
@@ -6137,7 +6148,10 @@ export async function previewTranslatedReply(
             model: translation.model,
             inputTokens: translation.usage.promptTokens || 0,
             outputTokens: translation.usage.completionTokens || 0,
+            fundingScope: translation.fundingScope,
+            executionMode: translation.executionMode,
             metadata: {
+                ...routeUsageMetadata(translation),
                 source: "previewTranslatedReply",
                 channel: normalizedChannel,
                 targetLanguage: resolvedTargetLanguage,
@@ -6233,7 +6247,10 @@ export async function translateSelectedText(
             model: translation.model,
             inputTokens: translation.usage.promptTokens || 0,
             outputTokens: translation.usage.completionTokens || 0,
+            fundingScope: translation.fundingScope,
+            executionMode: translation.executionMode,
             metadata: {
+                ...routeUsageMetadata(translation),
                 source: "translateSelectedText",
                 targetLanguage: resolvedTargetLanguage,
                 cached: false,
@@ -6401,7 +6418,10 @@ export async function translateConversationMessage(
             model: translation.model,
             inputTokens: translation.usage.promptTokens || 0,
             outputTokens: translation.usage.completionTokens || 0,
+            fundingScope: translation.fundingScope,
+            executionMode: translation.executionMode,
             metadata: {
+                ...routeUsageMetadata(translation),
                 source: "translateConversationMessage",
                 messageId: message.id,
                 targetLanguage: resolvedTargetLanguage,
@@ -6674,7 +6694,10 @@ export async function translateConversationThread(
                     model: translation.model,
                     inputTokens: translation.usage.promptTokens || 0,
                     outputTokens: translation.usage.completionTokens || 0,
+                    fundingScope: translation.fundingScope,
+                    executionMode: translation.executionMode,
                     metadata: {
+                        ...routeUsageMetadata(translation),
                         source: "translateConversationThread",
                         messageId: row.id,
                         targetLanguage: resolvedTargetLanguage,
@@ -11517,6 +11540,7 @@ interface LeadAnalysisTrace {
     fundingScope?: "user_chatgpt" | "location_chatgpt" | "location_openai" | "location_gemini" | "estio_global";
     thoughtSummary: string;
     llmRequest: {
+        route?: LLMResultWithMetadata["route"];
         model: string;
         prompt: string;
         options: {
@@ -11893,7 +11917,7 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
 
         const modelId = typeof modelOverride === "string" && modelOverride.trim()
             ? modelOverride.trim()
-            : getModelForTask("simple_generation");
+            : null; // Location chain: text task model
         const startedAt = Date.now();
         const summaryPrompt = [
             "You write concise internal CRM activity summaries for real estate teams.",
@@ -11915,8 +11939,10 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
             '"""',
         ].join("\n");
 
-        const { text: rawSummary, usage, provider } = await callLLMWithMetadata(modelId, summaryPrompt, undefined, {
+        const { text: rawSummary, usage, provider, model, route, fundingScope } = await callLLMWithMetadata(modelId, summaryPrompt, undefined, {
             temperature: 0.2,
+            operation: "crm_summary",
+            modelSelection: modelOverride ? "explicit" : "hint",
             locationId: location.id,
             executionMode: "interactive",
         });
@@ -11940,8 +11966,10 @@ export async function summarizeSelectionToCrmLog(conversationId: string, selecte
                 conversationInternalId: persisted.conversation.id,
                 taskTitle: "Selection Summary to CRM Log",
                 intent: "selection_summary",
-                modelId,
+                modelId: model,
                 provider,
+                route,
+                fundingScope,
                 promptText: summaryPrompt,
                 rawOutput: rawSummary,
                 normalizedOutput: summary,
@@ -12004,7 +12032,7 @@ export async function suggestTasksFromSelection(conversationId: string, selected
 
         const modelId = typeof modelOverride === "string" && modelOverride.trim()
             ? modelOverride.trim()
-            : getModelForTask("simple_generation");
+            : null; // Location chain: text task model
         modelForTelemetry = modelId;
 
         const startedAt = Date.now();
@@ -12044,12 +12072,13 @@ export async function suggestTasksFromSelection(conversationId: string, selected
             },
         });
 
-        const { text: rawOutput, usage, provider } = await callLLMWithMetadata(
+        const { text: rawOutput, usage, provider, model, route, fundingScope } = await callLLMWithMetadata(
             modelId,
             prompt,
             undefined,
-            { jsonMode: true, temperature: 0.2, locationId: location.id, executionMode: "interactive" }
+            { jsonMode: true, temperature: 0.2, operation: "crm_extraction", modelSelection: modelId ? "explicit" : "hint", locationId: location.id, executionMode: "interactive" }
         );
+        modelForTelemetry = model;
         const latencyMs = Date.now() - startedAt;
 
         const cleanJson = rawOutput.replace(/```json/g, "").replace(/```/g, "").trim();
@@ -12106,8 +12135,10 @@ export async function suggestTasksFromSelection(conversationId: string, selected
                 conversationInternalId: conversation.id,
                 taskTitle: "Selection Task Suggestions",
                 intent: "selection_task_suggestions",
-                modelId,
+                modelId: model,
                 provider,
+                route,
+                fundingScope,
                 promptText: prompt,
                 rawOutput,
                 normalizedOutput: JSON.stringify({ suggestions }),
@@ -12132,6 +12163,7 @@ export async function suggestTasksFromSelection(conversationId: string, selected
                 source: "selection_toolbar",
                 selectedTextLength: text.length,
                 modelId,
+                actualModel: model,
                 suggestionCount: suggestions.length,
                 latencyMs,
                 promptTokens: usage.promptTokens || 0,
@@ -12143,7 +12175,7 @@ export async function suggestTasksFromSelection(conversationId: string, selected
         return {
             success: true as const,
             suggestions,
-            model: modelId,
+            model,
             usage: {
                 promptTokens: usage.promptTokens || 0,
                 completionTokens: usage.completionTokens || 0,
@@ -12575,7 +12607,7 @@ export async function runCustomSelectionPrompt(
         const location = await getAuthenticatedLocation();
         const modelId = typeof modelOverride === "string" && modelOverride.trim()
             ? modelOverride.trim()
-            : getModelForTask("simple_generation");
+            : null; // Location chain: text task model
         const startedAt = Date.now();
         const systemPrompt = [
             "You are an assistant for CRM operators.",
@@ -12592,7 +12624,7 @@ export async function runCustomSelectionPrompt(
             '"""',
         ].join("\n");
 
-        const { text: rawOutput, usage, provider } = await callLLMWithMetadata(modelId, systemPrompt, undefined, {
+        const { text: rawOutput, usage, provider, model, route, fundingScope } = await callLLMWithMetadata(modelId, systemPrompt, undefined, {
             temperature: 0.25,
             locationId: location.id,
             executionMode: "interactive",
@@ -12607,8 +12639,10 @@ export async function runCustomSelectionPrompt(
                     conversationInternalId: conversation.id,
                     taskTitle: "Selection Custom Prompt",
                     intent: "selection_custom",
-                    modelId,
+                    modelId: model,
                     provider,
+                    route,
+                    fundingScope,
                     promptText: systemPrompt,
                     rawOutput,
                     normalizedOutput: output,
@@ -12785,81 +12819,32 @@ async function parseLeadFromTextInternal(
             '"""',
         ].join("\n");
 
-        const initialModelId = resolveLeadParserModelId(modelOverride);
-        const modelsToTry = [
-            initialModelId,
-            GEMINI_FLASH_STABLE_FALLBACK,
-            "gemini-2.5-pro"
-        ];
-
-        let finalModelId = initialModelId;
-        let finalProvider = "google_gemini";
-        let finalFundingScope: LeadAnalysisTrace["fundingScope"] = "location_gemini";
-        let finalJsonStr = "";
-        let finalUsage: any = null;
-        let finalParsed: any = null;
-        let finalResult: z.infer<typeof LeadParsingSchema> | null = null;
-        let lastError: Error | null = null;
-        
-        let start = Date.now();
-        let end = Date.now();
-
-        for (let i = 0; i < modelsToTry.length; i++) {
-            const currentModelId = modelsToTry[i] || GEMINI_FLASH_STABLE_FALLBACK;
-            finalModelId = currentModelId;
-            
-            try {
-                start = Date.now();
-                const { text: jsonStr, usage, provider, fundingScope } = await callLLMWithMetadata(currentModelId, prompt, undefined, {
-                    jsonMode: true,
-                    temperature: 0,
-                    maxOutputTokens: LEAD_PARSE_MAX_OUTPUT_TOKENS,
-                    thinkingBudget: LEAD_PARSE_THINKING_BUDGET,
-                    locationId: location.id,
-                    executionMode: "interactive",
-                });
-                end = Date.now();
-
-                finalJsonStr = jsonStr;
-                finalUsage = usage;
-                finalProvider = provider;
-                finalFundingScope = fundingScope;
-
-                finalParsed = parseJsonObjectFromModelOutput(jsonStr);
-                finalResult = LeadParsingSchema.parse(finalParsed);
-
-                // If successful, break
-                break;
-            } catch (error: any) {
-                lastError = error;
-                console.warn(`[Lead Parser] Attempt ${i + 1} failed with model ${currentModelId}:`, error?.message || error);
-                
-                if (i < modelsToTry.length - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // Incremental backoff
-                }
-            }
-        }
-
-        if (!finalResult || !finalUsage) {
-            throw lastError || new Error("Lead parsing failed after multiple attempts.");
-        }
+        const start = Date.now();
+        const aiResult = await callLLMWithMetadata(resolveLeadParserModelId(modelOverride), prompt, undefined, {
+            jsonMode: true,
+            temperature: 0,
+            maxOutputTokens: LEAD_PARSE_MAX_OUTPUT_TOKENS,
+            thinkingBudget: LEAD_PARSE_THINKING_BUDGET,
+            locationId: location.id,
+            executionMode: "interactive",
+            modelSelection: modelOverride ? "explicit" : "hint",
+            operation: "crm_extraction",
+        });
+        const end = Date.now();
+        const { text: jsonStr, model: modelId, provider: finalProvider, fundingScope: finalFundingScope, usage } = aiResult;
+        const result = LeadParsingSchema.parse(parseJsonObjectFromModelOutput(jsonStr));
 
         const costEstimate = isUnpricedTextProvider(finalProvider)
-            ? buildUnavailableProviderCostEstimate(finalProvider, finalUsage)
-            : calculateRunCostFromUsage(finalModelId, {
-                promptTokens: finalUsage.promptTokens,
-                completionTokens: finalUsage.completionTokens,
-                totalTokens: finalUsage.totalTokens,
-                thoughtsTokens: finalUsage.thoughtsTokens,
-                toolUsePromptTokens: finalUsage.toolUsePromptTokens
+            ? buildUnavailableProviderCostEstimate(finalProvider, usage)
+            : calculateRunCostFromUsage(modelId, {
+                promptTokens: usage.promptTokens,
+                completionTokens: usage.completionTokens,
+                totalTokens: usage.totalTokens,
+                thoughtsTokens: usage.thoughtsTokens,
+                toolUsePromptTokens: usage.toolUsePromptTokens
             });
 
-        const cleanJson = finalJsonStr.replace(/```json/gi, "").replace(/```/g, "").trim();
-        const parsed = finalParsed;
-        const result = finalResult;
-        const jsonStr = finalJsonStr;
-        const usage = finalUsage;
-        const modelId = finalModelId;
+        const cleanJson = jsonStr.replace(/```json/gi, "").replace(/```/g, "").trim();
         const traceId = `trace_${Date.now()}`;
         const trace: LeadAnalysisTrace = {
             traceId,
@@ -12871,6 +12856,7 @@ async function parseLeadFromTextInternal(
             thoughtSummary: `Lead Analysis (${modelId}):\n- Extracted structured data from normalized text.\n- Identified Source: ${result.source || 'Unknown'}\n- Message Status: ${result.messageContent ? 'Has Message' : 'Notes Only'}`,
             llmRequest: {
                 model: modelId,
+                route: aiResult.route,
                 prompt,
                 options: {
                     jsonMode: true,
@@ -13965,7 +13951,7 @@ export async function suggestViewingsFromSelection(
     const anchorDateIso = formatIsoDateInTimeZone(anchorContext.anchorDate, clientTimeZone);
     const anchorTomorrowIso = shiftIsoDate(anchorDateIso, 1) || anchorDateIso;
 
-    const modelId = requestedModelId || getModelForTask("suggest_viewings");
+    const modelId = requestedModelId || null; // Location chain: text task model
 
     await persistViewingsSuggestionFunnelEvent({
         type: VIEWINGS_SUGGESTION_FUNNEL_EVENT_TYPES.generateRequested,
@@ -14134,7 +14120,9 @@ ${trimmedText}
             conversationInternalId: conversation.id,
             taskTitle: "Suggest Viewings from Selection",
             intent: "extract_viewings",
-            modelId,
+            modelId: result.model,
+            route: result.route,
+            fundingScope: result.fundingScope,
             provider: result.provider,
             promptText: `${systemPrompt}\n\n${promptText}`,
             rawOutput: rawJsonRaw,

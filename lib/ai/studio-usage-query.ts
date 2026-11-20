@@ -12,6 +12,6 @@ export function studioUsageQuery(resolvedLocationId: string, now = new Date()) {
               count(*) filter(where settled_at >= ${startOfMonth} and settled_at < ${endOfMonth}) month_calls,
               coalesce(sum(coalesce(input_tokens,0)+coalesce(output_tokens,0)) filter(where settled_at >= ${startOfMonth} and settled_at < ${endOfMonth}),0)::bigint month_tokens,
               coalesce(sum(cost_micros) filter(where settled_at >= ${startOfMonth} and settled_at < ${endOfMonth}),0)::float8 / 1000000 month_cost
-            from studio.studio_ai_usage where location_id = ${resolvedLocationId} and status = 'settled'
+            from studio.studio_ai_usage where location_id = ${resolvedLocationId} and status = 'settled' and operation not like 'crm.%'
             group by operation, provider, model`;
 }

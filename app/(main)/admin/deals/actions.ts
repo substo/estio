@@ -18,7 +18,6 @@ import { collectDealConversationReferences, resolveDealConversationRefs, syncDea
 import { getActiveContactsAccess, type ActiveContactsAccess } from "@/lib/contacts/active-location-access";
 import { buildConversationVisibilityWhere } from "@/lib/conversations/contact-assignment-access";
 import { buildDealManageWhere, buildDealVisibilityWhere } from "@/lib/deals/assignment-access";
-import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 
 type DealTimelineWindow = {
     oldestCursor: string | null;
@@ -367,11 +366,8 @@ export async function runDealAgentAction(dealId: string, message: string, histor
     });
     if (!deal) throw new Error("Deal not found");
 
-    const apiKey = await resolveLocationGoogleAiApiKey(location.id);
-
-    if (!apiKey) throw new Error("AI not configured");
-
-    const agent = new DealAgent(apiKey, dealId, location.id);
+    // Provider/model come from the Location's AI order; the agent reports a stop reason when nothing can run.
+    const agent = new DealAgent(dealId, location.id);
 
     // Run
     const response = await agent.run(message, history);

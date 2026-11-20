@@ -10,7 +10,6 @@ import {
     looksLikeSendReadyDraftInstruction,
     resolveFastDraftMaxOutputTokens,
     resolveDraftChannelName,
-    shouldRetryGeminiDraftWithPinnedFallback,
     stripUngroundedMapUrls,
 } from "./coordinator";
 
@@ -208,12 +207,4 @@ test("buildGeminiDraftGenerationConfig only sends numeric thinking budgets to Ge
 
     assert.deepEqual(pinnedConfig.thinkingConfig, { thinkingBudget: 0 });
     assert.equal("thinkingConfig" in movingAliasConfig, false);
-});
-
-test("latest Gemini alias retries pinned fallback for capability-related HTTP 400 errors", () => {
-    const capabilityError = new Error("[400 Bad Request] Request contains an invalid argument.");
-
-    assert.equal(shouldRetryGeminiDraftWithPinnedFallback("gemini-flash-latest", capabilityError), true);
-    assert.equal(shouldRetryGeminiDraftWithPinnedFallback("gemini-2.5-flash-lite", capabilityError), false);
-    assert.equal(shouldRetryGeminiDraftWithPinnedFallback("gemini-3.1-pro", capabilityError), false);
 });

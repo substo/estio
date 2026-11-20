@@ -2,7 +2,6 @@ import { randomUUID } from "crypto";
 import { Prisma } from "@prisma/client";
 import db from "@/lib/db";
 import { callLLM } from "@/lib/ai/llm";
-import { getModelForTask } from "@/lib/ai/model-router";
 import { getLocationDefaultReplyLanguage } from "@/lib/ai/location-reply-language";
 import { formatViewingDateTimeWithTimeZoneLabel } from "@/lib/viewings/datetime";
 import { getShortMapLink } from "@/lib/crm/notion-scraper";
@@ -593,7 +592,7 @@ async function maybePolishReminderDraft(
     }
 
     try {
-        const modelId = getModelForTask("draft_reply");
+        const modelId = null; // Location chain: text task model
         const languageInstruction = targetLanguage || fallbackLanguage;
         const polished = await callLLM(
             modelId,

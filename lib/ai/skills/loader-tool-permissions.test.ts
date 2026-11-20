@@ -42,7 +42,6 @@ function fixture(toolCalls: Array<{ name: string; arguments?: Record<string, unk
     }));
     const dependencies: Record<string, unknown> = {
         fs, path, "gray-matter": matter, zod: { z },
-        "../model-router": { getModelForTask: () => "fixture-model" },
         "../mcp/registry": { toolRegistry: registry },
         "../prompts/communication-policy": communicationPolicy,
         "../pricing": { calculateRunCostFromUsage: () => ({ amount: 0, method: "fixture", confidence: "high" }) },

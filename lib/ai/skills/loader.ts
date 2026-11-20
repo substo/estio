@@ -129,7 +129,6 @@ export class SkillLoader {
 
 // ── EXECUTION LOGIC ─────────────────────────────────────────────────────────────
 
-import { getModelForTask } from "../model-router";
 import { callLLMWithMetadata } from "../llm";
 import { toolRegistry } from "../mcp/registry";
 import { SentimentResult } from "../sentiment";
@@ -176,7 +175,7 @@ export interface SkillExecutionResult {
     completionTokens: number;
     cost: number;
     llmCall?: {
-        executions?: Array<{ requestedModel: string; model: string; provider: string; fundingScope: string; executionMode: string }>;
+        executions?: Array<{ requestedModel: string; model: string; provider: string; fundingScope: string; executionMode: string; requestedKind?: string | null; actualKind?: string | null; switchReason?: string | null }>;
         request: {
             model: string;
             systemPrompt: string;
@@ -614,7 +613,7 @@ Write the final message the agent should send now.`;
             params.modelId,
             synthesisSystemPrompt,
             synthesisUserPrompt,
-            { jsonMode: false, locationId: params.context.locationId, executionMode: params.context.textExecution?.executionMode }
+            { jsonMode: false, locationId: params.context.locationId, executionMode: params.context.textExecution?.executionMode, modelSelection: params.context.textExecution?.model ? "explicit" : "hint" }
         );
         return { draft: result.text?.trim() || params.initialDraft || null, usage: result.usage, result };
     } catch (e) {
@@ -691,10 +690,9 @@ export async function executeSkill(
     skill: LoadedSkill & { tools?: string[] },
     context: SkillExecutionContext
 ): Promise<SkillExecutionResult> {
-    const modelId = context.textExecution?.model || getModelForTask(
-        context.intent === "PRICE_NEGOTIATION" ? "negotiation" :
-            context.intent === "QUALIFICATION" ? "qualification" : "draft_reply"
-    );
+    // The requester's pick for this request, else the Location chain's text task model decides.
+    const modelId = context.textExecution?.model || "";
+    const modelSelection = context.textExecution?.model ? "explicit" as const : "hint" as const;
 
     // 1. Filter Tools
     // Only expose tools that are explicitly listed in the skill's frontmatter
@@ -779,7 +777,7 @@ You must respond with valid JSON:
             modelId,
             systemPrompt,
             userPrompt,
-            { jsonMode: true, locationId: context.locationId, executionMode: context.textExecution?.executionMode }
+            { jsonMode: true, locationId: context.locationId, executionMode: context.textExecution?.executionMode, modelSelection }
         );
 
         const { text: response, usage } = primaryResult;
@@ -995,11 +993,14 @@ You must respond with valid JSON:
         const resRaw = truncateForTrace(response);
         const llmCall = {
             executions: executions.map(result => ({
-                requestedModel: modelId,
+                requestedModel: result.route?.requested?.model || modelId,
                 model: result.model || modelId,
                 provider: result.provider,
                 fundingScope: result.fundingScope,
                 executionMode: result.executionMode,
+                requestedKind: result.route?.requested?.kind ?? null,
+                actualKind: result.route?.actual.kind ?? null,
+                switchReason: result.route?.switchReason ?? null,
             })),
             request: {
                 model: modelId,

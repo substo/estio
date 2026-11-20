@@ -7,10 +7,14 @@ import {
     GEMINI_FLASH_LATEST_ALIAS,
     GEMINI_FLASH_STABLE_FALLBACK,
 } from "@/lib/ai/models";
-import { callLLMWithMetadata } from "@/lib/ai/llm";
+import { executeCrmRouteStep } from "@/lib/ai/llm";
+import { loadCrmRoutePlan, runLocationCrmRoute } from "@/lib/ai/crm-route-loader";
+import type { CrmRouteRecord, CrmRouteStep } from "@/lib/ai/crm-routing";
+import { AiRouteUnavailableError } from "@/lib/ai/route-errors";
 import { resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { resolveAuthenticatedDbUserId } from "@/lib/auth/current-user";
-import { isChatGptSubscriptionModelId } from "@/lib/ai/chatgpt-subscription";
+import { CHATGPT_SUBSCRIPTION_DEFAULT_MODEL, isChatGptSubscriptionModelId } from "@/lib/ai/chatgpt-subscription";
+import { OPENAI_DEFAULT_TEXT_MODEL } from "@/lib/ai/openai-models";
 import { validateAction } from "@/lib/ai/policy";
 import { appendAiStreamText, selectAiStreamFinalText } from "@/lib/ai/stream-text";
 import { 
@@ -146,6 +150,14 @@ function getDraftGenerationProvider(modelName: string): DraftGenerationProvider 
     return "google_gemini";
 }
 
+/** A chain step as the draft helpers' model value: `openai:…`, `chatgpt_subscription:…` (own or Location ChatGPT) or a Gemini id. */
+function draftRouteModelValue(step: { kind: string; model: string | null }): string {
+    const model = String(step.model || "").trim();
+    if (step.kind === "openai_key") return `openai:${model || OPENAI_DEFAULT_TEXT_MODEL}`;
+    if (step.kind === "chatgpt_subscription" || step.kind === "device_codex") return `chatgpt_subscription:${model || CHATGPT_SUBSCRIPTION_DEFAULT_MODEL}`;
+    return model || GEMINI_DRAFT_FAST_DEFAULT;
+}
+
 function getDraftGenerationTool(provider: DraftGenerationProvider): string {
     if (provider === "openai") return "openai.responses.create";
     if (provider === "chatgpt_subscription") return "codex.exec";
@@ -253,8 +265,6 @@ export function buildContactRequirementGuide(contact: {
 
 const DRAFT_THINKING_BUDGET_SIMPLE = 0;
 const DRAFT_THINKING_BUDGET_COMPLEX = 128;
-const DRAFT_RETRY_BASE_DELAY_MS = 260;
-const DRAFT_MAX_RETRIES_ON_429 = 2;
 const DRAFT_STATIC_CONTEXT_VERSION = "v1";
 
 const DRAFT_STATIC_CONTEXT_PROMPT = `You are an expert real-estate message drafting assistant.
@@ -292,39 +302,6 @@ const SIGN_OFF_PHRASES = new Set([
     "thanks"
 ]);
 
-function isModelUnavailableError(error: unknown): boolean {
-    const message = (error instanceof Error ? error.message : String(error || "")).toLowerCase();
-    return (
-        message.includes("404") ||
-        message.includes("not found") ||
-        message.includes("unknown model") ||
-        message.includes("invalid model") ||
-        message.includes("unsupported model")
-    );
-}
-
-function isModelCapabilityError(error: unknown): boolean {
-    const message = (error instanceof Error ? error.message : String(error || "")).toLowerCase();
-    return (
-        (message.includes("400") || message.includes("bad request")) &&
-        (
-            message.includes("invalid argument") ||
-            message.includes("thinkingconfig") ||
-            message.includes("thinking budget") ||
-            message.includes("not supported") ||
-            message.includes("unsupported")
-        )
-    );
-}
-
-export function shouldRetryGeminiDraftWithPinnedFallback(modelName: string, error: unknown): boolean {
-    if (modelName === GEMINI_FLASH_LATEST_ALIAS) {
-        return isModelUnavailableError(error) || isModelCapabilityError(error);
-    }
-
-    return modelName === GEMINI_DRAFT_FAST_DEFAULT && isModelUnavailableError(error);
-}
-
 export function buildGeminiDraftGenerationConfig(args: {
     modelName: string;
     maxOutputTokens: number;
@@ -345,15 +322,6 @@ export function buildGeminiDraftGenerationConfig(args: {
     }
 
     return generationConfig;
-}
-
-function isRateLimitError(error: unknown): boolean {
-    const message = (error instanceof Error ? error.message : String(error || "")).toLowerCase();
-    return message.includes("429") || message.includes("rate limit");
-}
-
-function wait(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function getUsageInt(meta: Record<string, unknown>, key: string): number {
@@ -711,6 +679,8 @@ export async function generateDraft(context: CoordinationContext) {
             thinkingBudget: number | null;
             finishReason: string | null;
             truncated: boolean;
+            /** Location chain: requested vs actual connection/model and why they differ. */
+            route?: CrmRouteRecord;
         };
         cache: {
             state: "hit" | "miss" | "disabled" | "error";
@@ -780,17 +750,24 @@ export async function generateDraft(context: CoordinationContext) {
         const configuredDraftModel = typeof configAny?.googleAiModel === "string" && configAny.googleAiModel.trim()
             ? configAny.googleAiModel.trim()
             : "";
+        // The Location chain decides provider and model; these values are hints on their own connection kind.
         let requestedModelName = explicitRequestedModel || configuredDraftModel || GEMINI_DRAFT_FAST_DEFAULT;
-        let actualModelName = requestedModelName;
-        let activeProvider: DraftGenerationProvider = getDraftGenerationProvider(actualModelName);
-
-        if (activeProvider === "google_gemini" && !apiKey) {
+        const interactiveDraft = context.executionMode === "interactive";
+        const requesterDbUserId = interactiveDraft ? await resolveAuthenticatedDbUserId() || undefined : undefined;
+        const loadDraftRoute = (hintModel: string) => loadCrmRoutePlan({
+            locationId: context.locationId, operation: "crm_text", interactive: interactiveDraft && !!requesterDbUserId,
+            hintModel, explicitModel: !!explicitRequestedModel,
+        });
+        let draftRoute = await loadDraftRoute(requestedModelName);
+        if (!draftRoute.steps.length) {
             return {
-                draft: "Error: No AI API Key configured.",
-                reasoning: "Please configure Google AI in Settings.",
+                draft: "Error: No AI connection can run this draft.",
+                reasoning: draftRoute.stopReason || "Check the AI order in Settings → AI.",
                 telemetry,
             };
         }
+        if (draftRoute.requested) requestedModelName = draftRouteModelValue(draftRoute.requested);
+        let actualModelName = draftRouteModelValue(draftRoute.steps[0]);
 
         telemetry.model.requested = requestedModelName;
         telemetry.model.actual = actualModelName;
@@ -1069,12 +1046,11 @@ export async function generateDraft(context: CoordinationContext) {
             );
         telemetry.prompt.complexDraft = isComplexDraft;
 
-        if (!explicitRequestedModel && !configuredDraftModel) {
-            actualModelName = isComplexDraft
-                ? GEMINI_FLASH_STABLE_FALLBACK
-                : GEMINI_DRAFT_FAST_DEFAULT;
-            requestedModelName = actualModelName;
-            activeProvider = getDraftGenerationProvider(actualModelName);
+        if (!explicitRequestedModel && !configuredDraftModel && isComplexDraft) {
+            // Complex drafts hint the stable Flash model; the chain still decides the connection.
+            draftRoute = await loadDraftRoute(GEMINI_FLASH_STABLE_FALLBACK);
+            if (draftRoute.requested) requestedModelName = draftRouteModelValue(draftRoute.requested);
+            if (draftRoute.steps[0]) actualModelName = draftRouteModelValue(draftRoute.steps[0]);
             telemetry.model.requested = requestedModelName;
         }
 
@@ -1276,8 +1252,8 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
 - Tone style: ${isEmail ? "Professional Email" : "Conversational Messaging"}
 - Static context version: ${DRAFT_STATIC_CONTEXT_VERSION}`;
 
-        // 4. Call selected provider. Gemini keeps cached-context streaming and
-        // model fallback; OpenAI routes through the shared Responses API wrapper.
+        // 4. Call selected provider. Gemini keeps cached-context streaming; OpenAI routes through the shared Responses API wrapper.
+        let geminiStreamAccepted = false;
         const generateWithModel = async (candidateModel: string) => {
             const generationConfig = buildGeminiDraftGenerationConfig({
                 modelName: candidateModel,
@@ -1300,51 +1276,39 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
             telemetry.cache.state = cacheModel.cacheState;
             telemetry.cache.name = cacheModel.cacheName || null;
 
-            let attempt = 0;
-            while (true) {
-                try {
-                    if (context.stream && typeof context.onToken === "function") {
-                        telemetry.model.streamed = true;
-                        const streamStartedAt = Date.now();
-                        const streamResult = await cacheModel.model.generateContentStream(finalPrompt);
-                        let rawText = "";
-                        let firstTokenSeen = false;
+            if (context.stream && typeof context.onToken === "function") {
+                telemetry.model.streamed = true;
+                const streamStartedAt = Date.now();
+                const streamResult = await cacheModel.model.generateContentStream(finalPrompt);
+                geminiStreamAccepted = true;
+                let rawText = "";
+                let firstTokenSeen = false;
 
-                        for await (const chunk of streamResult.stream) {
-                            const delta = chunk.text();
-                            if (!delta) continue;
-                            rawText = appendAiStreamText(rawText, delta);
-                            if (!firstTokenSeen) {
-                                firstTokenSeen = true;
-                                telemetry.stageMs.firstTokenMs = Date.now() - streamStartedAt;
-                                console.info("[AI Draft Timing]", JSON.stringify({
-                                    event: "generateDraft_first_token",
-                                    ts: new Date().toISOString(),
-                                    conversationId: context.conversationId,
-                                    firstTokenMs: telemetry.stageMs.firstTokenMs,
-                                }));
-                            }
-                            context.onToken(delta);
-                        }
-
-                        const response = await streamResult.response;
-                        const responseText = response.text();
-
-                        return { response, rawText: selectAiStreamFinalText(rawText, responseText) };
+                for await (const chunk of streamResult.stream) {
+                    const delta = chunk.text();
+                    if (!delta) continue;
+                    rawText = appendAiStreamText(rawText, delta);
+                    if (!firstTokenSeen) {
+                        firstTokenSeen = true;
+                        telemetry.stageMs.firstTokenMs = Date.now() - streamStartedAt;
+                        console.info("[AI Draft Timing]", JSON.stringify({
+                            event: "generateDraft_first_token",
+                            ts: new Date().toISOString(),
+                            conversationId: context.conversationId,
+                            firstTokenMs: telemetry.stageMs.firstTokenMs,
+                        }));
                     }
-
-                    const result = await cacheModel.model.generateContent(finalPrompt);
-                    return { response: result.response, rawText: result.response.text() };
-                } catch (error) {
-                    const shouldRetry = isRateLimitError(error) && attempt < DRAFT_MAX_RETRIES_ON_429;
-                    if (!shouldRetry) throw error;
-
-                    const jitterMs = Math.floor(Math.random() * 90);
-                    const delayMs = DRAFT_RETRY_BASE_DELAY_MS * (2 ** attempt) + jitterMs;
-                    await wait(delayMs);
-                    attempt += 1;
+                    context.onToken(delta);
                 }
+
+                const response = await streamResult.response;
+                const responseText = response.text();
+
+                return { response, rawText: selectAiStreamFinalText(rawText, responseText) };
             }
+
+            const result = await cacheModel.model.generateContent(finalPrompt);
+            return { response: result.response, rawText: result.response.text() };
         };
 
         const geminiStartedAt = Date.now();
@@ -1363,64 +1327,77 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
             };
         };
 
-        if (activeProvider !== "google_gemini") {
-            const openAiResult = await callLLMWithMetadata(
-                actualModelName,
-                DRAFT_STATIC_CONTEXT_PROMPT,
-                finalPrompt,
-                {
-                    temperature: 0.2,
-                    maxOutputTokens,
-                    locationId: context.locationId,
-                    executionMode: context.executionMode || "background",
+        // Ordered Location chain: switch only when a step fails before generation (limit, quota, credential).
+        // A started stream or uncertain call is never replayed on another step.
+        const runDraftStep = async (step: CrmRouteStep): Promise<typeof generationResult> => {
+            actualModelName = draftRouteModelValue(step);
+            telemetry.model.actual = actualModelName;
+            if (step.kind !== "gemini_key") {
+                const routedResult = await executeCrmRouteStep(
+                    step,
+                    withAiWorkflowInstructions(DRAFT_STATIC_CONTEXT_PROMPT, "crm_shared_text"),
+                    finalPrompt,
+                    {
+                        temperature: 0.2,
+                        maxOutputTokens,
+                        locationId: context.locationId,
+                        executionMode: context.executionMode || "background",
+                    },
+                    requesterDbUserId,
+                );
+                if (context.stream && typeof context.onToken === "function") {
+                    telemetry.model.streamed = true;
+                    try {
+                        context.onToken(routedResult.text);
+                    } catch (error) {
+                        throw new Error("The draft output could not be delivered.", { cause: error });
+                    }
                 }
-            );
-            if (context.stream && typeof context.onToken === "function") {
-                telemetry.model.streamed = true;
-                context.onToken(openAiResult.text);
-            }
-
-            generationResult = {
-                response: null,
-                rawText: openAiResult.text,
-                provider: openAiResult.provider,
-                fundingScope: openAiResult.fundingScope,
-                usage: {
-                    promptTokens: openAiResult.usage.promptTokens,
-                    completionTokens: openAiResult.usage.completionTokens,
-                    totalTokens: openAiResult.usage.totalTokens,
-                    thoughtsTokens: openAiResult.usage.thoughtsTokens,
-                    cachedContentTokens: openAiResult.usage.cachedContentTokens,
-                    toolUsePromptTokens: openAiResult.usage.toolUsePromptTokens,
-                },
-            };
-        } else {
-            try {
-                generationResult = {
-                    ...await generateWithModel(actualModelName),
-                    provider: "google_gemini",
-                    fundingScope: "location_gemini",
-                };
-            } catch (error) {
-                const canRetryWithPinnedFlash = shouldRetryGeminiDraftWithPinnedFallback(actualModelName, error);
-
-                if (!canRetryWithPinnedFlash) {
-                    throw error;
-                }
-
-                actualModelName = GEMINI_FLASH_STABLE_FALLBACK;
-                activeProvider = "google_gemini";
+                actualModelName = routedResult.provider === "openai"
+                    ? `openai:${routedResult.model}`
+                    : routedResult.provider === "chatgpt_subscription" ? `chatgpt_subscription:${routedResult.model}` : routedResult.model;
                 telemetry.model.actual = actualModelName;
-                telemetry.model.fallbackUsed = true;
-                telemetry.model.thinkingBudget = thinkingBudget;
-                console.warn(`[AI Draft] Requested model ${requestedModelName} unavailable or incompatible; retrying with ${actualModelName}.`);
-                generationResult = {
-                    ...await generateWithModel(actualModelName),
-                    provider: "google_gemini",
-                    fundingScope: "location_gemini",
+                return {
+                    response: null,
+                    rawText: routedResult.text,
+                    provider: routedResult.provider,
+                    fundingScope: routedResult.fundingScope,
+                    usage: {
+                        promptTokens: routedResult.usage.promptTokens,
+                        completionTokens: routedResult.usage.completionTokens,
+                        totalTokens: routedResult.usage.totalTokens,
+                        thoughtsTokens: routedResult.usage.thoughtsTokens,
+                        cachedContentTokens: routedResult.usage.cachedContentTokens,
+                        toolUsePromptTokens: routedResult.usage.toolUsePromptTokens,
+                    },
                 };
             }
-        }
+            if (!apiKey) throw new AiRouteUnavailableError("No AI API Key found");
+            try {
+                return { ...await generateWithModel(actualModelName), provider: "google_gemini", fundingScope: "location_gemini" };
+            } catch (error) {
+                if (geminiStreamAccepted) throw new Error("The draft stream stopped after it started.", { cause: error });
+                throw error;
+            }
+        };
+        const routedDraft = await runLocationCrmRoute(draftRoute, context.locationId, {
+            inputChars: finalPrompt.length + cachedStaticContext.length,
+            outputTokens: maxOutputTokens + thinkingBudget,
+        }, runDraftStep, value => {
+            const meta = value.response?.usageMetadata ?? {};
+            return {
+                model: actualModelName.replace(/^(openai:|chatgpt_subscription:)/, ""),
+                inputTokens: value.usage
+                    ? value.usage.promptTokens + value.usage.toolUsePromptTokens
+                    : getUsageInt(meta, "promptTokenCount") + getUsageInt(meta, "toolUsePromptTokenCount"),
+                outputTokens: value.usage
+                    ? value.usage.completionTokens + value.usage.thoughtsTokens
+                    : getUsageInt(meta, "candidatesTokenCount") + getUsageInt(meta, "thoughtsTokenCount"),
+            };
+        });
+        generationResult = routedDraft.value;
+        telemetry.model.fallbackUsed = routedDraft.route.switchReason !== null;
+        telemetry.model.route = { ...routedDraft.route, actual: { kind: routedDraft.step.kind, model: actualModelName.replace(/^(openai:|chatgpt_subscription:)/, "") } };
         telemetry.stageMs.geminiMs = Date.now() - geminiStartedAt;
 
         const postProcessingStartedAt = Date.now();
@@ -1543,6 +1520,7 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                             maxOutputTokens,
                             thinkingBudget,
                             cacheState: telemetry.cache.state,
+                            route: telemetry.model.route ?? null,
                         },
                         result: {
                             usage: telemetry.usage,
@@ -1587,6 +1565,13 @@ ${brandVoice ? `- Brand Voice: ${brandVoice}` : "- Brand Voice: Not provided"}
                 userId: context.executionMode === "interactive" ? await resolveAuthenticatedDbUserId() : null,
                 fundingScope: generationResult.fundingScope,
                 executionMode: context.executionMode || "background",
+                metadata: telemetry.model.route ? {
+                    requestedKind: telemetry.model.route.requested?.kind ?? null,
+                    requestedModel: telemetry.model.route.requested?.model ?? null,
+                    actualKind: telemetry.model.route.actual.kind,
+                    actualModel: telemetry.model.route.actual.model,
+                    switchReason: telemetry.model.route.switchReason,
+                } : undefined,
             });
         }
 

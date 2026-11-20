@@ -139,50 +139,19 @@ export async function generateContentFromUrl(url: string, locationId?: string, b
         // In a real app we might have a specific "mood" field
         const designMood = "Modern & Professional";
 
-        // STAGE 1 CHOICE: Extraction Model (Default to Flash for speed if not set)
-        const model = extractionModelOverride
-            || await resolveAiModelDefault(targetLocationId, "extraction")
-            || configAny.googleAiModelExtraction
-            || configAny.googleAiModel
-            || "gemini-2.5-flash";
-
-        // Use brand voice from settings, or fallback to default
-        const globalBrandVoice = configAny.brandVoice || "Professional, Trustworthy, Modern";
-
-        // Allow per-request override if we implement that UI later, otherwise use global
-        const finalBrandVoice = brandVoiceOverride || globalBrandVoice;
-
-        console.log(`Extraction Model: ${model}`);
-        console.log(`Design Target Model: ${configAny.googleAiModelDesign || "default"}`);
-
-        // ... (Rest of scraping prompt logic, but we might want to split design? 
-        // For now, let's keep the "Import" as a "One Shot" that uses the Extraction model to get the structure, 
-        // but maybe we should use the Design model if it is a full rebuild?
-        // actually, the USER requested "First import text... second rebuild".
-        // So for "generateContentFromUrl", we should probably use the DESIGN model if we want the result to look good immediately.
-        // OR, we use the Extraction model to get the data, then pass it to the Design model.
-        // Let's implement the "One Shot" to use the DESIGN model for the prompt generation to ensure quality on first try,
-        // BUT respecting the user's wish to split, we can create the second action below.)
-
-        // REVISION: The prompt below is the "Design Director" prompt. 
-        // To strictly follow "Stage 1 extraction", we might use a cheaper model here. 
-        // But for "One Click Import", using the better model is usually preferred. 
-        // Let's stick to the high-quality prompt but let the user override the model via the "Design" setting if they want.
-
-        // Actually, let's use the DESIGN model for this main function because it outputs the final blocks.
-        // The "Extraction" model is theoretically for just Raw Text -> JSON, but we are skipping that step in this single function.
-        // Let's use the Design Link.
+        const finalBrandVoice = brandVoiceOverride || configAny.brandVoice || "Professional, Trustworthy, Modern";
+        // Existing design preferences supply a model hint for Locations without a task model.
         const activeModel = extractionModelOverride
             || await resolveAiModelDefault(targetLocationId, "design")
             || configAny.googleAiModelDesign
             || "gemini-2.5-flash";
 
-        console.log(`Active Model: ${activeModel}`);
+        console.log(`Legacy or requested design model: ${activeModel}`);
         console.log(`Brand Voice: ${finalBrandVoice}`);
         console.log(`Design System: ${primaryColor}, ${brandName}`);
 
         const prompt = `
-        You are an expert web developer AND **High-End UI/UX Designer** using the ${activeModel}.
+        You are an expert web developer AND **High-End UI/UX Designer**.
         
         GOAL: Analyze the Source URL content and rebuild it using our Component Blocks.
         **DESIGN GOAL:** The output must not just be structured, it must be **Visually Stunning** and match our Brand Identity.
@@ -233,6 +202,7 @@ export async function generateContentFromUrl(url: string, locationId?: string, b
         const generatedText = await generateContentAiText({
             action: "generateContentFromUrl",
             model: activeModel,
+            explicitModel: Boolean(extractionModelOverride),
             prompt,
             locationId: targetLocationId,
             jsonMode: true,
@@ -377,6 +347,7 @@ export async function regeneratePageDesign(currentBlocks: any[], locationId: str
         const generatedText = await generateContentAiText({
             action: "regeneratePageDesign",
             model,
+            explicitModel: Boolean(designModelOverride),
             prompt,
             locationId,
             jsonMode: true,
@@ -863,6 +834,7 @@ export async function generateSectionFromPrompt(
         const generatedText = await generateContentAiText({
             action: "generateSectionFromPrompt",
             model,
+            explicitModel: Boolean(modelOverride),
             prompt: systemPrompt,
             locationId,
             jsonMode: true,
