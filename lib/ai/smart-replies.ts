@@ -3,7 +3,7 @@ import { securelyRecordAiUsage } from "./usage-metering";
 import db from "@/lib/db";
 import { assembleTimelineEvents, formatTimelineEventForPrompt } from "@/lib/conversations/timeline-events";
 import { DEFAULT_MODEL, calculateRunCost } from "@/lib/ai/pricing";
-import { callLLMWithMetadata } from "@/lib/ai/llm";
+import { callLLMWithMetadata, routeUsageMetadata } from "@/lib/ai/llm";
 import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 import { getScheduledMessageAiContext } from "@/lib/conversations/scheduled-messages";
 import {
@@ -107,7 +107,7 @@ export async function generateSmartReplies(conversationId: string) {
         await securelyRecordAiUsage({ locationId: conversation.locationId, userId: null, resourceType: 'conversation', resourceId: conversationId,
             featureArea: 'smart_replies', action: 'generate', provider: result.provider, model: result.model,
             inputTokens: result.usage.promptTokens, outputTokens: result.usage.completionTokens + result.usage.thoughtsTokens,
-            fundingScope: result.fundingScope, executionMode: 'background' });
+            fundingScope: result.fundingScope, executionMode: 'background', metadata: routeUsageMetadata(result) });
         console.log("[Smart Reply] AI response received.");
         const text = result.text.replace(/```json/g, '').replace(/```/g, '').trim();
         console.log(`[Smart Reply] Raw AI Output: ${text}`);

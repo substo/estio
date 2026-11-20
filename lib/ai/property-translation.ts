@@ -1,10 +1,7 @@
 import { getLocationConfig } from "@/lib/location-config/service";
 import db from "@/lib/db";
-import { settingsService } from "@/lib/settings/service";
-import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
-import { resolveAiModelDefault } from "@/lib/ai/fetch-models";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
-import { callLLMWithMetadata } from "@/lib/ai/llm";
+import { callLLMWithMetadata, routeUsageMetadata } from "@/lib/ai/llm";
 
 export interface PropertyTranslationInput {
     title: string;
@@ -34,21 +31,8 @@ export async function generatePropertyLanguageTranslation(params: {
     sourceData: PropertyTranslationInput;
     userId?: string | null;
 }): Promise<PropertyTranslationOutput> {
-    const aiDoc = await settingsService.getDocument<any>({
-        scopeType: "LOCATION",
-        scopeId: params.locationId,
-        domain: SETTINGS_DOMAINS.LOCATION_AI,
-    }).catch(() => null);
-
     const siteConfig = await getLocationConfig(params.locationId).catch(() => null);
-
-    const model = String(
-        aiDoc?.payload?.googleAiModelDesign
-        || aiDoc?.payload?.googleAiModel
-        || siteConfig?.googleAiModelDesign
-        || siteConfig?.googleAiModel
-        || await resolveAiModelDefault(params.locationId, "design")
-    ).trim();
+    const model = siteConfig?.googleAiModelTranslation || siteConfig?.googleAiModelDesign || siteConfig?.googleAiModel || null;
 
     const prompt = [
         `You are an expert luxury real estate multilingual translator.`,
@@ -75,7 +59,8 @@ export async function generatePropertyLanguageTranslation(params: {
     const result = await callLLMWithMetadata(model, prompt, undefined, {
         jsonMode: true,
         temperature: 0.3,
-        locationId: params.locationId,
+        operation: "crm_translation", locationId: params.locationId,
+        executionMode: params.userId ? "interactive" : "background",
     });
     const text = stripMarkdownCodeFences(result.text);
 
@@ -94,11 +79,14 @@ export async function generatePropertyLanguageTranslation(params: {
         featureArea: "property_translation",
         action: "generate_language_translation",
         provider: result.provider,
-        model: result.model || model,
+        model: result.model,
         inputTokens: Number(result.usage.promptTokens) || 0,
         outputTokens: Number(result.usage.completionTokens) || 0,
+        fundingScope: result.fundingScope,
+        executionMode: result.executionMode,
         metadata: {
             targetLanguage: params.targetLanguage,
+            ...routeUsageMetadata(result),
         },
     });
 

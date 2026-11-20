@@ -1,4 +1,5 @@
 import { withAiWorkflowInstructions } from "./workflow-capabilities";
+import { AiRouteUnavailableError } from "./route-errors";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -394,6 +395,8 @@ export async function callPreferredPersonalChatGptWithMetadata(
         executionContext: ChatGptExecutionContext;
         jsonSchema?: Record<string, unknown> | null;
         runner?: CodexCliRunner;
+        /** Model chosen by the Location chain for this step; otherwise the account's own default. */
+        modelId?: string | null;
     }
 ): Promise<ChatGptSubscriptionResult | null> {
     const context = options.executionContext;
@@ -411,7 +414,8 @@ export async function callPreferredPersonalChatGptWithMetadata(
     if (!credential?.authCache) return null;
 
     return callChatGptSubscriptionWithMetadata(
-        credential.defaultTextModel || `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}${CHATGPT_SUBSCRIPTION_DEFAULT_MODEL}`,
+        options.modelId ? withChatGptSubscriptionModelPrefix(options.modelId)
+            : credential.defaultTextModel || `${CHATGPT_SUBSCRIPTION_MODEL_VALUE_PREFIX}${CHATGPT_SUBSCRIPTION_DEFAULT_MODEL}`,
         systemPrompt,
         userContent,
         {
@@ -535,7 +539,7 @@ export async function callChatGptSubscriptionWithMetadata(
     } = {}
 ): Promise<ChatGptSubscriptionResult> {
     if (!isChatGptSubscriptionTransportEnabled()) {
-        throw new Error("ChatGPT subscription is currently unavailable. Ask a location admin to check the connection.");
+        throw new AiRouteUnavailableError("ChatGPT subscription is currently unavailable. Ask a location admin to check the connection.");
     }
 
     const explicitCredential = options.accessToken || options.authCache
@@ -551,7 +555,7 @@ export async function callChatGptSubscriptionWithMetadata(
             ? await resolveChatGptSubscriptionCredential(options.executionContext)
             : null;
     if (!explicitCredential) {
-        throw new Error("No authorized ChatGPT subscription connection is available for this request.");
+        throw new AiRouteUnavailableError("No authorized ChatGPT subscription connection is available for this request.");
     }
     const execute = async (credential: ResolvedChatGptCredential): Promise<ChatGptSubscriptionResult> => {
         const accessToken = String(credential.accessToken || "").trim();
@@ -625,7 +629,7 @@ export async function callChatGptSubscriptionWithMetadata(
         const freshCredential = options.executionContext
             ? await resolveChatGptSubscriptionCredential(options.executionContext)
             : explicitCredential;
-        if (!freshCredential) throw new Error("No authorized ChatGPT subscription connection is available for this request.");
+        if (!freshCredential) throw new AiRouteUnavailableError("No authorized ChatGPT subscription connection is available for this request.");
         return execute(freshCredential);
     });
 }

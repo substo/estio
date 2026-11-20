@@ -1,15 +1,14 @@
 import "server-only";
 import { auth } from "@clerk/nextjs/server";
-import { Prisma } from "@prisma/client";
 import db from "@/lib/db";
 import { settingsService } from "@/lib/settings/service";
-import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import { getStudioAccess, type StudioAccess } from "@/lib/studio/access";
 import { canManageStudioAi } from "@/lib/studio/ai-settings-policy";
 import { studioDb } from "@/lib/studio/studio-db";
+import { aiRoutingDocument, getLocationAiBudget, readLocationAiRouting, type AiRoutingBudget } from "./routing-store";
 import { getAiConnections } from "./connections";
 import { toClientConnection, type AiClientConnection, type AiConnection } from "./connections-model";
-import { aiRoutingSettingsSchema, readAiRoutingSettings, resolveAiRoute, type AiRouteDecision, type AiRoutingSettings } from "./routing";
+import { aiRoutingSettingsSchema, resolveAiRoute, type AiRouteDecision, type AiRoutingSettings } from "./routing";
 import type { AiRoutedOperation } from "./workflow-capabilities";
 
 /**
@@ -18,8 +17,8 @@ import type { AiRoutedOperation } from "./workflow-capabilities";
  */
 export class AiRoutingError extends Error { constructor(message: string, public readonly status = 400) { super(message); } }
 
-/** Monthly cap = the Location AI budget the atomic paid reservation enforces (studio.studio_location_ai_settings). */
-export type AiRoutingBudget = { capMicros: number; spentMicros: number; heldMicros: number; month: string };
+export type { AiRoutingBudget } from "./routing-store";
+export { getLocationAiBudget } from "./routing-store";
 export type LocationAiRoutingView = {
   connections: AiClientConnection[];
   chain: AiRoutingSettings["chain"];
@@ -31,26 +30,8 @@ export type LocationAiRoutingView = {
   budget: AiRoutingBudget;
   canManage: boolean;
 };
-
-const routingDoc = (locationId: string) => ({ scopeType: "LOCATION" as const, scopeId: locationId, domain: SETTINGS_DOMAINS.LOCATION_AI });
-const currentMonth = () => { const now = new Date(); return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`; };
-
-async function readRouting(locationId: string) {
-  const doc = await settingsService.getDocument<{ aiRouting?: unknown }>(routingDoc(locationId));
-  return { settings: readAiRoutingSettings(doc?.payload?.aiRouting), saved: doc?.payload?.aiRouting !== undefined, version: doc?.version ?? 0 };
-}
-
-/** The one Location monthly cap/usage read (both apps; Studio AI settings reuse it). Caller authorises the Location. */
-export async function getLocationAiBudget(locationId: string): Promise<AiRoutingBudget> {
-  const month = currentMonth();
-  const [settings, usage] = await Promise.all([
-    studioDb.rows<{ monthly_budget_micros: number }>(Prisma.sql`select monthly_budget_micros from studio.studio_location_ai_settings where location_id = ${locationId} limit 1`),
-    studioDb.one<{ spent: number; held: number }>(Prisma.sql`
-      select coalesce(sum(cost_micros) filter (where status = 'settled'), 0) as spent, coalesce(sum(reserved_micros) filter (where status = 'reserved'), 0) as held
-      from studio.studio_ai_usage where location_id = ${locationId} and usage_month = ${month}::date and status in ('reserved', 'settled')`),
-  ]);
-  return { capMicros: Number(settings[0]?.monthly_budget_micros ?? 0), spentMicros: Number(usage?.spent ?? 0), heldMicros: Number(usage?.held ?? 0), month };
-}
+const readRouting = readLocationAiRouting;
+const routingDoc = aiRoutingDocument;
 
 async function requireAccess(locationId: string) {
   const access = await getStudioAccess(locationId);

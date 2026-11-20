@@ -8,7 +8,6 @@ import { generateDraft } from "@/lib/ai/coordinator";
 import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
 import { getPendingPasteLeadPropertyImports } from "@/lib/queue/paste-lead-property-import";
 import {
-    MAX_DRAFT_OUTPUT_TOKENS,
     normalizeDraftOutputLength,
     type DraftOutputLength,
 } from "@/lib/ai/draft-output-length";
@@ -181,7 +180,7 @@ export async function POST(req: NextRequest) {
                     ts: new Date().toISOString(),
                 });
 
-                const generateWithBudget = (minimumOutputTokens?: number) => generateDraft({
+                const result = await generateDraft({
                     conversationId,
                     contactId,
                     locationId: location.id,
@@ -196,7 +195,6 @@ export async function POST(req: NextRequest) {
                     draftLanguage,
                     channel,
                     outputLength,
-                    minimumOutputTokens,
                     stream: true,
                     latencyMode: "fast",
                     executionMode: "interactive",
@@ -213,30 +211,6 @@ export async function POST(req: NextRequest) {
                         push({ type: "chunk", text: chunk });
                     },
                 });
-
-                let result = await generateWithBudget();
-                const initialOutputTokens = Number(result?.telemetry?.model?.maxOutputTokens || 0);
-                if (
-                    result?.truncated === true
-                    && initialOutputTokens > 0
-                    && initialOutputTokens < MAX_DRAFT_OUTPUT_TOKENS
-                ) {
-                    const retryOutputTokens = Math.min(
-                        MAX_DRAFT_OUTPUT_TOKENS,
-                        initialOutputTokens * 2
-                    );
-                    logDraftStreamTiming("route_stream_truncation_retry", {
-                        conversationId,
-                        initialOutputTokens,
-                        retryOutputTokens,
-                        outputLength,
-                    });
-                    push({
-                        type: "reset",
-                        reason: "truncation_retry",
-                    });
-                    result = await generateWithBudget(retryOutputTokens);
-                }
 
                 logDraftStreamTiming("route_stream_complete", {
                     conversationId,

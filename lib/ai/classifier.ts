@@ -1,5 +1,4 @@
 import type { TextExecutionContext } from "./runtime/text-execution";
-import { getModelForTask } from "./model-router";
 import { INTENTS, IntentType } from "./intents";
 import { callLLM } from "./llm";
 
@@ -118,14 +117,14 @@ export async function classifyIntent(
         };
     }
 
-    const model = textExecution?.model || getModelForTask("intent_classification");
+    const model = textExecution?.model || null; // requester pick, else the Location chain
 
     const prompt = conversationContext
         ? `${CLASSIFIER_PROMPT}\n\nRecent context:\n${conversationContext}\n\nMessage to classify:\n"${message}"`
         : `${CLASSIFIER_PROMPT}\n\nMessage to classify:\n"${message}"`;
 
     try {
-        const response = await callLLM(model, prompt, undefined, { ...textExecution, locationId });
+        const response = await callLLM(model, prompt, undefined, { executionMode: textExecution?.executionMode, locationId, modelSelection: textExecution?.model ? "explicit" : "hint" });
         const intentName = response.trim().toUpperCase() as IntentType;
 
         const intentConfig = INTENTS[intentName] ?? INTENTS.UNKNOWN;

@@ -13,21 +13,34 @@ const source = fs.readFileSync(path.join(__dirname, 'engine.ts'), 'utf8')
 const code = ts.transpileModule(source, { compilerOptions: {
   module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true,
 } }).outputText;
-function fixture() {
+function fixture(orchestrate?: () => Promise<never>) {
   const writes: any[] = [];
   const db = {
     aiDecision: {
       create: async (input: any) => ({ id: 'decision', status: input.data.status }),
       updateMany: async () => ({ count: 1 }), update: async () => ({}),
     },
+    message: { findMany: async () => [] },
     aiRuntimeJob: {
       create: async (input: any) => { writes.push(input.data); return { id: 'job' }; },
       update: async (input: any) => { writes.push(input.data); return {}; },
     },
   };
   const module = { exports: {} as any };
-  vm.runInNewContext(code, { module, exports: module.exports, console, Date,
-    require: (name: string) => name === 'crypto' ? crypto : name === '@/lib/db' ? db : {},
+  vm.runInNewContext(code, { module, exports: module.exports, console, Date, Error,
+    require: (name: string) => (<Record<string, unknown>>{
+      crypto,
+      '@/lib/db': db,
+      '@/lib/ai/orchestrator': { orchestrate },
+      '@/lib/ai/skills/loader': { SkillLoader: { loadSkill: () => ({}) } },
+      '@/lib/conversations/scheduled-messages': { getScheduledMessageAiContext: async () => '' },
+      '@/lib/ai/location-learning': { formatLocationKnowledgeForPrompt: () => '', listActiveLocationKnowledge: async () => [] },
+      '@/lib/ai/runtime/config': {
+        ...Object.fromEntries(['Channel', 'ContactSegments', 'Decision', 'Compliance', 'Style', 'Research']
+          .map(key => [`Skill${key}${key === 'ContactSegments' ? '' : 'Policy'}Schema`, { parse: () => ({}) }])),
+        parsePolicyJson: () => ({}),
+      },
+    })[name] ?? {},
   });
   return { ...module.exports, writes };
 }
@@ -42,7 +55,7 @@ test('a background claimant stops interactive work before reading skills or call
   assert.match(f.writes[0].lastError, /background provider fallback is blocked/);
 });
 
-test('failed interactive execution cannot become a background retry; automation retains retries', async () => {
+test('interactive jobs cannot retry and background jobs can retry a preparation failure', async () => {
   const f = fixture();
   assert.equal(await f.processClaimedRuntimeJob(job(true), now, { model: 'chosen', executionMode: 'interactive' }), 'dead');
   assert.match(f.writes[0].lastError, /no decision payload/);
@@ -62,4 +75,21 @@ test('interactive queue persists only a routing fence and allows one attempt', a
     assert.deepEqual(Object.keys(f.writes[0].payload).sort(), interactiveTextOnly
       ? ['contextSummary', 'extraInstruction', 'interactiveTextOnly'] : ['contextSummary', 'extraInstruction']);
   }
+});
+
+test('uncertain background generation is not rescheduled after dispatch', async () => {
+  let dispatches = 0;
+  const f = fixture(async () => { dispatches++; throw new Error('provider outcome uncertain'); });
+  const background = {
+    ...job(false),
+    decision: {
+      id: 'decision', locationId: 'loc', source: 'automation',
+      policy: { id: 'policy', enabled: true, skillId: 'fixture', objective: 'nurture' },
+      conversation: { id: 'conversation', contactId: 'contact' },
+    },
+  };
+  assert.equal(await f.processClaimedRuntimeJob(background, now), 'dead');
+  assert.equal(dispatches, 1);
+  assert.equal(f.writes[0].status, 'dead');
+  assert.match(f.writes[0].lastError, /provider outcome uncertain/);
 });

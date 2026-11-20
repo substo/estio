@@ -7,8 +7,8 @@ function fixture(text: string) {
     const recorded:any[]=[];let calls=0;
     const deps:Record<string,unknown>={
         './usage-metering':{securelyRecordAiUsage:async(input:any)=>{recorded.push(input);}},
-        './llm':{callLLMWithMetadata:async()=>{calls++;return{text,provider:'google_gemini',model:'fixture',usage:{promptTokens:100,completionTokens:200,thoughtsTokens:50},fundingScope:'location_gemini'};}},
-        './model-router':{getModelForTask:()=> 'fixture'},'@/lib/db':{},
+        './llm':{routeUsageMetadata:()=>({}),callLLMWithMetadata:async()=>{calls++;return{text,provider:'google_gemini',model:'fixture',usage:{promptTokens:100,completionTokens:200,thoughtsTokens:50},fundingScope:'location_gemini'};}},
+        '@/lib/db':{},
         '@/lib/leads/seller-type':{normalizeProspectSellerType:()=> 'private',sellerTypeToLegacyAgencyFlag:()=>false},
     };
     const module={exports:{} as any};const code=ts.transpileModule(fs.readFileSync('lib/ai/prospect-classifier.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText;

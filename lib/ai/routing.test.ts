@@ -56,7 +56,7 @@ test("a teammate's Mac is never used, even when it is the only ready subscriptio
 
 test("background work skips personal steps and uses Location-owned connections", () => {
   const list = connections([mac("d1", "user_me", { codex: true, claude: true })]);
-  const r = resolveAiRoute({ operation: "onboarding_research", settings: chain("device_codex", "chatgpt_subscription"), connections: list, requester: null, budget });
+  const r = resolveAiRoute({ operation: "crm_text", settings: chain("device_codex", "chatgpt_subscription"), connections: list, requester: null, budget });
   assert.deepEqual(r.candidates.map(c => c.kind), ["chatgpt_subscription"]);
   assert.match(r.skipped[0].reason, /background work can't use a personal subscription/);
 });

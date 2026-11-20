@@ -1,7 +1,7 @@
 import db from "@/lib/db";
 import { calculateRunCost } from "@/lib/ai/pricing";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
-import { callLLMWithMetadata } from "@/lib/ai/llm";
+import { callLLMWithMetadata, routeUsageMetadata, type LLMResultWithMetadata } from "@/lib/ai/llm";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import { normalizeContactProfileVerificationConfig } from "@/lib/ai/contact-profile-verification/config";
@@ -60,6 +60,8 @@ export type ContactVerificationPatch = Partial<Record<typeof VERIFICATION_FIELDS
 type ContactVerificationAssessment = ReturnType<typeof buildContactVerificationAssessment>;
 
 type ContactVerificationRunMetadata = {
+  route?: LLMResultWithMetadata["route"];
+  fundingScope?: LLMResultWithMetadata["fundingScope"];
   provider: string;
   model: string;
   promptTokens: number;
@@ -562,7 +564,7 @@ async function buildModelBackedContactVerificationAssessment(args: {
     temperature: 0.1,
     maxOutputTokens: 900,
     thinkingBudget: 0,
-    locationId: args.locationId,
+    operation: "crm_extraction", locationId: args.locationId,
   });
   const parsed = extractJsonObject(result.text);
   const assessment = normalizeAiContactVerificationAssessment({
@@ -579,6 +581,8 @@ async function buildModelBackedContactVerificationAssessment(args: {
     assessment,
     metadata: {
       provider: result.provider,
+      route: result.route,
+      fundingScope: result.fundingScope,
       model: result.model || modelName,
       promptTokens,
       completionTokens,
@@ -901,7 +905,9 @@ export async function verifyContactProfile(args: {
       model: metadata.model,
       inputTokens: metadata.promptTokens,
       outputTokens: metadata.completionTokens,
+      fundingScope: metadata.fundingScope,
       metadata: {
+        ...routeUsageMetadata(metadata),
         conversationId: args.conversationId || null,
         sourceType,
         status: assessment.status,

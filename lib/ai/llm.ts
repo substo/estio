@@ -1,5 +1,5 @@
 import { withAiWorkflowInstructions } from "./workflow-capabilities";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, type Schema } from "@google/generative-ai";
 import {
     OPENAI_MODEL_VALUE_PREFIX,
     resolveOpenAiApiKey,
@@ -9,9 +9,14 @@ import {
     callPreferredPersonalChatGptWithMetadata,
     callChatGptSubscriptionWithMetadata,
     isChatGptSubscriptionModelId,
+    withChatGptSubscriptionModelPrefix,
 } from "@/lib/ai/chatgpt-subscription";
 import { resolveEstioGlobalGoogleAiApiKey, resolveLocationGoogleAiApiKey } from "@/lib/ai/location-google-key";
 import { resolveAuthenticatedDbUserId } from "@/lib/auth/current-user";
+import { CRM_DEFAULT_OUTPUT_TOKENS, loadCrmRoutePlan, runLocationCrmRoute } from "@/lib/ai/crm-route-loader";
+import type { CrmRoutedOperation, CrmRouteRecord, CrmRouteStep } from "@/lib/ai/crm-routing";
+import { AiProviderRejectedError, AiRouteUnavailableError } from "@/lib/ai/route-errors";
+import { GEMINI_FLASH_LATEST_ALIAS } from "@/lib/ai/models";
 
 interface CallLLMOptions {
     jsonMode?: boolean;
@@ -23,7 +28,13 @@ interface CallLLMOptions {
     locationId?: string;
     allowEstioGlobal?: boolean;
     executionMode?: "interactive" | "background";
+    /** Which chain operation this call is (capability + task-family model). Default: shared CRM text. */
+    operation?: CrmRoutedOperation;
+    /** The model argument is the requester's pick for this request (it beats the Location task model on its own kind). */
+    modelSelection?: "explicit" | "hint";
 }
+
+export type { CallLLMOptions };
 
 type LLMUsage = {
     promptTokens: number;
@@ -42,7 +53,11 @@ type LLMResultWithMetadata = {
     usage: LLMUsage;
     fundingScope: "user_chatgpt" | "location_chatgpt" | "location_openai" | "location_gemini" | "estio_global";
     executionMode: "interactive" | "background";
+    /** Location chain record (requested vs actual kind/model and the switch reason); absent for Estio-global calls. */
+    route?: CrmRouteRecord;
 };
+
+export type { LLMResultWithMetadata };
 
 export function buildGenerationConfig(options: CallLLMOptions): Record<string, unknown> {
     const generationConfig: Record<string, unknown> = {
@@ -154,7 +169,7 @@ async function callOpenAIWithMetadata(
         allowEstioGlobal: options.allowEstioGlobal === true,
     });
     if (!apiKey) {
-        throw new Error("No authorized OpenAI API connection is configured for this location.");
+        throw new AiRouteUnavailableError("No authorized OpenAI API connection is configured for this location.");
     }
 
     const requestBody = buildOpenAiRequestBody(modelId, systemPrompt, userContent, options);
@@ -167,12 +182,12 @@ async function callOpenAIWithMetadata(
         body: JSON.stringify(requestBody),
     });
 
-    const payload = await response.json().catch(() => null);
     if (!response.ok) {
         console.warn("[OpenAI] Request failed", { status: response.status, model: stripOpenAiModelPrefix(modelId) });
-        throw new Error("The OpenAI connection could not complete this request. Test the connection in Settings → Integrations.");
+        throw new AiProviderRejectedError("The OpenAI connection could not complete this request. Test the connection in Settings → Integrations.", response.status);
     }
 
+    const payload = await response.json();
     const text = extractOpenAiOutputText(payload);
     if (!text) {
         throw new Error("OpenAI response was empty.");
@@ -201,159 +216,32 @@ async function callOpenAIWithMetadata(
     };
 }
 
-/**
- * Standardized wrapper for calling Gemini models.
- * Handles API key retrieval and model instantiation.
- */
-export async function callLLM(
-    modelId: string,
-    systemPrompt: string,
-    userContent?: string,
-    options: CallLLMOptions = {}
-): Promise<string> {
-    systemPrompt = withAiWorkflowInstructions(systemPrompt, "crm_shared_text");
-    const authenticatedUserId = options.executionMode === "interactive"
-        ? await resolveAuthenticatedDbUserId() || undefined
-        : undefined;
-    if (!isChatGptSubscriptionModelId(modelId) && options.executionMode === "interactive") {
-        const personal = await callPreferredPersonalChatGptWithMetadata(systemPrompt, userContent, {
-            jsonSchema: options.jsonSchema,
-            executionContext: {
-                executionMode: "interactive",
-                locationId: options.locationId,
-                userId: authenticatedUserId,
-            },
-        });
-        if (personal) return personal.text;
-    }
-    if (isOpenAiModelId(modelId)) {
-        const result = await callOpenAIWithMetadata(modelId, systemPrompt, userContent, options);
-        return result.text;
-    }
-    if (isChatGptSubscriptionModelId(modelId)) {
-        const result = await callChatGptSubscriptionWithMetadata(modelId, systemPrompt, userContent, {
-            jsonSchema: options.jsonSchema,
-            executionContext: {
-                executionMode: options.executionMode || "background",
-                locationId: options.locationId,
-                userId: authenticatedUserId,
-                allowEstioGlobal: options.allowEstioGlobal,
-            },
-        });
-        return result.text;
-    }
-
-    const apiKey = options.locationId
-        ? await resolveLocationGoogleAiApiKey(options.locationId)
-        : options.allowEstioGlobal === true
-            ? resolveEstioGlobalGoogleAiApiKey()
-            : null;
-
-    if (!apiKey) throw new Error("No AI API Key found");
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-
-    const model = genAI.getGenerativeModel({
-        model: modelId,
-        generationConfig: {
-            ...buildGenerationConfig(options),
-            ...(options.jsonSchema ? { responseSchema: options.jsonSchema } : {}),
-        },
-    });
-
-    const prompt = userContent
-        ? [systemPrompt, userContent]
-        : [systemPrompt];
-
-    const result = await model.generateContent(prompt);
-    return result.response.text();
+const ZERO_EXTRA_USAGE = { thoughtsTokens: 0, toolUsePromptTokens: 0, cachedContentTokens: 0 };
+function fromChatGpt(result: Awaited<ReturnType<typeof callChatGptSubscriptionWithMetadata>>, executionMode: "interactive" | "background"): LLMResultWithMetadata {
+    return {
+        text: result.text,
+        provider: "chatgpt_subscription",
+        model: result.model,
+        usage: { promptTokens: result.usage.promptTokens, completionTokens: result.usage.completionTokens, totalTokens: result.usage.totalTokens, ...ZERO_EXTRA_USAGE, raw: result.usage.raw },
+        fundingScope: result.fundingScope,
+        executionMode,
+    };
 }
 
-/**
- * Extended wrapper that returns usage metadata along with text.
- */
-export async function callLLMWithMetadata(
-    modelId: string,
-    systemPrompt: string,
-    userContent?: string,
-    options: CallLLMOptions = {}
-): Promise<LLMResultWithMetadata> {
-    systemPrompt = withAiWorkflowInstructions(systemPrompt, "crm_shared_text");
-    const authenticatedUserId = options.executionMode === "interactive"
-        ? await resolveAuthenticatedDbUserId() || undefined
-        : undefined;
-    if (!isChatGptSubscriptionModelId(modelId) && options.executionMode === "interactive") {
-        const personal = await callPreferredPersonalChatGptWithMetadata(systemPrompt, userContent, {
-            jsonSchema: options.jsonSchema,
-            executionContext: {
-                executionMode: "interactive",
-                locationId: options.locationId,
-                userId: authenticatedUserId,
-            },
-        });
-        if (personal) {
-            return {
-                text: personal.text,
-                provider: "chatgpt_subscription",
-                model: personal.model,
-                usage: {
-                    promptTokens: personal.usage.promptTokens,
-                    completionTokens: personal.usage.completionTokens,
-                    totalTokens: personal.usage.totalTokens,
-                    thoughtsTokens: 0,
-                    toolUsePromptTokens: 0,
-                    cachedContentTokens: 0,
-                    raw: personal.usage.raw,
-                },
-                fundingScope: personal.fundingScope,
-                executionMode: "interactive",
-            };
-        }
-    }
-    if (isOpenAiModelId(modelId)) {
-        return callOpenAIWithMetadata(modelId, systemPrompt, userContent, options);
-    }
-    if (isChatGptSubscriptionModelId(modelId)) {
-        const result = await callChatGptSubscriptionWithMetadata(modelId, systemPrompt, userContent, {
-            jsonSchema: options.jsonSchema,
-            executionContext: {
-                executionMode: options.executionMode || "background",
-                locationId: options.locationId,
-                userId: authenticatedUserId,
-                allowEstioGlobal: options.allowEstioGlobal,
-            },
-        });
-        return {
-            text: result.text,
-            provider: "chatgpt_subscription",
-            model: result.model,
-            usage: {
-                promptTokens: result.usage.promptTokens,
-                completionTokens: result.usage.completionTokens,
-                totalTokens: result.usage.totalTokens,
-                thoughtsTokens: 0,
-                toolUsePromptTokens: 0,
-                cachedContentTokens: 0,
-                raw: result.usage.raw,
-            },
-            fundingScope: result.fundingScope,
-            executionMode: options.executionMode || "background",
-        };
-    }
-
+async function callGeminiWithMetadata(modelId: string, systemPrompt: string, userContent: string | undefined, options: CallLLMOptions): Promise<LLMResultWithMetadata> {
     const apiKey = options.locationId
         ? await resolveLocationGoogleAiApiKey(options.locationId)
         : options.allowEstioGlobal === true
             ? resolveEstioGlobalGoogleAiApiKey()
             : null;
-    if (!apiKey) throw new Error("No AI API Key found");
+    if (!apiKey) throw new AiRouteUnavailableError("No AI API Key found");
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
         model: modelId,
         generationConfig: {
             ...buildGenerationConfig(options),
-            ...(options.jsonSchema ? { responseSchema: options.jsonSchema } : {}),
+            ...(options.jsonSchema ? { responseSchema: options.jsonSchema as unknown as Schema } : {}),
         },
     });
 
@@ -382,5 +270,121 @@ export async function callLLMWithMetadata(
         },
         fundingScope: options.locationId ? "location_gemini" : "estio_global",
         executionMode: options.executionMode || "background",
+    };
+}
+
+/**
+ * One step of a Location's chain on its server adapter. The requester's own ChatGPT (the chain's Codex step, interactive
+ * only) and the Location's hosted ChatGPT use separate credentials: a Location step never reads a personal login.
+ * `systemPrompt` must already carry the capability contract.
+ */
+export async function executeCrmRouteStep(
+    step: CrmRouteStep,
+    systemPrompt: string,
+    userContent: string | undefined,
+    options: CallLLMOptions & { locationId: string },
+    requesterDbUserId?: string,
+): Promise<LLMResultWithMetadata> {
+    const executionMode = options.executionMode || "background";
+    if (step.kind === "device_codex") {
+        const personal = executionMode === "interactive" && requesterDbUserId
+            ? await callPreferredPersonalChatGptWithMetadata(systemPrompt, userContent, {
+                jsonSchema: options.jsonSchema,
+                modelId: step.model,
+                executionContext: { executionMode: "interactive", locationId: options.locationId, userId: requesterDbUserId },
+            })
+            : null;
+        if (!personal) throw new AiRouteUnavailableError("Your ChatGPT isn't connected");
+        return fromChatGpt(personal, "interactive");
+    }
+    if (step.kind === "chatgpt_subscription") {
+        const result = await callChatGptSubscriptionWithMetadata(withChatGptSubscriptionModelPrefix(step.model || ""), systemPrompt, userContent, {
+            jsonSchema: options.jsonSchema,
+            // Location credential only: the background context never selects a personal login.
+            executionContext: { executionMode: "background", locationId: options.locationId, userId: null },
+        });
+        return fromChatGpt(result, executionMode);
+    }
+    if (step.kind === "openai_key") {
+        return callOpenAIWithMetadata(`${OPENAI_MODEL_VALUE_PREFIX}${stripOpenAiModelPrefix(step.model || "")}`, systemPrompt, userContent, { ...options, allowEstioGlobal: false });
+    }
+    if (step.kind === "gemini_key") {
+        return callGeminiWithMetadata(step.model || GEMINI_FLASH_LATEST_ALIAS, systemPrompt, userContent, { ...options, allowEstioGlobal: false });
+    }
+    throw new AiRouteUnavailableError(`${step.label} can't run CRM requests`);
+}
+
+/** Estio-global platform calls (no Location): the model value alone picks the adapter; there is no chain. */
+async function callUnroutedWithMetadata(modelId: string, systemPrompt: string, userContent: string | undefined, options: CallLLMOptions): Promise<LLMResultWithMetadata> {
+    if (isOpenAiModelId(modelId)) return callOpenAIWithMetadata(modelId, systemPrompt, userContent, options);
+    if (isChatGptSubscriptionModelId(modelId)) {
+        const result = await callChatGptSubscriptionWithMetadata(modelId, systemPrompt, userContent, {
+            jsonSchema: options.jsonSchema,
+            executionContext: { executionMode: "background", locationId: null, userId: null, allowEstioGlobal: options.allowEstioGlobal },
+        });
+        return fromChatGpt(result, options.executionMode || "background");
+    }
+    return callGeminiWithMetadata(modelId || GEMINI_FLASH_LATEST_ALIAS, systemPrompt, userContent, options);
+}
+
+/**
+ * Shared CRM text call. With a Location, the provider and model come from the Location's ordered chain and task-family
+ * model (`modelId` is only a hint for its own connection kind, or the requester's pick with `modelSelection: "explicit"`).
+ * The next step runs only when the previous one failed before generation; a started or uncertain run is never replayed.
+ * Background work never uses a personal login. The result carries `route` (requested vs actual and the reason).
+ */
+export async function callLLMWithMetadata(
+    modelId: string | null | undefined,
+    systemPrompt: string,
+    userContent?: string,
+    options: CallLLMOptions = {}
+): Promise<LLMResultWithMetadata> {
+    systemPrompt = withAiWorkflowInstructions(systemPrompt, "crm_shared_text");
+    const model = String(modelId || "").trim();
+    const locationId = String(options.locationId || "").trim();
+    if (!locationId) return callUnroutedWithMetadata(model, systemPrompt, userContent, options);
+
+    const interactive = options.executionMode === "interactive";
+    const requesterDbUserId = interactive ? await resolveAuthenticatedDbUserId() || undefined : undefined;
+    const plan = await loadCrmRoutePlan({
+        locationId, operation: options.operation, interactive: interactive && !!requesterDbUserId,
+        hintModel: model || null, explicitModel: options.modelSelection === "explicit",
+    });
+    const maxOutputTokens = Number.isFinite(options.maxOutputTokens) && options.maxOutputTokens! > 0
+        ? Math.max(1, Math.floor(options.maxOutputTokens!)) : CRM_DEFAULT_OUTPUT_TOKENS;
+    const routed = await runLocationCrmRoute(plan, locationId,
+        { inputChars: systemPrompt.length + (userContent?.length ?? 0) + JSON.stringify(options.jsonSchema ?? "").length, outputTokens: maxOutputTokens + (options.thinkingBudget ?? 0) },
+        step => executeCrmRouteStep(step, systemPrompt, userContent, { ...options, locationId, maxOutputTokens }, requesterDbUserId),
+        value => ({
+            model: value.model,
+            inputTokens: value.usage.promptTokens + value.usage.toolUsePromptTokens,
+            outputTokens: value.usage.completionTokens + value.usage.thoughtsTokens,
+        }));
+    const route = { ...routed.route, actual: { kind: routed.step.kind, model: routed.value.model } };
+    console.info("[AI route]", JSON.stringify({ locationId, ...route }));
+    return { ...routed.value, route };
+}
+
+/** Text-only form of callLLMWithMetadata (same routing). */
+export async function callLLM(
+    modelId: string | null | undefined,
+    systemPrompt: string,
+    userContent?: string,
+    options: CallLLMOptions = {}
+): Promise<string> {
+    return (await callLLMWithMetadata(modelId, systemPrompt, userContent, options)).text;
+}
+
+/** For callers that persist usage rows: the route as metadata fields. */
+export function routeUsageMetadata(result: Pick<LLMResultWithMetadata, "route">): Record<string, unknown> {
+    const route = result.route;
+    if (!route) return {};
+    return {
+        routeOperation: route.operation,
+        requestedKind: route.requested?.kind ?? null,
+        requestedModel: route.requested?.model ?? null,
+        actualKind: route.actual.kind,
+        actualModel: route.actual.model,
+        switchReason: route.switchReason,
     };
 }

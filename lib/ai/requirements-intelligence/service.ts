@@ -1,7 +1,7 @@
 import db from "@/lib/db";
 import { calculateRunCost } from "@/lib/ai/pricing";
 import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
-import { callLLMWithMetadata } from "@/lib/ai/llm";
+import { callLLMWithMetadata, routeUsageMetadata, type LLMResultWithMetadata } from "@/lib/ai/llm";
 import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
@@ -275,6 +275,8 @@ async function recordRequirementsIntelligenceUsage(args: {
   proposalId?: string | null;
   action: "assess_no_change" | "generate_requirement_proposal";
   provider: string;
+  route?: LLMResultWithMetadata["route"];
+  fundingScope?: LLMResultWithMetadata["fundingScope"];
   model: string;
   promptTokens: number;
   completionTokens: number;
@@ -292,7 +294,9 @@ async function recordRequirementsIntelligenceUsage(args: {
     model: args.model,
     inputTokens: args.promptTokens,
     outputTokens: args.completionTokens,
+    fundingScope: args.fundingScope,
     metadata: {
+      ...routeUsageMetadata(args),
       contactId: args.contactId,
       conversationId: args.conversationId || null,
       proposalId: args.proposalId || null,
@@ -547,7 +551,7 @@ ${propertyEvidence.text || "None"}`;
   const result = await callLLMWithMetadata(settings.model, prompt, userContent, {
     jsonMode: true,
     temperature: 0.1,
-    locationId: args.locationId,
+    operation: "crm_extraction", locationId: args.locationId,
   });
   const parsed = extractJsonObject(result.text);
   const proposedPatch = normalizePatch(parsed.proposedPatch || {});
@@ -574,6 +578,8 @@ ${propertyEvidence.text || "None"}`;
       sourceType: args.sourceType || "manual",
       action: "assess_no_change",
       provider: result.provider,
+      fundingScope: result.fundingScope,
+      route: result.route,
       model: meteredModel,
       promptTokens,
       completionTokens,
@@ -645,6 +651,8 @@ ${propertyEvidence.text || "None"}`;
     proposalId: proposal.id,
     action: "generate_requirement_proposal",
     provider: result.provider,
+    fundingScope: result.fundingScope,
+    route: result.route,
     model: meteredModel,
     promptTokens,
     completionTokens,

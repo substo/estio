@@ -1,5 +1,4 @@
 import type { TextExecutionContext } from "./runtime/text-execution";
-import { getModelForTask } from "./model-router";
 import { callLLM } from "./llm";
 import { buildDealProtectiveCommunicationContract } from "./prompts/communication-policy";
 
@@ -44,7 +43,7 @@ export async function reflectOnDraft(
         locationId?: string | null;
     }
 ): Promise<string> {
-    const model = options?.model || getModelForTask("draft_reply"); // Standard tier used for critic
+    const model = options?.model || null; // requester pick, else the Location chain
     const communicationContract = buildDealProtectiveCommunicationContract({
         expectedLanguage: options?.expectedLanguage || null,
         contextLabel: "critic refinement pass",
@@ -62,7 +61,7 @@ ${communicationContract}
             : "");
 
     try {
-        const response = await callLLM(model, prompt, undefined, { jsonMode: true, locationId: options?.locationId || undefined, executionMode: options?.executionMode });
+        const response = await callLLM(model, prompt, undefined, { jsonMode: true, locationId: options?.locationId || undefined, executionMode: options?.executionMode, modelSelection: options?.model ? "explicit" : "hint" });
         const result = JSON.parse(response);
 
         if (result.score >= 8) {

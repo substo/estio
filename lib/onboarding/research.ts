@@ -12,14 +12,13 @@ import { businessView } from "@/lib/business-profile/view";
 import { factAt } from "./facts";
 import { applySuggestions } from "./facts";
 import { parseResearchOutput, researchInput, researchPrompt } from "./research-contract";
-import { chooseResearchProvider, providerSearchesWeb, runProvider } from "./providers";
-import { deviceRunProvider, readyResearchDevice, researchDevices } from "./device-route";
+import { chooseResearchProvider, runOnboardingRoute } from "./providers";
 
 /**
  * Background research for onboarding, on the Studio job queue (durable, leased, retried; run by the hosted Studio worker):
  * "studio.onboarding_fetch" reads the business website (no AI), then queues one "studio.onboarding_research" job per topic. Each topic
- * job asks the Location's own AI and stores what it finds as unconfirmed suggestions in the Business profile. When a paired Mac
- * is ready, topic jobs run there instead (on its Codex/Claude subscription) and "studio.onboarding_apply" stores the result.
+ * job uses the Location's server AI order and stores unconfirmed suggestions in the Business profile.
+ * The apply handler still accepts results from already queued device research.
  * Worker-safe: no "server-only" imports.
  */
 export const ONBOARDING_FETCH = "studio.onboarding_fetch";
@@ -114,35 +113,13 @@ export function createOnboardingHandlers(studio: StudioDb, deps: { fetchPage?: t
           pages.push({ url: page.finalUrl, title: page.title?.slice(0, 300) ?? null, text: page.text.slice(0, 6000) });
       }
     }
-    // A running, opted-in Mac with a subscription goes first (owner decision: subscriptions first); otherwise server research.
-    const device = readyResearchDevice(await researchDevices(studio, job.location_id).catch(() => []));
-    const state = await updateOnboardingState(job.location_id, s => {
-      if (s.batch !== payload.batch) return s;
-      let next = { ...s, pages };
-      if (device) {
-        for (const topic of payload.topics) next = updateRun(next, `${payload.batch}:${topic}`, { provider: deviceRunProvider(device.id) });
-        next = say(next, "agent", `I'm researching on ${device.name} with your own ${device.readiness.providers.map(p => p === "codex" ? "ChatGPT (Codex)" : "Claude").join(" or ")} subscription.`);
-      }
-      return next;
-    });
+    const state = await updateOnboardingState(job.location_id, s => s.batch === payload.batch ? { ...s, pages } : s);
     if (state.batch !== payload.batch) return { superseded: true };
-    const location = device ? await db.location.findUnique({ where: { id: job.location_id }, select: { authRealm: true } }) : null;
-    let onMac = 0;
     for (const topic of payload.topics) {
-      if (device) {
-        try {
-          await studio.call("studio_enqueue_device_onboarding_research", { p_location_id: job.location_id, p_device_id: device.id,
-            p_payload: { batch: payload.batch, topic, actorId: payload.actorId, app: location?.authRealm === "substo" ? "substo" : "estio", input: state.input, context: await researchContext(job.location_id, topic), pages },
-            p_idempotency_key: `onboarding:${payload.batch}:${topic}:mac`, p_created_by: payload.createdBy });
-          onMac++; continue;
-        } catch { /* The Mac stopped accepting research meanwhile: this topic uses the server connections. */
-          await updateOnboardingState(job.location_id, s => updateRun(s, `${payload.batch}:${topic}`, { provider: undefined }));
-        }
-      }
       await studio.call("studio_enqueue_job", { p_location_id: job.location_id, p_kind: ONBOARDING_RESEARCH, p_payload: { batch: payload.batch, topic, actorId: payload.actorId },
-        p_idempotency_key: `onboarding:${payload.batch}:${topic}`, p_created_by: payload.createdBy, p_max_attempts: 2 });
+        p_idempotency_key: `onboarding:${payload.batch}:${topic}`, p_created_by: payload.createdBy, p_max_attempts: 1 });
     }
-    return { pages: pages.length, topics: payload.topics.length, onMac };
+    return { pages: pages.length, topics: payload.topics.length, onMac: 0 };
   };
 
   const researchJob: StudioJobHandler = async job => {
@@ -151,6 +128,12 @@ export function createOnboardingHandlers(studio: StudioDb, deps: { fetchPage?: t
     const runId = `${payload.batch}:${payload.topic}`;
     const { state } = await loadOnboardingState(job.location_id);
     if (!topic || state.batch !== payload.batch) return { superseded: true };
+    const existingRun = state.runs.find(run => run.id === runId);
+    if (existingRun?.status === "running") {
+      await updateOnboardingState(job.location_id, s => updateRun(s, runId, { status: "failed", finishedAt: new Date().toISOString(), error: "The previous research attempt was interrupted. Start a new request." }));
+      return { failed: "interrupted" };
+    }
+    if (existingRun && ["done", "failed"].includes(existingRun.status)) return { skipped: existingRun.status };
     const provider = await chooseResearchProvider(job.location_id);
     if (!provider) {
       await updateOnboardingState(job.location_id, s => updateRun(s, runId, { status: "failed", finishedAt: new Date().toISOString(), error: "No AI connection is ready." }));
@@ -160,9 +143,9 @@ export function createOnboardingHandlers(studio: StudioDb, deps: { fetchPage?: t
     try {
       const location = await db.location.findUnique({ where: { id: job.location_id }, select: { authRealm: true } });
       const app = location?.authRealm === "substo" ? "substo" : "estio";
-      const webSearch = providerSearchesWeb(provider);
-      const reply = await runProvider({ provider, locationId: job.location_id, userId: payload.actorId, webSearch, action: `research_${topic.id}`,
-        system: researchPrompt(topic, { ...state.input, ...await researchContext(job.location_id, topic.id), app, webSearch }), user: researchInput({ ...state.input, pages: state.pages }), signal: undefined });
+      const context = await researchContext(job.location_id, topic.id);
+      const reply = await runOnboardingRoute({ operation: "onboarding_research", locationId: job.location_id, userId: payload.actorId, action: `research_${topic.id}`,
+        system: webSearch => researchPrompt(topic, { ...state.input, ...context, app, webSearch }), user: researchInput({ ...state.input, pages: state.pages }) });
       return await applyResearchReply(job.location_id, topic, runId, reply.text, reply.provider);
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 300) : "Research failed";

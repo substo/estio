@@ -7,21 +7,13 @@ import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import { businessView } from "@/lib/business-profile/view";
 import { businessProfileSchema, type BusinessProfile } from "@/lib/business-profile/schema";
 import { getAiConnections as getAllAiConnections } from "@/lib/ai/connections";
-import type { AiConnections, AiConnectionSource } from "@/lib/ai/connections-model";
-import { readyResearchDevice, researchDevices, researchNoteFor, type ResearchDevice } from "./device-route";
-/**
- * Onboarding needs a connection that can research today: a server connection (ChatGPT subscription, OpenAI or Gemini key)
- * or a paired Mac that is ready right now (running, recently seen, processing On, not paused, research allowed, signed in
- * with a subscription that has capacity). Mac sources show their own research readiness instead of the generic one.
- */
+import type { AiConnections } from "@/lib/ai/connections-model";
+import { researchDevices, researchNoteFor, type ResearchDevice } from "./device-route";
+/** Report the eligibility of the server research order and retain device names for existing queued runs. */
 async function getAiConnections(locationId: string) {
   const [ai, provider, devices] = await Promise.all([getAllAiConnections(locationId), chooseResearchProvider(locationId).catch(() => null),
     researchDevices(studioDb, locationId).catch(() => [] as ResearchDevice[])]);
-  const name = (p: "codex" | "claude") => p === "codex" ? "Codex (ChatGPT)" : "Claude";
-  const macSources: AiConnectionSource[] = devices.map(d => ({ kind: d.readiness.providers[0] === "claude" ? "device_claude" : "device_codex", scope: "device",
-    label: d.readiness.ready ? `${d.readiness.providers.map(name).join(" and ")} on ${d.name}` : `Mac: ${d.name}`, ready: d.readiness.ready,
-    ...(d.readiness.reason ? { detail: d.readiness.reason } : {}) }));
-  const connections: AiConnections = { available: provider !== null || readyResearchDevice(devices) !== null, sources: [...ai.sources.filter(s => s.scope !== "device"), ...macSources] };
+  const connections: AiConnections = { available: provider !== null, sources: ai.sources.filter(s => s.scope !== "device") };
   return { connections, devices };
 }
 import { findTopic, topicsFor, type FieldValue } from "./topics";
@@ -29,7 +21,7 @@ import { confirmField, setOwnerField, setFieldState } from "./facts";
 import { answerPrompt, isValidFieldValue, parseResearchOutput } from "./research-contract";
 import { finish, reopen, say, skipTopic, startBatch, type OnboardingState } from "./state";
 import { buildOnboardingView } from "./view";
-import { chooseResearchProvider, runProvider } from "./providers";
+import { chooseResearchProvider, runOnboardingRoute } from "./providers";
 import { loadOnboardingState, ONBOARDING_FETCH, updateBusinessProfile, updateOnboardingState } from "./research";
 
 /**
@@ -150,11 +142,11 @@ export async function answer(actor: Actor, text: string, topicId?: string) {
   const topic = findTopic(topicId ?? before.topics.find(t => t.status !== "confirmed" && t.status !== "skipped")?.id ?? "business");
   if (!topic) throw new OnboardingError("Unknown topic.");
   await updateOnboardingState(actor.locationId, s => say(s, "owner", clean, topic.id), owner(actor));
-  const provider = await chooseResearchProvider(actor.locationId);
+  const provider = await chooseResearchProvider(actor.locationId, "onboarding_answer");
   let saved: string[] = [];
   if (provider) {
     try {
-      const reply = await runProvider({ provider, locationId: actor.locationId, userId: actor.dbUserId, webSearch: false, action: `answer_${topic.id}`, system: answerPrompt(topic), user: clean });
+      const reply = await runOnboardingRoute({ operation: "onboarding_answer", locationId: actor.locationId, userId: actor.dbUserId, action: `answer_${topic.id}`, system: () => answerPrompt(topic), user: clean });
       const parsed = parseResearchOutput(topic.id, reply.text, { ownerAnswer: true });
       if (parsed.businessName && topic.fields.some(f => f.key === "name")) parsed.suggestions.push({ key: "name", kind: "text", path: null, location: "name", value: parsed.businessName, sources: [] });
       for (const s of parsed.suggestions) { await edit(actor, topic.id, s.key, s.value); saved.push(topic.fields.find(f => f.key === s.key)?.label ?? s.key); }

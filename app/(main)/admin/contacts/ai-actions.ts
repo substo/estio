@@ -6,7 +6,6 @@ import db from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import { currentUser } from '@clerk/nextjs/server';
 import { callLLM } from '@/lib/ai/llm';
-import { getModelForTask } from '@/lib/ai/model-router';
 import { getLocationContext } from '@/lib/auth/location-context';
 import { verifyUserHasAccessToLocation } from '@/lib/auth/permissions';
 
@@ -47,7 +46,7 @@ export async function analyzeContactAction(contactId: string, locationId: string
             return { success: false, message: "No conversation history to analyze" };
         }
 
-        const model = getModelForTask("qualification");
+        const model = null; // Location chain: text task model
         const prompt = `You are an AI assistant analyzing a real estate lead's conversation history.
 
 Contact: ${contact.firstName || contact.name || 'Unknown'} ${contact.lastName || ''}

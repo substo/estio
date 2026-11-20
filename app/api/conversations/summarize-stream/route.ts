@@ -2,12 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import db from "@/lib/db";
 import { getLocationContext } from "@/lib/auth/location-context";
-import { getModelForTask } from "@/lib/ai/model-router";
 import { calculateRunCostFromUsage } from "@/lib/ai/pricing";
 import { securelyRecordConversationAiUsage } from "@/lib/ai/usage-metering";
 import { revalidatePath } from "next/cache";
 import { buildConversationReferenceWhere } from "@/lib/conversations/identity";
-import { callLLMWithMetadata } from "@/lib/ai/llm";
+import { callLLMWithMetadata, routeUsageMetadata } from "@/lib/ai/llm";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -247,7 +246,8 @@ export async function POST(req: NextRequest) {
         '"""',
     ].join("\n");
 
-    const modelId = modelOverride || getModelForTask("simple_generation");
+    // The Location chain picks provider/model; an explicit override is only honoured on its own connection kind.
+    const modelId = modelOverride || null;
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
@@ -266,7 +266,7 @@ export async function POST(req: NextRequest) {
                 const startedAt = Date.now();
                 const llmResult = await callLLMWithMetadata(modelId, summaryPrompt, undefined, {
                     temperature: 0.2,
-                    locationId: location.id,
+                    operation: "crm_summary", locationId: location.id, executionMode: "interactive", modelSelection: modelOverride ? "explicit" : "hint",
                 });
                 const rawSummary = llmResult.text;
                 if (rawSummary) {
@@ -339,7 +339,7 @@ export async function POST(req: NextRequest) {
                         toolUsePromptTokens: llmResult.usage.toolUsePromptTokens,
                     };
 
-                    const costEstimate = calculateRunCostFromUsage(modelId, usage);
+                    const costEstimate = calculateRunCostFromUsage(llmResult.model, usage);
 
                     await db.agentExecution.create({
                         data: {
@@ -350,10 +350,10 @@ export async function POST(req: NextRequest) {
                             status: "success",
                             skillName: "selection_toolbar",
                             intent: "selection_summary",
-                            model: modelId,
+                            model: llmResult.model,
                             thoughtSummary: `Selection action "Selection Summary to CRM Log" completed and usage recorded.`,
                             thoughtSteps: [
-                                { step: 1, description: "LLM request payload", conclusion: "Captured full request prompt", data: { model: modelId, prompt: summaryPrompt } },
+                                { step: 1, description: "LLM request payload", conclusion: "Captured full request prompt", data: { model: llmResult.model, prompt: summaryPrompt, ...routeUsageMetadata(llmResult) } },
                                 { step: 2, description: "LLM response payload", conclusion: "Captured normalized output and usage metadata", data: { rawOutput: rawSummary, normalizedOutput: summary, usage } },
                                 { step: 3, description: "Usage & cost estimate", conclusion: `Estimated run cost (${costEstimate.confidence} confidence)`, data: { usd: costEstimate.amount, method: costEstimate.method, confidence: costEstimate.confidence } },
                             ] as any,
@@ -370,10 +370,13 @@ export async function POST(req: NextRequest) {
                         conversationId: conversation.id,
                         action: "selection_summary_stream",
                         provider: llmResult.provider,
-                        model: modelId,
+                        model: llmResult.model,
                         inputTokens: usage.promptTokens,
                         outputTokens: usage.completionTokens,
+                        fundingScope: llmResult.fundingScope,
+                        executionMode: llmResult.executionMode,
                         metadata: {
+                            ...routeUsageMetadata(llmResult),
                             source: "summarize-stream",
                             cached: false,
                             provider: llmResult.provider,

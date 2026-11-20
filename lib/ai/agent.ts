@@ -1,11 +1,10 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { callLLMWithMetadata } from "./llm";
 import db from "@/lib/db";
 import * as tools from "./tools";
 import { SkillLoader } from "./skills/loader";
 import * as skillTools from "./skills/tools";
 import { calculateRunCost } from "@/lib/ai/pricing";
 export { orchestrate } from "./orchestrator"; // Re-export for backward compatibility/ease of use
-import { getModelForTask } from "./model-router";
 import { toolRegistry } from "./mcp/registry";
 import "./mcp/server"; // Import for side effects (tool registration)
 import { startTrace, endTrace, startSpan, endSpan } from "./tracing";
@@ -13,7 +12,6 @@ import { retrieveContext } from "./memory";
 import { shouldUsePTC } from "./ptc/config";
 import { getPtcSystemPrompt } from "./prompts/ptc-instructions";
 import { buildDealProtectiveCommunicationContract } from "./prompts/communication-policy";
-import { resolveLocationGoogleAiApiKey } from "./location-google-key";
 
 const PLANNER_SYSTEM_PROMPT = `
 You are the Estio Real Estate Planner. Your job is to break down a high-level "Ultimate Goal" into a concrete, sequential checklist of tasks.
@@ -97,37 +95,36 @@ export interface AgentTask {
     result?: string;
 }
 
+/** Usage in the Gemini usageMetadata shape existing agent callers read, plus the route that actually ran. */
+function geminiShapedUsage(result: Awaited<ReturnType<typeof callLLMWithMetadata>>) {
+    return {
+        promptTokenCount: result.usage.promptTokens,
+        candidatesTokenCount: result.usage.completionTokens,
+        totalTokenCount: result.usage.totalTokens,
+        model: result.model,
+        provider: result.provider,
+        fundingScope: result.fundingScope,
+        route: result.route,
+    };
+}
+
 // --- Planner Function ---
 export async function generateAgentPlan(contactId: string, locationId: string, history: string, goal: string): Promise<{ success: boolean, plan?: AgentTask[], thought?: string, usage?: any }> {
     try {
-        const apiKey = await resolveLocationGoogleAiApiKey(locationId);
-        if (!apiKey) throw new Error("No AI API Key");
-
-        // Prepare Model
-        const genAI = new GoogleGenerativeAI(apiKey);
-        // ROUTER INTEGRATION: Select optimal model for planning
-        const modelId = getModelForTask("complex_planning");
-        const model = genAI.getGenerativeModel({
-            model: modelId,
-            generationConfig: { responseMimeType: "application/json" }
-        });
-
         const context = `
 GOAL: ${goal}
 HISTORY: ${history}
 `;
 
-        const result = await model.generateContent([PLANNER_SYSTEM_PROMPT, context]);
-        const parsed = JSON.parse(result.response.text());
+        // Location chain: provider and text task model.
+        const result = await callLLMWithMetadata(null, PLANNER_SYSTEM_PROMPT, context, { jsonMode: true, locationId, executionMode: "interactive" });
+        const parsed = JSON.parse(result.text);
 
         return {
             success: true,
             plan: parsed.plan,
             thought: parsed.thought,
-            usage: {
-                ...result.response.usageMetadata,
-                model: modelId
-            }
+            usage: geminiShapedUsage(result)
         };
     } catch (e) {
         console.error("Plan Generation Failed", e);
@@ -138,17 +135,6 @@ HISTORY: ${history}
 // --- Executor Function ---
 export async function executeAgentTask(contactId: string, locationId: string, history: string, currentTask: AgentTask, allTasks: AgentTask[]) {
     try {
-        const apiKey = await resolveLocationGoogleAiApiKey(locationId);
-        if (!apiKey) throw new Error("No AI API Key");
-
-        const genAI = new GoogleGenerativeAI(apiKey);
-        // ROUTER INTEGRATION: Select optimal model for execution/drafting
-        const modelName = getModelForTask("draft_reply");
-        const model = genAI.getGenerativeModel({
-            model: modelName,
-            generationConfig: { responseMimeType: "application/json" }
-        });
-
         // 1. Get Registry for System Prompt
         const registry = SkillLoader.getRegistry();
         const SYSTEM_PROMPT = getExecutorSystemPrompt(registry);
@@ -187,12 +173,8 @@ HISTORY:
             finalSystemPrompt += "\n\n" + getPtcSystemPrompt();
         }
 
-        const result = await model.generateContent([
-            finalSystemPrompt,
-            context
-        ]);
-
-        const responseText = result.response.text();
+        const result = await callLLMWithMetadata(null, finalSystemPrompt, context, { jsonMode: true, locationId, executionMode: "interactive" });
+        const responseText = result.text;
         console.log("Executor Response:", responseText);
 
         let parsed;
@@ -261,10 +243,7 @@ HISTORY:
             draft: parsed.final_response,
             taskCompleted: parsed.task_completed,
             taskResult: parsed.task_result,
-            usage: {
-                ...result.response.usageMetadata,
-                model: modelName
-            }
+            usage: geminiShapedUsage(result)
         };
 
     } catch (e) {
@@ -275,12 +254,11 @@ HISTORY:
 
 
 export class DealAgent {
-    private genAI: GoogleGenerativeAI;
     private dealId: string;
     private locationId: string;
 
-    constructor(apiKey: string, dealId: string, locationId: string) {
-        this.genAI = new GoogleGenerativeAI(apiKey);
+    /** Provider and model come from the Location chain (crm_text). */
+    constructor(dealId: string, locationId: string) {
         this.dealId = dealId;
         this.locationId = locationId;
     }
@@ -297,13 +275,6 @@ export class DealAgent {
 
             if (!deal) throw new Error("Deal not found");
 
-            // ROUTER INTEGRATION
-            const modelId = getModelForTask("deal_coordinator");
-            const model = this.genAI.getGenerativeModel({
-                model: modelId,
-                generationConfig: { responseMimeType: "application/json" }
-            });
-
             // Format History
             const historyStr = history.map(h => `${h.role}: ${h.content} `).join("\n");
 
@@ -319,12 +290,9 @@ STAGE: ${deal.stage}
     OUTPUT: JSON with 'thought' and 'final_response'(draft reply) and optionally 'tool_calls'(same tools available).
             `;
 
-            const result = await model.generateContent([
-                SYSTEM_PROMPT,
-                `History: \n${historyStr} \n\nNew Message: ${message} `
-            ]);
-
-            const responseText = result.response.text();
+            const result = await callLLMWithMetadata(null, SYSTEM_PROMPT, `History: \n${historyStr} \n\nNew Message: ${message} `,
+                { jsonMode: true, locationId: this.locationId, executionMode: "interactive" });
+            const responseText = result.text;
             let parsed;
             try {
                 parsed = JSON.parse(responseText);
