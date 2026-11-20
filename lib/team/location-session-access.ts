@@ -67,7 +67,7 @@ async function createFirstAccess(identity: PresenceIdentity): Promise<void> {
         type: "security_location_session",
         title: `New device used with ${locationName}`,
         body: `A device signed in to Estio accessed ${locationName}. Review location access and sessions in Team Management.`,
-        deepLinkUrl: "/admin/team",
+        deepLinkUrl: "/settings/team",
         payload: { locationId: identity.locationId },
       },
     });

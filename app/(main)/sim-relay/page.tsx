@@ -172,7 +172,7 @@ export default function SimRelayPage() {
                             </div>
                             <div className="flex flex-col gap-3 sm:flex-row">
                                 <Button asChild size="lg" className="bg-blue-600 text-white hover:bg-blue-500">
-                                    <Link href="/admin/settings/integrations/sms-relay">
+                                    <Link href="/settings/integrations/sms-relay">
                                         Set up SIM Relay
                                     </Link>
                                 </Button>
@@ -332,7 +332,7 @@ export default function SimRelayPage() {
                                 </p>
                             </div>
                             <Button asChild variant="outline">
-                                <Link href="/admin/settings/integrations/sms-relay">
+                                <Link href="/settings/integrations/sms-relay">
                                     <Download className="mr-2 h-4 w-4" />
                                     Open setup
                                 </Link>

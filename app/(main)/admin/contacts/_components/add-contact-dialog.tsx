@@ -15,7 +15,7 @@ import { ContactForm, ContactData } from './contact-form';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { previewLeadAction } from '@/app/(main)/admin/settings/crm/actions';
+import { previewLeadAction } from '@/app/(main)/settings/crm/actions';
 import { CrmMergeDialog } from './crm-merge-dialog';
 import { updateContactAction } from '../actions';
 // import { checkContactPermissions } from './contact-types';

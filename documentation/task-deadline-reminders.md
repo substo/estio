@@ -296,13 +296,13 @@ Capabilities:
 - focused reminder inbox surface only
 
 > [!NOTE]
-> The bell is intentionally lightweight. Persistent user-level settings live under `/admin/settings/notifications`.
+> The bell is intentionally lightweight. Persistent user-level settings live under `/settings/notifications`.
 
 ### User notification settings page
 
 Files:
 
-- [`app/(main)/admin/settings/notifications/page.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/settings/notifications/page.tsx)
+- [`app/(main)/settings/notifications/page.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/settings/notifications/page.tsx)
 - [`components/notifications/notification-settings-page.tsx`](/Users/martingreen/Projects/Estio/components/notifications/notification-settings-page.tsx)
 - [`components/notifications/notification-preferences-card.tsx`](/Users/martingreen/Projects/Estio/components/notifications/notification-preferences-card.tsx)
 - [`components/notifications/notification-current-browser-card.tsx`](/Users/martingreen/Projects/Estio/components/notifications/notification-current-browser-card.tsx)
@@ -386,7 +386,7 @@ File: [`public/sw.js`](/Users/martingreen/Projects/Estio/public/sw.js)
 
 - clicking a bell item marks the `UserNotification` as read/clicked
 - the client navigates to the same deep link used in browser push
-- notification preferences are managed from `/admin/settings/notifications`, linked from the bell header
+- notification preferences are managed from `/settings/notifications`, linked from the bell header
 
 ## Feature Flags and Environment Variables
 

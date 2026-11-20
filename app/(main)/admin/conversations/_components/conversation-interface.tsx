@@ -95,7 +95,7 @@ import {
     type DealContactOption,
 } from './conversation-contact-identity-actions';
 import {
-    generateDraftWithStreamingFallback,
+    requestComposerDraft,
     type ComposerAiDraftFeedback,
     type DraftChunkHandler,
     type GenerateDraftResult,
@@ -2997,7 +2997,7 @@ export function ConversationInterface({ locationId, scope, initialConversations,
         if (!activeConversation) return null;
 
         try {
-            const runDraft = (ignorePendingPropertyImport = false) => generateDraftWithStreamingFallback({
+            const runDraft = (ignorePendingPropertyImport = false) => requestComposerDraft({
                 conversationId: activeConversation.id,
                 contactId: activeConversation.contactId,
                 instruction,
@@ -3010,9 +3010,6 @@ export function ConversationInterface({ locationId, scope, initialConversations,
                 ignorePendingPropertyImport,
                 onChunk,
                 generateDraft: generateComposerAIDraft,
-                onStreamError: (streamError) => {
-                    console.warn("[AI Draft] Stream path failed, falling back to fast composer action.", streamError);
-                },
             });
             let res = await runDraft();
             if (res.blockedReason === "property_import_pending") {
@@ -3098,7 +3095,7 @@ export function ConversationInterface({ locationId, scope, initialConversations,
     ) => {
         if (!selectedDealConversation) return null;
         try {
-            const runDraft = (ignorePendingPropertyImport = false) => generateDraftWithStreamingFallback({
+            const runDraft = (ignorePendingPropertyImport = false) => requestComposerDraft({
                 conversationId: selectedDealConversation.id,
                 contactId: selectedDealConversation.contactId,
                 instruction,
@@ -3112,9 +3109,6 @@ export function ConversationInterface({ locationId, scope, initialConversations,
                 ignorePendingPropertyImport,
                 onChunk,
                 generateDraft: generateComposerAIDraft,
-                onStreamError: (streamError) => {
-                    console.warn("[AI Draft] Deal stream path failed, falling back to fast composer action.", streamError);
-                },
             });
             let res = await runDraft();
             if (res.blockedReason === "property_import_pending") {

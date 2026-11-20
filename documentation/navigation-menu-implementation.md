@@ -52,7 +52,7 @@ These buttons appear to the right of the dynamic navigation links (or below them
 ## Frontend Architecture
 
 ### Component: `MenuBuilder`
-Located at: `app/(main)/admin/site-settings/navigation/_components/menu-builder.tsx`
+Located at: `app/(main)/settings/website/navigation/_components/menu-builder.tsx`
 
 This shared component manages the UI for all menu types. It handles:
 - **Adding/Removing Items**: Simple array manipulation.
@@ -87,17 +87,17 @@ We use `@dnd-kit` for its headless, accessible, and robust drag-and-drop primiti
 ## Backend Architecture
 
 ### Server Action: `saveNavigation`
-Located at: `app/(main)/admin/site-settings/navigation/actions.ts`
+Located at: `app/(main)/settings/website/navigation/actions.ts`
 
 1.  **Authentication**: Verifies the current user and resolves their `locationId`.
 2.  **Authorization**: Enforces strict location-admin access (`verifyUserIsLocationAdmin`).
 3.  **Update**: Upserts `location.navigation` via `settingsService.upsertDocument`.
 4.  **Compatibility Window**: Optionally dual-writes to `SiteConfig` while migration flags are enabled.
-5.  **Revalidation**: Calls `revalidatePath("/admin/site-settings/navigation")` so UI updates immediately.
+5.  **Revalidation**: Calls `revalidatePath("/settings/website/navigation")` so UI updates immediately.
 
 ### Forms & Persistence
-- **Site Settings Form**: For the main settings page (`/admin/site-settings`), which also includes a menu editor, we manually serialize the links to a hidden JSON input (`navLinksJson`) to pass them through the standard `FormData` submission flow.
-- **Navigation Page**: For the dedicated navigation page (`/admin/site-settings/navigation`), we use direct client-side calls to the `saveNavigation` server action for a smoother experience.
+- **Site Settings Form**: For the main settings page (`/settings/website`), which also includes a menu editor, we manually serialize the links to a hidden JSON input (`navLinksJson`) to pass them through the standard `FormData` submission flow.
+- **Navigation Page**: For the dedicated navigation page (`/settings/website/navigation`), we use direct client-side calls to the `saveNavigation` server action for a smoother experience.
 
 ### Menu Style Configuration
 The system allows admins to choose the animation style for the mobile/tablet navigation menu.
@@ -105,7 +105,7 @@ The system allows admins to choose the animation style for the mobile/tablet nav
 - **Top Dropdown**: Horizontal navbar sliding down from the top, featuring dropdowns for sub-categories.
 
 **Implementation**:
-- **Selector**: `MenuStyleSelector` component in `app/(main)/admin/site-settings/navigation/_components/menu-style-selector.tsx`.
+- **Selector**: `MenuStyleSelector` component in `app/(main)/settings/website/navigation/_components/menu-style-selector.tsx`.
 - **Storage**: `location.navigation.menuStyle` ("side" | "top"), with legacy mirror to `SiteConfig.theme.menuStyle` when dual-write is enabled.
 - **Components**:
     - **Side**: Standard vertical list.
@@ -125,5 +125,5 @@ Updates to `configuration` now enforcing Mobile-First best practices:
 
 ## usage
 This system is used in:
-- **Site Settings**: `/admin/site-settings` (Main Menu only)
-- **Advanced Navigation**: `/admin/site-settings/navigation` (All Menus)
+- **Site Settings**: `/settings/website` (Main Menu only)
+- **Advanced Navigation**: `/settings/website/navigation` (All Menus)

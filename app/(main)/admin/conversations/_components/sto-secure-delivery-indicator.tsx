@@ -9,7 +9,7 @@ import type { StoSecureDeliveryStatus } from "@/lib/device-tunnel/sto-secure-del
 
 const READY_POLL_MS = 30_000;
 const RECOVERY_POLL_MS = 5_000;
-const CONNECTED_DEVICES_PATH = "/admin/settings/integrations/sms-relay#sto-secure-delivery";
+const CONNECTED_DEVICES_PATH = "/settings/integrations/sms-relay#sto-secure-delivery";
 
 export function StoSecureDeliveryIndicator({ active }: { active: boolean }) {
     const [status, setStatus] = useState<StoSecureDeliveryStatus | null>(null);

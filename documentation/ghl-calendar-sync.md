@@ -23,7 +23,7 @@ A dedicated service handles all interactions with the GHL Calendar API:
 **Key Improvement**: We implemented `ghlFetchWithAuth`, a robust fetching utility that automatically handles GHL token refreshes. This eliminates "401 Unauthorized" errors by ensuring a valid token is always used.
 
 ### 3. User & Team Management
-*   **Team Management Page**: Located at `/admin/team`. This unified page allows Admins to:
+*   **Team Management Page**: Located at `/settings/team`. This unified page allows Admins to:
     *   View all team members with their roles (ADMIN/MEMBER).
     *   Invite new users to the location.
     *   Map GHL Calendars to specific users.
@@ -31,7 +31,7 @@ A dedicated service handles all interactions with the GHL Calendar API:
     *   **Remove users**: Revoke access to the location.
 
 > [!NOTE]
-> The old `/admin/settings/team` page has been deprecated and consolidated into `/admin/team` (Dec 2025).
+> The old `/settings/team` page has been deprecated and consolidated into `/settings/team` (Dec 2025).
 
 ### 4. Viewing Synchronization
 *   Viewing sync now uses the shared `ViewingOutbox` + `ViewingSync` architecture.

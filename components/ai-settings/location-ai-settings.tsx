@@ -1,5 +1,5 @@
 "use client";
-import { BudgetForm, OpenAiKeyForm } from "./key-budget-forms";
+import { AiKeyForm, BudgetForm } from "./key-budget-forms";
 import { LocationAiSettingsView, type LocationAiSettingsProps } from "./location-ai-settings-view";
 
 export type { AiSettingsLinks, LocationAiSettingsProps } from "./location-ai-settings-view";
@@ -11,6 +11,7 @@ export type { AiSettingsLinks, LocationAiSettingsProps } from "./location-ai-set
 export function LocationAiSettings(props: LocationAiSettingsProps) {
   const budgetUsd = (props.routing.budget.capMicros / 1_000_000).toFixed(2);
   return <LocationAiSettingsView key={props.locationId} {...props}
-    keyForm={<OpenAiKeyForm locationId={props.locationId} hasKey={!!props.openAiKey} />}
+    keyForm={<AiKeyForm locationId={props.locationId} provider="openai" hasKey={!!props.openAiKey} />}
+    geminiKeyForm={<AiKeyForm locationId={props.locationId} provider="gemini" hasKey={props.routing.connections.some(connection => connection.kind === "gemini_key" && connection.status === "ready")} />}
     budgetForm={<BudgetForm locationId={props.locationId} budgetUsd={budgetUsd} />} />;
 }

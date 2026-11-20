@@ -1,4 +1,5 @@
 import "server-only";
+import { resolveStudioTextCommand } from "./text-route";
 import { requireOwnStudioCommandLocation } from "./paid-workspace";
 import { getStudioAccess } from "./access";
 import { Prisma } from "@prisma/client";
@@ -8,7 +9,7 @@ export async function enqueueStudioIdeaReview(locationId: string, command: Retur
   const access = await requireOwnStudioCommandLocation(locationId);
   return studioDb.call<{ reviewId: string; jobId: string }>("studio_enqueue_routed_text_run", {
     p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId,
-    p_workflow: "idea_review", p_command: command });
+    p_workflow: "idea_review", p_command: await resolveStudioTextCommand(access, "idea_review", command) });
 }
 export interface StudioTextRun<T, S = IdeaSnapshot> {
   id: string; job_id: string; model: string; prompt_version: string; snapshot: S; result: T | null;

@@ -22,7 +22,7 @@ export const TASK_FAMILY_LABELS: Record<AiTaskFamily, { label: string; descripti
   text: { label: "Writing and review", description: "Idea reviews, script briefs, source assistant, CRM text" },
   extraction: { label: "Extraction", description: "Knowledge extraction, video templates, onboarding answers" },
   translation: { label: "Translation", description: "CRM translation" },
-  summaries: { label: "Summaries", description: "Library summaries" },
+  summaries: { label: "Summaries", description: "Library and CRM summaries" },
   research: { label: "Research", description: "Related videos, onboarding research" },
 };
 

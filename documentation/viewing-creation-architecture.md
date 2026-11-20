@@ -62,8 +62,8 @@ Viewing scheduling now uses **agent timezone** as the source of truth.
 Current admin surfaces:
 
 - Agent timezone: `/admin/user-profile`
-- Location fallback timezone: `/admin/site-settings`
-- Google Calendar target selection: `/admin/settings/integrations/google`
+- Location fallback timezone: `/settings/website`
+- Google Calendar target selection: `/settings/integrations/google`
 
 ## The Synchronization Engine
 

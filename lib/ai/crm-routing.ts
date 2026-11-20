@@ -87,7 +87,7 @@ export function planCrmRoute(input: {
   const chain = input.settings.chain;
   const capableKinds: readonly AiConnectionKind[] = AI_ROUTED_OPERATIONS[operation].kinds;
   const connections = input.connections.filter(connection => connection.scope !== "device");
-  const personalSlot = input.interactive && capableKinds.includes("device_codex");
+  const personalSlot = input.interactive && operation.startsWith("crm_") && capableKinds.includes("device_codex");
   if (personalSlot) {
     // The server executor checks active membership and resolves only this requester's credential.
     connections.push({

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
 // Import fetch helpers
 import Link from 'next/link';
+import { getStudioAccess } from '@/lib/studio/access';
 import { generatePreviewToken } from '@/lib/jwt-utils';
 import { isPrecisionRemoveEnabledForLocation } from "@/lib/ai/property-image-precision-remove-config";
 import { Badge } from '@/components/ui/badge';
@@ -45,7 +46,11 @@ export default async function PropertiesPage(props: PageProps) {
     }
 
     const previewToken = generatePreviewToken(location.id);
-    const precisionRemoveEnabled = await isPrecisionRemoveEnabledForLocation(location.id);
+    const [precisionRemoveEnabled, settingsAccess] = await Promise.all([
+        isPrecisionRemoveEnabledForLocation(location.id),
+        getStudioAccess(location.id),
+    ]);
+    const canConfigureProperties = settingsAccess?.role === "ADMIN";
 
     // Parse search params
     const limit = 10;
@@ -216,6 +221,7 @@ export default async function PropertiesPage(props: PageProps) {
                     </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2" aria-label="Property actions">
+                    {canConfigureProperties && <Button asChild variant="outline"><Link href="/settings/property-media?from=crm">Property settings</Link></Button>}
                     <Button asChild variant="outline">
                         <Link href="/admin/properties/feed-inbox">
                             Feed Inbox

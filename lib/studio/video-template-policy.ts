@@ -1,7 +1,7 @@
 import { StudioCommandError } from "./command-error";
 import type { KnowledgeExtractionSnapshot } from "./knowledge-extraction-policy";
 import { MAX_SCRIPT_TEMPLATE_BEATS, SCRIPT_TEMPLATE_UUID, type ScriptTemplateDraft } from "./script-template-policy";
-import { readStudioTextProvider } from "./text-provider";
+import { hasStudioTextConsent, readStudioTextProvider } from "./text-provider";
 
 export const VIDEO_TEMPLATE_PROMPT = "studio.video-template.v1";
 
@@ -22,13 +22,14 @@ export interface VideoTemplateResult extends ScriptTemplateDraft {
 
 export function readVideoTemplateCommand(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new StudioCommandError("Invalid template request.");
-  const { sourceId, expectedVersion, requestId, provider: route, confirmPaid, confirmSubscription } = value as Record<string, unknown>;
+  const input = value as Record<string, unknown>;
+  const { sourceId, expectedVersion, requestId, provider: route } = input;
   if (route === undefined) throw new StudioCommandError("Choose a processing route.");
   const provider = readStudioTextProvider(route);
   if (typeof sourceId !== "string" || !SCRIPT_TEMPLATE_UUID.test(sourceId)
     || typeof requestId !== "string" || !SCRIPT_TEMPLATE_UUID.test(requestId)
     || typeof expectedVersion !== "number" || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1
-    || (provider === "openai" ? confirmPaid !== true : confirmSubscription !== true)) {
+    || !hasStudioTextConsent(provider, input)) {
     throw new StudioCommandError("Select the video and authorize the chosen processing route.");
   }
   return { sourceId: sourceId.toLowerCase(), expectedVersion, requestId: requestId.toLowerCase(), provider,

@@ -89,7 +89,8 @@ test("Mac research results are bounded and carry no raw provider output", async 
   const { readDeviceCommand: read } = await import("./devices-policy");
   const base = { workerId: "mac", jobId: requestId, leaseToken: requestId };
   assert.deepEqual(read("complete", { ...base, result: { research: { fields: [] }, provider: "claude", model: "native-default" } }).result, { research: { fields: [] }, provider: "claude", model: "native-default" });
-  for (const result of [{ research: { fields: [] }, provider: "openai", model: "native-default" }, { research: { fields: [] }, provider: "codex", model: "gpt-5" },
+  assert.deepEqual(read("complete", { ...base, result: { research: { fields: [] }, provider: "codex", model: "gpt-5.5" } }).result, { research: { fields: [] }, provider: "codex", model: "gpt-5.5" });
+  for (const result of [{ research: { fields: [] }, provider: "openai", model: "native-default" }, { research: { fields: [] }, provider: "codex", model: "--unsafe" },
     { research: "text", provider: "codex", model: "native-default" }, { research: {}, provider: "codex", model: "native-default", stdout: "x" },
     { research: { big: "x".repeat(30000) }, provider: "codex", model: "native-default" }]) assert.throws(() => read("complete", { ...base, result }));
   assert.equal(read("claim", { workerId: "mac", limit: 1, leaseSeconds: 60, researchReady: true }).researchReady, true);

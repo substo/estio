@@ -140,41 +140,34 @@ export class SettingsService {
     async upsertDocument<T>(input: UpsertDocumentInput<T>) {
         return withOptionalTransaction(input.tx, async (tx) => {
             const normalizedPayload = validateSettingsPayload(input.domain, input.payload);
-            const existing = await tx.settingsDocument.findUnique({
-                where: {
-                    scopeType_scopeId_domain: {
-                        scopeType: input.scopeType,
-                        scopeId: input.scopeId,
-                        domain: input.domain,
-                    },
-                },
-            });
-
+            const key = { scopeType: input.scopeType, scopeId: input.scopeId, domain: input.domain };
+            const where = { scopeType_scopeId_domain: key };
+            const existing = await tx.settingsDocument.findUnique({ where });
             ensureExpectedVersion(existing?.version ?? null, input.expectedVersion);
-            const nextVersion = (existing?.version ?? 0) + 1;
 
-            const saved = await tx.settingsDocument.upsert({
-                where: {
-                    scopeType_scopeId_domain: {
-                        scopeType: input.scopeType,
-                        scopeId: input.scopeId,
-                        domain: input.domain,
-                    },
-                },
-                create: {
-                    scopeType: input.scopeType,
-                    scopeId: input.scopeId,
-                    domain: input.domain,
-                    payload: normalizedPayload as Prisma.InputJsonValue,
-                    version: 1,
-                    schemaVersion: input.schemaVersion ?? 1,
-                },
-                update: {
-                    payload: normalizedPayload as Prisma.InputJsonValue,
-                    version: nextVersion,
-                    schemaVersion: input.schemaVersion ?? 1,
-                },
-            });
+            const data = {
+                payload: normalizedPayload as Prisma.InputJsonValue,
+                schemaVersion: input.schemaVersion ?? 1,
+            };
+            const create = { ...key, ...data, version: 1 };
+            const update = { ...data, version: { increment: 1 } };
+            const expected = input.expectedVersion;
+            let saved;
+
+            if (expected == null) {
+                saved = await tx.settingsDocument.upsert({ where, create, update });
+            } else {
+                // Postgres checks the version when it locks the row for UPDATE. Conditional insert
+                // uses the same unique key for the initial version, including when two forms are opened at once.
+                const result = expected === 0
+                    ? await tx.settingsDocument.createMany({ data: create, skipDuplicates: true })
+                    : await tx.settingsDocument.updateMany({ where: { ...key, version: expected }, data: update });
+                if (result.count === 0) {
+                    const latest = await tx.settingsDocument.findUnique({ where, select: { version: true } });
+                    throw new SettingsVersionConflictError(expected, latest?.version ?? 0);
+                }
+                saved = await tx.settingsDocument.findUniqueOrThrow({ where });
+            }
 
             await createAuditLog(tx, {
                 actorUserId: input.actorUserId,

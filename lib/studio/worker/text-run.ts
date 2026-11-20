@@ -33,6 +33,7 @@ export function createTextRunHandler<T, S = IdeaSnapshot>(spec: TextRunSpec<T, S
     const attempt = await rpc<{ outcome: string; attempt_id?: string }>("studio_begin_text_run_attempt", fence);
     if (attempt.outcome === "schedule_inactive") throw new StudioJobError("schedule_inactive", "Recurring consent, inputs or membership changed. Review and reauthorize the schedule before generating again.", false);
     if (attempt.outcome === "saved") return { reviewId, alreadyReviewed: true };
+    if (attempt.outcome === "route_unavailable") throw new StudioJobError("ai_route_unavailable", "The Location AI order has changed.", false);
     if (attempt.outcome === "budget_exhausted") throw new StudioJobError("ai_budget_exhausted", "The workspace needs at least a $0.01 available budget hold for this review. Check AI settings before retrying.", false);
     if (attempt.outcome === "reconciled") throw new StudioJobError("ai_replacement_required", "Billing was reviewed. An AI manager must separately authorize replacement work from Jobs.", false);
     if (attempt.outcome === "uncertain") throw uncertain();

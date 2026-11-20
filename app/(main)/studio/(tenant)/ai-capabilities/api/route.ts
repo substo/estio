@@ -6,6 +6,8 @@ import { readDeviceConfig, safeDeviceCapabilities, type StudioDeviceConfig } fro
 import { deviceTextReadiness } from "@/lib/studio/text-readiness";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
+import { resolveLocationAiRoute } from "@/lib/ai/routing-service";
+import { IDEA_REVIEW_MODEL } from "@/lib/studio/idea-review-policy";
 export const dynamic = "force-dynamic";
 export const GET = withStudioRoute(async (request, { params }) => {
   const { locationId } = await studioRouteParams(params, request);
@@ -32,7 +34,23 @@ export const GET = withStudioRoute(async (request, { params }) => {
       configVersion: d.config_version, appliedVersion: d.applied_config_version, configStatus: d.config_status }); }
     catch { return { ready: false, reason: "Save Text work and a subscription provider in Connected computer → Setup." }; }
   });
-  const apiKeyPresent = await settingsService.hasSecret({ scopeType: "LOCATION", scopeId: access.locationId, domain: SETTINGS_DOMAINS.LOCATION_AI, secretKey: SETTINGS_SECRET_KEYS.OPENAI_API_KEY });
-  return Response.json({ subscription: devices.find(d => d.ready) ?? devices[0] ?? { ready: false, reason: "Pair your own Mac in Connected computer settings." },
-    openai: { ready: apiKeyPresent, reason: apiKeyPresent ? "Location API key saved; model access, quota and budget are checked at execution." : "Add a Location OpenAI API key in AI settings." } }, { headers: { "Cache-Control": "private, no-store" } });
+  const operation = workflow === "staged_creation" ? "script_brief"
+    : workflow === "video_template" ? "video_template"
+      : workflow === "selected_idea" || workflow === "source_assist" ? "source_assist"
+        : workflow === "knowledge_outline" ? "knowledge_extract" : "idea_review";
+  const [apiKeyPresent, route] = await Promise.all([
+    settingsService.hasSecret({ scopeType: "LOCATION", scopeId: access.locationId, domain: SETTINGS_DOMAINS.LOCATION_AI, secretKey: SETTINGS_SECRET_KEYS.OPENAI_API_KEY }),
+    resolveLocationAiRoute(access.locationId, operation, { access }),
+  ]);
+  const step = route.candidates[0];
+  const next = step?.kind === "device_codex" ? "Codex" : step?.kind === "device_claude" ? "Claude" : "OpenAI API";
+  const model = step?.kind === "openai_key" ? IDEA_REVIEW_MODEL : step?.model;
+  return Response.json({
+    location_order: step
+      ? { ready: true, reason: `Next eligible connection: ${next}${model ? ` · ${model}` : ""}. Readiness is checked when queued.` }
+      : { ready: false, reason: route.stopReason ?? "Check the Location AI order and connection status." },
+    subscription: devices.find(d => d.ready) ?? devices[0] ?? { ready: false, reason: "Pair your own Mac in Connected computer settings." },
+    openai: { ready: apiKeyPresent, label: `${IDEA_REVIEW_MODEL} · OpenAI API (paid)`,
+      reason: apiKeyPresent ? "Location API key saved. Budget is checked at execution." : "Add a Location OpenAI API key in AI settings." },
+  }, { headers: { "Cache-Control": "private, no-store" } });
 });

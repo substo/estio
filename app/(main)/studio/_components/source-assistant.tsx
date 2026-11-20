@@ -7,7 +7,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { saveSourceNoteAction } from "../(tenant)/library/note-actions";
 import { draftIdeaFromReactions, relatedSearchPhrase, REACTION_LIMIT } from "@/lib/studio/source-assistant-policy";
 import type { SourceAssistRun } from "@/lib/studio/source-assist";
-import type { StudioTextProvider } from "@/lib/studio/text-provider";
+import { studioTextConsent, type StudioTextProvider } from "@/lib/studio/text-provider";
 import { StudioTextProviderChoice } from "./text-provider-choice";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
 import { DRAFT_FROM_FINDINGS_EVENT, useSourceWorkspace } from "./source-workspace";
@@ -71,7 +71,7 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
   const taskMode = mode === "knowledge" || mode === "template";
   const selectedIdea = mode === "propose_idea" && findingSelection;
   const intent: Intent = taskMode ? "discuss" : mode;
-  const [provider, setProvider] = useState<StudioTextProvider>("subscription");
+  const [provider, setProvider] = useState<StudioTextProvider>("location_order");
   const [asking, setAsking] = useState(false);
   const recognition = useRef<Recognition | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
@@ -144,14 +144,14 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
     try {
       const url = knowledge ? "/studio/knowledge/extractions/api" : "/studio/content/templates/from-video/api";
       const body = knowledge
-        ? { action: "enqueueOutline", requestId: requestKey.current, sourceId, expectedVersion: version, inputId: knowledgeInput!.inputId, mode: knowledgeInput!.mode, provider, confirmPaid: provider === "openai", confirmSubscription: provider === "subscription" }
-        : { requestId: requestKey.current, sourceId, expectedVersion: version, provider, confirmPaid: provider === "openai", confirmSubscription: provider === "subscription" };
+        ? { action: "enqueueOutline", requestId: requestKey.current, sourceId, expectedVersion: version, inputId: knowledgeInput!.inputId, mode: knowledgeInput!.mode, ...studioTextConsent(provider, true) }
+        : { requestId: requestKey.current, sourceId, expectedVersion: version, ...studioTextConsent(provider, true) };
       const response = await fetch(url, { method: "POST", headers: { "X-Studio-Tenant": tenant, "Content-Type": "application/json" }, signal: AbortSignal.timeout(30_000), body: JSON.stringify(body) });
       const data = await response.json();
       if (!response.ok) { if (response.status < 500) requestKey.current = null; push({ role: "assistant", text: data.error || "The task could not start.", tone: "error" }); return; }
       requestKey.current = null;
       const id = knowledge ? data.outlineId : data.reviewId;
-      push({ role: "assistant", text: knowledge ? "Knowledge extraction started on " + (provider === "subscription" ? "your Mac" : "the Location OpenAI key") + ". Review the cited takeaways when it finishes:" : "Script template extraction started. Review the beats when it finishes:", link: { href: knowledge ? `/studio/knowledge/extractions/${id}` : `/studio/content/templates/from-video/${id}`, label: knowledge ? "Open knowledge review" : "Open template review" } });
+      push({ role: "assistant", text: knowledge ? "Knowledge extraction queued. Review the cited takeaways when it finishes:" : "Script template extraction started. Review the beats when it finishes:", link: { href: knowledge ? `/studio/knowledge/extractions/${id}` : `/studio/content/templates/from-video/${id}`, label: knowledge ? "Open knowledge review" : "Open template review" } });
       setOpen(false);
       // Switch tabs first: updating the URL hash after a refresh starts would restore the old page state over it.
       window.setTimeout(() => { window.dispatchEvent(new CustomEvent(OPEN_TAB_EVENT, { detail: knowledge ? "knowledge" : "script" })); window.setTimeout(() => router.refresh(), 100); }, 50);
@@ -167,7 +167,7 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
     setAsking(true);
     try {
       const response = await fetch("/studio/assistant/api", { method: "POST", headers: { "X-Studio-Tenant": tenant, "Content-Type": "application/json" }, signal: AbortSignal.timeout(30_000),
-        body: JSON.stringify({ requestId: requestKey.current, sourceId, expectedVersion: version, provider, intent, message, ...(selection ? { selection } : {}), confirmPaid: provider === "openai", confirmSubscription: provider === "subscription" }) });
+        body: JSON.stringify({ requestId: requestKey.current, sourceId, expectedVersion: version, ...studioTextConsent(provider, true), intent, message, ...(selection ? { selection } : {}) }) });
       const data = await response.json();
       if (!response.ok) { if (response.status < 500) requestKey.current = null; push({ role: "assistant", text: data.error || "The assistant could not start.", tone: "error" }); return; }
       requestKey.current = null; recognition.current?.stop(); setText("");

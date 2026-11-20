@@ -14,6 +14,6 @@ export async function ComputerReadiness({ locationId }: { locationId: string }) 
     <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden="true" />
     <span className="font-medium">{state.label}</span>
     <span className="min-w-0 flex-1 text-muted-foreground">{state.detail}</span>
-    <Link href="/studio/settings/computer" className="inline-flex min-h-9 items-center font-medium text-primary hover:underline">{state.action}</Link>
+    <Link href="/settings/computer?from=studio" className="inline-flex min-h-9 items-center font-medium text-primary hover:underline">{state.action}</Link>
   </section>;
 }

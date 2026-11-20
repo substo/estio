@@ -16,6 +16,7 @@ export function createLibrarySummaryHandler(deps: { adapter: (p: LocalProvider) 
     const defaultModel = (p: LocalProvider) => config && p === config.textProvider ? config.textModel ?? undefined : undefined;
     // The Location order supplied with the job; without one, Setup's provider (or both, by capacity, with no Setup).
     const routed = localRoute(job, { deviceId: deps.deviceId, defaultModel });
+    if (routed && !routed.steps.length && !routed.serverNext) throw new StudioJobError("summary_route_unavailable", "No subscription in this Location's order can summarize this source on your Mac.", false);
     if (!routed && config && !config.textProvider) throw new StudioJobError("local_policy", "Choose a text subscription provider in Mac Setup.", true, 300);
     const steps = routed?.steps ?? ((capacity: LocalProvider[]) => capacity.filter(p => !config || p === config.textProvider).map(provider => ({ provider, model: defaultModel(provider) })));
     const attempt = await runLocalRoute(steps, deps, context.signal, (adapter, step) => adapter.generate({ workflowContext: "library_summary", signal: context.signal, model: step.model,

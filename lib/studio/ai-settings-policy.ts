@@ -1,5 +1,7 @@
 import type { UserRole } from "@prisma/client";
 
+export type LocationAiKeyProvider = "openai" | "gemini";
+
 export const MAX_MONTHLY_BUDGET_USD = 100_000;
 
 /** Location admins in either app may manage AI settings. Impersonation is checked separately. */
@@ -13,6 +15,12 @@ export function readOpenAiKey(value: FormDataEntryValue | null): string {
   if (!/^sk-[A-Za-z0-9_-]{20,300}$/.test(key)) throw new Error("Enter an OpenAI secret key that starts with sk-.");
   return key;
 }
+export function readGeminiKey(value: FormDataEntryValue | null) {
+  const key = typeof value === "string" ? value.trim() : "";
+  if (!/^[A-Za-z0-9_-]{20,300}$/.test(key)) throw new Error("Enter a valid Gemini API key.");
+  return key;
+}
+
 export const keyHint = (key: string) => key.slice(-4);
 
 /** Dollars with up to two decimals → integer micro-USD. Zero disables hosted AI. */
@@ -27,10 +35,17 @@ export function readMonthlyBudget(value: FormDataEntryValue | null): number {
 export const formatUsd = (micros: number) => `$${(micros / 1_000_000).toFixed(2)}`;
 
 /** Confirm the key with a free read-only call before storing it. */
-export async function verifyOpenAiKey(key: string, fetcher: typeof fetch = fetch): Promise<"valid" | "invalid" | "unavailable"> {
+export async function verifyLocationAiKey(provider: LocationAiKeyProvider, key: string, fetcher: typeof fetch = fetch): Promise<"valid" | "invalid" | "unavailable"> {
+  const url = provider === "gemini"
+    ? "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1"
+    : "https://api.openai.com/v1/models?limit=1";
+  const headers: HeadersInit = provider === "gemini" ? { "x-goog-api-key": key } : { Authorization: `Bearer ${key}` };
   try {
-    const response = await fetcher("https://api.openai.com/v1/models?limit=1", { headers: { Authorization: `Bearer ${key}` }, cache: "no-store", signal: AbortSignal.timeout(10_000) });
+    const response = await fetcher(url, { headers, cache: "no-store", signal: AbortSignal.timeout(10_000) });
     if (response.ok) return "valid";
+    if (provider === "gemini" && response.status === 400) return "invalid";
     return response.status === 401 || response.status === 403 ? "invalid" : "unavailable";
-  } catch { return "unavailable"; }
+  } catch {
+    return "unavailable";
+  }
 }

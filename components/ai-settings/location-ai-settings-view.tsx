@@ -36,8 +36,8 @@ export type LocationAiSettingsProps = {
   /** Defaults to the shared routing endpoint. */
   apiPath?: string;
 };
-/** Rendered slots for the Location OpenAI key and monthly cap forms (the wrapper passes the shared server-action forms). */
-export type LocationAiSettingsSlots = { keyForm?: React.ReactNode; budgetForm?: React.ReactNode };
+/** Rendered slots for the Location API key and monthly cap forms (the wrapper passes the shared server-action forms). */
+export type LocationAiSettingsSlots = { keyForm?: React.ReactNode; geminiKeyForm?: React.ReactNode; budgetForm?: React.ReactNode };
 
 const DEFAULT_MODEL = "__default";
 const statusClass: Record<AiConnectionStatus, string> = {
@@ -67,7 +67,7 @@ function Section({ id, title, description, children }: { id: string; title: stri
  * The Location AI settings screen for Estio CRM and Studio, without the server-action forms (pass them as slots). Use
  * <LocationAiSettings> from ./location-ai-settings in pages. Editing needs `routing.canManage`; everyone else sees a read-only view.
  */
-export function LocationAiSettingsView({ locationId, routing: initial, openAiKey, encryptionReady, links, apiPath = "/api/studio/ai-routing", keyForm, budgetForm }: LocationAiSettingsProps & LocationAiSettingsSlots) {
+export function LocationAiSettingsView({ locationId, routing: initial, openAiKey, encryptionReady, links, apiPath = "/api/studio/ai-routing", keyForm, geminiKeyForm, budgetForm }: LocationAiSettingsProps & LocationAiSettingsSlots) {
   const [previousInitial, setPreviousInitial] = useState(initial);
   const [routing, setRouting] = useState(initial);
   const [chain, setChain] = useState<AiRouteStep[]>(initial.chain);
@@ -116,7 +116,7 @@ export function LocationAiSettingsView({ locationId, routing: initial, openAiKey
 
   return <div className="space-y-6">
     {!canManage ? <p className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">View only. Only a Location admin, signed in as themselves, can change AI settings.</p> : null}
-    <ConnectionsSection connections={routing.connections} kinds={kinds} links={links} canManage={canManage} openAiKey={openAiKey} encryptionReady={encryptionReady} keyForm={keyForm} />
+    <ConnectionsSection connections={routing.connections} kinds={kinds} links={links} canManage={canManage} openAiKey={openAiKey} encryptionReady={encryptionReady} keyForm={keyForm} geminiKeyForm={geminiKeyForm} />
     <div className="space-y-6" inert={saving}>
       <ModelsSection chain={chain} taskDefaults={taskDefaults} kinds={kinds} canManage={canManage} onChange={edit(setTaskDefaults)} />
       <OrderSection chain={chain} saved={routing.saved || dirty} kinds={kinds} canManage={canManage} capMicros={routing.budget.capMicros} onChange={edit(setChain)} announce={setAnnouncement} />
@@ -141,9 +141,9 @@ function ManageLink({ href, children }: { href: string; children: React.ReactNod
   return <Link href={href} className="inline-flex min-h-9 items-center text-sm font-medium text-primary hover:underline">{children}</Link>;
 }
 
-function ConnectionsSection({ connections, kinds, links, canManage, openAiKey, encryptionReady, keyForm }: {
+function ConnectionsSection({ connections, kinds, links, canManage, openAiKey, encryptionReady, keyForm, geminiKeyForm }: {
   connections: AiClientConnection[]; kinds: Record<AiConnectionKind, KindSummary>; links: AiSettingsLinks; canManage: boolean;
-  openAiKey: { keyHint: string } | null; encryptionReady: boolean; keyForm?: React.ReactNode;
+  openAiKey: { keyHint: string } | null; encryptionReady: boolean; keyForm?: React.ReactNode; geminiKeyForm?: React.ReactNode;
 }) {
   const ownDevices = connections.filter(c => c.scope === "device" && c.mine !== false);
   const rows: { key: string; kind: AiConnectionKind; label: string; connection: AiClientConnection | null }[] = [
@@ -168,10 +168,11 @@ function ConnectionsSection({ connections, kinds, links, canManage, openAiKey, e
               {row.kind === "openai_key" && openAiKey ? ` · key ending …${openAiKey.keyHint}` : ""}</p>
           </div>
           <div className="shrink-0">
-            {row.kind === "openai_key" ? <OpenAiKeyManage canManage={canManage} hasKey={!!openAiKey} encryptionReady={encryptionReady} form={keyForm} />
+            {row.kind === "openai_key" ? <AiKeyManage canManage={canManage} hasKey={!!openAiKey} encryptionReady={encryptionReady} form={keyForm} />
+              : row.kind === "gemini_key" && geminiKeyForm ? <AiKeyManage canManage={canManage} hasKey={status === "ready"} encryptionReady={encryptionReady} form={geminiKeyForm} />
               : row.kind === "device_codex" || row.kind === "device_claude" ? <ManageLink href={links.computer}>{row.connection ? "Manage Mac" : "Set up your Mac"}</ManageLink>
               : (row.kind === "gemini_key" ? links.gemini : links.chatgpt) ? <ManageLink href={(row.kind === "gemini_key" ? links.gemini : links.chatgpt)!}>{status === "not_connected" ? "Connect" : "Manage"}</ManageLink>
-              : <span className="text-xs text-muted-foreground">Managed in Estio CRM settings</span>}
+              : <span className="text-xs text-muted-foreground">Managed in Estio settings</span>}
           </div>
         </li>;
       })}
@@ -179,7 +180,7 @@ function ConnectionsSection({ connections, kinds, links, canManage, openAiKey, e
   </Section>;
 }
 
-function OpenAiKeyManage({ canManage, hasKey, encryptionReady, form }: { canManage: boolean; hasKey: boolean; encryptionReady: boolean; form?: React.ReactNode }) {
+function AiKeyManage({ canManage, hasKey, encryptionReady, form }: { canManage: boolean; hasKey: boolean; encryptionReady: boolean; form?: React.ReactNode }) {
   if (!canManage || !form) return null;
   if (!encryptionReady) return <span className="text-xs text-muted-foreground">Secure key storage isn&apos;t configured on this server.</span>;
   return <Collapsible className="sm:w-72">
@@ -206,6 +207,7 @@ function ModelsSection({ chain, taskDefaults, kinds, canManage, onChange }: {
 }) {
   const id = useId();
   return <Section id="ai-models" title="Models per task" description="Which model each connection uses for a kind of work. Default uses the order's model, then the connection's own default.">
+    <p className="text-xs text-muted-foreground">Structured Studio tasks using the OpenAI API run on the metered gpt-6-luna model. OpenAI model selections apply to compatible CRM and onboarding tasks.</p>
     <ul className="space-y-4">
       {TASK_FAMILIES.map((family: AiTaskFamily) => {
         const eligible = kindsForFamily(family);

@@ -102,12 +102,14 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
 
       // 2. Relevance gate (approved-channel discovery only): the Mac's own subscription text route; high auto, borderline asks, low is logged.
       let relevance: (RelevanceResult & { band?: RelevanceBand }) | undefined;
+      let routeActual: { provider: LocalProvider; model: string } | undefined;
       if (payload.gate) {
         const thresholds = payload.gate.thresholds;
         // The Location order supplied with the job; without one, Setup's provider only.
         const defaultModel = (p: LocalProvider) => p === config.textProvider ? config.textModel ?? undefined : undefined;
         const routed = localRoute(job, { deviceId: deps.deviceId, defaultModel });
         if (!routed && !config.textProvider) fail("local_policy", "Choose a text subscription provider in Mac Setup so relevance can be checked.", true, 900);
+        if (routed && !routed.steps.length) fail("video_relevance_unavailable", "No subscription in this Location's order can check this video. Use Transcribe on your Mac to run it anyway.");
         const steps = routed?.steps ?? [{ provider: config.textProvider!, model: defaultModel(config.textProvider!) }];
         let candidate: VideoCandidate | undefined;
         const attempt = await runLocalRoute(steps, { adapter: deps.adapter, usage: deps.usage }, signal, async (adapter, step) => {
@@ -120,10 +122,11 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
         }, () => fail("video_relevance_failed", "Relevance could not be scored with your subscription. Use Transcribe on your Mac to run it anyway."));
         if (!attempt) fail("video_provider_waiting", "Waiting for a subscription in this Location's order to be signed in with fresh capacity.", true, 300);
         deps.reportRoute?.(job.id, attempt);
+        if (routed) routeActual = { provider: attempt.provider, model: attempt.model ?? "native-default" };
         relevance = attempt.value;
         const band = relevanceBand(relevance!, thresholds);
         relevance = { ...relevance!, band };
-        if (band !== "high") return { outcome: gateOutcome(band), relevance: stripBand(relevance) };
+        if (band !== "high") return { outcome: gateOutcome(band), relevance: stripBand(relevance), ...(routeActual ? { routeActual } : {}) };
       }
 
       // 3. Audio -> local Parakeet; YouTube captions only as the fallback. No paid service is ever called.
@@ -170,7 +173,7 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
           if (signal.aborted) fail("worker_lease_lost", "The Mac lost its job lease.", true);
           return { status: "failed" as const, error: visualMessage(error) };
         });
-      return { outcome: "transcribed", ...(relevance ? { relevance: stripBand(relevance) } : {}), method, ...(language ? { language } : {}), durationSeconds: Math.round(meta.duration * 100) / 100,
+      return { outcome: "transcribed", ...(routeActual ? { routeActual } : {}), ...(relevance ? { relevance: stripBand(relevance) } : {}), method, ...(language ? { language } : {}), durationSeconds: Math.round(meta.duration * 100) / 100,
         transcript: { chunks: chunks.length, segments: segments.length }, visual };
     } finally { await rm(work, { recursive: true, force: true }); }
   };

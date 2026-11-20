@@ -6,7 +6,7 @@ test("screens come from page routes and read as the user sees them", () => {
   assert.equal(pageRoute("app/(main)/admin/conversations/page.tsx"), "/admin/conversations");
   assert.equal(pageRoute("app/(main)/admin/conversations/layout.tsx"), null);
   assert.equal(pageRoute("app/page.tsx"), "/");
-  assert.deepEqual(experienceFor("app/(main)/admin/settings/integrations/whatsapp/page.tsx"), { route: "/admin/settings/integrations/whatsapp", section: "CRM", area: "Settings", product: "crm", name: "Settings › Integrations › WhatsApp" });
+  assert.deepEqual(experienceFor("app/(main)/settings/integrations/whatsapp/page.tsx"), { route: "/settings/integrations/whatsapp", section: "CRM", area: "Settings", product: "crm", name: "Settings › Integrations › WhatsApp" });
   assert.equal(experienceFor("app/(main)/admin/conversations/[id]/page.tsx")?.name, "Conversations › Detail");
   assert.equal(experienceFor("app/(main)/admin/platform/build/page.tsx")?.section, "Platform admin");
   assert.equal(experienceFor("app/studio/knowledge/page.tsx")?.product, "studio");

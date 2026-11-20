@@ -25,7 +25,7 @@ export async function pairDevice(input: { origin: string; name: string; platform
   const start = await startPairing(origin, { name, platform: input.platform }, deps);
   // Only open an approval page on the app we are pairing with, never a server-chosen site.
   const url = new URL(start.verificationUrl);
-  if (url.origin !== origin || url.pathname !== "/studio/settings/computer" || url.username || url.password) throw new Error("invalid_pairing_url");
+  if (url.origin !== origin || url.pathname !== "/settings/computer" || url.username || url.password) throw new Error("invalid_pairing_url");
   print(`Approve this Mac in your browser: ${url.href}`);
   print(`Confirm the code shown there is ${start.userCode}. Waiting for approval…`);
   (deps.openUrl ?? openInBrowser)(url.href);

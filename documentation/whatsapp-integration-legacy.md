@@ -32,8 +32,8 @@ model Location {
 
 | Component | Path | Purpose |
 |-----------|------|---------|
-| Settings UI | `app/(main)/admin/settings/integrations/whatsapp/page.tsx` | Embedded Signup + Manual config |
-| Server Actions | `app/(main)/admin/settings/integrations/whatsapp/actions.ts` | Token exchange, WABA fetch |
+| Settings UI | `app/(main)/settings/integrations/whatsapp/page.tsx` | Embedded Signup + Manual config |
+| Server Actions | `app/(main)/settings/integrations/whatsapp/actions.ts` | Token exchange, WABA fetch |
 | Bridge Page | `app/whatsapp-bridge/page.tsx` | Cross-domain OAuth handler |
 | Webhooks | `app/api/webhooks/whatsapp/route.ts` | Message reception |
 | Client Library | `lib/whatsapp/client.ts` | Message sending |
@@ -96,7 +96,7 @@ const granularScopes = debugResponse.data.data?.granular_scopes || [];
 
 **Solution:** Added to Meta App Settings:
 - App Domains: `estio.co`
-- Valid OAuth Redirect URIs: `https://estio.co/admin/settings/integrations/whatsapp`
+- Valid OAuth Redirect URIs: `https://estio.co/settings/integrations/whatsapp`
 - Allowed Domains for JS SDK: `https://estio.co/`
 
 ---

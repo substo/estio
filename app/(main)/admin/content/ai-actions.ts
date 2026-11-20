@@ -470,6 +470,12 @@ export async function generateBrandVoiceFromSite(locationId: string, websiteUrl?
 
     if ((await getLocationContext())?.id !== locationId) return { success: false, error: "Active location mismatch." };
 
+    const { onboardingActor } = await import("@/lib/onboarding/actor");
+    const actor = await onboardingActor(locationId);
+    if (!actor || actor.role !== "ADMIN" || actor.impersonating) {
+        return { success: false, error: "Location admin access is required." };
+    }
+
     try {
         // 1. Fetch Site Config
         const siteConfig = await getLocationConfig(locationId);

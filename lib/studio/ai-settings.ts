@@ -1,7 +1,7 @@
 import "server-only";
 import { auth } from "@clerk/nextjs/server";
 import { getStudioAccess } from "./access";
-import { canManageStudioAi, keyHint, verifyOpenAiKey } from "./ai-settings-policy";
+import { canManageStudioAi, keyHint, verifyLocationAiKey, type LocationAiKeyProvider } from "./ai-settings-policy";
 import { studioDb } from "./studio-db";
 import { getLocationAiBudget } from "@/lib/ai/routing-service";
 import db from "@/lib/db";
@@ -9,11 +9,14 @@ import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
 
 /** Studio uses the Location's encrypted OpenAI key in settings, the same key the CRM uses. */
-const openAiSecret = (locationId: string) => ({ scopeType: "LOCATION" as const, scopeId: locationId, domain: SETTINGS_DOMAINS.LOCATION_AI, secretKey: SETTINGS_SECRET_KEYS.OPENAI_API_KEY });
+const locationAiSecret = (locationId: string, provider: LocationAiKeyProvider) => ({
+  scopeType: "LOCATION" as const, scopeId: locationId, domain: SETTINGS_DOMAINS.LOCATION_AI,
+  secretKey: provider === "gemini" ? SETTINGS_SECRET_KEYS.GOOGLE_AI_API_KEY : SETTINGS_SECRET_KEYS.OPENAI_API_KEY,
+});
 async function openAiKeySummary(locationId: string) {
-  const row = await db.settingsSecret.findUnique({ where: { scopeType_scopeId_domain_secretKey: openAiSecret(locationId) }, select: { encryptedAt: true, rotatedAt: true } });
+  const row = await db.settingsSecret.findUnique({ where: { scopeType_scopeId_domain_secretKey: locationAiSecret(locationId, "openai") }, select: { encryptedAt: true, rotatedAt: true } });
   if (!row) return null;
-  const key = await settingsService.getSecret(openAiSecret(locationId)).catch(() => null);
+  const key = await settingsService.getSecret(locationAiSecret(locationId, "openai")).catch(() => null);
   return key ? { keyHint: keyHint(key), setAt: (row.rotatedAt ?? row.encryptedAt).toISOString() } : null;
 }
 
@@ -40,17 +43,18 @@ async function actorId(access: { userId: string; app: "estio" | "substo" }) {
   return user?.id ?? null;
 }
 
-export async function saveStudioOpenAiKey(locationId: string, key: string) {
+export async function saveStudioAiKey(locationId: string, provider: LocationAiKeyProvider, key: string) {
   const access = await requireManager(locationId);
-  const verified = await verifyOpenAiKey(key);
-  if (verified === "invalid") throw new StudioAiSettingsError("OpenAI rejected this key. Check it and try again.");
-  if (verified === "unavailable") throw new StudioAiSettingsError("Could not reach OpenAI to check this key. Try again shortly.");
-  await settingsService.setSecret({ ...openAiSecret(access.locationId), plaintext: key.trim(), actorUserId: await actorId(access) });
+  const verified = await verifyLocationAiKey(provider, key);
+  const name = provider === "gemini" ? "Gemini" : "OpenAI";
+  if (verified === "invalid") throw new StudioAiSettingsError(`${name} rejected this key. Check it and try again.`);
+  if (verified === "unavailable") throw new StudioAiSettingsError(`Could not reach ${name} to check this key. Try again shortly.`);
+  await settingsService.setSecret({ ...locationAiSecret(access.locationId, provider), plaintext: key.trim(), actorUserId: await actorId(access) });
 }
 
-export async function removeStudioOpenAiKey(locationId: string) {
+export async function removeStudioAiKey(locationId: string, provider: LocationAiKeyProvider) {
   const access = await requireManager(locationId);
-  await settingsService.clearSecret({ ...openAiSecret(access.locationId), actorUserId: await actorId(access) });
+  await settingsService.clearSecret({ ...locationAiSecret(access.locationId, provider), actorUserId: await actorId(access) });
 }
 
 export async function saveStudioAiBudget(locationId: string, monthlyBudgetMicros: number) {

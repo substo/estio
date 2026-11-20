@@ -43,8 +43,8 @@
   - Displays audio attachments in conversation UI.
 
 ### Current AI config/control plane already in app
-- `app/(main)/admin/settings/ai/actions.ts`
-- `app/(main)/admin/settings/ai/ai-settings-form.tsx`
+- `app/(main)/settings/_components/crm-features/actions.ts`
+- `app/(main)/settings/_components/crm-features/crm-feature-settings-form.tsx`
 - Existing Gemini-centric model/config path makes Google-first rollout straightforward.
 
 ### Queue infrastructure available for async jobs

@@ -264,7 +264,7 @@ test("pair opens only the app's approval page, polls until approved and stores t
       assert.equal(init?.redirect, "error"); assert.ok(!(init?.headers as Record<string, string>).authorization);
       const body = JSON.parse(String(init?.body)); bodies.push(body);
       if (String(url).endsWith("/pair/start")) return envelope({ pairingId: id, deviceCode: "d".repeat(43), userCode: "ABCD-EF23",
-        verificationUrl: `${config.origin}/studio/settings/computer?code=ABCD-EF23`, expiresAt: new Date(Date.now() + 600000).toISOString(), intervalSeconds: 5 });
+        verificationUrl: `${config.origin}/settings/computer?code=ABCD-EF23`, expiresAt: new Date(Date.now() + 600000).toISOString(), intervalSeconds: 5 });
       assert.deepEqual(body, { pairingId: id, deviceCode: "d".repeat(43) });
       polls++;
       if (polls === 1) return Response.json({ ok: false, error: "slow down" }, { status: 429 });
@@ -274,7 +274,7 @@ test("pair opens only the app's approval page, polls until approved and stores t
     const result = await pairDevice({ origin: config.origin, name: "Test Mac", platform: "darwin" },
       { fetcher, store, configDir: dir, openUrl: url => opened.push(url), sleep: async () => {}, print: line => printed.push(line) });
     assert.deepEqual(bodies[0], { name: "Test Mac", platform: "darwin" });
-    assert.deepEqual(opened, [`${config.origin}/studio/settings/computer?code=ABCD-EF23`]);
+    assert.deepEqual(opened, [`${config.origin}/settings/computer?code=ABCD-EF23`]);
     assert.equal(result.businessName, "Acme31m Ltd");
     assert.equal(items.get(`${config.origin}|${keychainService}`), token);
     assert.deepEqual(await loadConfig(dir), config);
@@ -288,13 +288,13 @@ test("pair refuses foreign approval links and reports denial/expiry", async () =
   const base = { sleep: async () => {}, print: () => {}, store: fakeKeychain().store, configDir: "/nonexistent" };
   const opened: string[] = [];
   await assert.rejects(pairDevice({ origin: config.origin, name: "Mac", platform: "darwin" }, { ...base, openUrl: u => opened.push(u),
-    fetcher: async () => start("https://evil.example/studio/settings/computer?code=ABCD-EF23") }), /invalid_pairing_url/);
+    fetcher: async () => start("https://evil.example/settings/computer?code=ABCD-EF23") }), /invalid_pairing_url/);
   assert.deepEqual(opened, []);
   for (const status of ["denied", "expired", "consumed"]) await assert.rejects(pairDevice({ origin: config.origin, name: "Mac", platform: "darwin" }, { ...base, openUrl: () => {},
-    fetcher: async url => String(url).endsWith("/start") ? start(`${config.origin}/studio/settings/computer?code=ABCD-EF23`) : envelope({ status }) }), new RegExp(`pairing_${status}`));
+    fetcher: async url => String(url).endsWith("/start") ? start(`${config.origin}/settings/computer?code=ABCD-EF23`) : envelope({ status }) }), new RegExp(`pairing_${status}`));
   let t = 0;
   await assert.rejects(pairDevice({ origin: config.origin, name: "Mac", platform: "darwin" }, { ...base, openUrl: () => {}, now: () => (t += 400_000),
-    fetcher: async url => String(url).endsWith("/start") ? start(`${config.origin}/studio/settings/computer?code=ABCD-EF23`) : envelope({ status: "pending" }) }), /pairing_expired/);
+    fetcher: async url => String(url).endsWith("/start") ? start(`${config.origin}/settings/computer?code=ABCD-EF23`) : envelope({ status: "pending" }) }), /pairing_expired/);
 });
 test("CLI: setup explains its replacement; bad arguments are refused", async () => {
   const { main } = await import("../../../scripts/studio-companion");

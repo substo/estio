@@ -30,7 +30,7 @@ const view = (over: Partial<LocationAiRoutingView> = {}): LocationAiRoutingView 
   budget: { capMicros: 25_000_000, spentMicros: 5_000_000, heldMicros: 10_000, month: "2026-11-01" }, canManage: true, ...over,
 });
 const render = (props: Partial<LocationAiSettingsProps> = {}) => renderToStaticMarkup(createElement(LocationAiSettings, {
-  locationId: "loc_1", routing: view(), openAiKey: { keyHint: "abcd" }, encryptionReady: true, links: { computer: "/studio/settings/computer", gemini: "/admin/settings/integrations/gemini" },
+  locationId: "loc_1", routing: view(), openAiKey: { keyHint: "abcd" }, encryptionReady: true, links: { computer: "/settings/computer", gemini: "/settings/integrations/gemini" },
   keyForm: createElement("p", null, "KEY_FORM"), budgetForm: createElement("p", null, "Save cap"), ...props,
 }));
 
@@ -61,7 +61,7 @@ test("task models and payload", () => {
   assert.deepEqual(setTaskModel(next, "extraction", "device_codex", null), {});
   assert.deepEqual(routingPayload(defaultChain(), next, 3).version, 3);
   assert.ok(sameRouting({ chain: defaultChain(), taskDefaults: {} }, { chain: defaultChain(), taskDefaults: {} }));
-  assert.deepEqual(kindsForFamily("summaries"), ["device_codex", "device_claude"]);
+  assert.deepEqual(kindsForFamily("summaries"), ["device_codex", "device_claude", "chatgpt_subscription", "openai_key", "gemini_key"]);
 });
 
 test("populated admin view shows all four sections, statuses, paid marks and the teammate rule", () => {
@@ -74,7 +74,7 @@ test("populated admin view shows all four sections, statuses, paid marks and the
   assert.match(html, /aria-label="Move Codex down"/);
   assert.match(html, /aria-label="Move Codex up"[^>]*disabled/);
   assert.match(html, /Alt \+ Up or Down arrow/);
-  assert.match(html, /href="\/studio\/settings\/computer"/);
+  assert.match(html, /href="\/settings\/computer"/);
   assert.match(html, /\$5\.00<\/span> spent/);
   assert.match(html, /60% left · resets .*17:00 UTC/);
   assert.match(html, /Save order and models/);
@@ -89,10 +89,10 @@ test("read-only view for non-admins has no editing controls", () => {
 });
 
 test("empty Location: nothing connected, no cap, empty order", () => {
-  const html = render({ openAiKey: null, links: { computer: "/studio/settings/computer" },
+  const html = render({ openAiKey: null, links: { computer: "/settings/computer" },
     routing: view({ connections: [], chain: [], saved: true, budget: { capMicros: 0, spentMicros: 0, heldMicros: 0, month: "2026-11-01" } }) });
   assert.match(html, /Set up your Mac/);
-  assert.match(html, /Managed in Estio CRM settings/);
+  assert.match(html, /Managed in Estio settings/);
   assert.match(html, /The order is empty/);
   assert.match(html, /No cap set: paid steps are skipped/);
   assert.match(html, /No subscription is connected yet/);

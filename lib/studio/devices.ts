@@ -116,7 +116,7 @@ export async function executeStudioDeviceCommand(token: string, brand: "estio" |
     estioAuthorizedBy = identity.approvedBy;
   }
   // Outermost device entry point: YouTube search in the Mac's browser, video transcription, then Mac text runs, onboarding research, Library summaries and the base device protocol.
-  const call = (observed?: unknown) => studioDb.call<unknown>("studio_youtube_search_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy, p_observed: observed });
+  const call = (observed?: unknown) => studioDb.call<unknown>("studio_routed_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy, p_observed: observed });
   if (operation === "video_frames_reserve" || operation === "video_frames_verify") return executeVideoFrameOperation(operation, call);
   return call();
 }
@@ -132,7 +132,7 @@ export async function startStudioDevicePairing(brand: "estio" | "substo", origin
       const result = await studioDb.call<{ pairingId: string; userCode: string; expiresAt: string }>("studio_device_pair_start", {
         p_app: brand, p_name: input.name, p_platform: input.platform, p_device_code_hash: hashStudioDeviceToken(deviceCode), p_user_code: userCode });
       const display = formatPairingCode(result.userCode);
-      return { pairingId: result.pairingId, deviceCode, userCode: display, verificationUrl: `${origin}/studio/settings/computer?code=${display}`,
+      return { pairingId: result.pairingId, deviceCode, userCode: display, verificationUrl: `${origin}/settings/computer?code=${display}`,
         expiresAt: result.expiresAt, intervalSeconds: PAIRING_POLL_SECONDS };
     } catch (error) {
       // A user-code collision with another open pairing: draw again.

@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
         const baseUrl = process.env.APP_BASE_URL
             || process.env.NEXT_PUBLIC_APP_URL
             || req.nextUrl.origin;
-        const redirectUrl = new URL('/admin/settings/integrations/google', baseUrl);
+        const redirectUrl = new URL('/settings/integrations/google', baseUrl);
         redirectUrl.searchParams.set('google_error', errorCode);
         redirectUrl.searchParams.set('google_error_id', errorId);
         return NextResponse.redirect(redirectUrl);

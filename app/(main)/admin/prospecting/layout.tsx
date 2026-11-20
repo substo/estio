@@ -17,7 +17,7 @@ export default function ProspectingLayout({ children }: { children: React.ReactN
                         </p>
                     </div>
                     <Button variant="outline" size="sm" className="h-7 text-xs px-2" asChild>
-                        <Link href="/admin/settings/prospecting">
+                        <Link href="/settings/prospecting">
                             <Settings className="w-3.5 h-3.5 mr-1" />
                             Settings
                         </Link>

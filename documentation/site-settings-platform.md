@@ -237,13 +237,13 @@ Core platform:
 
 Admin actions/pages (settings now routed through `SettingsService`):
 
-- `/admin/site-settings`
-- `/admin/site-settings/navigation`
+- `/settings/website`
+- `/settings/website/navigation`
 - `/admin/content/*` settings writes
 - `/settings/ai`
-- `/admin/settings/crm`
-- `/admin/settings/integrations/google`
-- `/admin/settings/integrations/whatsapp`
+- `/settings/integrations/old-crm`
+- `/settings/integrations/google`
+- `/settings/integrations/whatsapp`
 
 Integration/auth consumers:
 

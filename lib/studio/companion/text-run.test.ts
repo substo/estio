@@ -24,6 +24,12 @@ test("subscription consent is separate from paid authorization and unsupported p
  const selection = { requestId: id, ideas: [{ id, version: 1 }], focus: "", provider: "subscription", confirmSubscription: true };
  assert.equal(readIdeaReviewRequest(selection).confirmPaid, false);
  assert.throws(() => readIdeaReviewRequest({ ...selection, confirmSubscription: false, confirmPaid: true }));
+ const requestedOrder = { ...selection, provider: "location_order", confirmRoute: true, route: { candidates: [{ kind: "openai_key" }] } };
+ const parsedOrder = readIdeaReviewRequest(requestedOrder);
+ assert.equal(parsedOrder.provider, "location_order");
+ assert.equal("route" in parsedOrder, false);
+ assert.throws(() => readIdeaReviewRequest({ ...requestedOrder, confirmRoute: false }));
+
  assert.throws(() => readIdeaReviewRequest({ ...selection, provider: "gemini" }));
  assert.throws(() => readIdeaReviewRequest({ ...selection, provider: "openai" }));
  assert.equal(readKnowledgeExtractionCommand({ action: "enqueue", requestId: id, sourceId: id, expectedVersion: 1, mode: "record_text", inputId: "transcript", startUnit: 0, unitCount: 1, focus: "", provider: "subscription", confirmSubscription: true }).action, "enqueue");

@@ -7,8 +7,7 @@ import {
     normalizeDraftOutputLength,
     resolveDraftOutputTokenBudget,
 } from '@/lib/ai/draft-output-length';
-import { generateDraftWithStreamingFallback, resolveDraftStreamTimeoutMs, selectComposerFinalDraftText, streamDraftViaApi } from './conversation-draft-generation';
-import { resolveComposerDraftModelOverride } from './use-conversation-composer-ai-draft';
+import { LOCATION_AI_ORDER, requestComposerDraft, resolveComposerDraftModelOverride, resolveDraftStreamTimeoutMs, selectComposerFinalDraftText, streamDraftViaApi } from './conversation-draft-generation';
 
 test('appendAiStreamText preserves exact streamed text chunks', () => {
     const chunks = ['Hi ', 'Tony', '.', '\n\n', 'New ', 'listing ', 'alert ', 'in ', 'Peyia', '.'];
@@ -102,11 +101,11 @@ test('appendAiStreamText preserves intentional joins for punctuation, currency, 
     );
 });
 
-test('generateDraftWithStreamingFallback uses stream result when chunks are supported', async () => {
+test('requestComposerDraft uses stream result when chunks are supported', async () => {
     const chunks: string[] = [];
     let fallbackCalled = false;
 
-    const result = await generateDraftWithStreamingFallback({
+    const result = await requestComposerDraft({
         conversationId: 'conv-1',
         contactId: 'contact-1',
         mode: 'chat',
@@ -126,10 +125,10 @@ test('generateDraftWithStreamingFallback uses stream result when chunks are supp
     assert.deepEqual(result, { draft: 'Hello there', reasoning: 'streamed' });
 });
 
-test('generateDraftWithStreamingFallback uses longer timeout for ChatGPT subscription streams', async () => {
+test('requestComposerDraft uses longer timeout for ChatGPT subscription streams', async () => {
     let observedTimeoutMs = 0;
 
-    const result = await generateDraftWithStreamingFallback({
+    const result = await requestComposerDraft({
         conversationId: 'conv-1',
         contactId: 'contact-1',
         mode: 'chat',
@@ -146,91 +145,39 @@ test('generateDraftWithStreamingFallback uses longer timeout for ChatGPT subscri
     assert.deepEqual(result, { draft: 'subscription draft' });
 });
 
-test('generateDraftWithStreamingFallback falls back when stream fails', async () => {
-    let sawStreamError = false;
-    let fallbackCalls = 0;
-
-    const result = await generateDraftWithStreamingFallback({
-        conversationId: 'conv-1',
-        contactId: 'contact-1',
-        instruction: 'short',
-        model: 'fast',
-        mode: 'deal',
-        dealId: 'deal-1',
-        draftLanguage: 'en',
-        onChunk: () => {},
-        streamDraft: async () => {
-            throw new Error('stream unavailable');
-        },
-        generateDraft: async (conversationId, contactId, instruction, model, options) => {
-            fallbackCalls += 1;
-            assert.equal(conversationId, 'conv-1');
-            assert.equal(contactId, 'contact-1');
-            assert.equal(instruction, 'short');
-            assert.equal(model, 'fast');
-            assert.deepEqual(options, { mode: 'deal', dealId: 'deal-1', draftLanguage: 'en' });
-            return { draft: 'fallback draft', reasoning: 'fallback reasoning' };
-        },
-        onStreamError: () => {
-            sawStreamError = true;
-        },
-    });
-
-    assert.equal(sawStreamError, true);
-    assert.equal(fallbackCalls, 1);
-    assert.deepEqual(result, { draft: 'fallback draft', reasoning: 'fallback reasoning' });
-});
-
-test('generateDraftWithStreamingFallback passes base draft through stream and fallback paths', async () => {
-    let sawStreamBaseDraft = false;
-    let sawFallbackBaseDraft = false;
-
-    const result = await generateDraftWithStreamingFallback({
+test('requestComposerDraft preserves refinement and channel in both request paths', async () => {
+    const baseDraft = 'This is the current draft.';
+    const channel = 'WhatsApp' as const;
+    const request = {
         conversationId: 'conv-1',
         contactId: 'contact-1',
         instruction: 'Make it shorter',
-        baseDraft: 'This is the current draft that needs refinement.',
-        mode: 'chat',
+        baseDraft,
+        mode: 'chat' as const,
+        channel,
+    };
+
+    const streamed = await requestComposerDraft({
+        ...request,
         onChunk: () => {},
         streamDraft: async (args) => {
-            sawStreamBaseDraft = args.baseDraft === 'This is the current draft that needs refinement.';
-            return { reasoning: 'missing draft' };
+            assert.equal(args.baseDraft, baseDraft);
+            assert.equal(args.channel, channel);
+            return { draft: 'Streamed draft' };
         },
+        generateDraft: async () => assert.fail('Should only submit one request'),
+    });
+    const direct = await requestComposerDraft({
+        ...request,
         generateDraft: async (_conversationId, _contactId, _instruction, _model, options) => {
-            sawFallbackBaseDraft = options?.baseDraft === 'This is the current draft that needs refinement.';
-            return { draft: 'Shorter draft' };
+            assert.equal(options?.baseDraft, baseDraft);
+            assert.equal(options?.channel, channel);
+            return { draft: 'Direct draft' };
         },
     });
 
-    assert.equal(sawStreamBaseDraft, true);
-    assert.equal(sawFallbackBaseDraft, true);
-    assert.deepEqual(result, { draft: 'Shorter draft' });
-});
-
-test('generateDraftWithStreamingFallback passes selected channel through stream and fallback paths', async () => {
-    let sawStreamChannel = false;
-    let sawFallbackChannel = false;
-
-    const result = await generateDraftWithStreamingFallback({
-        conversationId: 'conv-1',
-        contactId: 'contact-1',
-        instruction: 'Draft first outreach',
-        mode: 'chat',
-        channel: 'WhatsApp',
-        onChunk: () => {},
-        streamDraft: async (args) => {
-            sawStreamChannel = args.channel === 'WhatsApp';
-            return { reasoning: 'missing draft' };
-        },
-        generateDraft: async (_conversationId, _contactId, _instruction, _model, options) => {
-            sawFallbackChannel = options?.channel === 'WhatsApp';
-            return { draft: 'WhatsApp draft' };
-        },
-    });
-
-    assert.equal(sawStreamChannel, true);
-    assert.equal(sawFallbackChannel, true);
-    assert.deepEqual(result, { draft: 'WhatsApp draft' });
+    assert.equal(streamed.draft, 'Streamed draft');
+    assert.equal(direct.draft, 'Direct draft');
 });
 
 test('streamDraftViaApi includes selected channel and output length in request options', async () => {
@@ -257,51 +204,30 @@ test('streamDraftViaApi includes selected channel and output length in request o
     assert.deepEqual(result, { draft: 'stream draft' });
 });
 
-test('generateDraftWithStreamingFallback times out stream before direct fallback', async () => {
-    let sawStreamError = false;
-    let fallbackCalls = 0;
-
-    const result = await generateDraftWithStreamingFallback({
-        conversationId: 'conv-1',
-        contactId: 'contact-1',
-        mode: 'chat',
-        streamTimeoutMs: 5,
-        onChunk: () => {},
-        streamDraft: async () => new Promise(() => {}),
-        generateDraft: async () => {
-            fallbackCalls += 1;
-            return { draft: 'fallback after timeout' };
-        },
-        onStreamError: (error) => {
-            sawStreamError = error instanceof Error && error.message.includes('timed out');
-        },
+for (const failure of [
+    { name: 'transport error', attempt: async () => { throw new Error('stream unavailable'); }, expected: /stream unavailable/ },
+    { name: 'timeout', attempt: async () => new Promise<never>(() => {}), expected: /timed out/ },
+    { name: 'missing final draft', attempt: async () => null, expected: /before a complete draft/ },
+]) {
+    test(`requestComposerDraft does not submit another request after ${failure.name}`, async () => {
+        let directCalls = 0;
+        await assert.rejects(requestComposerDraft({
+            conversationId: 'conv-1',
+            contactId: 'contact-1',
+            mode: 'chat',
+            streamTimeoutMs: 10,
+            onChunk: () => {},
+            streamDraft: failure.attempt,
+            generateDraft: async () => {
+                directCalls += 1;
+                return { draft: 'Duplicate draft' };
+            },
+        }), failure.expected);
+        assert.equal(directCalls, 0);
     });
+}
 
-    assert.equal(sawStreamError, true);
-    assert.equal(fallbackCalls, 1);
-    assert.deepEqual(result, { draft: 'fallback after timeout' });
-});
-
-test('generateDraftWithStreamingFallback falls back when stream completes without final draft', async () => {
-    let fallbackCalls = 0;
-
-    const result = await generateDraftWithStreamingFallback({
-        conversationId: 'conv-1',
-        contactId: 'contact-1',
-        mode: 'chat',
-        onChunk: () => {},
-        streamDraft: async () => ({ reasoning: 'no draft' }),
-        generateDraft: async () => {
-            fallbackCalls += 1;
-            return { draft: 'fallback for missing final' };
-        },
-    });
-
-    assert.equal(fallbackCalls, 1);
-    assert.deepEqual(result, { draft: 'fallback for missing final' });
-});
-
-test('generateDraftWithStreamingFallback returns pending import result without invoking fallback', async () => {
+test('requestComposerDraft returns pending import result without invoking fallback', async () => {
     let fallbackCalls = 0;
     const blockedResult = {
         draft: null,
@@ -309,7 +235,7 @@ test('generateDraftWithStreamingFallback returns pending import result without i
         pendingPropertyReferences: ['DT1234'],
     };
 
-    const result = await generateDraftWithStreamingFallback({
+    const result = await requestComposerDraft({
         conversationId: 'conv-1',
         contactId: 'contact-1',
         mode: 'chat',
@@ -325,10 +251,10 @@ test('generateDraftWithStreamingFallback returns pending import result without i
     assert.deepEqual(result, blockedResult);
 });
 
-test('generateDraftWithStreamingFallback skips stream path without onChunk', async () => {
+test('requestComposerDraft skips stream path without onChunk', async () => {
     let streamCalled = false;
 
-    const result = await generateDraftWithStreamingFallback({
+    const result = await requestComposerDraft({
         conversationId: 'conv-1',
         contactId: 'contact-1',
         mode: 'chat',
@@ -440,10 +366,10 @@ test('streamDraftViaApi sends the generate-anyway property import override', asy
     assert.equal(requestBody.options.ignorePendingPropertyImport, true);
 });
 
-test('resolveComposerDraftModelOverride honors OpenAI defaults without freezing Gemini defaults', () => {
-    assert.equal(resolveComposerDraftModelOverride('openai:gpt-4o-mini', false), 'openai:gpt-4o-mini');
-    assert.equal(resolveComposerDraftModelOverride('chatgpt_subscription:gpt-5.4-mini', false), 'chatgpt_subscription:gpt-5.4-mini');
-    assert.equal(resolveComposerDraftModelOverride('gemini-flash-latest', false), undefined);
-    assert.equal(resolveComposerDraftModelOverride('gemini-flash-latest', true), 'gemini-flash-latest');
-    assert.equal(resolveComposerDraftModelOverride('', true), undefined);
+test('resolveComposerDraftModelOverride leaves model selection to the Location order by default', () => {
+    assert.equal(resolveComposerDraftModelOverride(LOCATION_AI_ORDER), undefined);
+    assert.equal(resolveComposerDraftModelOverride(''), undefined);
+    assert.equal(resolveComposerDraftModelOverride('openai:gpt-4o-mini'), 'openai:gpt-4o-mini');
+    assert.equal(resolveComposerDraftModelOverride('chatgpt_subscription:gpt-5.4-mini'), 'chatgpt_subscription:gpt-5.4-mini');
+    assert.equal(resolveComposerDraftModelOverride('gemini-flash-latest'), 'gemini-flash-latest');
 });

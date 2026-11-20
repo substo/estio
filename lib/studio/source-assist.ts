@@ -1,4 +1,5 @@
 import "server-only";
+import { resolveStudioTextCommand } from "./text-route";
 import { Prisma } from "@prisma/client";
 import { getStudioAccess } from "./access";
 import { StudioCommandError } from "./command-error";
@@ -11,7 +12,7 @@ export async function enqueueSourceAssist(locationId: string, command: ReturnTyp
   const access = await requireOwnStudioCommandLocation(locationId);
   try {
     return await studioDb.call<{ reviewId: string; jobId: string }>("studio_enqueue_source_assist", {
-      p_location: access.locationId, p_app: access.app, p_actor: access.userId, p_command: command });
+      p_location: access.locationId, p_app: access.app, p_actor: access.userId, p_command: await resolveStudioTextCommand(access, "source_assist", command) });
   } catch (error) {
     if (error instanceof StudioDbError) {
       if (error.code === "P2013") throw new StudioCommandError("Save a transcript or description on this source first.");

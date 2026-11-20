@@ -1,5 +1,6 @@
 import { isSubstoSitePath } from "@/lib/substo-sites/policy";
 import { isSubstoCrmPage, isSubstoCrmApi } from "./substo-crm-policy";
+import { isSubstoSettingsPage } from "./settings-route-policy";
 import type { HostBrand } from "./host-brand";
 
 function isPathOrNested(pathname: string, root: string): boolean {
@@ -8,7 +9,7 @@ function isPathOrNested(pathname: string, root: string): boolean {
 
 export const CLERK_PROFILE_WEBHOOK_PATH = "/api/webhooks/clerk-profile";
 
-export type SubstoRouteKind = "root" | "auth" | "studio" | "settings" | "studio-api" | "brand" | "crm" | "crm-api" | "profile" | "webhook" | "site" | "blocked";
+export type SubstoRouteKind = "root" | "auth" | "studio" | "settings" | "studio-api" | "crm" | "crm-api" | "profile" | "webhook" | "site" | "blocked";
 
 /** Substo reaches reviewed application routes and never the tenant-site resolver. */
 export function classifySubstoRoute(pathname: string): SubstoRouteKind {
@@ -18,12 +19,9 @@ export function classifySubstoRoute(pathname: string): SubstoRouteKind {
   if (isPathOrNested(pathname, "/sign-in") || isPathOrNested(pathname, "/sign-up")) return "auth";
   if (isPathOrNested(pathname, "/account/connections")) return "profile";
   if (isPathOrNested(pathname, "/studio")) return "studio";
-  // Settings shared by CRM and Studio (/settings/ai, …).
-  if (isPathOrNested(pathname, "/settings")) return "settings";
+  if (isSubstoSettingsPage(pathname)) return "settings";
   if (isSubstoCrmPage(pathname) || pathname === "/select-location") return "crm";
   if (isSubstoCrmApi(pathname)) return "crm-api";
-  // Brand team management is shared with Studio.
-  if (isPathOrNested(pathname, "/brand")) return "brand";
   if (isPathOrNested(pathname, "/api/studio")) return "studio-api";
   return "blocked";
 }
@@ -44,7 +42,7 @@ export function safeAuthRedirect(value: string | null, brand: HostBrand, origin?
     if (!value.startsWith("/") && !origin) return fallback;
     const target = new URL(value, base);
     if (target.origin !== base || target.username || target.password) return fallback;
-    if (brand === "substo" && !isSubstoCrmPage(target.pathname) && !isPathOrNested(target.pathname, "/studio") && !isPathOrNested(target.pathname, "/settings") && !isPathOrNested(target.pathname, "/brand") && !isPathOrNested(target.pathname, "/account/connections")) return fallback;
+    if (brand === "substo" && !isSubstoCrmPage(target.pathname) && !isPathOrNested(target.pathname, "/studio") && !isSubstoSettingsPage(target.pathname) && !isPathOrNested(target.pathname, "/account/connections")) return fallback;
     return `${target.pathname}${target.search}${target.hash}`;
   } catch { return fallback; }
 }

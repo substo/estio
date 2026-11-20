@@ -45,17 +45,17 @@ export function studioNavGroups(app: ShellApp, studioLocationId: string | null, 
   }
   const settings: AdminNavGroup["items"] = []
   if (base) settings.push(
+    { href: "/settings?from=studio", label: "Settings", icon: Settings, activePath: (pathname) => pathname === "/settings" || pathname === "/settings/general" },
     { href: "/settings/ai?from=studio", label: "AI settings", icon: Sparkles, activePath: (pathname) => pathname.startsWith("/settings/ai") },
-    { href: `${base}/settings/computer`, label: "Connected computer", icon: Laptop, activePath: (pathname) => pathname.startsWith(`${base}/settings/computer`) },
+    { href: "/settings/computer?from=studio", label: "Connected computer", icon: Laptop, activePath: (pathname) => pathname === "/settings/computer" },
   )
   settings.push({ href: "/account/connections", label: "My connections", icon: PlugZap, activePath: (pathname) => pathname.startsWith("/account/connections") })
   if (app === "substo" && locationId) {
     settings.push(
-      { href: "/brand/team", label: "Team", icon: UsersRound, activePath: (pathname) => pathname.startsWith("/brand/team") },
-      { href: "/brand/settings", label: "General", icon: Settings, activePath: (pathname) => pathname.startsWith("/brand/settings") },
+      { href: "/settings/team?from=studio", label: "Team", icon: UsersRound, activePath: (pathname) => pathname === "/settings/team" },
     )
   } else if (app === "estio" && locationId) {
-    settings.push({ href: "/admin/team", label: "Team", icon: UsersRound, activePath: (pathname) => pathname.startsWith("/admin/team"), formTarget: { action: "/api/studio/tenant-switch", fields: { product: "team", locationId } } })
+    settings.push({ href: "/settings/team?from=studio", label: "Team", icon: UsersRound, activePath: (pathname) => pathname === "/settings/team", formTarget: { action: "/api/studio/tenant-switch", fields: { product: "team", locationId } } })
   }
   groups.push({ label: "Settings", items: settings })
   return groups

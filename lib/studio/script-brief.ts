@@ -1,4 +1,5 @@
 import "server-only";
+import { resolveStudioTextCommand } from "./text-route";
 import { requireOwnStudioCommandLocation } from "./paid-workspace";
 import { getStudioTextRun } from "./idea-review";
 import { Prisma } from "@prisma/client";
@@ -8,7 +9,7 @@ export async function enqueueStudioScriptBrief(locationId: string, command: Retu
   const access = await requireOwnStudioCommandLocation(locationId);
   return studioDb.call<{ reviewId: string; jobId: string }>("studio_enqueue_routed_text_run", {
     p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId,
-    p_workflow: "script_brief", p_command: command });
+    p_workflow: "script_brief", p_command: await resolveStudioTextCommand(access, "script_brief", command) });
 }
 export async function applyStudioScriptBrief(locationId: string, command: ReturnType<typeof readScriptBriefApply>) {
   const access = await requireOwnStudioCommandLocation(locationId);

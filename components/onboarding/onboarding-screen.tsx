@@ -55,7 +55,16 @@ export function OnboardingScreen({ initialView, locationId, connect, homeHref, u
   const later = () => { document.cookie = `${ONBOARDING_LATER_COOKIE}=${encodeURIComponent(locationId)}; path=/; SameSite=Lax`; window.location.assign(homeHref); };
   const edit = (topic: string, field: string) => { setSelected(topic); setEditing({ topic, field }); setTab("profile"); };
 
-  const timeline = <Timeline view={view} active={active} editing={editing} busy={busy} canEdit={view.canEdit}
+  const brandWebsite = view.topics.find(topic => topic.id === "online")?.fields.find(field => field.key === "website")?.value;
+
+  async function suggestWritingInstructions() {
+    const { generateBrandVoiceFromSite } = await import("@/app/(main)/admin/content/ai-actions");
+    const result = await generateBrandVoiceFromSite(locationId, typeof brandWebsite === "string" ? brandWebsite : undefined);
+    if (!result.success || !result.voice) throw new Error(result.error || "Could not suggest writing instructions.");
+    return result.voice;
+  }
+
+  const timeline = <Timeline view={view} suggestWritingInstructions={view.ai.available && view.canEdit && view.ai.sources.some(source => source.scope !== "device") ? suggestWritingInstructions : undefined} active={active} editing={editing} busy={busy} canEdit={view.canEdit}
     onSelect={id => setSelected(id)} onEdit={edit} onCancel={() => setEditing(null)}
     onSave={(topic, field, value) => command(typeof value === "object" && value && "fieldState" in value ? { action: "field-state", topic, field, status: value.fieldState } : { action: "edit", topic, field, value }, () => setEditing(null))}
     onConfirm={(topic, field) => command({ action: "confirm", topic, field })} />;
@@ -199,7 +208,7 @@ function StatusIcon({ topic }: { topic: TopicView }) {
   return <Circle className={`${cls} text-muted-foreground`} aria-label="Not started" />;
 }
 
-function Timeline({ view, active, editing, busy, canEdit, onSelect, onEdit, onCancel, onSave, onConfirm }: {
+function Timeline({ view, active, editing, busy, canEdit, onSelect, onEdit, onCancel, onSave, onConfirm, suggestWritingInstructions }: {
   view: OnboardingView; active: string | undefined; editing: Editing; busy: boolean; canEdit: boolean;
   onSelect: (id: string) => void; onEdit: (topic: string, field: string) => void; onCancel: () => void;
   onSave: (topic: string, field: string, value: unknown) => void; onConfirm: (topic: string, field: string) => void }) {
@@ -213,18 +222,19 @@ function Timeline({ view, active, editing, busy, canEdit, onSelect, onEdit, onCa
           className={`w-full rounded-md px-2 py-1 text-left text-sm font-medium hover:bg-muted ${t.id === active ? "bg-muted" : ""}`}>{t.title}
           <span className="ml-2 text-xs font-normal text-muted-foreground">{t.researching ? "researching" : t.status === "suggested" ? "to confirm" : t.status === "confirmed" ? "done" : t.status === "skipped" ? "skipped" : ""}</span></button>
         {open && <dl className="mb-2 mt-1 space-y-1.5 pl-2">{t.fields.map(f => <FieldRow key={f.key} topic={t.id} field={f} busy={busy} canEdit={canEdit}
-          editing={editing?.topic === t.id && editing.field === f.key} onEdit={() => onEdit(t.id, f.key)} onCancel={onCancel}
+          editing={editing?.topic === t.id && editing.field === f.key}
+          onSuggest={t.id === "voice" && f.key === "instructions" ? suggestWritingInstructions : undefined} onEdit={() => onEdit(t.id, f.key)} onCancel={onCancel}
           onSave={value => onSave(t.id, f.key, value)} onConfirm={() => onConfirm(t.id, f.key)} />)}</dl>}
       </li>;
     })}
   </ol>;
 }
 
-function FieldRow({ topic, field, busy, canEdit, editing, onEdit, onCancel, onSave, onConfirm }: { topic: string; field: FieldView; busy: boolean; canEdit: boolean;
-  editing: boolean; onEdit: () => void; onCancel: () => void; onSave: (value: unknown) => void; onConfirm: () => void }) {
+function FieldRow({ topic, field, busy, canEdit, editing, onEdit, onCancel, onSave, onConfirm, onSuggest }: { topic: string; field: FieldView; busy: boolean; canEdit: boolean;
+  editing: boolean; onEdit: () => void; onCancel: () => void; onSave: (value: unknown) => void; onConfirm: () => void; onSuggest?: () => Promise<string> }) {
   const id = `field-${topic}-${field.key}`;
   const shown = field.suggestion?.value ?? displayValue(field.kind, field.value);
-  if (editing) return <EditField id={id} field={field} busy={busy} onCancel={onCancel} onSave={onSave} />;
+  if (editing) return <EditField id={id} field={field} busy={busy} onCancel={onCancel} onSave={onSave} onSuggest={onSuggest} />;
   return <div className="group text-sm">
     <dt className="text-xs text-muted-foreground">{field.label}</dt>
     <dd className="flex flex-wrap items-baseline gap-x-2">
@@ -237,19 +247,41 @@ function FieldRow({ topic, field, busy, canEdit, editing, onEdit, onCancel, onSa
   </div>;
 }
 
-function EditField({ id, field, busy, onCancel, onSave }: { id: string; field: FieldView; busy: boolean; onCancel: () => void; onSave: (value: unknown) => void }) {
+function EditField({ id, field, busy, onCancel, onSave, onSuggest }: {
+  id: string; field: FieldView; busy: boolean; onCancel: () => void; onSave: (value: unknown) => void; onSuggest?: () => Promise<string>;
+}) {
   const [text, setText] = useState(() => field.suggestion?.value ?? toText(field.kind, field.value));
   const ref = useRef<HTMLTextAreaElement & HTMLInputElement>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestionError, setSuggestionError] = useState("");
+
+  async function suggest() {
+    if (!onSuggest) return;
+    setSuggesting(true);
+    setSuggestionError("");
+    try {
+      setText(await onSuggest());
+      ref.current?.focus();
+    } catch (error) {
+      setSuggestionError(error instanceof Error ? error.message : "Could not suggest writing instructions.");
+    } finally {
+      setSuggesting(false);
+    }
+  }
   useEffect(() => { ref.current?.focus(); }, []);
   const cancel = () => { onCancel(); requestAnimationFrame(() => document.getElementById(`${id}-edit`)?.focus()); };
   const hint = fieldFormat[field.kind] ?? field.hint;
-  return <form className="space-y-1.5 rounded-lg border bg-background p-2" onSubmit={e => { e.preventDefault(); onSave(fromText(field.kind, text)); }}
+  return <form className="space-y-1.5 rounded-lg border bg-background p-2" onSubmit={e => { e.preventDefault(); if (!suggesting) onSave(fromText(field.kind, text)); }}
     onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); cancel(); } }}>
     <label htmlFor={id} className="text-xs font-medium">{field.label}</label>
-    {field.choices ? <select id={id} autoFocus value={text} onChange={e => setText(e.target.value)} className="block w-full rounded-md border bg-background p-2"><option value="">Choose</option>{field.choices.map(c => <option key={c} value={c}>{c === "starting" ? "Starting from scratch" : c === "operating" ? "Already operating" : c.replaceAll("_", " ")}</option>)}</select> : multiline(field.kind) ? <Textarea id={id} ref={ref} rows={Math.min(8, Math.max(3, text.split("\n").length + 1))} value={text} onChange={e => setText(e.target.value)} />
+    {field.choices ? <select id={id} autoFocus value={text} onChange={e => setText(e.target.value)} className="block w-full rounded-md border bg-background p-2"><option value="">Choose</option>{field.choices.map(c => <option key={c} value={c}>{c === "starting" ? "Starting from scratch" : c === "operating" ? "Already operating" : c.replaceAll("_", " ")}</option>)}</select> : multiline(field.kind) ? <Textarea id={id} ref={ref} rows={Math.min(8, Math.max(3, text.split("\n").length + 1))} value={text} readOnly={suggesting} onChange={e => setText(e.target.value)} />
       : <Input id={id} ref={ref} value={text} onChange={e => setText(e.target.value)} type={field.kind === "email" ? "email" : "text"} inputMode={field.kind === "url" ? "url" : undefined} />}
     {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-    <div className="flex flex-wrap gap-2"><Button type="submit" size="sm" disabled={busy}>Save</Button>
+    {suggestionError && <p role="alert" className="text-xs text-destructive">{suggestionError}</p>}
+    <div className="flex flex-wrap gap-2"><Button type="submit" size="sm" disabled={busy || suggesting}>Save</Button>
+      {onSuggest && <Button type="button" size="sm" variant="outline" disabled={busy || suggesting} onClick={suggest}>
+        {suggesting ? "Preparing suggestion…" : "Suggest with AI"}
+      </Button>}
       {field.excludable && <>{([['not_applicable', 'Not applicable'], ['not_yet', 'Not yet'], ['empty', 'Leave unanswered']] as const).map(([status, label]) => <Button key={status} type="button" size="sm" variant="outline" disabled={busy} onClick={() => onSave({ fieldState: status })}>{label}</Button>)}</>}<Button type="button" size="sm" variant="ghost" onClick={cancel}>Cancel</Button></div>
   </form>;
 }

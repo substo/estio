@@ -136,7 +136,7 @@ NEXT_PUBLIC_APP_URL=https://your-domain.com
 ## Step 7: Verify Configuration
 
 1. Restart your application to load new environment variables
-2. Navigate to `/admin/settings/integrations/microsoft`
+2. Navigate to `/settings/integrations/microsoft`
 3. Click **"Connect Microsoft Account"**
 4. You should be redirected to Microsoft's login page
 5. After signing in, you'll be asked to consent to the permissions
@@ -252,7 +252,7 @@ For accounts that cannot use the standard Graph API (e.g., some personal Outlook
 
 When a Puppeteer/OWA cookie session expires:
 
-- **Microsoft Integration Page** (`/admin/settings/integrations/microsoft`) shows an expired session state.
+- **Microsoft Integration Page** (`/settings/integrations/microsoft`) shows an expired session state.
 - The Microsoft status endpoint can now trigger a **background auto-renew attempt** (Puppeteer) when credentials are stored.
 - **Conversations Page** (`/admin/conversations`) still shows the **Outlook status icon** (red/error state) instead of hiding it.
 - The Conversations hover status explains the session is expired and indicates when auto-reconnect is available.

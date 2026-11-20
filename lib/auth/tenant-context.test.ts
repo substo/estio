@@ -51,7 +51,7 @@ test("native tenant switches reauthorize before provisioning or changing the coo
       const body = new FormData(); body.set("product", product); body.set("locationId", "tenant-b");
       const response = await api.POST(new NextRequest("https://substo.com/api/studio/tenant-switch", { method: "POST", headers: { host: "substo.com", origin: "https://substo.com" }, body }));
       assert.equal(response.status, 303); assert.equal(response.cookies.get("active_location_id")?.value, allowed ? "tenant-b" : undefined);
-      assert.equal(new URL(response.headers.get("location")!).pathname, allowed ? product === "studio" ? `/studio` : product === "team" ? "/admin/team" : "/admin" : "/studio/select");
+      assert.equal(new URL(response.headers.get("location")!).pathname, allowed ? product === "studio" ? `/studio` : product === "team" ? "/settings/team" : "/admin" : "/studio/select");
     }
     assert.deepEqual(checks, Array(3).fill("tenant-b"));
     const foreignBody = new FormData(); foreignBody.set("product", "studio"); foreignBody.set("locationId", "foreign");

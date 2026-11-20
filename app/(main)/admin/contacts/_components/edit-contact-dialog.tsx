@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
 import { Pencil, Trash, RefreshCw, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { previewLeadAction } from '@/app/(main)/admin/settings/crm/actions';
+import { previewLeadAction } from '@/app/(main)/settings/crm/actions';
 import { CrmMergeDialog } from './crm-merge-dialog';
 import { DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import {

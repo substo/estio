@@ -1,4 +1,4 @@
--- Ordered AI fallback chain (migration 20261120100000_ai_route_chain). Real SQL, isolated cluster, no providers.
+-- Ordered AI fallback chain (migration 20261120120001_ai_route_chain). Real SQL, isolated cluster, no providers.
 create table if not exists public.settings_documents(scope_type text,scope_id text,domain text,payload jsonb);
 create table if not exists public.settings_secrets(scope_type text,scope_id text,domain text,secret_key text);
 create function pg_temp.pair_route_device(w text,actor text,code text,hash text,p_report jsonb) returns uuid language plpgsql as $$
@@ -83,6 +83,48 @@ begin
  a:=studio.studio_begin_idea_review_attempt(w,(r->>'reviewId')::uuid,j.id,'route-worker',j.lease_token);
  if a->>'outcome'<>'started' then raise exception 'Paid attempt not started %',a; end if;
  if (select u.route#>>'{actual,kind}' from studio.studio_ai_usage u join studio.studio_ai_attempts t on t.usage_id=u.id where t.id=(a->>'attempt_id')::uuid)<>'openai_key' then raise exception 'Usage route missing'; end if;
+
+ -- OpenAI first can switch to the requester's Mac only after a proven rejection.
+ update public.settings_documents set payload='{"aiRouting":{"version":1,"chain":[{"kind":"openai_key"},{"kind":"device_codex"}]}}' where scope_id=w;
+ update studio.studio_devices set report=report||'{"capacity":{"codex":true,"claude":true}}' where id=d;
+ cmd:=jsonb_set(jsonb_set(cmd,'{requestId}',to_jsonb(gen_random_uuid())),'{route}',
+   '{"requested":{"kind":"openai_key","model":"gpt-6-luna"},"candidates":[{"kind":"openai_key"},{"kind":"device_codex"}]}');
+ r:=studio.studio_enqueue_routed_text_run(w,'substo','route-owner','idea_review',cmd);
+ perform studio.studio_claim_jobs('route-worker',50,60);
+ select * into j from studio.studio_jobs where id=(r->>'jobId')::uuid;
+ if j.route#>>'{actual,model}'<>'gpt-6-luna' then raise exception 'Paid model attribution missing'; end if;
+ a:=studio.studio_begin_idea_review_attempt(w,(r->>'reviewId')::uuid,j.id,'route-worker',j.lease_token);
+ if a->>'outcome'<>'started' then raise exception 'OpenAI-first attempt did not begin %',a; end if;
+ perform studio.studio_close_ai_attempt(w,j.id,'route-worker',j.lease_token,(a->>'attempt_id')::uuid,true);
+ if studio.studio_fail_job(j.id,'route-worker',j.lease_token,'text_provider_rejected','Rejected',false)<>'retry_scheduled' then
+  raise exception 'Confirmed OpenAI rejection did not advance'; end if;
+ select * into j from studio.studio_jobs where id=j.id;
+ if j.status<>'queued' or j.attempts<>0 or j.payload->>'provider'<>'codex' or j.device_id<>d then
+  raise exception 'OpenAI-first handoff is not claimable: %',j; end if;
+ update studio.studio_jobs set status='cancelled',finished_at=clock_timestamp() where id=j.id;
+
+ -- Remove a paid step after enqueue. An untouched reservation ledger proves dispatch did not start.
+ cmd:=jsonb_set(cmd,'{requestId}',to_jsonb(gen_random_uuid()));
+ r:=studio.studio_enqueue_routed_text_run(w,'substo','route-owner','idea_review',cmd);
+ perform studio.studio_claim_jobs('route-worker',50,60);
+ select * into j from studio.studio_jobs where id=(r->>'jobId')::uuid;
+ update public.settings_documents set payload='{"aiRouting":{"version":1,"chain":[{"kind":"device_codex"},{"kind":"device_claude"}]}}' where scope_id=w;
+ a:=studio.studio_begin_idea_review_attempt(w,(r->>'reviewId')::uuid,j.id,'route-worker',j.lease_token);
+ if a->>'outcome'<>'route_unavailable' or exists(select 1 from studio.studio_ai_attempts where job_id=j.id) then raise exception 'Removed paid route dispatched %',a; end if;
+ if studio.studio_fail_job(j.id,'route-worker',j.lease_token,'ai_route_unavailable','Removed',false)<>'retry_scheduled' then
+  raise exception 'Removed paid route did not hand off'; end if;
+ update studio.studio_jobs set status='cancelled',finished_at=clock_timestamp() where id=j.id;
+ cmd:=jsonb_set(cmd,'{route}',rt);
+
+ -- A full-source outline admits its batches using the same Location order.
+ update studio.studio_devices set report=report||'{"knowledgeOutlineVersion":2,"knowledgeCurationVersion":1}' where id=d;
+ r:=studio.studio_enqueue_knowledge_outline(w,'substo','route-owner',jsonb_build_object(
+   'sourceId',src,'expectedVersion',1,'requestId',gen_random_uuid(),'mode','record_text','inputId','notes',
+   'provider','location_order','curationVersion',1,'route',rt));
+ if not exists(select 1 from studio.studio_idea_reviews o join studio.studio_jobs jb on jb.id=o.job_id
+   where o.location_id=w and o.snapshot->>'inputId'=r->>'outlineId' and jb.route#>>'{actual,kind}'='device_codex') then
+  raise exception 'Outline did not use the routed submission'; end if;
+ update studio.studio_jobs set status='cancelled',finished_at=clock_timestamp() where location_id=w and kind='studio.text_run' and status='queued';
 
  -- An uncertain run is never moved to the next step.
  update studio.studio_devices set report=report||'{"capacity":{"codex":true,"claude":true}}' where id=d;

@@ -3,15 +3,15 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-const source = fs.readFileSync(path.join(process.cwd(), "app/(main)/admin/team/actions.ts"), "utf8");
+const source = fs.readFileSync(path.join(process.cwd(), "app/(main)/settings/team/actions.ts"), "utf8");
 const execution = source.slice(
   source.indexOf("export async function executeTransferResponsibilities"),
   source.indexOf("// ============ TEAM MEMBER MANAGEMENT"),
 );
 const responsibilities = fs.readFileSync(path.join(process.cwd(), "lib/team/offboarding-responsibilities.ts"), "utf8");
-const actions = fs.readFileSync(path.join(process.cwd(), "app/(main)/admin/team/actions.ts"), "utf8");
+const actions = fs.readFileSync(path.join(process.cwd(), "app/(main)/settings/team/actions.ts"), "utf8");
 const teamComponents = ["team-member-card.tsx", "team-member-card 2.tsx", "team-members-list.tsx"]
-  .map((name) => fs.readFileSync(path.join(process.cwd(), "app/(main)/admin/team/_components", name), "utf8"))
+  .map((name) => fs.readFileSync(path.join(process.cwd(), "app/(main)/settings/team/_components", name), "utf8"))
   .join("\n");
 
 test("execution re-previews and accepts no client location, role, IDs, or counts", () => {

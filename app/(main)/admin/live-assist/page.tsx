@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { getStudioAccess } from "@/lib/studio/access";
 import { getLocationContext } from "@/lib/auth/location-context";
 import db from "@/lib/db";
 import { Badge } from "@/components/ui/badge";
@@ -92,6 +94,7 @@ export default async function ViewingSessionsIndexPage({ searchParams }: PagePro
         orderBy: { label: "asc" },
         take: 50,
     })]);
+    const canConfigureLiveAssist = (await getStudioAccess(locationId))?.role === "ADMIN";
     const hasNextPage = sessions.length > PAGE_SIZE;
     const visibleSessions = sessions.slice(0, PAGE_SIZE);
     const pageHref = (targetPage: number) => {
@@ -113,7 +116,10 @@ export default async function ViewingSessionsIndexPage({ searchParams }: PagePro
     return (
         <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6">
             <div className="space-y-2">
-                <h1 className="text-2xl font-semibold tracking-tight">Live Assist</h1>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h1 className="text-2xl font-semibold tracking-tight">Live Assist</h1>
+                    {canConfigureLiveAssist && <Button asChild variant="outline"><Link href="/settings/live-assist?from=crm">Live Assist settings</Link></Button>}
+                </div>
                 <p className="text-sm text-muted-foreground">
                     Translate, transcribe, or ask AI during a conversation. Link a contact or property when you need its context.
                 </p>

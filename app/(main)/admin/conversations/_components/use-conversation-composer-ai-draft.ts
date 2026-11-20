@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { toast } from "sonner";
 import { useAiModelCatalog } from "@/components/ai/use-ai-model-catalog";
 import { usePersistentAiModelSelection } from "@/components/ai/use-persistent-ai-model-selection";
@@ -21,6 +21,8 @@ import {
     resolveConversationLanguageContext,
 } from "@/lib/conversations/language-context";
 import {
+    LOCATION_AI_ORDER,
+    resolveComposerDraftModelOverride,
     selectComposerFinalDraftText,
     type ComposerAiDraftFeedback,
     type DraftChunkHandler,
@@ -70,13 +72,6 @@ function logComposerDraftTiming(event: string, fields: Record<string, unknown> =
     }));
 }
 
-export function resolveComposerDraftModelOverride(selectedModel: string, hasUserSelectedModel: boolean): string | undefined {
-    const model = String(selectedModel || "").trim();
-    if (!model) return undefined;
-    if (hasUserSelectedModel) return model;
-    return model.startsWith("openai:") || model.startsWith("chatgpt_subscription:") ? model : undefined;
-}
-
 export function useConversationComposerAiDraft({
     conversation,
     draft,
@@ -92,6 +87,7 @@ export function useConversationComposerAiDraft({
     viewingLanguageLabel,
 }: UseConversationComposerAiDraftArgs): {
     generatingDraft: boolean;
+    modelSelection: string;
     selectedModel: string;
     handleModelChange: (model: string) => void;
     availableModels: ReturnType<typeof useAiModelCatalog>["models"];
@@ -117,17 +113,14 @@ export function useConversationComposerAiDraft({
     autoTranslateTargetLabel: string;
 } {
     const [generatingDraft, setGeneratingDraft] = useState(false);
-    const { models: availableModels, resolveModelForKind } = useAiModelCatalog();
-    const preferredDraftModel = resolveModelForKind("draft") || resolveModelForKind("general");
-    const {
-        selectedModel,
-        hasUserSelectedModel,
-        handleModelChange,
-    } = usePersistentAiModelSelection({
+    const { models } = useAiModelCatalog();
+    const availableModels = useMemo(() => [{ value: LOCATION_AI_ORDER, label: "Location AI order" }, ...models], [models]);
+    const { selectedModel: modelSelection, handleModelChange } = usePersistentAiModelSelection({
         usageKey: "conversation.draft",
         models: availableModels,
-        defaultModel: preferredDraftModel,
+        defaultModel: LOCATION_AI_ORDER,
     });
+    const selectedModel = resolveComposerDraftModelOverride(modelSelection) ?? "";
     const [selectedReplyLanguage, setSelectedReplyLanguage] = useState<string>(
         conversation?.replyLanguageOverride || REPLY_LANGUAGE_AUTO_VALUE
     );
@@ -204,7 +197,7 @@ export function useConversationComposerAiDraft({
         }
         onAiDraftFeedbackChange?.(null);
         try {
-            const modelOverride = resolveComposerDraftModelOverride(selectedModel, hasUserSelectedModel);
+            const modelOverride = selectedModel || undefined;
             let streamedBuffer = "";
             const result = await onGenerateDraft(
                 instruction,
@@ -356,6 +349,7 @@ export function useConversationComposerAiDraft({
 
     return {
         generatingDraft,
+        modelSelection,
         selectedModel,
         handleModelChange,
         availableModels,

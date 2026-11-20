@@ -58,7 +58,7 @@ When enabled for a location (historical implementation):
 ## Where It Was Configured
 
 Admin page (still contains legacy settings fields, but the automation is not the recommended path):
-- `/admin/settings/crm`
+- `/settings/integrations/old-crm`
 
 Settings added (location-level):
 - `Enable legacy CRM lead email detection`
@@ -267,7 +267,7 @@ By default, processing skips if status is already:
 ### Required for Feature Use
 
 - Outlook email sync configured and running (OWA and/or Graph)
-- Legacy CRM notifier settings configured in `/admin/settings/crm`
+- Legacy CRM notifier settings configured in `/settings/integrations/old-crm`
 - Database schema pushed and Prisma client generated (for the processing model/fields)
 
 ### Required for Queue-Backed Auto-Processing
@@ -340,8 +340,8 @@ Non-Outlook emails are intentionally not auto-badged unless already processed.
 
 ## Historical Code References (Legacy Automation)
 
-- CRM settings UI: `app/(main)/admin/settings/crm/page.tsx`
-- CRM settings actions: `app/(main)/admin/settings/crm/actions.ts`
+- CRM settings UI: `app/(main)/settings/crm/page.tsx`
+- CRM settings actions: `app/(main)/settings/crm/actions.ts`
 - Parser + processing actions: `app/(main)/admin/conversations/actions.ts`
 - Message bubble UI badges/actions: `app/(main)/admin/conversations/_components/message-bubble.tsx`
 - Auto-process queue: `lib/queue/legacy-crm-lead-email.ts`

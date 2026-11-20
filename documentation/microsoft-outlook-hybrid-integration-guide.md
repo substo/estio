@@ -103,7 +103,7 @@ This function orchestrates the scraping with a **"World-Class" Robust Strategy**
 
 1.  **"Session Invalid" / 401 in Logs**:
     - **Cause**: Cookies expired (usually after 7-14 days).
-    - **Fix**: First open `/admin/settings/integrations/microsoft` and allow the background auto-renew attempt to run (if stored credentials exist). Use **Try Auto-Renew Now** as a manual fallback. Re-authenticate only if renewal fails.
+    - **Fix**: First open `/settings/integrations/microsoft` and allow the background auto-renew attempt to run (if stored credentials exist). Use **Try Auto-Renew Now** as a manual fallback. Re-authenticate only if renewal fails.
 
 2.  **"Unexpected token '<'" while trying to renew**:
     - **Cause**: The client expected JSON but received an HTML proxy/timeout page (commonly when a full sync endpoint is used for a long-running action).
@@ -127,7 +127,7 @@ This function orchestrates the scraping with a **"World-Class" Robust Strategy**
   - exact sync time,
   - expiry hints (for example, Gmail watch or Outlook session/webhook expiry),
   - Outlook auth method (`oauth` or `puppeteer`) when available.
-- `/admin/settings/integrations/microsoft` also surfaces expired-session messaging and auto-renew state:
+- `/settings/integrations/microsoft` also surfaces expired-session messaging and auto-renew state:
   - `renewing` (background renewal in progress),
   - throttled auto-retry messaging (`next auto-renew retry ...`),
   - last auto-renew error (if any),

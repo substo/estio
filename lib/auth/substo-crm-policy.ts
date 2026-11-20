@@ -8,12 +8,9 @@ export const SUBSTO_CRM_PAGE_PATTERNS = [
   /^\/admin\/content\/(?:pages|posts)(?:\/[^/]+)?$/,
   /^\/admin\/content\/website$/,
   /^\/admin\/content\/home$/,
-  /^\/admin\/site-settings(?:\/navigation)?$/,
   /^\/admin\/content\/pages\/[^/]+\/preview$/,
-  /^\/admin\/settings(?:\/notifications)?$/,
   // Business onboarding: authorised per Location by its page and API (admins change, members read).
   /^\/admin\/onboarding$/,
-  /^\/admin\/team$/,
   /^\/admin\/user-profile(?:\/.*)?$/,
 ] as const;
 

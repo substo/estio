@@ -361,6 +361,7 @@ export function ConversationComposer({
     });
     const {
         generatingDraft,
+        modelSelection,
         selectedModel,
         handleModelChange,
         availableModels,
@@ -1018,7 +1019,7 @@ export function ConversationComposer({
                                 <>
                                     <div className="hidden h-4 w-px bg-slate-200 sm:block" />
                                     <AiModelSelect
-                                        value={selectedModel}
+                                        value={modelSelection}
                                         onValueChange={handleModelChange}
                                         disabled={isUnavailable}
                                         triggerClassName={cn("h-7 w-[112px] text-[11px] border-0 px-2 sm:w-[110px]", resolvedSurfaceTheme.composerControlClassName)}

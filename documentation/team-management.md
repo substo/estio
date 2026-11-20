@@ -4,7 +4,7 @@ This document describes the team management functionality in IDX, including user
 
 ## Overview
 
-The Team Management page (`/admin/team`) provides a unified interface for:
+The Team Management page (`/settings/team`) provides a unified interface for:
 - Viewing all users with access to the current location
 - Inviting new users with specific roles
 - Assigning GHL calendars for viewing synchronization
@@ -206,12 +206,12 @@ Re-Invite Clicked
 
 | File | Purpose |
 |------|---------|
-| `app/(main)/admin/team/page.tsx` | Main team page component |
-| `app/(main)/admin/team/_components/pending-invitations-list.tsx` | Displays pending invites with Revoke option |
-| `app/(main)/admin/team/actions.ts` | Server actions (`inviteUserToLocation`, `revokeInvitation`) |
+| `app/(main)/settings/team/page.tsx` | Main team page component |
+| `app/(main)/settings/team/_components/pending-invitations-list.tsx` | Displays pending invites with Revoke option |
+| `app/(main)/settings/team/actions.ts` | Server actions (`inviteUserToLocation`, `revokeInvitation`) |
 | `app/api/webhooks/clerk/route.ts` | Handles `user.created` to link accepted invites to locations |
-| `app/(main)/admin/team/_components/team-member-card.tsx` | User card with calendar assignment |
-| `app/(main)/admin/team/_components/edit-team-member-dialog.tsx` | Modal for admin editing of team member profiles |
+| `app/(main)/settings/team/_components/team-member-card.tsx` | User card with calendar assignment |
+| `app/(main)/settings/team/_components/edit-team-member-dialog.tsx` | Modal for admin editing of team member profiles |
 | `lib/ghl/users.ts` | GHL User API functions (`createGHLUser`, `removeGHLUserFromLocation`) |
 | `lib/auth/sync-user.ts` | Syncs Clerk user data to local DB, includes helper functions |
 
@@ -241,7 +241,7 @@ When a user accepts an invitation:
 2. We check `evt.data.public_metadata` for `locationId` and `source: 'team_invite'`.
 3. If present, we automatically create the `UserLocationRole` record in the database.
 4. **CRITICAL**: We update the user's Clerk `publicMetadata.ghlRole` to `'admin'` or `'user'` (lowercase).
-   - This is required because the Settings page UI (`/admin/settings`) checks this field to show/hide the "Team Management" card.
+   - This is required because the Settings page UI (`/settings`) checks this field to show/hide the "Team Management" card.
    - Without this step, invited admins would not see the Team Management option.
 5. This removes the need for manual "accept" clicks inside the app; it's seamless.
 

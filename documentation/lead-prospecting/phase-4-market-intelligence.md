@@ -111,7 +111,7 @@ model ListingAlert {
 
 #### Agent Watch Criteria
 
-Agents can configure monitoring rules via `/admin/settings/market-watch`:
+Agents can configure monitoring rules via `/settings/market-watch`:
 
 ```json
 {
@@ -275,7 +275,7 @@ Optional dashboard at `/admin/market/competitors`:
 | `app/api/cron/market-monitor/route.ts` | **[NEW]** Monitoring cron |
 | `app/(main)/admin/market/page.tsx` | **[NEW]** Market intelligence dashboard |
 | `app/(main)/admin/market/alerts/page.tsx` | **[NEW]** Alert feed |
-| `app/(main)/admin/settings/market-watch/page.tsx` | **[NEW]** Watch criteria configuration |
+| `app/(main)/settings/market-watch/page.tsx` | **[NEW]** Watch criteria configuration |
 
 ---
 

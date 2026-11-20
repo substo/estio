@@ -1,4 +1,4 @@
-import { readStudioTextProvider } from "./text-provider";
+import { hasStudioTextConsent, readStudioTextProvider } from "./text-provider";
 import { StudioCommandError } from "./command-error";
 
 export const IDEA_REVIEW_MODEL = "gpt-6-luna";
@@ -17,7 +17,7 @@ export function readIdeaReviewRequest(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new IdeaReviewError("Invalid idea review.");
   const b = value as Record<string, unknown>;
   const provider = readStudioTextProvider(b.provider);
-  if (typeof b.requestId !== "string" || !uuid.test(b.requestId) || (provider === "openai" ? b.confirmPaid !== true : b.confirmSubscription !== true) || !Array.isArray(b.ideas)
+  if (typeof b.requestId !== "string" || !uuid.test(b.requestId) || !hasStudioTextConsent(provider, b) || !Array.isArray(b.ideas)
     || b.ideas.length < 1 || b.ideas.length > 5 || typeof b.focus !== "string" || b.focus.length > 300) throw new IdeaReviewError("Select one to five ideas and authorize a paid review.");
   const ideas = b.ideas.map((i: unknown) => {
     if (!i || typeof i !== "object") throw new IdeaReviewError("Invalid idea selection.");

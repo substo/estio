@@ -90,7 +90,7 @@ export function OutlookSyncManager({ contactEmail, contactName, open, onOpenChan
                     <AlertTriangle className="h-5 w-5" />
                     <div className="text-sm">
                         <span className="font-semibold block">Not Connected</span>
-                        <a href="/admin/settings/integrations/microsoft" className="text-blue-600 hover:underline">
+                        <a href="/settings/integrations/microsoft" className="text-blue-600 hover:underline">
                             Connect Outlook to sync emails
                         </a>
                     </div>

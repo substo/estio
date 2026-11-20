@@ -8339,7 +8339,7 @@ export async function getEmailSyncProvidersStatus() {
                 expectedCadenceMinutes: 5,
                 watchExpiration: gmailWatchExpiry?.toISOString() || null,
                 watchExpired: gmailWatchExpired,
-                settingsPath: '/admin/settings/integrations/google'
+                settingsPath: '/settings/integrations/google'
             },
             {
                 provider: 'outlook' as const,
@@ -8356,7 +8356,7 @@ export async function getEmailSyncProvidersStatus() {
                 canAutoReconnect: outlookCanAutoReconnect,
                 subscriptionExpiry: user.outlookSubscriptionExpiry?.toISOString() || null,
                 subscriptionExpired: outlookSubscriptionExpired,
-                settingsPath: '/admin/settings/integrations/microsoft'
+                settingsPath: '/settings/integrations/microsoft'
             }
         ];
 
@@ -15276,6 +15276,7 @@ export async function updateAiAutomationConfig(locationId: string, config: unkno
         scopeId: targetLocationId,
         domain: SETTINGS_DOMAINS.LOCATION_AI,
         payload: mergedPayload,
+        expectedVersion: existingDoc?.version ?? 0,
         actorUserId: actor.userId || undefined,
     });
 

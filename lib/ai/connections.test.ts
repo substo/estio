@@ -15,13 +15,13 @@ test("any one ready source makes AI available: a key, a connected ChatGPT subscr
   assert.equal(assembleAiConnections({ ...none, openAiKey: true }, now).available, true);
   assert.equal(assembleAiConnections({ ...none, chatGpt: { enabled: true, health: "connected", hasCredential: true } }, now).available, true);
   assert.equal(assembleAiConnections({ ...none, chatGpt: { enabled: true, health: "needs_attention", hasCredential: true } }, now).available, false);
-  const mac = (seenAt: string, claude: Record<string, unknown>, paused = false) => ({ ...none, devices: [{ name: "Studio Mac", revoked: false, paused, seenAt, draining: false, capabilities: { claude } }] });
   const signedIn = { installed: true, authenticated: true, loginMethod: "claudeai" };
   const mac2 = (seenAt: string, claude: Record<string, unknown>, paused = false) => ({ ...none, devices: [{ name: "Studio Mac", revoked: false, paused, seenAt, draining: false, capabilities: { claude, capacity: { claude: true } } }] });
   const r = assembleAiConnections(mac2(recent, signedIn), now);
   assert.equal(r.available, true); assert.equal(r.sources.at(-1)!.label, "Claude on Studio Mac");
   assert.equal(assembleAiConnections(mac2(stale, signedIn), now).sources.at(-1)!.detail, "Mac offline");
   assert.equal(assembleAiConnections(mac2(recent, signedIn, true), now).available, false);
+  assert.equal(assembleAiConnections(mac2(recent, { ...signedIn, ready: false }), now).available, false);
   // An API-key login on the Mac is not the business's subscription.
   assert.equal(assembleAiConnections(mac2(recent, { ...signedIn, loginMethod: "console" }), now).available, false);
 });

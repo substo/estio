@@ -1,6 +1,6 @@
 import { StudioCommandError } from "./command-error";
 import type { KnowledgeExtractionResult, KnowledgeExtractionSnapshot } from "./knowledge-extraction-policy";
-import { readStudioTextProvider } from "./text-provider";
+import { hasStudioTextConsent, readStudioTextProvider } from "./text-provider";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const invalid = (message: string): never => { throw new StudioCommandError(message); };
@@ -21,7 +21,7 @@ export function readKnowledgeOutlineCommand(body: Record<string, unknown>) {
       || typeof inputId !== "string" || !inputId || inputId.length > 200
       || (mode === "record_text" && !["transcript", "notes", "script"].includes(inputId))
       || (mode === "upload_transcript" && !uuid.test(inputId))
-      || (provider === "subscription" ? body.confirmSubscription !== true : body.confirmPaid !== true)) {
+      || !hasStudioTextConsent(provider, body)) {
       return invalid("Choose saved evidence and authorize its processing.");
     }
     return { action: "enqueueOutline" as const, requestId, sourceId, expectedVersion: Number(body.expectedVersion),
@@ -31,7 +31,7 @@ export function readKnowledgeOutlineCommand(body: Record<string, unknown>) {
   if (body.action === "retryBatch") {
     const reviewId = readId(body.reviewId);
     const provider = readStudioTextProvider(body.provider);
-    if (provider === "subscription" ? body.confirmSubscription !== true : body.confirmPaid !== true) return invalid("Authorize processing of this batch.");
+    if (provider === "location_order" || !hasStudioTextConsent(provider, body)) return invalid("Authorize processing of this batch.");
     return { action: "retryBatch" as const, requestId, outlineId, reviewId, provider, confirmPaid: provider === "openai", confirmSubscription: provider === "subscription" };
   }
   if (body.action === "triage") {
@@ -101,7 +101,7 @@ export interface KnowledgeOutline {
   createdAt: string;
   sourceId: string;
   stale: boolean;
-  provider: "openai" | "subscription";
+  provider: "location_order" | "openai" | "subscription";
   batches: OutlineBatch[];
   annotations: Record<string, OutlineAnnotation>;
   triage?: Record<string, "kept" | "hidden">;

@@ -217,7 +217,7 @@ export function AdminNotificationBell() {
           </div>
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" asChild>
-              <Link href="/admin/settings/notifications" onClick={() => setOpen(false)}>
+              <Link href="/settings/notifications" onClick={() => setOpen(false)}>
                 <Settings2 className="mr-1.5 h-3.5 w-3.5" />
                 Manage settings
               </Link>

@@ -1,6 +1,7 @@
 import db from "@/lib/db";
 import { verifyContactProfile } from "@/lib/ai/contact-verification/service";
 import { settingsService } from "@/lib/settings/service";
+import { persistLocationAiRunStatus } from "@/lib/ai/settings/run-status";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import {
   normalizeContactProfileVerificationBatchSize,
@@ -74,41 +75,13 @@ function shouldVerifyContact(args: {
   return false;
 }
 
-async function getLocationSettings(locationId: string): Promise<{
-  doc: any | null;
-  settings: ContactProfileVerificationConfig;
-}> {
-  const doc = await settingsService.getDocument<any>({
+async function getLocationSettings(locationId: string): Promise<ContactProfileVerificationConfig> {
+  const doc = await settingsService.getDocument<{ contactProfileVerification?: unknown }>({
     scopeType: "LOCATION",
     scopeId: locationId,
     domain: SETTINGS_DOMAINS.LOCATION_AI,
   }).catch(() => null);
-  return {
-    doc,
-    settings: normalizeContactProfileVerificationConfig(doc?.payload?.contactProfileVerification),
-  };
-}
-
-async function persistContactProfileVerificationRunStatus(args: {
-  locationId: string;
-  doc: any | null;
-  settings: ContactProfileVerificationConfig;
-  status: ContactProfileVerificationRunStatus;
-}) {
-  if (!args.doc?.payload) return;
-  await settingsService.upsertDocument({
-    scopeType: "LOCATION",
-    scopeId: args.locationId,
-    domain: SETTINGS_DOMAINS.LOCATION_AI,
-    payload: {
-      ...args.doc.payload,
-      contactProfileVerification: {
-        ...args.settings,
-        lastRun: args.status,
-      },
-    },
-    schemaVersion: args.doc.schemaVersion || 1,
-  });
+  return normalizeContactProfileVerificationConfig(doc?.payload?.contactProfileVerification);
 }
 
 async function findVerificationCandidates(args: {
@@ -214,7 +187,7 @@ async function runForLocation(args: {
 }) {
   const startedAt = new Date();
   const stats = cloneStats();
-  const { doc, settings } = await getLocationSettings(args.locationId);
+  const settings = await getLocationSettings(args.locationId);
   const batchSize = normalizeContactProfileVerificationBatchSize(args.batchSize, settings.batchSize);
 
   if (!args.force && !["new_contacts", "daily_due_and_new_contacts"].includes(settings.mode)) {
@@ -229,7 +202,7 @@ async function runForLocation(args: {
       stats,
       error: "Contact Profile Verification mode is not enabled for automated runs.",
     };
-    await persistContactProfileVerificationRunStatus({ locationId: args.locationId, doc, settings, status });
+    await persistLocationAiRunStatus(args.locationId, "contactProfileVerification", status);
     return stats;
   }
 
@@ -248,7 +221,7 @@ async function runForLocation(args: {
       currentContactId: currentContactId || null,
       error: null,
     };
-    await persistContactProfileVerificationRunStatus({ locationId: args.locationId, doc, settings, status });
+    await persistLocationAiRunStatus(args.locationId, "contactProfileVerification", status);
   };
 
   const candidates = await findVerificationCandidates({
@@ -385,7 +358,7 @@ async function runForLocation(args: {
     currentContactId: null,
     error: stats.failures > 0 ? `${stats.failures} contact(s) failed.` : null,
   };
-  await persistContactProfileVerificationRunStatus({ locationId: args.locationId, doc, settings, status });
+  await persistLocationAiRunStatus(args.locationId, "contactProfileVerification", status);
   if (args.source === "manual") {
     console.info("[contact-profile-verification:manual] Batch finished", {
       locationId: args.locationId,

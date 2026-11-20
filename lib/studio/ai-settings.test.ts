@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import test from "node:test";
-import { canManageStudioAi, formatUsd, keyHint, readMonthlyBudget, readOpenAiKey, verifyOpenAiKey } from "./ai-settings-policy";
+import { canManageStudioAi, formatUsd, keyHint, readGeminiKey, readMonthlyBudget, readOpenAiKey, verifyLocationAiKey } from "./ai-settings-policy";
 import { aiCredentialContext, decryptStudioSecret, encryptStudioSecret, hasStudioSecretsKey } from "./secrets";
 
 const keyA = randomBytes(32).toString("base64");
@@ -45,9 +45,21 @@ test("key and budget inputs are validated exactly", () => {
 test("key verification classifies OpenAI responses without leaking the key", async () => {
   let seen: Headers | null = null;
   const reply = (status: number) => (async (_url: unknown, init?: RequestInit) => { seen = new Headers(init?.headers); return new Response("{}", { status }); }) as typeof fetch;
-  assert.equal(await verifyOpenAiKey(secret, reply(200)), "valid");
+  assert.equal(await verifyLocationAiKey("openai", secret, reply(200)), "valid");
   assert.equal(seen!.get("authorization"), `Bearer ${secret}`);
-  assert.equal(await verifyOpenAiKey(secret, reply(401)), "invalid");
-  assert.equal(await verifyOpenAiKey(secret, reply(503)), "unavailable");
-  assert.equal(await verifyOpenAiKey(secret, (async () => { throw new Error("offline"); }) as typeof fetch), "unavailable");
+  assert.equal(await verifyLocationAiKey("openai", secret, reply(401)), "invalid");
+  assert.equal(await verifyLocationAiKey("openai", secret, reply(503)), "unavailable");
+  assert.equal(await verifyLocationAiKey("openai", secret, (async () => { throw new Error("offline"); }) as typeof fetch), "unavailable");
+});
+
+test("Gemini verification accepts a separate Location key and keeps it out of the URL", async () => {
+  const secret = readGeminiKey("  example_gemini_test_key_012345678  ");
+  assert.throws(() => readGeminiKey("key with spaces"));
+  const verify: typeof fetch = async (url, options) => {
+    assert.equal(String(url), "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1");
+    assert.equal(new Headers(options?.headers).get("x-goog-api-key"), secret);
+    return new Response(null, { status: 200 });
+  };
+  assert.equal(await verifyLocationAiKey("gemini", secret, verify), "valid");
+  assert.equal(await verifyLocationAiKey("gemini", secret, async () => new Response(null, { status: 400 })), "invalid");
 });

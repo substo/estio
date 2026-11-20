@@ -1,6 +1,6 @@
 import { StudioCommandError } from "./command-error";
 import { recordLinkId } from "./record-link-policy";
-import { readStudioTextProvider } from "./text-provider";
+import { hasStudioTextConsent, readStudioTextProvider } from "./text-provider";
 
 export const CREATION_STAGES = ["Concept", "Angle", "Title", "Hook", "Payoff", "Script", "Shoot plan"] as const;
 export type CreationStage = typeof CREATION_STAGES[number];
@@ -144,7 +144,7 @@ export function readCreationCommand(value: unknown): CreationCommand {
   if (action === "generate") {
     if (b.provider === undefined) throw new StudioCommandError("Choose a processing route.");
     const provider = readStudioTextProvider(b.provider);
-    if (provider === "openai" ? b.confirmPaid !== true : b.confirmSubscription !== true) throw new StudioCommandError("Authorize the selected processing route.");
+    if (!hasStudioTextConsent(provider, b)) throw new StudioCommandError("Authorize the selected processing route.");
     const feedback = text(b.feedback, 1200).trim();
     if (requestsDirectionChange(feedback)) throw new StudioCommandError("Confirm the new video direction before generating.");
     const linked = b.linkedDraft == null ? null : object(b.linkedDraft);

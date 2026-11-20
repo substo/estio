@@ -1,12 +1,12 @@
 "use client";
 import { StudioTextProviderChoice } from "../../../_components/text-provider-choice";
-import type { StudioTextProvider } from "@/lib/studio/text-provider";
+import { studioTextConsent, type StudioTextProvider } from "@/lib/studio/text-provider";
 import {useRef,useState} from "react";
 import {useRouter} from "next/navigation";
 import type {ExtractionInputs} from "@/lib/studio/knowledge-extraction";
 import {useStudioCommand} from "../../../_components/use-studio-command";
 export function ExtractionStartForm({ source, inputs }: { source: ExtractionInputs["source"]; inputs: ExtractionInputs["inputs"] }) {
-  const [provider, setProvider] = useState<StudioTextProvider>("subscription");
+  const [provider, setProvider] = useState<StudioTextProvider>("location_order");
   const [choice, setChoice] = useState(0);
   const [confirm, setConfirm] = useState(false);
   const [queued, setQueued] = useState(false);
@@ -19,7 +19,7 @@ export function ExtractionStartForm({ source, inputs }: { source: ExtractionInpu
     if (!input || queued) return;
     const result = await command.run({ action: "enqueueOutline", requestId: crypto.randomUUID(),
       sourceId: source.id, expectedVersion: Number(source.version), inputId: input.inputId, mode: input.mode,
-      provider, confirmPaid: provider === "openai" && confirm, confirmSubscription: provider === "subscription" && confirm });
+      ...studioTextConsent(provider, confirm) });
     if (result?.ok) {
       setQueued(true);
       router.push(`/studio/knowledge/extractions/${result.data.outlineId}`);
@@ -38,7 +38,8 @@ export function ExtractionStartForm({ source, inputs }: { source: ExtractionInpu
         <input type="checkbox" required checked={confirm} onChange={e => setConfirm(e.target.checked)} />
         <span>{provider === "openai"
           ? "I authorize paid processing of this input using the Location OpenAI API, with up to $0.48 in batch reservations."
-          : "I authorize processing of this input using my paired Mac subscription."}</span>
+          : provider === "subscription" ? "I authorize processing of this input using my paired Mac subscription."
+          : "I authorize processing of this input using the Location AI order, including any paid steps an admin has enabled."}</span>
       </label>
     </fieldset>
     <button disabled={command.pending || !input || queued} className="rounded-md border px-3 py-2 disabled:opacity-50">
@@ -74,8 +75,7 @@ export function RetryBatchForm({ outlineId, reviewId, provider, firstPassage, la
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (queued) return;
-    const result = await command.run({ action: "retryBatch", requestId: requestId.current, outlineId, reviewId, provider,
-      confirmPaid: provider === "openai" && confirm, confirmSubscription: provider === "subscription" && confirm });
+    const result = await command.run({ action: "retryBatch", requestId: requestId.current, outlineId, reviewId, ...studioTextConsent(provider, confirm) });
     if (result?.ok) { setQueued(true); router.refresh(); } else if (result?.status === 409) router.refresh();
   }
   if (queued) return <p role="status">Retry queued for passages {firstPassage}–{lastPassage}.</p>;

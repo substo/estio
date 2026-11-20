@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
-import { updateWhatsAppSettings } from "../app/(main)/admin/settings/integrations/whatsapp/actions";
+import { updateWhatsAppSettings } from "../app/(main)/settings/integrations/whatsapp/actions";
 
 // Mock auth
 jest.mock("@clerk/nextjs/server", () => ({

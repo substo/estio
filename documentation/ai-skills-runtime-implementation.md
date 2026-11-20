@@ -34,9 +34,9 @@ All generated text is written to `AiSuggestedResponse` and is **human-approval f
   - `app/(main)/admin/conversations/_components/unified-timeline.tsx`
 - Server actions (runtime + queue + admin APIs): `app/(main)/admin/conversations/actions.ts`
 - Admin settings skill runtime UI:
-  - `app/(main)/admin/settings/ai/skill-runtime-settings.tsx`
-  - `app/(main)/admin/settings/ai/actions.ts`
-  - `app/(main)/admin/settings/ai/page.tsx`
+  - `app/(main)/settings/_components/crm-features/skill-runtime-settings.tsx`
+  - `app/(main)/settings/_components/crm-features/actions.ts`
+  - `app/(main)/settings/conversations/page.tsx`
 - DB models: `prisma/schema.prisma`
 
 ## 3. Runtime Flow

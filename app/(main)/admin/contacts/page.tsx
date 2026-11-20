@@ -1,4 +1,7 @@
 import db from "@/lib/db";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import { hasGoogleTokens } from "@/lib/google/credentials";
 
 import { AddContactDialog } from "./_components/add-contact-dialog";
@@ -310,6 +313,7 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
         orderBy: { name: 'asc' }
     });
     const leadSourceNames = leadSources.map(s => s.name);
+    const canConfigureContacts = access.role === "ADMIN" && await getRequestAuthRealm() === "estio";
     const manageableContacts = contacts.filter((contact) => canManageContact(access, contact.assignedUserId));
 
     // Fetch agents (Users with access to this location)
@@ -328,7 +332,8 @@ export default async function LeadsPage(props: { searchParams: Promise<ContactSe
                     <h1 className="text-2xl font-bold">Contacts</h1>
                     <p className="text-muted-foreground">Manage your contacts and leads.</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
+                    {canConfigureContacts && <Button asChild variant="outline"><Link href="/settings/contacts?from=crm">Contact settings</Link></Button>}
                     {/* The AddContactDialog handles its own button, but to align them we might wrap it. 
                         AddContactDialog currently renders a DialogTrigger with a Button.
                     */}

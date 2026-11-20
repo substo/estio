@@ -9,11 +9,16 @@ import { businessProfileSchema, type BusinessProfile } from "@/lib/business-prof
 import { getAiConnections as getAllAiConnections } from "@/lib/ai/connections";
 import type { AiConnections } from "@/lib/ai/connections-model";
 import { researchDevices, researchNoteFor, type ResearchDevice } from "./device-route";
+import { planOnboardingResearch } from "./research-route";
 /** Report the eligibility of the server research order and retain device names for existing queued runs. */
-async function getAiConnections(locationId: string) {
-  const [ai, provider, devices] = await Promise.all([getAllAiConnections(locationId), chooseResearchProvider(locationId).catch(() => null),
+async function getAiConnections(actor: Actor) {
+  const { locationId } = actor;
+  const owner = actor.role === "ADMIN" && !actor.impersonating ? { app: actor.app, createdBy: actor.clerkUserId } : undefined;
+  const [ai, plan, devices] = await Promise.all([getAllAiConnections(locationId), planOnboardingResearch(studioDb, locationId, owner).catch(() => null),
     researchDevices(studioDb, locationId).catch(() => [] as ResearchDevice[])]);
-  const connections: AiConnections = { available: provider !== null, sources: ai.sources.filter(s => s.scope !== "device") };
+  const ownMacSources = owner ? (ai.connections ?? []).filter(c => c.scope === "device" && c.ownerUserId === owner.createdBy)
+    .map(c => ({ kind: c.kind, scope: c.scope, label: c.label, ready: plan?.steps.some(s => "deviceId" in s && s.kind === c.kind && s.deviceId === c.deviceId) ?? false, detail: c.reason })) : [];
+  const connections: AiConnections = { available: Boolean(plan?.steps.length), sources: [...ai.sources.filter(s => s.scope !== "device"), ...ownMacSources] };
   return { connections, devices };
 }
 import { findTopic, topicsFor, type FieldValue } from "./topics";
@@ -36,7 +41,7 @@ async function load(actor: Actor) {
     loadOnboardingState(actor.locationId),
     settingsService.getDocument<BusinessProfile>({ scopeType: "LOCATION", scopeId: actor.locationId, domain: SETTINGS_DOMAINS.LOCATION_BUSINESS }),
     db.location.findUnique({ where: { id: actor.locationId }, select: { name: true, timeZone: true } }),
-    getAiConnections(actor.locationId),
+    getAiConnections(actor),
   ]);
   return { state, profile: doc ? businessProfileSchema.parse(doc.payload) : null, location: { name: location?.name ?? null, timeZone: location?.timeZone ?? null },
     ai: ai.connections, researchNote: researchNoteFor(state, ai.devices) };
@@ -68,7 +73,7 @@ export async function startResearch(actor: Actor, input: { name?: string; websit
   if (website) { try { const u = new URL(website); if (!["http:", "https:"].includes(u.protocol) || u.username || u.password) throw new Error(); } catch { throw new OnboardingError("That website address doesn't look right."); } }
   const name = normalizeName(input.name ?? savedView.name) || undefined;
   if (!name && !website && !input.summary?.trim() && !savedView.summary) throw new OnboardingError("Describe your business or personal brand to start.");
-  if (!(await getAiConnections(actor.locationId)).connections.available)
+  if (!(await getAiConnections(actor)).connections.available)
     throw new OnboardingError("Connect an AI first: a ChatGPT subscription, an API key, or a paired Mac running the Studio companion with processing on.");
   const opening = (["stage", "kind", "presence", "summary"] as const).flatMap(key => {
     if (!input[key]) return [];
@@ -83,7 +88,7 @@ export async function startResearch(actor: Actor, input: { name?: string; websit
   const topics = topicsFor(actor.app).map(t => t.id);
   await updateOnboardingState(actor.locationId, s => say(say(startBatch({ ...s, ...(input.name?.trim() ? { suggestedName: null } : {}) }, batch, topics, { ...(name ? { name } : {}), ...(website ? { website } : {}) }), "owner",
     [name, website].filter(Boolean).join(" · ")), "agent", "Thanks. I'm researching your business and market using your setup choices, one topic at a time. Confirm or edit each suggestion in your profile."), owner(actor));
-  await studioDb.call("studio_enqueue_job", { p_location_id: actor.locationId, p_kind: ONBOARDING_FETCH, p_payload: { batch, topics, ...(website ? { website } : {}), actorId: actor.dbUserId, createdBy: actor.clerkUserId },
+  await studioDb.call("studio_enqueue_job", { p_location_id: actor.locationId, p_kind: ONBOARDING_FETCH, p_payload: { batch, topics, ...(website ? { website } : {}), actorId: actor.dbUserId, createdBy: actor.clerkUserId, app: actor.app },
     p_idempotency_key: `onboarding:${batch}:fetch`, p_created_by: actor.clerkUserId, p_max_attempts: 3 });
   return getOnboardingView(actor);
 }
@@ -171,7 +176,7 @@ export async function setStatus(actor: Actor, action: "finish" | "reopen") {
 }
 /** Where the app should send an admin: the onboarding screen, until it is done. */
 export async function onboardingOpenModeFor(actor: Actor) {
-  const [{ state }, ai] = await Promise.all([loadOnboardingState(actor.locationId), getAiConnections(actor.locationId)]);
+  const [{ state }, ai] = await Promise.all([loadOnboardingState(actor.locationId), getAiConnections(actor)]);
   const { onboardingOpenMode } = await import("./state");
   return onboardingOpenMode({ role: actor.role, impersonating: actor.impersonating, status: state.status, aiAvailable: ai.connections.available });
 }

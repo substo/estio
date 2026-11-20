@@ -55,7 +55,7 @@ The Property Form is the primary interface for creating and editing properties. 
     *   **AI Enhance (Admin)**: Existing persisted images can be enhanced via an admin AI modal with two modes:
         - `Polish`: analyze issues, choose fix chips, then generate a polished variant with optional override instructions and prompt reuse for similar follow-up images.
         - `Precision Remove`: manually mask an object with brush/box tools, remove it with AI inpainting, then review the result in the same compare view used by Polish.
-      Generated output is stored as a new image variant while preserving the original. `Precision Remove` only appears when Google Cloud image editing is configured on the server and the location has enabled it in `AI Configuration`.
+      Generated output is stored as a new image variant while preserving the original. `Precision Remove` only appears when Google Cloud image editing is configured on the server and the location has enabled it under [Property media and import](/settings/property-media).
     *   **Videos**: One URL per line.
     *   **Documents**: One URL per line.
     *   **Notes**: Internal and administrative details.

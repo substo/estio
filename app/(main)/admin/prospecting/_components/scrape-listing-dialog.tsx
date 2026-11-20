@@ -11,7 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, CheckCircle2, AlertTriangle, RefreshCw, Bug, ChevronDown, ChevronUp, Save } from 'lucide-react';
-import { BazarakiAuthButton } from '../../settings/prospecting/_components/bazaraki-auth-button';
+import { BazarakiAuthButton } from '@/app/(main)/settings/prospecting/_components/bazaraki-auth-button';
 
 interface ScrapeListingDialogProps {
     listingId: string;

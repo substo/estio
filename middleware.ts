@@ -7,7 +7,9 @@ import { hasStudioDatabaseConfig } from "@/lib/studio/config";
 import { isSubstoSitePath } from "@/lib/substo-sites/policy";
 import { CLERK_PROFILE_WEBHOOK_PATH, classifySubstoRoute, skipsLegacyEstioMiddleware } from "@/lib/auth/host-routing-policy";
 
-const isProtectedRoute = createRouteMatcher(["/dashboard(.*)", "/forum(.*)", "/studio(.*)", "/settings(.*)", "/account/connections(.*)"]);
+import { isSettingsPath } from "@/lib/auth/settings-route-policy";
+
+const isProtectedRoute = createRouteMatcher(["/dashboard(.*)", "/forum(.*)", "/studio(.*)", "/settings", "/settings/(.*)", "/account/connections(.*)"]);
 const getRequestBrand = (req: NextRequest) =>
   resolveHostBrand(req.headers.get("host"), getHostBrandConfig());
 
@@ -28,7 +30,7 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
     if (routeKind === "blocked") {
       return new NextResponse("Not Found", { status: 404 });
     }
-    if (routeKind === "studio" || routeKind === "settings" || routeKind === "brand" || routeKind === "profile" || routeKind === "crm") await auth.protect();
+    if (routeKind === "studio" || routeKind === "settings" || routeKind === "profile" || routeKind === "crm") await auth.protect();
     // Studio API handlers validate their Clerk user and workspace access, returning
     // JSON errors to clients instead of Clerk's page-oriented protect redirect.
 
@@ -85,7 +87,9 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
   }
 
   // 2. Tenant Domain Logic (Public Website)
+  const settingsPath = isSettingsPath(url.pathname);
   const isSystemPath =
+    settingsPath ||
     url.pathname.startsWith("/admin") ||
     url.pathname.startsWith("/sso") ||
     url.pathname.startsWith("/setup") ||
@@ -109,7 +113,7 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
     const { userId } = await auth();
 
     if (!userId && !isHandshakePath && !isAuthPage) {
-      if (url.pathname.startsWith("/admin")) {
+      if (settingsPath || url.pathname.startsWith("/admin")) {
         const signInUrl = new URL("/sign-in", `https://${hostname}`);
         signInUrl.searchParams.set("redirect_url", url.pathname + url.search);
         return NextResponse.redirect(signInUrl);
@@ -128,6 +132,7 @@ const clerkHandler = clerkMiddleware(async (auth, req: NextRequest) => {
     const hasClientUat = req.cookies.has("__client_uat");
     const hasTicket = req.nextUrl.searchParams.has("__clerk_ticket");
     const isAuthPath =
+      settingsPath ||
       url.pathname.startsWith("/admin") ||
       url.pathname.startsWith("/favorites") ||
       url.pathname.startsWith("/sign-in") ||

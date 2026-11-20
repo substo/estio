@@ -33,8 +33,8 @@ test('media list, expiry count, purge, and restore are location scoped', () => {
 });
 
 test('media actions derive the active ADMIN location and accept no client location authority', () => {
-  const actions = read('app/(main)/admin/settings/media/actions.ts');
-  const client = read('app/(main)/admin/settings/media/media-trash-client.tsx');
+  const actions = read('app/(main)/settings/media/actions.ts');
+  const client = read('app/(main)/settings/media/media-trash-client.tsx');
   assert.match(actions, /getActiveContactsAccess\(\)/);
   assert.match(actions, /access\.role !== "ADMIN"/);
   assert.match(actions, /export async function listTrashedMediaAction\(\)/);

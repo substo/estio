@@ -115,12 +115,12 @@ test("tenant widgets wait for a tenant and AI spend keeps a fixed slot for locat
   assert.match(read("components/mode-toggle.tsx"), /<Skeleton className="w-10 h-10"\/>/);
 });
 
-test("CRM, Studio and brand pages all render the one shared shell", () => {
+test("CRM and Studio render the shared product shell and settings has one shared layout", () => {
   assert.match(read("app/(main)/admin/layout.tsx"), /<AppShell product="crm" \{\.\.\.shell\}>/);
   assert.match(read("app/(main)/studio/(tenant)/layout.tsx"), /<AppShell product="studio" \{\.\.\.shell\}/);
   assert.match(read("app/(main)/studio/select/page.tsx"), /<AppShell product="studio" \{\.\.\.shell\}>/);
-  assert.match(read("app/(main)/brand/team/page.tsx"), /<AppShell product="studio" \{\.\.\.shell\}/);
-  assert.match(read("app/(main)/brand/settings/page.tsx"), /<AppShell product="studio" \{\.\.\.shell\}/);
+  assert.match(read("app/(main)/settings/layout.tsx"), /<SettingsNav sections=\{/);
+  for (const page of ["team", "general", "computer"]) assert.doesNotMatch(read(`app/(main)/settings/${page}/page.tsx`), /<AppShell/);
   for (const retired of [
     "app/(main)/admin/_components/admin-shell-layout.tsx",
     "app/(main)/admin/_components/dashbord-top-nav.tsx",
@@ -148,16 +148,16 @@ test("exactly one header implementation exists across the CRM and Studio shells"
   const shellFiles = [
     ...sources("components/app-shell"),
     ...sources("app/(main)/admin/_components"),
-    ...sources("app/(main)/studio/_components"),
-    "app/(main)/admin/layout.tsx", "app/(main)/studio/layout.tsx", "app/(main)/studio/(tenant)/layout.tsx", "app/(main)/brand/layout.tsx",
+    "app/(main)/studio/_components/studio-shell-data.ts",
+    "app/(main)/admin/layout.tsx", "app/(main)/studio/layout.tsx", "app/(main)/studio/(tenant)/layout.tsx",
   ];
   const withHeader = shellFiles.filter((file) => /<header[\s>]/.test(read(file)));
   assert.deepEqual(withHeader, ["components/app-shell/app-header.tsx"]);
   assert.equal(read("components/app-shell/app-header.tsx").match(/<header[\s>]/g)?.length, 1);
 });
 
-test("Studio and brand pages use the shared profile menu, never Clerk's UserButton", () => {
-  for (const file of [...sources("app/(main)/studio"), ...sources("app/(main)/brand"), ...sources("components/app-shell")]) {
+test("Studio and settings pages use the shared profile menu or settings shell, never Clerk's UserButton", () => {
+  for (const file of [...sources("app/(main)/studio"), ...sources("app/(main)/settings"), ...sources("components/app-shell")]) {
     assert.doesNotMatch(read(file), /UserButton/, file);
   }
   assert.match(read("components/app-shell/app-header.tsx"), /<UserProfile \/>/);

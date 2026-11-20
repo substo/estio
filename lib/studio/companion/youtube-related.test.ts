@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultDeviceConfig } from "../devices-policy";
-import { StudioJobError } from "../worker/handlers";
+import { StudioJobError, StudioProviderRejectedError } from "../worker/handlers";
 import type { LocalProvider, LocalTextAdapter } from "./providers";
 import { classifyBrowserError, createYoutubeSearchHandler, type YoutubeBrowser } from "./youtube-search";
 
@@ -11,7 +11,7 @@ const source = { kind: "reference" as const, title: "New Generation YouTube Infl
 const context = { approvedTitles: ["Think Media"], pinnedKnowledge: ["Studio helps creators"], profile: { offer: "Studio" } };
 const v = (id: string, title: string) => ({ id, title, channelTitle: "Ch", publishedText: "1 yr ago", viewsText: "10 views" });
 const ids = { a: "aaaaaaaaaaa", b: "bbbbbbbbbbb", c: "ccccccccccc", d: "ddddddddddd" };
-const job = (payload: unknown) => ({ id: "j", location_id: "loc", kind: "studio.youtube_search", payload, lease_token: "t", attempts: 1, max_attempts: 1 }) as never;
+const job = (payload: unknown, route?: unknown) => ({ route, id: "j", location_id: "loc", kind: "studio.youtube_search", payload, lease_token: "t", attempts: 1, max_attempts: 1 }) as never;
 const ctx = () => ({ signal: new AbortController().signal, workerId: "w" }) as never;
 
 function model(script: { plan?: unknown; rank?: unknown; failPlan?: boolean; failRank?: boolean }, prompts: string[] = []) {
@@ -21,7 +21,7 @@ function model(script: { plan?: unknown; rank?: unknown; failPlan?: boolean; fai
       return req.validate(isPlan ? script.plan : script.rank); } }), usage, config: () => ({ ...defaultDeviceConfig, textProvider: "codex" as const }) };
 }
 const browser = (byQuery: Record<string, ReturnType<typeof v>[]>, seen: string[] = []): (() => Promise<YoutubeBrowser>) => async () => ({ search: async q => { seen.push(q); if (!byQuery[q]) throw new Error("none"); return { videos: byQuery[q], signedIn: false }; } });
-const run = (deps: Parameters<typeof createYoutubeSearchHandler>[0], payload: unknown) => createYoutubeSearchHandler(deps)(job(payload), ctx()) as Promise<{ videos: Array<{ id: string; score?: number | null; band?: string }>; trace: { mode: string; route: string; focus?: string; queries: Array<{ query: string; by: string; found: number }>; planner?: { prompt: string; provider: string }; ranker?: { prompt: string }; notes?: string[]; candidates: Array<{ id: string; band: string }> } }>;
+const run = (deps: Parameters<typeof createYoutubeSearchHandler>[0], payload: unknown, route?: unknown) => createYoutubeSearchHandler(deps)(job(payload, route), ctx()) as Promise<{ videos: Array<{ id: string; score?: number | null; band?: string }>; trace: { mode: string; route: string; focus?: string; queries: Array<{ query: string; by: string; found: number }>; planner?: { prompt: string; provider: string }; ranker?: { prompt: string; provider: string; model: string }; notes?: string[]; candidates: Array<{ id: string; band: string }> } }>;
 
 test("plan, search each planned query, merge and rank: relevant first, trace records prompts, model, queries and scores", async () => {
   const prompts: string[] = []; const seen: string[] = [];
@@ -105,4 +105,34 @@ test("a browser failure names its stage from the error class only, never the mes
   assert.equal(classifyBrowserError(e("Error", "Target page, context or browser has been closed")), "browser_closed");
   const handler = createYoutubeSearchHandler({ enabled: () => true, browser: async () => ({ search: async () => { throw e("TimeoutError", "page.goto: Timeout 30000ms exceeded at /Users/private/path"); } }) });
   await assert.rejects(handler(job({ query: "k", limit: 6 }), ctx()), (err: unknown) => err instanceof StudioJobError && err.code === "youtube_search_failed" && /\(timeout\)/.test(err.message) && !err.message.includes("/Users"));
+});
+
+
+test("a route-aware rank uses the ordered model and only advances on a pre-generation rejection", async () => {
+  const payload = { query: "k", limit: 6, mode: "rank", source, context, candidates: [v(ids.a, "A")] };
+  const deviceId = "this-mac";
+  const route = { candidates: [{ kind: "device_claude", model: "sonnet", deviceId }, { kind: "device_codex", model: "gpt-5.5", deviceId }] };
+  const calls: string[] = [];
+  const runAttempt = (rejection: Error) => {
+    const base = model({ rank: { rankings: [{ id: ids.a, score: 80, reason: "Same subject" }] } });
+    return run({ browser: async () => null, enabled: () => true, deviceId,
+      models: { ...base, adapter: provider => {
+        const adapter = base.adapter(provider);
+        const generate: LocalTextAdapter["generate"] = req => {
+          calls.push(`${provider}:${req.model}`);
+          if (provider === "claude") throw rejection;
+          return adapter.generate(req);
+        };
+        return { ...adapter, generate };
+      } },
+    }, payload, route);
+  };
+  const switched = await runAttempt(new StudioProviderRejectedError("rate_limited", "limit", true));
+  assert.deepEqual(calls.splice(0), ["claude:sonnet", "codex:gpt-5.5"]);
+  assert.equal(switched.trace.ranker?.model, "gpt-5.5");
+
+  const stopped = await runAttempt(new Error("uncertain"));
+  assert.deepEqual(calls, ["claude:sonnet"]);
+  assert.equal(stopped.videos[0].band, "unranked");
+  assert.equal(stopped.trace.ranker, undefined);
 });

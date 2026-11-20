@@ -9,35 +9,23 @@ Estio also has an experimental ChatGPT subscription text provider based on the O
 For canonical AI automation runtime architecture (policies, decisions, jobs, suggested response queue), use:
 - `documentation/ai-skills-runtime-implementation.md`
 
-## AI Settings Page
+## AI and feature settings
 
-**Shared page:** `/settings/ai` (`components/ai-settings/`). Both apps use it for connections, task models, fallback order and usage limits. The previous CRM editor remains in place for Phase D to migrate its feature-specific settings.
+The shared AI page at `/settings/ai` manages Location connections, task models, fallback order and usage limits. The app stores routing and feature configuration in the `location.ai` settings document. API keys are encrypted in `settings_secrets`.
 
-The AI settings page manages Google Gemini model/runtime settings, brand voice, transcription, automation, and skill runtime configuration. It now keeps OpenAI-specific connection controls out of this page.
+CRM feature controls have separate pages under Settings, linked from their features:
 
-Google AI settings write through `SettingsService`:
+- `/settings/conversations` holds default reply language, WhatsApp transcription and retention, and the Skill Runtime controls.
+- `/settings/contacts` holds contact classification, requirements intelligence, and outreach.
+- `/settings/live-assist` holds session disclosure, audio, transcript and model options.
+- `/settings/property-media` holds property import and design models and Precision Remove.
+- The Business Profile's Brand voice section stores writing instructions shared by CRM and Studio.
 
-- Non-secret model configuration is stored in `settings_documents` under domain `location.ai`.
-- API keys are stored in `settings_secrets` and encrypted at rest:
-  - Google: `google_ai_api_key`
-- During migration windows, legacy `SiteConfig` dual-write may still be enabled via feature flags.
-
-For storage architecture, migration flags, and encryption/key rotation procedures, see [site-settings-platform.md](/Users/martingreen/Projects/Estio/documentation/site-settings-platform.md).
-
-### Skill Runtime Hub (Admin)
-
-The AI settings page includes a **Skill Runtime Hub** section that manages:
-- per-skill `AiSkillPolicy` configuration,
-- runtime simulation (`simulateSkillDecision`),
-- runtime execution trigger (`runAiRuntimeNow`),
-- runtime health summaries (policies, pending/dead jobs, pending suggestions).
-
-UI source:
-- `app/(main)/admin/settings/ai/skill-runtime-settings.tsx`
+The Skill Runtime section manages per-skill policies, decision simulation, manual execution, and runtime job summaries. Its UI is in `app/(main)/settings/_components/crm-features/skill-runtime-settings.tsx`.
 
 ## OpenAI Integration Page
 
-**Path:** `/admin/settings/integrations/openai`
+**Path:** `/settings/integrations/chatgpt-subscription`
 
 This is the canonical UI for all OpenAI-related setup:
 
@@ -63,7 +51,6 @@ Underlying storage remains:
 - `googleAiModelDesign` (stage 2 design)
 - `openAiTextModel` (OpenAI text-generation alternative; stored with `openai:` prefix)
 - `precisionRemoveEnabled` (per-location toggle for masked property photo removal)
-- `brandVoice`
 - `outreachConfig` (`enabled`, `visionIdPrompt`, `icebreakerPrompt`, `qualifierPrompt`)
 - `automationConfig` (legacy compatibility payload; not the primary runtime control plane)
 
@@ -82,7 +69,7 @@ At runtime, OpenAI text calls resolve credentials in this order:
 2. Location/admin OpenAI key.
 3. `OPENAI_API_KEY` environment variable.
 
-Personal keys, the user’s preferred OpenAI text model, location/admin keys, the location OpenAI text model, and ChatGPT subscription settings are configured from `/admin/settings/integrations/openai`.
+Personal keys, the user’s preferred OpenAI text model, location/admin keys, the location OpenAI text model, and ChatGPT subscription settings are configured from `/settings/integrations/chatgpt-subscription`.
 
 OpenAI server API calls use bearer API keys or short-lived access tokens; consumer ChatGPT login is not an API authentication mechanism for this app. See OpenAI’s API authentication and model-list references:
 - https://developers.openai.com/api/reference/overview#authentication
@@ -106,7 +93,7 @@ The current Estio transport is deliberately opt-in:
 - optional `CHATGPT_SUBSCRIPTION_CODEX_TIMEOUT_MS=120000`
 - optional deployment fallback `CODEX_ACCESS_TOKEN`
 
-Per-user tokens can be configured from `/admin/settings/integrations/openai`, but they are optional when the trusted runner has an authenticated Codex login cache from `codex login --device-auth`. Codex access tokens are supported for ChatGPT Business and Enterprise workspaces and are intended for trusted automation. This is appropriate only for trusted servers/runners. Do not use browser session cookies, scraped ChatGPT tokens, or shared personal credentials in a multi-user deployment.
+Per-user tokens can be configured from `/settings/integrations/chatgpt-subscription`, but they are optional when the trusted runner has an authenticated Codex login cache from `codex login --device-auth`. Codex access tokens are supported for ChatGPT Business and Enterprise workspaces and are intended for trusted automation. This is appropriate only for trusted servers/runners. Do not use browser session cookies, scraped ChatGPT tokens, or shared personal credentials in a multi-user deployment.
 
 The Codex transport is locked down with `codex exec --ephemeral --ignore-rules --skip-git-repo-check --sandbox read-only --ask-for-approval never` and writes the final answer through `--output-last-message`. It is slower and less deterministic than the API-key path, so it should be limited to human-triggered text drafting/selection workflows. Live transcript, realtime voice, audio transcription, and image generation remain outside this provider.
 
@@ -213,8 +200,8 @@ For user-facing pickers and chat defaults, the effective model is resolved throu
 - `lib/ai/property-image-enhancement.ts`
 - `lib/ai/property-image-precision-remove-config.ts`
 - `lib/ai/property-image-precision-remove.ts`
-- `app/(main)/admin/settings/ai/actions.ts`
-- `app/(main)/admin/settings/ai/ai-settings-form.tsx`
+- `app/(main)/settings/_components/crm-features/actions.ts`
+- `app/(main)/settings/_components/crm-features/crm-feature-settings-form.tsx`
 - `app/(main)/admin/conversations/actions.ts`
 - `app/(main)/admin/conversations/_components/conversation-composer.tsx`
 - `app/(main)/admin/conversations/_components/chat-window.tsx`

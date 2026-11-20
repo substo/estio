@@ -1,7 +1,7 @@
 import { StudioCommandError } from "./command-error";
 import type { KnowledgeExtractionSnapshot } from "./knowledge-extraction-policy";
 import { readFindingReferences } from "./knowledge-outline";
-import { readStudioTextProvider } from "./text-provider";
+import { hasStudioTextConsent, readStudioTextProvider } from "./text-provider";
 
 /** One bounded, tool-free operation over ONE saved source. The model proposes; the user saves or creates separately. */
 export const SELECTED_IDEA_PROMPT = "studio.source-assist.selected-idea.v1";
@@ -19,12 +19,13 @@ export interface SourceAssistResult {
 
 export function readSourceAssistCommand(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new StudioCommandError("Invalid assistant request.");
-  const { sourceId, expectedVersion, requestId, provider: route, confirmPaid, confirmSubscription, intent, message, selection: rawSelection } = value as Record<string, unknown>;
+  const input = value as Record<string, unknown>;
+  const { sourceId, expectedVersion, requestId, provider: route, intent, message, selection: rawSelection } = input;
   if (route === undefined) throw new StudioCommandError("Choose a processing route.");
   const provider = readStudioTextProvider(route);
   if (typeof sourceId !== "string" || !UUID.test(sourceId) || typeof requestId !== "string" || !UUID.test(requestId)
     || typeof expectedVersion !== "number" || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1
-    || (provider === "openai" ? confirmPaid !== true : confirmSubscription !== true)) {
+    || !hasStudioTextConsent(provider, input)) {
     throw new StudioCommandError("Select the source and authorize the chosen processing route.");
   }
   if (!SOURCE_ASSIST_INTENTS.includes(intent as SourceAssistIntent)) throw new StudioCommandError("Choose discuss, rewrite as a note, or propose an idea.");

@@ -110,7 +110,7 @@ The system logs heavily to the server console. Look for these tags:
 | **Email not received** | SPAM Filters or DNS | 1. Check GHL "Conversations" tab (if it's there, we sent it).<br>2. Check Recipient SPAM.<br>3. Verify Domain SPF/DKIM records. |
 
 ## Feature: Resend Invitation
-A "Resend" button was added to the Team Management page (`/admin/team`).
+A "Resend" button was added to the Team Management page (`/settings/team`).
 *   **Logic**: Revokes the old invitation (Clerk) -> Creates a new one (Clerk) -> Triggers Webhook -> Sends via GHL.
 
 ## Deliverability & DNS Troubleshooting

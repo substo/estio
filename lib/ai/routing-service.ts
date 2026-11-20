@@ -89,12 +89,11 @@ export function toStudioTextRoute(decision: AiRouteDecision) {
 
 export type StudioTextOperation = "idea_review" | "script_brief" | "knowledge_extract" | "video_template" | "source_assist";
 /**
- * For a Studio text request that follows the Location order: drop the explicit-provider fields and attach the resolved
+ * For a Studio text request that follows the Location order: attach the resolved
  * route. Pass the result as `p_command` to studio_enqueue_routed_text_run (directly or via the video-template/source-assist
  * wrappers). Throws AiRoutingError(409) with the stop reason when nothing can run.
  */
-export async function withStudioTextRoute<T extends Record<string, unknown>>(locationId: string, operation: StudioTextOperation, command: T) {
-  const decision = await resolveLocationAiRoute(locationId, operation);
-  const { provider: _provider, confirmPaid: _paid, confirmSubscription: _subscription, ...rest } = command;
-  return { command: { ...rest, route: toStudioTextRoute(decision) }, decision };
+export async function withStudioTextRoute<T extends Record<string, unknown>>(locationId: string, operation: StudioTextOperation, command: T, access?: StudioAccess) {
+  const decision = await resolveLocationAiRoute(locationId, operation, { access });
+  return { ...command, route: toStudioTextRoute(decision) };
 }

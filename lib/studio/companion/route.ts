@@ -36,7 +36,7 @@ export function localRoute(job: Pick<StudioJob, "payload"> & { route?: unknown }
     const provider = s.kind === "device_codex" ? "codex" : s.kind === "device_claude" ? "claude" : null;
     if (!provider || (s.deviceId !== undefined && s.deviceId !== options.deviceId)) return { steps, serverNext: true };
     if (steps.some(x => x.provider === provider)) continue;
-    const model = s.model ?? options.defaultModel?.(provider);
+    const model = s.model === null && s.deviceId !== undefined ? undefined : s.model ?? options.defaultModel?.(provider);
     if (model !== undefined && !modelPattern.test(model)) continue; // Not runnable here; the next step may be.
     steps.push({ provider, model });
   }

@@ -3,7 +3,8 @@ import { useActionState, useId } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { removeOpenAiKeyAction, saveBudgetAction, saveOpenAiKeyAction } from "./actions";
+import type { LocationAiKeyProvider } from "@/lib/studio/ai-settings-policy";
+import { removeAiKeyAction, saveBudgetAction, saveAiKeyAction } from "./actions";
 
 type State = { error?: string; saved?: string };
 function Status({ state }: { state: State }) {
@@ -11,16 +12,17 @@ function Status({ state }: { state: State }) {
   return state.saved ? <p role="status" className="text-sm text-muted-foreground">{state.saved}</p> : null;
 }
 
-/** The Location OpenAI key (shared by CRM and Studio). Verified with OpenAI, encrypted, never shown again. */
-export function OpenAiKeyForm({ locationId, hasKey }: { locationId: string; hasKey: boolean }) {
-  const [state, action, pending] = useActionState(saveOpenAiKeyAction.bind(null, locationId), {});
-  const [removeState, remove, removing] = useActionState(removeOpenAiKeyAction.bind(null, locationId), {});
+/** The Location provider key shared by CRM and Studio. */
+export function AiKeyForm({ locationId, provider, hasKey }: { locationId: string; provider: LocationAiKeyProvider; hasKey: boolean }) {
+  const name = provider === "gemini" ? "Gemini" : "OpenAI";
+  const [state, action, pending] = useActionState(saveAiKeyAction.bind(null, locationId, provider), {});
+  const [removeState, remove, removing] = useActionState(removeAiKeyAction.bind(null, locationId, provider), {});
   const id = useId();
   return <div className="space-y-3">
     <form action={action} className="space-y-2">
-      <Label htmlFor={`${id}-key`}>{hasKey ? "Replace OpenAI API key" : "OpenAI API key"}</Label>
-      <Input id={`${id}-key`} name="apiKey" type="password" autoComplete="off" spellCheck={false} required placeholder="sk-…" aria-describedby={`${id}-help`} />
-      <p id={`${id}-help`} className="text-xs text-muted-foreground">Checked with OpenAI, encrypted, and never shown again. Usage is billed to your OpenAI account.</p>
+      <Label htmlFor={`${id}-key`}>{hasKey ? `Replace ${name} API key` : `${name} API key`}</Label>
+      <Input id={`${id}-key`} name="apiKey" type="password" autoComplete="off" spellCheck={false} required placeholder={provider === "openai" ? "sk-…" : undefined} aria-describedby={`${id}-help`} />
+      <p id={`${id}-help`} className="text-xs text-muted-foreground">The key is verified with {name} and stored encrypted. Usage is billed to your {name} account.</p>
       <Status state={state} />
       <Button type="submit" size="sm" disabled={pending}>{pending ? "Checking…" : "Save key"}</Button>
     </form>

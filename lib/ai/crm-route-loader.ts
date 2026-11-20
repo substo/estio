@@ -16,8 +16,9 @@ export const CRM_DEFAULT_OUTPUT_TOKENS = 4096;
 
 export async function loadCrmRoutePlan(input: {
   locationId: string; operation?: CrmRoutedOperation; interactive: boolean; hintModel?: string | null; explicitModel?: boolean;
+  routing?: Awaited<ReturnType<typeof readLocationAiRouting>>;
 }): Promise<CrmRoutePlan> {
-  const [routing, connections] = await Promise.all([readLocationAiRouting(input.locationId), loadAiConnections(input.locationId)]);
+  const [routing, connections] = await Promise.all([input.routing ?? readLocationAiRouting(input.locationId), loadAiConnections(input.locationId)]);
   const budget = routing.settings.chain.some(step => step.kind === "openai_key" || step.kind === "gemini_key")
     ? await getLocationAiBudget(input.locationId, studio).catch(() => null)
     : null;

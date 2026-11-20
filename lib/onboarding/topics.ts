@@ -51,6 +51,7 @@ export const onboardingTopics: Topic[] = [
     { key: "preferredWords", label: "Words to use", kind: "list", target: p("brandVoice.preferredWords") },
     { key: "avoidedWords", label: "Words to avoid", kind: "list", target: p("brandVoice.avoidedWords") },
     { key: "contentPillars", label: "Topics you talk about", kind: "list", target: p("brandVoice.contentPillars") },
+    { key: "instructions", label: "Writing instructions", kind: "longtext", target: p("brandVoice.instructions"), hint: "Optional instructions for AI-generated content and replies." },
   ] },
   { id: "look", title: "Brand look", question: "Do you have a logo and brand colours?", fields: [
     { key: "logos", label: "Logo", kind: "logos", target: p("visualIdentity.logos") },

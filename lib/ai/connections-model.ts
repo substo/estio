@@ -83,7 +83,8 @@ function deviceModels(provider: "codex" | "claude", report: ProviderReport): Pic
 function deviceConnection(device: AiConnectionInputs["devices"][number], provider: "codex" | "claude", now: number, onlineSeconds: number): AiConnection | null {
   const report = device.capabilities[provider] as ProviderReport | undefined;
   if (!report?.installed) return null;
-  const online = !device.draining && !!device.seenAt && now - Date.parse(device.seenAt) < onlineSeconds * 1000;
+  const age = device.seenAt ? now - Date.parse(device.seenAt) : NaN;
+  const online = !device.draining && age >= 0 && age < onlineSeconds * 1000;
   // A device counts when its CLI is signed in with a subscription (ChatGPT or claude.ai), not an API key.
   const signedIn = report.authenticated === true && report.loginMethod === subscriptionLogin[provider];
   const capacity = (device.capabilities.capacity as Partial<Record<"codex" | "claude", boolean>> | undefined)?.[provider];
@@ -95,6 +96,9 @@ function deviceConnection(device: AiConnectionInputs["devices"][number], provide
     : device.paused ? ["unavailable", "Paused"]
     : device.processingEnabled === false ? ["unavailable", "Processing is off on this Mac"]
     : capacity === false || (usage.remaining !== undefined && usage.remaining <= usageFloor) ? ["limit_reached", `${name} limit reached`]
+    : report.ready === false ? ["unavailable", `${name} is unavailable on this Mac`]
+    : Array.isArray(device.capabilities.processingBlocked) && device.capabilities.processingBlocked.length
+      ? ["unavailable", "Processing is blocked on this Mac"]
     : capacity !== true ? ["unavailable", "No usage reading from this Mac yet"]
     : ["ready", undefined];
   const models = deviceModels(provider, report);

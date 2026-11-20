@@ -248,14 +248,14 @@ Files:
 - shows unread deadline reminders
 - allows mark-read actions
 - keeps the popover focused on the reminder inbox
-- exposes a compact header link to `/admin/settings/notifications`
-- leaves browser push management and delivery preferences to `/admin/settings/notifications`
+- exposes a compact header link to `/settings/notifications`
+- leaves browser push management and delivery preferences to `/settings/notifications`
 
 ### User notification settings
 
 Files:
 
-- [`app/(main)/admin/settings/notifications/page.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/settings/notifications/page.tsx)
+- [`app/(main)/settings/notifications/page.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/settings/notifications/page.tsx)
 - [`components/notifications/notification-settings-page.tsx`](/Users/martingreen/Projects/Estio/components/notifications/notification-settings-page.tsx)
 
 - this is the source of truth for user-level reminder settings
@@ -311,7 +311,7 @@ Primary file: [`app/(main)/admin/conversations/actions.ts`](/Users/martingreen/P
 
 ## Google Task List Settings
 
-File: [`app/(main)/admin/settings/integrations/google/tasklist-settings.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/admin/settings/integrations/google/tasklist-settings.tsx)
+File: [`app/(main)/settings/integrations/google/tasklist-settings.tsx`](/Users/martingreen/Projects/Estio/app/%28main%29/settings/integrations/google/tasklist-settings.tsx)
 
 - loads available Google tasklists for the connected user
 - saves preferred tasklist id/title to the local user record

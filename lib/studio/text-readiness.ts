@@ -15,5 +15,5 @@ export function deviceTextReadiness(input: TextDeviceInput, now = Date.now()) {
     capabilities: { ...input.capabilities, handlers: [...handlers, "studio.onboarding_research"] } }, now);
   if (!readiness.ready) return no(readiness.reason!);
   if (!readiness.providers.includes(provider)) return no(`Waiting for ${provider} subscription sign-in and fresh capacity.`);
-  return { ready: true, reason: `Ready on your Mac with ${provider}${input.config.textModel ? ` (${input.config.textModel})` : " (CLI default)"}.` };
+  return { ready: true, label: `${provider === "codex" ? "Codex" : "Claude"} · ${input.config.textModel || "CLI default"}`, reason: `Ready on your Mac with ${provider}${input.config.textModel ? ` (${input.config.textModel})` : " (CLI default)"}.` };
 }

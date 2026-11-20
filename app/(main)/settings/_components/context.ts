@@ -1,19 +1,28 @@
 import "server-only";
 import { cache } from "react";
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
+import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
 import { resolveTenantContext } from "@/lib/auth/tenant-context";
 import { getStudioAccess } from "@/lib/studio/access";
 
-/**
- * The Location for every /settings page, resolved exactly as CRM and Studio do: the session's active Location in this app's
- * realm (resolveTenantContext → resolveActiveLocation), then Location membership via getStudioAccess (realm, deleted profile
- * and impersonation checks). Editing authority stays with each section's own server check (Location ADMIN, not impersonated).
- */
+/** Bind shared settings to the active Location in the account's current realm. */
 export const requireSettingsContext = cache(async () => {
   const context = await resolveTenantContext();
   if (!context || context.resolution.status === "unauthenticated") notFound();
-  if (!context.locationId) return { app: context.app, access: null, locationId: null };
-  const access = await getStudioAccess(context.locationId);
+  const { app, locationId, resolution } = context;
+  const tenantHost = resolveHostBrand((await headers()).get("host"), getHostBrandConfig()) === "tenant";
+  if (!locationId) return { app, tenantHost, access: null, locationId: null };
+
+  // CRM settings remain available on Estio Clerk satellite hosts, which don't run Studio.
+  if (tenantHost && resolution.location && resolution.clerkUserId && resolution.role) {
+    return {
+      app, tenantHost, locationId,
+      access: { app, locationId, userId: resolution.clerkUserId, locationName: resolution.location.name?.trim() || "Unnamed location", role: resolution.role },
+    };
+  }
+
+  const access = await getStudioAccess(locationId);
   if (!access) notFound();
-  return { app: context.app, access, locationId: access.locationId };
+  return { app, tenantHost, access, locationId: access.locationId };
 });

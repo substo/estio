@@ -68,7 +68,8 @@ export function createDeviceStudioQueue(credentials: DeviceCredentials, options:
   return {
     claim: (workerId, limit, leaseSeconds) => call("claim", { workerId, limit, leaseSeconds, textReady: options.textReady?.() === true, summaryReady: options.summaryReady?.() === true, researchReady: options.researchReady?.() === true, videoReady: options.videoReady?.() === true, youtubeReady: options.youtubeReady?.() === true }, z.array(job).max(50)),
     extend: (jobId, workerId, leaseSeconds, leaseToken) => call("extend", { jobId, workerId, leaseSeconds, leaseToken }, z.boolean()),
-    complete: (jobId, workerId, result, leaseToken) => call("complete", { jobId, workerId, result, leaseToken }, z.boolean()),
+    complete: (jobId, workerId, { routeActual, ...result }, leaseToken) =>
+      call("complete", { jobId, workerId, result, leaseToken, ...(routeActual ? { routeActual } : {}) }, z.boolean()),
     fail: (jobId, workerId, failure, leaseToken) => call("fail", { jobId, workerId, failure, leaseToken }, z.enum(["retry_scheduled", "failed", "lease_lost"])),
     heartbeat: async (workerId, release, startedAt, report) => {
       const configAck = options.configAck?.();

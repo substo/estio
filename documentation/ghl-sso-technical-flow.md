@@ -80,7 +80,7 @@ sequenceDiagram
     6.  **Redirect**: Goes to `/admin` or the `redirect_url` (if one was passed, e.g., for the popup callback).
 
 > [!NOTE]
-> **Auto-Admin on OAuth (Dec 2025)**: When a user authorizes a GHL location, they are automatically assigned the `ADMIN` role for that location in the `UserLocationRole` table. This allows them to manage team members via `/admin/team`.
+> **Auto-Admin on OAuth (Dec 2025)**: When a user authorizes a GHL location, they are automatically assigned the `ADMIN` role for that location in the `UserLocationRole` table. This allows them to manage team members via `/settings/team`.
 
 #### Step D: Clerk Authentication (`/api/clerk/sign-in-with-token`)
 -   **Logic**:

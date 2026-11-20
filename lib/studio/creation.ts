@@ -1,4 +1,5 @@
 import "server-only";
+import { resolveStudioTextCommand } from "./text-route";
 import { auth } from "@clerk/nextjs/server";
 import { Prisma } from "@prisma/client";
 import { getStudioAccess, type StudioAccess } from "./access";
@@ -129,8 +130,9 @@ export async function executeCreationCommand(locationId: string, command: Creati
     try {
       return await studioDb.call<{ reviewId: string }>("studio_enqueue_routed_text_run", {
         p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_workflow: "script_brief",
-        p_command: { requestId: command.requestId, provider: command.provider, confirmPaid: command.confirmPaid,
-          confirmSubscription: command.confirmSubscription, focus: "", ideas: [{ id: recordId, version, creation: operation }] },
+        p_command: await resolveStudioTextCommand(access, "script_brief", { requestId: command.requestId, provider: command.provider,
+          confirmPaid: command.confirmPaid, confirmSubscription: command.confirmSubscription, focus: "",
+          ideas: [{ id: recordId, version, creation: operation }] }),
       });
     } catch (error) {
       if (error instanceof StudioDbError && error.code === "SC001") throw new StudioCommandError("Update your paired Mac companion and check Text work, sign-in and capacity.");

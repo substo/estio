@@ -12,7 +12,7 @@ import { isSignedInTopbar, macVideoSchema, parseYoutubeSearchData, youtubeSearch
 import { applyRankings, buildPlanPrompt, buildRankPrompt, fitResultSize, planJsonSchema, planSchema, rankJsonSchema, rankSchema, relatedPayloadSchema, relatedResultSchema, relatedTraceSchema,
   type RankedCandidate, type RelatedCandidate, type RelatedTrace } from "../related-search-policy";
 import type { LocalProvider, LocalTextAdapter } from "./providers";
-import { summaryProviders } from "./route";
+import { localRoute, runLocalRoute, summaryProviders } from "./route";
 
 const CHROME_PATHS = ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium"];
 export function youtubeBrowserProfile(home = homedir(), env: NodeJS.ProcessEnv = process.env) {
@@ -99,7 +99,7 @@ const toVideo = (c: RankedCandidate | MacVideo): MacVideo => macVideoSchema.pars
   ...("score" in c ? { score: c.score, reason: c.reason, band: c.band } : {}) }).filter(([, v]) => v !== undefined)));
 
 /** Search (and, when asked, plan and rank) in the Mac's own browser and subscription. Model steps degrade to an unranked result with a note; they never fail the search. */
-export function createYoutubeSearchHandler(deps: { browser: () => Promise<YoutubeBrowser | null>; enabled: () => boolean; models?: RelatedModelDeps }): StudioJobHandler {
+export function createYoutubeSearchHandler(deps: { browser: () => Promise<YoutubeBrowser | null>; enabled: () => boolean; models?: RelatedModelDeps; deviceId?: string }): StudioJobHandler {
   const inner = createRelatedHandler(deps);
   return async (job, context) => {
     try { return await inner(job, context); }
@@ -112,7 +112,7 @@ export function createYoutubeSearchHandler(deps: { browser: () => Promise<Youtub
   };
 }
 
-function createRelatedHandler(deps: { browser: () => Promise<YoutubeBrowser | null>; enabled: () => boolean; models?: RelatedModelDeps }): StudioJobHandler {
+function createRelatedHandler(deps: { browser: () => Promise<YoutubeBrowser | null>; enabled: () => boolean; models?: RelatedModelDeps; deviceId?: string }): StudioJobHandler {
   return async (job, context) => {
     if (!deps.enabled()) throw new StudioJobError("local_policy", "Waiting for the computer's processing settings.", true, 300);
     const payload = relatedPayloadSchema.parse(job.payload);
@@ -120,15 +120,36 @@ function createRelatedHandler(deps: { browser: () => Promise<YoutubeBrowser | nu
     const notes: string[] = [];
     const queries: RelatedTrace["queries"] = [];
     let picked: Picked | null = null; let noModel = "no subscription model is configured on this Mac";
-    if (mode !== "search" && deps.models) { const choice = await pickModel(deps.models, context.signal); if ("picked" in choice) picked = choice.picked; else noModel = choice.reason; }
+    const config = deps.models?.config();
+    const routed = mode === "search" ? null : localRoute(job, {
+      deviceId: deps.deviceId,
+      defaultModel: provider => provider === config?.textProvider ? config.textModel ?? undefined : undefined,
+    });
+    if (mode !== "search" && deps.models && !routed) {
+      const choice = await pickModel(deps.models, context.signal);
+      if ("picked" in choice) picked = choice.picked; else noModel = choice.reason;
+    }
+    const models = deps.models;
+    const check = async <T>(prompt: string, schema: z.ZodType<T>, jsonSchema: Record<string, unknown>) => {
+      if (routed && models) {
+        const attempted = await runLocalRoute(routed.steps, models, context.signal,
+          (adapter, step) => modelStep({ adapter, ...step }, context.signal, prompt, schema, jsonSchema),
+          error => { throw error; });
+        return attempted?.value ?? null;
+      }
+      return picked ? modelStep(picked, context.signal, prompt, schema, jsonSchema) : null;
+    };
+    const hasModel = Boolean(routed ? routed.steps.length && models : picked);
+    if (routed) noModel = "no connection in this Location's order can check relevance on this Mac";
 
     // rank only: candidates came from the server (the YouTube API); the Mac only judges them.
     if (mode === "rank") {
       if (!payload.source || !payload.context || !payload.candidates?.length) throw new StudioJobError("invalid_job", "This relevance check was missing its source or candidates.", false);
-      if (!picked) throw new StudioJobError("subscription_capacity", "Your Mac's Codex/Claude subscription is not signed in or has no capacity right now.", false);
+      if (!hasModel) throw new StudioJobError("subscription_capacity", "Your Mac's Codex/Claude subscription is not signed in or has no capacity right now.", false);
       let ranked: RankedCandidate[]; let ranker: RelatedTrace["ranker"];
       try {
-        const r = await modelStep(picked, context.signal, buildRankPrompt(payload.source, payload.context, payload.source.title, payload.candidates), rankSchema, rankJsonSchema);
+        const r = await check(buildRankPrompt(payload.source, payload.context, payload.source.title, payload.candidates), rankSchema, rankJsonSchema);
+        if (!r) throw new Error("subscription_capacity");
         ranked = applyRankings(payload.candidates, r.value.rankings); ranker = r.step;
       } catch { ranked = applyRankings(payload.candidates, []); notes.push("The relevance model did not return a usable answer, so these results are not checked."); }
       return finish(ranked, { route: "api", mode: "rank", queries: [], ranker, notes });
@@ -152,8 +173,8 @@ function createRelatedHandler(deps: { browser: () => Promise<YoutubeBrowser | nu
 
     // plan -> search -> rank
     let planned: string[] = []; let planner: RelatedTrace["planner"]; let focus = payload.source.title;
-    if (picked) {
-      try { const p = await modelStep(picked, context.signal, buildPlanPrompt(payload.source, payload.context), planSchema, planJsonSchema); planned = p.value.queries.slice(0, 3); planner = p.step; focus = p.value.focus; }
+    if (hasModel) {
+      try { const p = await check(buildPlanPrompt(payload.source, payload.context), planSchema, planJsonSchema); if (!p) throw new Error("subscription_capacity"); planned = p.value.queries.slice(0, 3); planner = p.step; focus = p.value.focus; }
       catch { notes.push("The planning model did not return usable queries, so the keyword search was used."); }
     } else notes.push(`No usable subscription model (${noModel}), so results are not checked for relevance.`);
     const pool = new Map<string, RelatedCandidate>(); let signedIn: boolean | undefined;
@@ -165,8 +186,8 @@ function createRelatedHandler(deps: { browser: () => Promise<YoutubeBrowser | nu
     }
     const candidates = [...pool.values()];
     let ranked: RankedCandidate[] = applyRankings(candidates, []); let ranker: RelatedTrace["ranker"];
-    if (picked && candidates.length) {
-      try { const r = await modelStep(picked, context.signal, buildRankPrompt(payload.source, payload.context, focus, candidates), rankSchema, rankJsonSchema); ranked = applyRankings(candidates, r.value.rankings); ranker = r.step; }
+    if (hasModel && candidates.length) {
+      try { const r = await check(buildRankPrompt(payload.source, payload.context, focus, candidates), rankSchema, rankJsonSchema); if (!r) throw new Error("subscription_capacity"); ranked = applyRankings(candidates, r.value.rankings); ranker = r.step; }
       catch { notes.push("The relevance model did not return a usable answer, so these results are not checked."); }
     }
     return finish(ranked, { route: "mac_browser", mode: "plan_search_rank", queries, planner, ranker, notes, focus }, signedIn);

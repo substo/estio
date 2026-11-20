@@ -1,4 +1,5 @@
 import "server-only";
+import { resolveStudioTextCommand } from "./text-route";
 import { Prisma } from "@prisma/client";
 import { getStudioAccess } from "./access";
 import { StudioCommandError } from "./command-error";
@@ -41,7 +42,7 @@ export async function enqueueVideoTemplate(locationId: string, command: ReturnTy
   if (!source) throw new StudioCommandError("Choose an active saved YouTube video.", 404);
   try {
     return await studioDb.call<{ reviewId: string }>("studio_enqueue_video_template", {
-      p_location: access.locationId, p_app: access.app, p_actor: access.userId, p_command: command,
+      p_location: access.locationId, p_app: access.app, p_actor: access.userId, p_command: await resolveStudioTextCommand(access, "video_template", command),
     });
   } catch (error) {
     if (error instanceof StudioDbError) {

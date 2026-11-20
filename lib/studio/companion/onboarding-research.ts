@@ -39,7 +39,8 @@ export function createOnboardingResearchHandler(deps: { adapter: (p: LocalProvid
     const data = parsed.data;
     const prompt = `${researchPrompt(topic, { ...data.input, ...data.context, app: data.app, webSearch: true })}\n\n${researchInput({ ...data.input, pages: data.pages })}`;
     // The Location order supplied with the job; without one, whichever subscription has more fresh capacity first.
-    const steps = localRoute(job, { deviceId: deps.deviceId })?.steps ?? ((capacity: LocalProvider[]) => capacity.map(provider => ({ provider, model: undefined })));
+    const routed = localRoute(job, { deviceId: deps.deviceId });
+    const steps = routed?.steps ?? ((capacity: LocalProvider[]) => capacity.map(provider => ({ provider, model: undefined })));
     const attempt = await runLocalRoute(steps, deps, context.signal, (adapter, step) => adapter.generate({ workflowContext: "onboarding_research", signal: context.signal, prompt, webSearch: true, timeoutMs: researchTimeoutMs, maxResultBytes: replyBytes,
       model: step.model, jsonSchema: researchOutputJsonSchema as unknown as Record<string, unknown>, validate: value => researchOutputSchema.parse(value) }),
     error => {
@@ -50,6 +51,7 @@ export function createOnboardingResearchHandler(deps: { adapter: (p: LocalProvid
       deps.reportRoute?.(job.id, attempt);
       return { research: researchOutputSchema.parse(attempt.value), provider: attempt.provider, model: attempt.model ?? "native-default" };
     }
+    if (routed) throw new StudioJobError("onboarding_route_wait", "The Mac subscriptions in this step were unavailable before generation.", false);
     throw new StudioJobError("subscription_capacity", "Waiting for fresh subscription capacity on the Mac.", true, 300);
   };
 }

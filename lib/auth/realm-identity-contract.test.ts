@@ -76,7 +76,7 @@ test("user resolution, impersonation and Studio schedule authority are realm-sco
   assert.match(read("lib/auth/permissions.ts"), /where: businessClerkIdWhere\(userId\)/);
   assert.match(read("lib/auth/current-user.ts"), /where: businessClerkIdWhere\(clerkUserId\)/);
   assert.match(read("lib/studio/schedule-authority.ts"), /authRealm_clerkId: \{ authRealm: "estio", clerkId: userId \}/);
-  const team = read("app/(main)/admin/team/actions.ts");
+  const team = read("app/(main)/settings/team/actions.ts");
   assert.match(team, /findUnique\(\{ where: realmEmailWhere\(realm, normalizedEmail\) \}\)/);
   assert.match(team, /where: \{ authRealm: realm, email: \{ equals: targetEmail/);
 });
@@ -100,12 +100,12 @@ test("Property routes and Business webhooks stay closed on the Substo host", () 
   }
 });
 
-test("Substo brand pages are allowed and protected; lookalike paths stay blocked", () => {
-  assert.equal(classifySubstoRoute("/brand/team"), "brand");
-  assert.equal(classifySubstoRoute("/brand/settings"), "brand");
-  assert.equal(classifySubstoRoute("/brand-x"), "blocked");
-  assert.match(read("middleware.ts"), /routeKind === "studio" \|\| routeKind === "brand" \|\| routeKind === "profile" \|\| routeKind === "crm"\) await auth\.protect\(\)/);
-  assert.match(read("app/(main)/brand/layout.tsx"), /!== "substo"\) notFound\(\)/);
+test("Substo team and general settings are allowed and protected; moved routes stay closed", () => {
+  assert.equal(classifySubstoRoute("/settings/team"), "settings");
+  assert.equal(classifySubstoRoute("/settings/general"), "settings");
+  for (const path of ["/brand/team", "/brand/settings", "/brand-x", "/admin/team", "/admin/settings"]) assert.equal(classifySubstoRoute(path), "blocked");
+  assert.match(read("middleware.ts"), /routeKind === "studio" \|\| routeKind === "settings" \|\| routeKind === "profile" \|\| routeKind === "crm"\) await auth\.protect\(\)/);
+  assert.match(read("app/(main)/settings/layout.tsx"), /requireSettingsContext\(\)/);
   assert.match(read("app/(main)/admin/layout.tsx"), /prepareCurrentSubstoUserOnEntry\(\)/);
 });
 
@@ -130,9 +130,9 @@ test("Substo invitations use Substo's own Clerk application, and Estio platform 
   assert.match(options, /authRealm: "estio",\s*clerkId: \{ not: null \}/);
 });
 
-test("Studio and brand pages share the CRM sidebar shell in both apps", () => {
+test("CRM and Studio share the sidebar shell and team uses the shared settings layout", () => {
   assert.match(read("app/(main)/studio/(tenant)/layout.tsx"), /<AppShell product="studio" \{\.\.\.shell\}/);
-  assert.match(read("app/(main)/brand/team/page.tsx"), /<AppShell product="studio" \{\.\.\.shell\}/);
+  assert.match(read("app/(main)/settings/team/page.tsx"), /getRequestAuthRealm\(\) === "substo"\) return <SubstoTeam/);
   assert.match(read("app/(main)/admin/layout.tsx"), /<AppShell product="crm" \{\.\.\.shell\}/);
   const shell = read("components/app-shell/app-shell.tsx");
   assert.match(shell, /<AppSidebar/);

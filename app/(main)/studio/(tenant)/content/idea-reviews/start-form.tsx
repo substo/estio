@@ -1,6 +1,6 @@
 "use client";
 import { StudioTextProviderChoice } from "../../../_components/text-provider-choice";
-import type { StudioTextProvider } from "@/lib/studio/text-provider";
+import { studioTextConsent, type StudioTextProvider } from "@/lib/studio/text-provider";
 import { useStudioTenantHeaders } from "../../../_components/studio-tenant-context";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -11,14 +11,14 @@ export function IdeaReviewStartForm({ locationId, ideas, workflow = "idea_review
   const fixedIdea = isScript && ideas.length === 1 ? ideas[0] : null;
   const router = useRouter(); const [selected, setSelected] = useState<string[]>([]);
   const selectedIds = fixedIdea ? [fixedIdea.id] : selected;
-  const [provider, setProvider] = useState<StudioTextProvider>("subscription");
+  const [provider, setProvider] = useState<StudioTextProvider>("location_order");
   const [focus, setFocus] = useState("");
   const [confirm, setConfirm] = useState(false); const [pending, setPending] = useState(false); const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState<object | null>(null);
   async function submit(event: React.FormEvent) {
     event.preventDefault(); if (pending) return;
     if (!retry && (selectedIds.length < 1 || selectedIds.length > 5 || !confirm)) { setError(isScript ? "Authorize the brief for this idea." : "Select one to five ideas and authorize the review."); return; }
-    const command = retry ?? { action: "enqueue", requestId: crypto.randomUUID(), ideas: ideas.filter(i => selectedIds.includes(i.id)).map(i => ({ id: i.id, version: Number(i.version) })), focus, provider, confirmPaid: provider === "openai" && confirm, confirmSubscription: provider === "subscription" && confirm };
+    const command = retry ?? { action: "enqueue", requestId: crypto.randomUUID(), ideas: ideas.filter(i => selectedIds.includes(i.id)).map(i => ({ id: i.id, version: Number(i.version) })), focus, ...studioTextConsent(provider, confirm) };
     setRetry(command); setPending(true); setError(null);
     try {
       const response = await fetch(`/studio/content/${section}/api`, { method: "POST", headers: { ...tenantHeaders, "Content-Type": "application/json" }, body: JSON.stringify(command), signal: AbortSignal.timeout(30000) });
@@ -38,7 +38,7 @@ export function IdeaReviewStartForm({ locationId, ideas, workflow = "idea_review
       <label className="block space-y-1"><span>Audience or topic focus (optional)</span><input value={focus} onChange={e => setFocus(e.target.value)} maxLength={300} className="block w-full rounded-md border bg-background p-2" /></label>
       <StudioTextProviderChoice provider={provider} onChange={p => { setProvider(p); setConfirm(false); }} />
       <p className="text-muted-foreground">Selected notes and bounded linked-source excerpts are processed without browsing or publishing.</p>
-      <label className="flex items-start gap-2"><input type="checkbox" checked={confirm} onChange={e => setConfirm(e.target.checked)} required /><span>I authorize this {provider === "openai" ? "paid API review using the Location key and budget" : "review on my paired Mac subscription"}. Results require human review.</span></label>
+      <label className="flex items-start gap-2"><input type="checkbox" checked={confirm} onChange={e => setConfirm(e.target.checked)} required /><span>I authorize this {provider === "openai" ? "paid API review using the Location key and budget" : provider === "subscription" ? "review on my paired Mac subscription" : "review using the Location AI order"}. Results require human review.</span></label>
     </fieldset>
     <button disabled={pending || !ideas.length} className="rounded-md border px-3 py-2 disabled:opacity-50">{pending ? "Queuing…" : retry ? "Retry same request" : (isScript ? "Generate script brief" : "Review selected ideas")}</button>
     {error ? <p role="alert" className="text-destructive">{error}</p> : null}

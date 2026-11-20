@@ -370,7 +370,7 @@ To reduce dependency on GHL and provide a more robust, "production-ready" experi
 1.  **Credentials & Configuration**:
     *   Stored in the `Location` model (encrypted).
     *   Fields: `whatsappBusinessAccountId`, `whatsappPhoneNumberId`, `whatsappAccessToken`, `whatsappWebhookSecret`.
-    *   UI: New settings page at `/admin/settings/integrations/whatsapp`.
+    *   UI: New settings page at `/settings/integrations/whatsapp`.
 
 2.  **Webhook Handling (`/api/webhooks/whatsapp`)**:
     *   **Verification**: Handles the initial `hub.challenge` verification from Meta.

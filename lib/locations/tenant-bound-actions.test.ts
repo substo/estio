@@ -19,7 +19,7 @@ function actions(allowed = true) {
   deps["@/lib/locations/location-policy"] = {};
   // Parsing currently lives in the policy module imported directly by actions.
   deps["@/lib/locations/location-policy"].parseLocationRole = (value: unknown) => value === "ADMIN" || value === "MEMBER" ? value : null;
-  const code = ts.transpileModule(fs.readFileSync("app/(main)/brand/actions.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+  const code = ts.transpileModule(fs.readFileSync("app/(main)/settings/_components/substo-location-actions.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
   const module = { exports: {} as any };
   vm.runInNewContext(code, { module, exports: module.exports, require: (name: string) => { assert.ok(name in deps, name); return deps[name]; } });
   return { api: module.exports, selections, writes };

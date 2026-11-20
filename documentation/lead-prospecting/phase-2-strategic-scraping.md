@@ -120,7 +120,7 @@ After initial deploy, `/admin/prospecting` crashed with a Server Components erro
 
 ### Admin UI
 
-New settings page at `/admin/settings/prospecting` (or under existing `/admin/settings` navigation):
+New settings page at `/settings/prospecting` (or under existing `/settings` navigation):
 
 #### Configuration Fields per Connection and Credential
 
@@ -760,16 +760,16 @@ Flow:
 | `lib/scraping/page-fetcher.ts` | **[NEW]** Playwright/cheerio page fetcher |
 | `app/api/admin/save-listing/route.ts` | **[NEW]** Save partial scrape data endpoint |
 | `app/api/cron/scrape-listings/route.ts` | **[NEW]** Cron endpoint |
-| `app/(main)/admin/settings/prospecting/page.tsx` | **[NEW]** Scraping target admin UI + 24h run KPI dashboard |
-| `app/(main)/admin/settings/prospecting/actions.ts` | **[NEW]** CRUD for ScrapingTarget + scoped run-history retrieval |
-| `app/(main)/admin/settings/prospecting/_components/run-history-panel.tsx` | **[NEW]** Expandable run telemetry panel with status/flow/error metadata |
-| `app/(main)/admin/settings/prospecting/_components/run-scraper-button.tsx` | **[NEW]** Manual trigger dropdown button |
+| `app/(main)/settings/prospecting/page.tsx` | **[NEW]** Scraping target admin UI + 24h run KPI dashboard |
+| `app/(main)/settings/prospecting/actions.ts` | **[NEW]** CRUD for ScrapingTarget + scoped run-history retrieval |
+| `app/(main)/settings/prospecting/_components/run-history-panel.tsx` | **[NEW]** Expandable run telemetry panel with status/flow/error metadata |
+| `app/(main)/settings/prospecting/_components/run-scraper-button.tsx` | **[NEW]** Manual trigger dropdown button |
 | `lib/scraping/deep-scrape-orchestrator.ts` | **[NEW]** Manual-first deep orchestration service (seed URLs → phone gate → seller portfolio → agency/private decision → selective deep portfolio scraping) |
 | `lib/scraping/deep-scrape-types.ts` | **[NEW]** Typed deep-run telemetry contracts (`DeepScrapeRunSummary`, `DeepScrapeStageLog`, `OmissionReason`, reason codes, error categories) |
 | `lib/scraping/listing-relevance-classifier.ts` | **[MODIFY]** Relevance classifier hardened to `v2` (fail-closed uncertain path, word-boundary matching, AI retry/backoff + timeout diagnostics) |
 | `lib/scraping/listing-scraper.ts` | **[MODIFY]** Added explicit status resolver for relevance outcomes to enforce `SKIPPED` on non-RE while preserving `IMPORTED/REJECTED` |
-| `app/(main)/admin/settings/prospecting/_components/deep-runs-panel.tsx` | **[NEW]** Top-level Deep Runs monitoring panel with KPI summary, expandable stage logs, omission reasons, and metadata/error payload drill-down |
-| `app/(main)/admin/settings/prospecting/_components/run-deep-scraper-button.tsx` | **[NEW]** Manual trigger button for Deep Scrape jobs |
+| `app/(main)/settings/prospecting/_components/deep-runs-panel.tsx` | **[NEW]** Top-level Deep Runs monitoring panel with KPI summary, expandable stage logs, omission reasons, and metadata/error payload drill-down |
+| `app/(main)/settings/prospecting/_components/run-deep-scraper-button.tsx` | **[NEW]** Manual trigger button for Deep Scrape jobs |
 | `app/api/admin/prospecting/deep-runs/stream/route.ts` | **[NEW]** SSE stream endpoint for live deep-run status, stage, and diagnostics snapshots |
 | `app/api/admin/prospecting/deep-runs/diagnostics/route.ts` | **[NEW]** Admin diagnostics endpoint for worker heartbeat + queue depth + recent failures |
 | `prisma/migrations/20260322113000_deep_scrape_orchestrator/migration.sql` | **[NEW]** Deep run history tables + status backfill (`REVIEWED -> REVIEWING`) |
@@ -956,7 +956,7 @@ Additional operational stages include:
 
 #### Monitoring UI and Read APIs
 
-- A new top-level **Deep Runs** panel is available on `/admin/settings/prospecting`, separate from per-task run cards.
+- A new top-level **Deep Runs** panel is available on `/settings/prospecting`, separate from per-task run cards.
 - The panel shows run status, duration, trigger source, KPI summary row, worker/queue diagnostics, and expandable stage logs with counters/reason codes/metadata.
 - The panel now supports optimistic queued insertion, stale-queue warning, and live state transitions (`Queued`, `Starting`, `Running`, `Partial`, `Failed`, `Completed`, `Cancelled`).
 - Manual cancellation uses reusable confirmation dialogs with status-aware messaging:

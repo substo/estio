@@ -24,6 +24,7 @@ export async function studioCommandResponse<T>(request: Request, deps: {
     if (error instanceof StudioCommandError) return json({ error: error.message }, error.status);
     if (isStudioProviderUnavailable(error)) return studioUnavailableResponse();
     if (error instanceof StudioRestError && ["40001", "23505"].includes(error.code ?? "")) return json({ error: "This review or job changed. Reload before continuing." }, 409);
+    if (error instanceof StudioRestError && error.code === "P2020") return json({ error: "No AI connection in this Location’s order can run this now. Check AI settings and the workflow’s requirements." }, 409);
     if (error instanceof StudioRestError && error.code === "42501") return json({ error: "Location access is required." }, 403);
     if (error instanceof StudioRestError && ["22023", "22P02", "23514"].includes(error.code ?? "")) return json({ error: "The input exceeds this workflow's bounds or is unavailable. Reload and choose supported inputs or a smaller range." }, 400);
     return json({ error: "The command could not be confirmed. Retry the same command to check its outcome." }, 503);

@@ -200,7 +200,7 @@ If you plan to open this to the public (any Google user), you will need to submi
 -   If this is just for your internal team, you can keep the app in **Testing** mode and just add all agents as **Test Users**. No verification needed.
 
 ### 3. User Activation
-1.  Go to `/admin/settings/integrations/google`.
+1.  Go to `/settings/integrations/google`.
 2.  Click "Connect Account".
 3.  Grant permissions.
 4.  Estio validates the OAuth `state` value to protect against CSRF and stale callback requests.
@@ -233,7 +233,7 @@ This happens when token storage reaches settings encryption and KMS receives an 
 **Fix:**
 1. Verify `GCP_KMS_KEY_PATH` exactly matches the key resource path in Google Cloud KMS.
 2. Redeploy with the corrected environment variable.
-3. Retry Google Connect from `/admin/settings/integrations/google`.
+3. Retry Google Connect from `/settings/integrations/google`.
 
 > [!NOTE]
 > The full KMS storage model is documented in [Site Settings Platform](./site-settings-platform.md). This troubleshooting section only covers the Google-facing symptom and recovery path.
@@ -256,7 +256,7 @@ If your Google OAuth token expires (e.g., after 6 months or password change) or 
 The Google callback is hardened so OAuth failures do not surface as a raw 500 page to end users.
 
 -   **CSRF Protection**: `/api/google/auth` issues a secure OAuth `state` token and `/api/google/callback` verifies it before exchanging the authorization code.
--   **Graceful Redirects**: Callback failures redirect the user back to `/admin/settings/integrations/google` with a typed error code instead of rendering an internal error response.
+-   **Graceful Redirects**: Callback failures redirect the user back to `/settings/integrations/google` with a typed error code instead of rendering an internal error response.
 -   **Supportability**: Unexpected callback failures include a short error reference ID in the redirect so server logs can be correlated quickly.
 
 ---

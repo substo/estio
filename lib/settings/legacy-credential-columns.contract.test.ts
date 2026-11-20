@@ -72,7 +72,7 @@ test("every Old CRM credential reader goes through lib/crm/credentials.ts", () =
         "lib/crm/old-crm-property-pull-service.ts",
         "lib/crm/import-workflow.ts",
         "app/(main)/admin/properties/import/actions.ts",
-        "app/(main)/admin/settings/crm/actions.ts",
+        "app/(main)/settings/crm/actions.ts",
         "lib/ai/property-evidence-resolver/service.ts",
     ]) {
         assert.match(readFileSync(`${root}/${file}`, "utf8"), /from ["']@\/lib\/crm\/credentials["']|from ["']\.\/credentials["']/, file);

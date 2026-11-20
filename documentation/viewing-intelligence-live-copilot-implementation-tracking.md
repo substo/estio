@@ -535,9 +535,9 @@ That remains the north star.
 
 ## Related settings surface
 
-- `app/(main)/admin/settings/ai/page.tsx`
-- `app/(main)/admin/settings/ai/actions.ts`
-- `app/(main)/admin/settings/ai/ai-settings-form.tsx`
+- `app/(main)/settings/live-assist/page.tsx`
+- `app/(main)/settings/_components/crm-features/actions.ts`
+- `app/(main)/settings/_components/crm-features/crm-feature-settings-form.tsx`
 - `lib/settings/schemas.ts`
 
 ## Existing viewing architecture intentionally preserved

@@ -94,6 +94,13 @@ type DraftFallbackArgs = {
 const DEFAULT_DRAFT_STREAM_TIMEOUT_MS = 35_000;
 const COMPLETION_CHUNK_DRAFT_STREAM_TIMEOUT_MS = 45_000;
 
+export const LOCATION_AI_ORDER = "location_order";
+
+export function resolveComposerDraftModelOverride(selectedModel: string): string | undefined {
+    const model = selectedModel.trim();
+    return model && model !== LOCATION_AI_ORDER ? model : undefined;
+}
+
 export function resolveDraftStreamTimeoutMs(model?: string | null) {
     const normalizedModel = String(model || "").trim();
     if (normalizedModel.startsWith("chatgpt_subscription:") || normalizedModel.startsWith("openai:")) {
@@ -296,7 +303,7 @@ export async function streamDraftViaApi(
     return finalResult;
 }
 
-export async function generateDraftWithStreamingFallback(args: {
+export async function requestComposerDraft(args: {
     conversationId: string;
     contactId: string;
     instruction?: string;
@@ -318,54 +325,31 @@ export async function generateDraftWithStreamingFallback(args: {
         model?: string,
         options?: DraftFallbackArgs["options"] & { baseDraft?: string | null }
     ) => Promise<GenerateDraftResult>;
-    onStreamError?: (error: unknown) => void;
 }): Promise<GenerateDraftResult> {
-    let result: GenerateDraftResult | null = null;
-    let fallbackReason = args.onChunk ? "stream_not_attempted" : "streaming_unavailable";
-
     if (args.onChunk) {
-        try {
-            const streamStartedAt = Date.now();
-            const timeoutMs = args.streamTimeoutMs ?? resolveDraftStreamTimeoutMs(args.model);
-            result = await withTimeout((args.streamDraft || streamDraftViaApi)({
-                conversationId: args.conversationId,
-                contactId: args.contactId,
-                instruction: args.instruction,
-                baseDraft: args.baseDraft,
-                model: args.model,
-                mode: args.mode,
-                dealId: args.dealId ?? undefined,
-                draftLanguage: args.draftLanguage,
-                channel: args.channel ?? null,
-                outputLength: args.outputLength,
-                onChunk: args.onChunk,
-                timeoutMs,
-                ignorePendingPropertyImport: args.ignorePendingPropertyImport,
-            }), timeoutMs);
-            fallbackReason = result?.draft ? "" : "stream_completed_without_final_result";
-            logDraftTiming("stream_path_end", {
-                conversationId: args.conversationId,
-                elapsedMs: Date.now() - streamStartedAt,
-                hasDraft: !!result?.draft,
-                fallbackReason: fallbackReason || null,
-            });
-        } catch (error) {
-            fallbackReason = describeError(error);
-            args.onStreamError?.(error);
-        }
+        const timeoutMs = args.streamTimeoutMs ?? resolveDraftStreamTimeoutMs(args.model);
+        const result = await withTimeout((args.streamDraft || streamDraftViaApi)({
+            conversationId: args.conversationId,
+            contactId: args.contactId,
+            instruction: args.instruction,
+            baseDraft: args.baseDraft,
+            model: args.model,
+            mode: args.mode,
+            dealId: args.dealId,
+            draftLanguage: args.draftLanguage,
+            channel: args.channel,
+            outputLength: args.outputLength,
+            onChunk: args.onChunk,
+            timeoutMs,
+            ignorePendingPropertyImport: args.ignorePendingPropertyImport,
+        }), timeoutMs);
+        if (result?.draft || result?.blockedReason) return result;
+
+        // A missing final response does not prove the server stopped before generation.
+        throw new Error(result?.reasoning || "The draft stream ended before a complete draft was received.");
     }
 
-    if (result?.draft || result?.blockedReason) {
-        return result;
-    }
-
-    const fallbackStartedAt = Date.now();
-    logDraftTiming("fallback_server_action_start", {
-        conversationId: args.conversationId,
-        mode: args.mode,
-        reason: fallbackReason,
-    });
-    const fallbackResult = await args.generateDraft(
+    return args.generateDraft(
         args.conversationId,
         args.contactId,
         args.instruction,
@@ -380,11 +364,4 @@ export async function generateDraftWithStreamingFallback(args: {
             ...(args.ignorePendingPropertyImport ? { ignorePendingPropertyImport: true } : {}),
         }
     );
-    logDraftTiming("fallback_server_action_end", {
-        conversationId: args.conversationId,
-        elapsedMs: Date.now() - fallbackStartedAt,
-        hasDraft: !!fallbackResult?.draft,
-        reason: fallbackReason,
-    });
-    return fallbackResult;
 }

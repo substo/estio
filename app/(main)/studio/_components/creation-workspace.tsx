@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { CREATION_STAGES, REWRITE_ACTIONS, SELECTION_LIMIT, requestsDirectionChange, stageDraft, stageTextLimit, type CreationCommand, type CreationRecord, type CreationSource, type CreationStage, type LinkedDraft, type DraftContextChoice, type Selection } from "@/lib/studio/creation-policy";
 import type { CreationRun } from "@/lib/studio/creation-text-policy";
-import type { StudioTextProvider } from "@/lib/studio/text-provider";
+import { studioTextConsent, type StudioTextProvider } from "@/lib/studio/text-provider";
 import { CreationDirection } from "./creation-direction";
 import { CreationFeedback } from "./creation-feedback";
 import { CreationNextContext, CreationRunContext } from "./creation-context";
@@ -48,7 +48,7 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
   const [includeReferences, setIncludeReferences] = useState(true);
   const [draftId, setDraftId] = useState("");
   const [purpose, setPurpose] = useState<DraftContextChoice["purpose"]>("compare");
-  const [provider, setProvider] = useState<StudioTextProvider>("subscription");
+  const [provider, setProvider] = useState<StudioTextProvider>("location_order");
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [error, setError] = useState("");
@@ -171,7 +171,7 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
   async function generate() {
     const selected = linkedDrafts.find(draft => draft.id === draftId);
     const linkedDraft = selected ? { id: selected.id, version: selected.version, purpose } : null;
-    const route = { provider, confirmPaid: provider === "openai", confirmSubscription: provider === "subscription", includeReferences, linkedDraft };
+    const route = { ...studioTextConsent(provider, true), includeReferences, linkedDraft };
     const parameters = rewrite && selection
       ? { ...route, action: "generate" as const, kind: "rewrite" as const, stage, feedback, selection, instruction: rewrite }
       : { ...route, action: "generate" as const, kind: generationKind, stage, feedback };
@@ -329,7 +329,7 @@ export function CreationWorkspace({ recordId, initial, initialStage = "Concept",
           {directionChange && <p role="status" className="text-sm">Confirm the new video direction before generating. <Button type="button" variant="link" className={stageControls}
             onClick={() => { setPanel(null); setDirectionOpen(true); }}>Review direction</Button></p>}
           <Button type="button" className={stageControls} disabled={busy || pending || directionChange} onClick={() => void generate()}>
-            {busy ? "Submitting…" : provider === "openai" ? "Generate with paid API" : "Generate on my Mac"}
+            {busy ? "Submitting…" : provider === "openai" ? "Generate with paid API" : provider === "subscription" ? "Generate on my Mac" : "Generate"}
           </Button>
         </div>}
         {error && panel && <p role="alert" className="text-sm text-destructive">{error}</p>}

@@ -354,7 +354,7 @@ export default function ImportPropertyPage() {
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => router.push("/admin/settings/integrations/old-crm")}>
+                        <AlertDialogAction onClick={() => router.push("/settings/integrations/old-crm")}>
                             Go to Settings
                         </AlertDialogAction>
                     </AlertDialogFooter>

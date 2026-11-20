@@ -121,7 +121,7 @@ What it adds:
 Behaviour on Substo after release B:
 
 - At each `/studio` entry, the app links the Substo Business user and claims pending brand invitations addressed to the user's verified emails. It then adopts pre-brand Studio workspaces: the first member to sign in turns each one into a brand, and all of its current Studio members are imported once. If the user is still in no brand and has no invitation, the app creates their brand ("<first name>'s brand"), at most once per user.
-- Team management lives at `/brand/team` (invite by email, change role, remove, leave), and the name at `/brand/settings`. Invitations are sent by Substo's own Clerk application. Old `/studio/invite/<token>` links only explain that invitations now come by email.
+- Team management lives at `/settings/team` (invite by email, change role, remove, leave), and the name at `/settings/general`. Invitations are sent by Substo's own Clerk application. Old `/studio/invite/<token>` links only explain that invitations now come by email.
 - Studio and brand pages use the CRM's sidebar shell in both apps. On Estio, the CRM/Studio switch sits under the logo. Slice 3 now opens only the reviewed generic CRM pages/APIs on Substo, with a separate Server Action firewall. Slice 4 enables both directions of the Substo product switch with membership revalidation.
 
 ### Before deploying B (read-only)
@@ -160,7 +160,7 @@ Smoke tests:
 - On estio.co: `/admin` is unchanged, and the CRM/Studio switch under the logo opens the location's Studio with the sidebar.
 - On substo.com:
   - Sign in. You land in your brand's Studio with the same sidebar; a pre-brand workspace appears as a brand with its name.
-  - `/brand/team` invites a second test address. That person signs up from the email and lands in the same brand as a member, without getting a brand of their own.
+  - `/settings/team` invites a second test address. That person signs up from the email and lands in the same brand as a member, without getting a brand of their own.
   - Removing them takes their Studio access away.
   - `/admin` opens the generic CRM in the same Substo brand. Follow every opened route and foreign-ID check in [the slice 3 audit](substo-crm-route-firewall.md). `/admin/properties`, `/admin/prospecting`, `/admin/viewings`, platform/provider routes and forbidden Server Actions remain closed.
 

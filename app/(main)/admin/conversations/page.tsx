@@ -14,7 +14,8 @@ import Link from 'next/link';
 export const dynamic = 'force-dynamic';
 
 export default async function ConversationsPage({ searchParams }: { searchParams?: any }) {
-    const vocabulary = crmVocabulary(await getRequestAuthRealm());
+    const realm = await getRequestAuthRealm();
+    const vocabulary = crmVocabulary(realm);
     const [location, access] = await Promise.all([
         getLocationContext(),
         getActiveContactsAccess(),
@@ -67,7 +68,7 @@ export default async function ConversationsPage({ searchParams }: { searchParams
     return (
         <div className="h-full min-h-0 w-full max-w-full min-w-0 overflow-hidden flex flex-col">
             <h1 className="sr-only">Conversations</h1>
-            <div className="flex items-center gap-2 border-b bg-background px-3 py-2 text-sm">
+            <div className="flex flex-wrap items-center gap-2 border-b bg-background px-3 py-2 text-sm">
                 <span className="text-muted-foreground">Scope</span>
                 {canViewLocationContacts(access) ? (
                     <>
@@ -76,6 +77,9 @@ export default async function ConversationsPage({ searchParams }: { searchParams
                     </>
                 ) : (
                     <span className="font-medium">My assignments</span>
+                )}
+                {realm === 'estio' && access.role === 'ADMIN' && (
+                    <Link className="ml-auto inline-flex min-h-11 items-center font-medium text-primary hover:underline" href="/settings/conversations?from=crm">Conversation settings</Link>
                 )}
             </div>
             <main className="flex-1 min-h-0 overflow-hidden relative">

@@ -2,9 +2,11 @@
 
 Updated 2026-11-08. This is the task/status source of truth; [architecture and decisions](how-the-app-works.md) owns product rules. Historical checkpoints do not override this page.
 
-## Unified AI settings, phase A: one routing backend (2026-11-20, local candidate, not deployed)
+## Unified settings and Location AI routing (2026-11-20, local candidate)
 
-Branch `feature/unified-ai-settings`. Each Location has one ordered AI fallback chain, shared by Estio and Studio, with per-task models, the existing monthly cap, connection status (ready / limit reached with reset time / unavailable / not connected / offline) and model lists. The pure decision is `resolveAiRoute`. Studio text admission and pre-generation switching run in SQL under additive migration `20261120100000_ai_route_chain`. The read/save API is `/api/studio/ai-routing`. See [AI workflows](ai-workflows.md#ordered-fallback-chain-2026-11-20-local-candidate). Phase B companion (`studio-companion-10`) reports `textRouteVersion: 1` and Mac model lists (Codex `model/list`, Claude curated) and switches Codex ↔ Claude per job before generation only. The shared UI at `/settings/ai` serves CRM and Studio. Remaining work includes moving the feature-specific controls from the old CRM editor and routing Studio summary, research and relevance jobs.
+`feature/unified-ai-settings` combines the shared Location order, model lists, per-task models and spending cap with the canonical staged-creation work. CRM and Studio link directly to the same `/settings` area and `/settings/ai`, where Location admins can connect OpenAI and Gemini keys. General, Team, Website, integrations, Connected computer and the other Location settings use the shared shell. The old settings pages have been removed. CRM-specific controls live under Conversations, Contacts, Live Assist, and Property media. Brand voice lives in Business Profile.
+
+Studio text, CRM text and onboarding use the Location order through their supported adapters. Only a confirmed pre-generation failure can switch routes. A Mac may use only its owner’s subscriptions. Paid order steps use the Location’s shared budget. See [AI workflows](ai-workflows.md#ordered-fallback-chain-2026-11-20-local-candidate) for supported operations, fixed-model exceptions and release acceptance. The additive routing migrations follow the canonical staged-creation migration. Use `studio-companion-11` for the per-job Mac route and result-attribution protocol.
 
 ## Studio UX overhaul and source assistant (2026-11-19, local candidate, not deployed)
 

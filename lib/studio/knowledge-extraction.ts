@@ -1,4 +1,5 @@
 import "server-only";
+import { resolveStudioTextCommand } from "./text-route";
 import { auth } from "@clerk/nextjs/server";
 import { getStudioAccess } from "./access";
 import { requireOwnStudioCommandLocation } from "./paid-workspace";
@@ -33,7 +34,7 @@ export async function executeKnowledgeExtraction(locationId:string,command:Retur
  if (command.action === "enqueueOutline" || command.action === "retryBatch" || command.action === "annotate" || command.action === "approve" || command.action === "triage") {
    const rpc = command.action === "enqueueOutline" ? "studio_enqueue_knowledge_outline" : command.action === "retryBatch" ? "studio_retry_knowledge_outline_batch" : "studio_change_knowledge_outline";
    try {
-     return await studioDb.call(rpc, { p_location: access.locationId, p_app: access.app, p_actor: access.userId, p_command: command });
+     return await studioDb.call(rpc, { p_location: access.locationId, p_app: access.app, p_actor: access.userId, p_command: command.action === "enqueueOutline" ? await resolveStudioTextCommand(access, "knowledge_extract", command) : command });
    } catch (error) {
      if (error instanceof StudioDbError) {
        if (error.code === "P2010") throw new StudioCommandError("This evidence exceeds the full extraction limit. Save it as shorter sources and try again.");
@@ -45,7 +46,7 @@ export async function executeKnowledgeExtraction(locationId:string,command:Retur
    }
  }
  const authority={p_location_id:access.locationId,p_actor_app:access.app,p_clerk_user_id:access.userId,p_request_id:command.requestId,p_expected_version:command.expectedVersion};
- if(command.action==="enqueue")return studioDb.call("studio_enqueue_routed_text_run",{p_location_id:access.locationId,p_actor_app:access.app,p_clerk_user_id:access.userId,p_workflow:"knowledge_extract",p_command:command});
+ if(command.action==="enqueue")return studioDb.call("studio_enqueue_routed_text_run",{p_location_id:access.locationId,p_actor_app:access.app,p_clerk_user_id:access.userId,p_workflow:"knowledge_extract",p_command:await resolveStudioTextCommand(access, "knowledge_extract", command)});
  return studioDb.call("studio_apply_knowledge_extraction",{...authority,p_review_id:command.reviewId,p_finding_indexes:command.findingIndexes,p_confirm_pending:command.confirmPending});
 }
 export async function getKnowledgeExtraction(locationId:string,reviewId:string){

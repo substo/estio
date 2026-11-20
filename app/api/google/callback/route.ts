@@ -11,7 +11,7 @@ function googleSettingsRedirect(
     baseUrl: string,
     params: Record<string, string | undefined>
 ): NextResponse {
-    const redirectUrl = new URL('/admin/settings/integrations/google', baseUrl);
+    const redirectUrl = new URL('/settings/integrations/google', baseUrl);
     for (const [key, value] of Object.entries(params)) {
         if (value) redirectUrl.searchParams.set(key, value);
     }

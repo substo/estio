@@ -94,6 +94,7 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
   if (v.knowledgeOutlineVersion === 2) result.knowledgeOutlineVersion = 2;
   // Route-aware companion: runs the provider/model each job carries instead of only Setup's (lib/ai/routing.ts).
   if (v.textRouteVersion === 1) result.textRouteVersion = 1;
+  if (v.deviceAiRouteVersion === 1) result.deviceAiRouteVersion = 1;
   // QuotaCell readings (remaining % and reset time per window), so the server can say when a limit resets.
   if (v.usage && typeof v.usage === "object" && !Array.isArray(v.usage)) {
     const usage = usageSpec.safeParse(Object.fromEntries(Object.entries(v.usage as Record<string, unknown>).filter(([k]) => k === "codex" || k === "claudeAgent")));
@@ -157,7 +158,7 @@ export const DEVICE_RESEARCH_RESULT_BYTES = 24576;
 export function readDeviceResearchResult(value: unknown): Record<string, unknown> {
   const result = object(value);
   valid(Object.keys(result).every(key => ["research", "provider", "model"].includes(key)));
-  valid(isProvider(result.provider) && result.model === "native-default");
+  valid(isProvider(result.provider) && typeof result.model === "string" && modelPattern.test(result.model));
   object(result.research);
   valid(new TextEncoder().encode(JSON.stringify(result)).length <= DEVICE_RESEARCH_RESULT_BYTES);
   return { research: result.research, provider: result.provider, model: result.model };
@@ -241,6 +242,11 @@ export function readDeviceCommand(operation: DeviceOperation, value: unknown): R
   if (operation === "video_frames_reserve") return { ...out, ...readFramesReserve(v) };
   if (operation === "video_frames_verify") return { ...out, ...readFramesVerify(v) };
   if (operation === "complete") { out.result = v.result && typeof v.result === "object" && "videos" in v.result ? readDeviceYoutubeSearchResult(v.result) : v.result && typeof v.result === "object" && "outcome" in v.result ? readVideoResult(v.result) : v.result && typeof v.result === "object" && "output" in v.result && typeof v.result.output === "object" ? readDeviceTextResult(v.result) : v.result && typeof v.result === "object" && "research" in v.result ? readDeviceResearchResult(v.result) : readDeviceDiagnosticResult(v.result); }
+  if (operation === "complete" && v.routeActual !== undefined) {
+    const actual = object(v.routeActual);
+    valid(isProvider(actual.provider) && typeof actual.model === "string" && modelPattern.test(actual.model));
+    out.routeActual = { provider: actual.provider, model: actual.model };
+  }
   if (operation === "fail") {
     const f = object(v.failure); valid(typeof f.code === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(f.code));
     valid(typeof f.message === "string" && f.message.length <= 500 && typeof f.retryable === "boolean");

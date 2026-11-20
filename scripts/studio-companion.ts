@@ -28,7 +28,7 @@ import { createVideoDeviceApi } from "../lib/studio/companion/video-api";
 import { fileURLToPath } from "node:url";
 import { createPlaywrightYoutubeBrowser, createYoutubeSearchHandler, findChrome, openYoutubeLogin, youtubeBrowserProfile } from "../lib/studio/companion/youtube-search";
 
-const version = "studio-companion-10";
+const version = "studio-companion-11";
 const quotaMs = 5 * 60_000;
 const quotaHelper = () => path.join(os.homedir(), "Applications/QuotaCell.app/Contents/Helpers/CodexBarCLI");
 const rediscoverMs = 10 * 60_000;
@@ -90,7 +90,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     let chromePath: string | null = await findChrome();
     let youtubeSignedIn: boolean | undefined;
     const gate = () => localGate({ state: settings.state, config: settings.config, power: discovery.hardware.power, freeDiskGb: discovery.hardware.freeDiskGb });
-    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, knowledgeOutlineVersion: 2, knowledgeCurationVersion: 1, stagedCreationVersion: 1, videoTemplateVersion: 1, sourceAssistVersion: 1, textRouteVersion: TEXT_ROUTE_VERSION, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search"], youtubeSearch: { ready: youtubeReady(), signedIn: youtubeSignedIn, rank: researchReady() }, ...providers, ...discovery, video: videoTools.report,
+    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, knowledgeOutlineVersion: 2, knowledgeCurationVersion: 1, stagedCreationVersion: 1, videoTemplateVersion: 1, sourceAssistVersion: 1, textRouteVersion: TEXT_ROUTE_VERSION, deviceAiRouteVersion: 1, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search"], youtubeSearch: { ready: youtubeReady(), signedIn: youtubeSignedIn, rank: researchReady() }, ...providers, ...discovery, video: videoTools.report,
       capacity: subscriptionCapacity(quota), usage: quota, processingBlocked: gate().reasons.filter(reason => reason in DEVICE_BLOCK_REASONS) });
     const researchReady = () => {
       const capacity = subscriptionCapacity(quota);
@@ -115,7 +115,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
         .finally(() => active.delete(cmd.provider));
       active.set(cmd.provider, task);
     };
-    const inner = createDeviceStudioQueue(credentials, { capabilities, textReady: () => settings.config.features.text && gate().processing, summaryReady: () => settings.config.features.text && gate().processing, researchReady, videoReady, youtubeReady, configAck: () => settings.pendingAck,
+    const inner = createDeviceStudioQueue(credentials, { capabilities, textReady: () => settings.config.features.text && gate().processing, summaryReady: () => settings.config.features.text && gate().processing, researchReady: () => gate().processing, videoReady, youtubeReady, configAck: () => settings.pendingAck,
       onHeartbeat: (state, sentAck) => {
         if (settings.update(state, sentAck)) { log({ event: "config_applied", version: settings.appliedVersion, status: settings.pendingAck?.status }); pulse(); }
         if (state && !once) for (const cmd of state.commands) runCommand(cmd);
@@ -140,7 +140,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const textRun = createSubscriptionTextRunHandler({ adapter: p => adapters[p], usage: usageNow, enabled: () => gate().processing, config: () => settings.config, configVersion: () => settings.appliedVersion });
     const video = createVideoTranscribeHandler({ tools: async () => { videoTools = await discoverVideoTools(); return videoTools; }, api: createVideoDeviceApi(credentials), enabled: () => gate().processing, config: () => settings.config,
       adapter: p => adapters[p], usage: usageNow, deviceId: config.deviceId, reportRoute, scriptsDir: fileURLToPath(new URL("./studio-video", import.meta.url)) });
-    const youtubeSearchInner = createYoutubeSearchHandler({ enabled: () => gate().processing, models: { adapter: p => adapters[p], usage: usageNow, config: () => settings.config }, browser: async () => {
+    const youtubeSearchInner = createYoutubeSearchHandler({ deviceId: config.deviceId, enabled: () => gate().processing, models: { adapter: p => adapters[p], usage: usageNow, config: () => settings.config }, browser: async () => {
       chromePath = await findChrome();
       return chromePath ? createPlaywrightYoutubeBrowser({ executablePath: chromePath, profileDir: youtubeBrowserProfile() }) : null;
     } });

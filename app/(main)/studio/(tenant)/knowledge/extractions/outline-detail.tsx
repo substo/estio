@@ -45,7 +45,7 @@ export function KnowledgeOutlineDetail({ outline, query, embedded = false, frame
       {waiting ? <RefreshKnowledgeOutline /> : null}
       {batches.length ? <details>
         <summary className="cursor-pointer text-muted-foreground">Processing details</summary>
-        <p className="break-words">{outline.provider === "subscription" ? "Paired Mac subscription" : "Location OpenAI API"}
+        <p className="break-words">{outline.provider === "location_order" ? "Location AI order" : outline.provider === "subscription" ? "Paired Mac subscription" : "Location OpenAI API"}
           {" · "}{[...new Set(batches.map(batch => batch.model))].join(", ")}</p>
       </details> : null}
       {failures.length ? <div className="space-y-2 rounded-md border p-3">
@@ -53,7 +53,7 @@ export function KnowledgeOutlineDetail({ outline, query, embedded = false, frame
         {[...new Set(failures.map(batch => batch.error).filter(Boolean))].map(error => <p className="break-words" key={error}>{error}</p>)}
         <p className="text-muted-foreground">Completed batches are kept. A retry runs only the stopped batch again.</p>
         {failures.filter(batch => batch.jobId && batch.status === "failed").map(batch => <RetryBatchForm key={batch.reviewId} outlineId={outline.id}
-          reviewId={batch.reviewId} provider={outline.provider} firstPassage={batch.snapshot.startUnit + 1}
+          reviewId={batch.reviewId} provider={outline.provider === "location_order" ? (batch.model.startsWith("mac_") ? "subscription" : "openai") : outline.provider} firstPassage={batch.snapshot.startUnit + 1}
           lastPassage={batch.snapshot.startUnit + batch.snapshot.unitCount} />)}
         <Link href="/studio/jobs" className="text-primary underline">Open Jobs</Link>
       </div> : null}

@@ -54,7 +54,7 @@ async function sendTestMessage() {
 
 if (!ACCESS_TOKEN) {
     console.log('ERROR: WHATSAPP_ACCESS_TOKEN environment variable not set');
-    console.log('Get token from: https://estio.co/admin/settings/integrations/whatsapp (Advanced Options)');
+    console.log('Get token from: https://estio.co/settings/integrations/whatsapp (Advanced Options)');
     process.exit(1);
 }
 

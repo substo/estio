@@ -27,7 +27,7 @@ test("the research note says where research runs or what it waits for", () => {
 });
 test("the Mac connection is offered without a coming-soon label", () => {
   for (const app of ["estio", "substo"] as const) {
-    const mac = connectLinks(app).find(l => l.href === "/studio/settings/computer")!;
+    const mac = connectLinks(app).find(l => l.href === "/settings/computer")!;
     assert.doesNotMatch(mac.label, /coming soon/i); assert.match(mac.description, /companion running/);
   }
 });

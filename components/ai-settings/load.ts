@@ -21,6 +21,6 @@ export async function loadLocationAiSettings(locationId: string, links: AiSettin
 /** Connection management links each app can open. Substo cannot open the Estio CRM integration pages. */
 export function aiSettingsLinks(app: "estio" | "substo"): AiSettingsLinks {
   return app === "estio"
-    ? { computer: "/studio/settings/computer", gemini: "/admin/settings/integrations/gemini", chatgpt: "/admin/settings/integrations/chatgpt-subscription" }
-    : { computer: "/studio/settings/computer" };
+    ? { computer: "/settings/computer", gemini: "/settings/integrations/gemini", chatgpt: "/settings/integrations/chatgpt-subscription" }
+    : { computer: "/settings/computer" };
 }

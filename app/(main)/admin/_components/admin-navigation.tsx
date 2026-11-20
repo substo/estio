@@ -2,6 +2,7 @@
 
 import { useCrmRealm } from "./crm-realm"
 import { isSubstoCrmPage } from "@/lib/auth/substo-crm-policy"
+import { isSubstoSettingsPage } from "@/lib/auth/settings-route-policy"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import type { LucideIcon } from "lucide-react"
@@ -129,16 +130,16 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     label: "System",
     items: [
       {
-        href: "/admin/site-settings/navigation",
+        href: "/settings/website/navigation?from=crm",
         label: "Menus",
         icon: SquareMenu,
-        activePath: (pathname) => pathname.includes("/admin/site-settings/navigation"),
+        activePath: (pathname) => pathname.includes("/settings/website/navigation"),
       },
       {
-        href: "/admin/settings",
+        href: "/settings?from=crm",
         label: "Settings",
         icon: SlidersHorizontal,
-        activePath: (pathname) => pathname.includes("/admin/settings"),
+        activePath: (pathname) => pathname === "/settings" || pathname.startsWith("/settings/"),
       },
     ],
   },
@@ -266,7 +267,7 @@ export function AdminNavigationGroups({
 }) {
   const realm = useCrmRealm()
   const visibleGroups = realm === "substo" && groups === ADMIN_NAV_GROUPS
-    ? groups.map((group) => ({ ...group, items: group.items.map((item) => ({ ...item, setupPending: !isSubstoCrmPage(item.href) })) })).filter((group) => group.items.length > 0)
+    ? groups.map((group) => ({ ...group, items: group.items.map((item) => ({ ...item, setupPending: !isSubstoCrmPage(item.href) && !isSubstoSettingsPage(item.href.split("?")[0]) })) })).filter((group) => group.items.length > 0)
     : groups
   if (realm === "substo" && groups === ADMIN_NAV_GROUPS) {
     visibleGroups.find((group) => group.label === "Content")?.items.unshift({ href: "/admin/content/website", label: "Website", icon: PanelsTopLeft, activePath: (pathname) => pathname === "/admin/content/website" })

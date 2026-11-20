@@ -11,7 +11,7 @@ const form = read('app/(main)/admin/user-profile/_components/user-profile-form.t
 const action = read('app/(main)/admin/profile-actions.ts');
 const completeAction = action.slice(0, action.indexOf('export async function getUserProfileStatus'));
 const legacyRoute = read('app/(main)/(auth)/user-profile/[[...user-profile]]/page.tsx');
-const sessionLinks = read('app/(main)/admin/team/_components/access-sessions-section.tsx');
+const sessionLinks = read('app/(main)/settings/team/_components/access-sessions-section.tsx');
 
 test('the canonical profile page renders one Estio personal-details section without embedded or retired profile applications', () => {
     assert.match(page, /<h1[^>]*>My profile<\/h1>/);

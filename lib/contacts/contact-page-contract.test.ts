@@ -9,8 +9,8 @@ const filtersSource = readFileSync('app/(main)/admin/contacts/_components/contac
 const rowSource = readFileSync('app/(main)/admin/contacts/_components/contact-row.tsx', 'utf8');
 const schemaSource = readFileSync('prisma/schema.prisma', 'utf8');
 const migrationSource = readFileSync('prisma/migrations/20260801120000_contact_assigned_user/migration.sql', 'utf8');
-const teamActionSource = readFileSync('app/(main)/admin/team/actions.ts', 'utf8');
-const teamPageSource = readFileSync('app/(main)/admin/team/page.tsx', 'utf8');
+const teamActionSource = readFileSync('app/(main)/settings/team/actions.ts', 'utf8');
+const teamPageSource = readFileSync('app/(main)/settings/team/page.tsx', 'utf8');
 const companyPageSource = readFileSync('app/(main)/admin/companies/page.tsx', 'utf8');
 const companyDetailSource = readFileSync('app/(main)/admin/companies/[id]/view/page.tsx', 'utf8');
 

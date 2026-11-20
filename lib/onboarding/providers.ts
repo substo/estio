@@ -4,7 +4,7 @@ import { resolveOpenAiApiKey, OPENAI_DEFAULT_TEXT_MODEL, stripOpenAiModelPrefix 
 import { executeCrmRouteStep, routeUsageMetadata } from "@/lib/ai/llm";
 import { GEMINI_FLASH_LATEST_ALIAS } from "@/lib/ai/models";
 import { CRM_DEFAULT_OUTPUT_TOKENS, loadCrmRoutePlan, runLocationCrmRoute } from "@/lib/ai/crm-route-loader";
-import type { CrmRouteRecord } from "@/lib/ai/crm-routing";
+import type { CrmRoutePlan, CrmRouteRecord } from "@/lib/ai/crm-routing";
 import { AiProviderRejectedError, AiRouteUnavailableError } from "@/lib/ai/route-errors";
 import { securelyRecordAiUsage, type AiFundingScope } from "@/lib/ai/usage-metering";
 import { researchOutputJsonSchema } from "./research-contract";
@@ -23,11 +23,12 @@ export type ProviderReply = { text: string; provider: ResearchProvider; model: s
 export type OnboardingOperation = "onboarding_research" | "onboarding_answer";
 const isResearchProvider = (kind: string): kind is ResearchProvider => kind === "chatgpt_subscription" || kind === "openai_key" || kind === "gemini_key";
 
-const onboardingPlan = (locationId: string, operation: OnboardingOperation) => loadCrmRoutePlan({ locationId, operation, interactive: false });
+export const onboardingServerPlan = (locationId: string, operation: OnboardingOperation, routing?: Parameters<typeof loadCrmRoutePlan>[0]["routing"]) =>
+  loadCrmRoutePlan({ locationId, operation, interactive: false, routing });
 
 /** The first server connection the chain would use now, or null (the onboarding gate and the run's first label). */
 export async function chooseResearchProvider(locationId: string, operation: OnboardingOperation = "onboarding_research"): Promise<ResearchProvider | null> {
-  const plan = await onboardingPlan(locationId, operation);
+  const plan = await onboardingServerPlan(locationId, operation);
   return plan.steps.map(s => s.kind).find(isResearchProvider) ?? null;
 }
 
@@ -35,8 +36,8 @@ export async function chooseResearchProvider(locationId: string, operation: Onbo
  * Run one onboarding call over the Location chain. The next step runs only when a step failed before generation; the
  * system prompt is rebuilt per step because only some providers search the web.
  */
-export async function runOnboardingRoute(input: { locationId: string; userId: string | null; operation: OnboardingOperation; system: (webSearch: boolean) => string; user: string; action: string; signal?: AbortSignal }): Promise<ProviderReply> {
-  const plan = await onboardingPlan(input.locationId, input.operation);
+export async function runOnboardingRoute(input: { locationId: string; userId: string | null; operation: OnboardingOperation; system: (webSearch: boolean) => string; user: string; action: string; signal?: AbortSignal; plan?: CrmRoutePlan }): Promise<ProviderReply> {
+  const plan = input.plan ?? await onboardingServerPlan(input.locationId, input.operation);
   const research = input.operation === "onboarding_research";
   const searchPrompt = input.system(true);
   const readPrompt = research ? input.system(false) : searchPrompt;

@@ -59,7 +59,7 @@ test("schema clears are independent and never clear user credentials", () => {
 
 test("section clear action is strict, transactional, and active-location derived", () => {
     const actions = fs.readFileSync(
-        path.join(process.cwd(), "app/(main)/admin/settings/crm/actions.ts"),
+        path.join(process.cwd(), "app/(main)/settings/crm/actions.ts"),
         "utf8"
     );
     const start = actions.indexOf("export async function clearOldCrmSettingsSection");
@@ -78,11 +78,11 @@ test("section clear action is strict, transactional, and active-location derived
 
 test("page places one reusable contextual Clear control beside every Save control", () => {
     const page = fs.readFileSync(
-        path.join(process.cwd(), "app/(main)/admin/settings/integrations/old-crm/page.tsx"),
+        path.join(process.cwd(), "app/(main)/settings/integrations/old-crm/page.tsx"),
         "utf8"
     );
     const component = fs.readFileSync(
-        path.join(process.cwd(), "app/(main)/admin/settings/integrations/old-crm/_components/clear-settings-button.tsx"),
+        path.join(process.cwd(), "app/(main)/settings/integrations/old-crm/_components/clear-settings-button.tsx"),
         "utf8"
     );
 
@@ -99,7 +99,7 @@ test("page places one reusable contextual Clear control beside every Save contro
 
 test("Old CRM page continues to support saving blank connection values", () => {
     const page = fs.readFileSync(
-        path.join(process.cwd(), "app/(main)/admin/settings/integrations/old-crm/page.tsx"),
+        path.join(process.cwd(), "app/(main)/settings/integrations/old-crm/page.tsx"),
         "utf8"
     );
 

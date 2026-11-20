@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
   if (product === "studio") destination = await studioDestination(locationId);
   else {
     const resolution = await validateActiveLocationSelection(locationId);
-    if (resolution.status === "authorized" && resolution.location) destination = { locationId: resolution.location.id, path: product === "team" ? "/admin/team" : "/admin" };
+    if (resolution.status === "authorized" && resolution.location) destination = { locationId: resolution.location.id, path: product === "team" ? "/settings/team?from=studio" : "/admin" };
   }
   if (!destination) return NextResponse.redirect(new URL("/studio/select?error=access", origin), 303);
   const response = NextResponse.redirect(new URL(destination.path, origin), 303);

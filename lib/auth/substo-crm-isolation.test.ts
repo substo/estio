@@ -32,9 +32,9 @@ function load(file: string, deps: Record<string, unknown>): any {
 const pages = [
   "/admin", "/admin/contacts", "/admin/contacts/estio-contact/view", "/admin/contacts/estio-contact/edit",
   "/admin/companies", "/admin/companies/estio-company/view", "/admin/projects", "/admin/conversations",
-  "/admin/content/website", "/admin/content/pages/page-id/preview", "/admin/site-settings", "/admin/site-settings/navigation", "/admin/content/home",
+  "/admin/content/website", "/admin/content/pages/page-id/preview", "/settings/website", "/settings/website/navigation", "/admin/content/home",
   "/admin/content/pages", "/admin/content/pages/estio-page", "/admin/content/posts", "/admin/content/posts/estio-post",
-  "/admin/settings", "/admin/settings/notifications", "/admin/team", "/admin/user-profile", "/select-location",
+  "/settings", "/settings/notifications", "/settings/team", "/admin/user-profile", "/select-location",
 ];
 const apis = [
   "/api/active-location", "/api/admin/location-session-activity", "/api/admin/conversations/estio-conversation/message-window",
@@ -78,7 +78,7 @@ function resolver(options: { cookie?: string; realm?: string; userRealm?: string
 
 for (const route of [...pages, ...apis]) {
   test(`${route}: foreign active-location cookie and selection cannot cross the realm`, async () => {
-    assert.equal(classifySubstoRoute(route), route.startsWith("/api/") ? "crm-api" : "crm");
+    assert.equal(classifySubstoRoute(route), route.startsWith("/api/") ? "crm-api" : route.startsWith("/settings") ? "settings" : "crm");
     const boundary = resolver({ cookie: "estio" });
     const active = await boundary.resolveActiveLocation();
     assert.equal(active.status, "selection_required");
@@ -100,7 +100,7 @@ test("valid Substo selection works; stale realm and impersonation fail closed; E
 test("hidden pages and API suffix/lookalike/extra segment bypasses stay closed", () => {
   for (const route of [
     "/admin/properties", "/admin/prospecting", "/admin/viewings/sessions", "/admin/live-assist", "/admin/platform",
-    "/admin/settings/integrations/ghl", "/admin/settings/prospecting", "/admin/settings/location-data", "/admin/site-settings/domains",
+    "/settings/integrations/ghl", "/settings/prospecting", "/settings/location-data", "/settings/website/domains",
     "/admin/conversations/import", "/admin/content/home/extra", "/admin/contacts-x", "/admin/contacts/x/view/extra",
     "/api/admin/conversations/property-match-campaigns/x/processing", "/api/admin/conversations/send-reply",
     "/api/admin/companies/feed-sync", "/api/admin/properties/upsert", "/api/google/auth", "/api/cron/task-sync",
@@ -149,17 +149,18 @@ function filesIn(dir: string): string[] {
   });
 }
 
-test("every non-Studio/brand Server Action export starts with the app firewall", () => {
+test("every non-Studio Server Action export starts with its realm and tenant checks", () => {
   let count = 0;
   for (const file of [...filesIn("app"), ...filesIn("lib")]) {
     const text = fs.readFileSync(file, "utf8");
-    if (!/^['"]use server['"]/.test(text) || file.includes("/studio/") || file.includes("/brand/")) continue;
+    if (!/^['"]use server['"]/.test(text) || file.includes("/studio/")) continue;
     const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
     for (const statement of source.statements) {
       if (!ts.isFunctionDeclaration(statement) || !statement.body || !statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) continue;
       const first = statement.body.statements[0].getText(source);
       // Safe read used by existing contact pages: Substo reports no Outlook connection.
       if (statement.name?.text === "getOutlookStatusAction") assert.match(first, /getRequestAuthRealm.*substo.*connected: false/);
+      else if (file.endsWith("/substo-location-actions.ts")) assert.equal(first, "const actor = await requireActor(formData);");
       else assert.match(first, /^await assertCrmActionAllowed\(/, `${file}:${statement.name?.text}`);
       count++;
     }
@@ -237,13 +238,13 @@ test("shared header widgets work from Studio pages on Substo against the tenant 
   assert.equal(resolved, 4);
   assert.equal(classifySubstoRoute("/api/notifications/events"), "crm-api");
   assert.equal(classifySubstoRoute("/admin/user-profile"), "crm");
-  for (const page of ["/studio", "/studio/library", "/brand/team"]) assert.notEqual(classifySubstoRoute(page), "blocked");
+  for (const page of ["/studio", "/studio/library", "/settings/team"]) assert.notEqual(classifySubstoRoute(page), "blocked");
   const tenantContext = fs.readFileSync("lib/auth/tenant-context.ts", "utf8");
   assert.match(tenantContext, /: await resolveActiveLocation\(\);/);
   assert.match(fs.readFileSync("lib/studio/route-context.ts", "utf8"), /const context = await resolveTenantContext\(\);/);
-  for (const page of ["app/(main)/brand/team/page.tsx", "app/(main)/brand/settings/page.tsx"]) {
+  for (const page of ["app/(main)/settings/team/_components/substo-team.tsx", "app/(main)/settings/general/page.tsx"]) {
     const source = fs.readFileSync(page, "utf8");
-    assert.match(source, /getSubstoLocationActor\(\);/);
+    assert.match(source, /getSubstoLocationActor\(\)/);
     assert.doesNotMatch(source, /searchParams/);
   }
 });

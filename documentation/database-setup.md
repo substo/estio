@@ -87,7 +87,7 @@ A role-based access control system was added to manage user permissions per loca
 ### How Roles Are Assigned
 
 1. **Auto-Admin on OAuth**: When a user authorizes a GHL location via SSO, they are automatically assigned the `ADMIN` role for that location.
-2. **Admin Invites**: Admins can invite new users via `/admin/team` and assign them `ADMIN` or `MEMBER` roles.
+2. **Admin Invites**: Admins can invite new users via `/settings/team` and assign them `ADMIN` or `MEMBER` roles.
 
 ### Migration Command
 

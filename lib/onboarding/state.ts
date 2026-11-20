@@ -12,7 +12,7 @@ export const onboardingMessageSchema = z.object({
 }).strict();
 export const researchRunSchema = z.object({
   id: z.string().max(80), batch: z.string().max(40), topic: z.string().max(40), status: z.enum(["queued", "running", "done", "failed"]),
-  provider: z.string().max(40).optional(), queuedAt: iso, startedAt: iso.optional(), finishedAt: iso.optional(),
+  provider: z.string().max(40).optional(), model: z.string().max(120).optional(), queuedAt: iso, startedAt: iso.optional(), finishedAt: iso.optional(),
   error: z.string().max(300).optional(), applied: z.array(z.string().max(80)).max(40).optional(), sources: z.array(z.string().max(500)).max(20).optional(),
 }).strict();
 export const pageExcerptSchema = z.object({ url: z.string().max(2048), title: z.string().max(300).nullable(), text: z.string().max(8000) }).strict();

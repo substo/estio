@@ -4,6 +4,7 @@ import { securelyRecordAiUsage } from "@/lib/ai/usage-metering";
 import { callLLMWithMetadata, routeUsageMetadata, type LLMResultWithMetadata } from "@/lib/ai/llm";
 import { GEMINI_FLASH_STABLE_FALLBACK } from "@/lib/ai/models";
 import { settingsService } from "@/lib/settings/service";
+import { persistLocationAiRunStatus } from "@/lib/ai/settings/run-status";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import {
   resolvePropertyEvidenceForContactActivity,
@@ -861,27 +862,7 @@ async function persistRequirementsIntelligenceRunStatus(args: {
   locationId: string;
   status: RequirementsIntelligenceRunStatus;
 }) {
-  const doc = await settingsService.getDocument<any>({
-    scopeType: "LOCATION",
-    scopeId: args.locationId,
-    domain: SETTINGS_DOMAINS.LOCATION_AI,
-  }).catch(() => null);
-  if (!doc?.payload) return;
-
-  const existingRequirements = doc.payload.requirementsIntelligence || {};
-  await settingsService.upsertDocument({
-    scopeType: "LOCATION",
-    scopeId: args.locationId,
-    domain: SETTINGS_DOMAINS.LOCATION_AI,
-    payload: {
-      ...doc.payload,
-      requirementsIntelligence: {
-        ...existingRequirements,
-        lastRun: args.status,
-      },
-    },
-    schemaVersion: doc.schemaVersion || 1,
-  });
+  await persistLocationAiRunStatus(args.locationId, "requirementsIntelligence", args.status);
 }
 
 export async function runRequirementsIntelligenceCron(args?: {

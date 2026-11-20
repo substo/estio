@@ -8,14 +8,14 @@ export const onboardingPath = (product: "crm" | "studio") => product === "studio
 export type ConnectLink = { label: string; description: string; href: string };
 /** Screens where an admin connects an AI the Location owns. Substo has no CRM integrations screen, so it uses Studio's. */
 export function connectLinks(app: "estio" | "substo"): ConnectLink[] {
-  const mac = { label: "A Mac with Codex or Claude", description: "Research on your own ChatGPT or Claude subscription: pair a Mac, turn processing on and keep the Studio companion running.", href: "/studio/settings/computer" };
+  const mac = { label: "A Mac with Codex or Claude", description: "Research on your own ChatGPT or Claude subscription: pair a Mac, turn processing on and keep the Studio companion running.", href: "/settings/computer" };
   if (app === "substo") return [
     { label: "OpenAI API key", description: "Add your own OpenAI key and a monthly budget.", href: "/settings/ai?from=studio" },
     mac,
   ];
   return [
-    { label: "ChatGPT subscription", description: "Connect your ChatGPT plan (Codex); no API key needed.", href: "/admin/settings/integrations/chatgpt-subscription" },
-    { label: "OpenAI API key", description: "Add your own OpenAI key.", href: "/admin/settings/integrations/openai-api" },
+    { label: "ChatGPT subscription", description: "Connect your ChatGPT plan (Codex); no API key needed.", href: "/settings/integrations/chatgpt-subscription" },
+    { label: "OpenAI API key", description: "Add your own OpenAI key.", href: "/settings/integrations/openai-api" },
     mac,
   ];
 }
