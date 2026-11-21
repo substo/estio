@@ -40,3 +40,21 @@ test("the disk gate outranks allowance and an unreadable allowance is distinct f
   assert.equal(connection(caps).status, "unavailable");
   assert.equal(connection({ ...caps, usage: { codex: { remaining: 0, windows: [], at: recent } } }).status, "limit_reached");
 });
+
+test("native CLI readiness admits unknown or low allowance and still reports real denials", () => {
+  const native = { nativeSubscriptionVersion: 1, capacity: { codex: true, claude: true },
+    codex: { installed: true, authenticated: true, ready: true, loginMethod: "chatgpt" },
+    claude: { installed: true, authenticated: true, ready: true, loginMethod: "claudeai" } };
+  const deviceConnections = (capabilities: Record<string, unknown>) => assembleAiConnections({ ...none, devices: [{
+    name: "Mac", revoked: false, paused: false, seenAt: recent, draining: false, capabilities,
+  }] }, now).connections!.filter(connection => connection.scope === "device");
+  assert.deepEqual(deviceConnections(native).map(c => [c.status, c.remainingPercent]), [["ready", undefined], ["ready", undefined]]);
+  const low = deviceConnections({ ...native, usage: { codex: { remaining: 2, windows: [], at: recent } } });
+  assert.equal(low[0].status, "ready");
+  assert.equal(low[0].remainingPercent, 2);
+  const rejection = deviceConnections({ ...native, nativeRetryAt: { claude: now + 60_000 } });
+  assert.equal(rejection[1].status, "limit_reached");
+  assert.equal(rejection[1].resetsAt, undefined);
+  const legacy = deviceConnections({ ...native, nativeSubscriptionVersion: undefined, capacity: { codex: false, claude: false } });
+  assert.ok(legacy.every(connection => connection.status === "unavailable"));
+});

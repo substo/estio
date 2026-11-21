@@ -33,12 +33,12 @@ test("runLocalRoute switches only before generation and never replays a started 
   const adapter = (fail: (p: LocalProvider) => unknown) => (p: LocalProvider): LocalTextAdapter => ({ provider: p, readiness: ready(p),
     generate: async () => { calls.push(p); const e = fail(p); if (e) throw e; return p as never; } });
   const stop = (): never => { throw new Error("stopped"); };
-  // Codex at its limit (no fresh capacity): Claude runs, with the reason recorded.
-  assert.deepEqual(await runLocalRoute(steps, { adapter: adapter(() => null), usage: async () => ({ codex: reading(1), claudeAgent: reading(80) }) }, context.signal, a => a.generate({} as never), stop),
+  // Codex at its measured limit: Claude runs, with the reason recorded.
+  assert.deepEqual(await runLocalRoute(steps, { adapter: adapter(() => null), usage: async () => ({ codex: reading(0), claudeAgent: reading(80) }) }, context.signal, a => a.generate({} as never), stop),
     { value: "claude", provider: "claude", model: "sonnet", firstLocalStep: steps[0], switchReason: "Codex limit reached → Claude" });
   // A completed rate-limit rejection (no output) moves on.
   calls.length = 0;
-  assert.equal((await runLocalRoute(steps, { adapter: adapter(p => p === "codex" ? new StudioProviderRejectedError("rate_limited", "limit", true) : null), usage: full }, context.signal, a => a.generate({} as never), stop))?.provider, "claude");
+  assert.equal((await runLocalRoute(steps, { adapter: adapter(p => p === "codex" ? new StudioProviderRejectedError("rate_limited", "limit", true, undefined, "before_generation") : null), usage: full }, context.signal, a => a.generate({} as never), stop))?.provider, "claude");
   assert.deepEqual(calls, ["codex", "claude"]);
   // Anything else after generation began stops: Claude is never tried.
   calls.length = 0;
@@ -53,7 +53,7 @@ test("library summary follows the job's order over Setup and reports the actual 
   const calls: string[] = [];
   const config = { features: { text: true, transcription: false }, textProvider: "codex", textModel: "gpt-5.5" } as never;
   const adapter = (p: LocalProvider): LocalTextAdapter => ({ provider: p, readiness: ready(p), generate: async req => { calls.push(`${p}:${req.model}`); return req.validate({ summary: "S" }); } });
-  const handler = createLibrarySummaryHandler({ adapter, enabled: () => true, usage: async () => ({ codex: reading(1), claudeAgent: reading(80) }), config: () => config, deviceId: me });
+  const handler = createLibrarySummaryHandler({ adapter, enabled: () => true, usage: async () => ({ codex: reading(0), claudeAgent: reading(80) }), config: () => config, deviceId: me });
   const job = { id: "j", location_id: "l", kind: "studio.library_summary", payload: { description: "Evidence" }, lease_token: "t", attempts: 1, max_attempts: 2,
     route: { candidates: [{ kind: "device_codex", deviceId: me }, { kind: "device_claude", model: "haiku" }] } };
   assert.deepEqual(await handler(job, context), { summary: "S", provider: "claude", model: "haiku" });

@@ -7,7 +7,8 @@ import { profileSpec, selectProfile, validLease, canRevoke, sameOrigin, extractP
 import { withoutPlan } from "./playbook";
 import { remainingByBucket } from "./contract";
 import { extractRemember, memoryText, remember } from "./memory";
-import { parseUsage } from "./usage";
+import { unattendedAllowanceReason } from "./contract";
+import { parseCodexAllowance } from "../studio/companion/native-usage";
 import { reverseAffected } from "./scanner";
 
 test("Build uses the platform gate: location admin, Substo and impersonation cannot acquire operator context", async () => {
@@ -106,9 +107,9 @@ test("a conversation plan is read from the last plan block and hidden from the d
 });
 
 test("usage readings: lowest window wins, stale readings are ignored, and routing prefers allowance left", () => {
-  const raw = JSON.stringify([{ usage: { primary: { usedPercent: 10, resetsAt: "2026-11-04T18:00:00Z" }, secondary: { usedPercent: 86 }, loginMethod: "Pro", updatedAt: new Date().toISOString() }, rateWindowLabels: { primary: "Session", secondary: "Weekly" } }]);
-  const u = parseUsage(raw)!;
-  assert.equal(u.remaining, 14); assert.equal(u.windows[1].label, "Weekly");
+  const raw = JSON.stringify({ id: 2, result: { rateLimits: { primary: { usedPercent: 10 }, secondary: { usedPercent: 86, windowDurationMins: 10080 } } } });
+  const u = parseCodexAllowance(raw).codex!;
+  assert.equal(u.remaining, 14); assert.equal(u.windows[1].label, "10080 min");
   assert.deepEqual(remainingByBucket({ claudeAgent: u, codex: { ...u, at: "2020-01-01T00:00:00Z" } }), { claudeAgent: 14 });
   const base = profileSpec.parse({ id: "a", enabled: true, provider: "codex", account: "default", billing: "subscription", model: "m", options: {}, quotaBucket: "codex", taskTypes: ["implementation"], tools: ["git-read", "code-write"], dataScope: "estio-repository", quality: 3, concurrency: 1, maxAttempts: 1, fallbacks: [] });
   const claude = { ...base, id: "b", provider: "claudeAgent", quotaBucket: "claudeAgent" };
@@ -132,4 +133,10 @@ test("the Decisions section is read from the end of a task report", async () => 
   assert.equal(decisionsOf("Done.\n\nDecisions:\n- Kept X in Y because Z"), "- Kept X in Y because Z");
   assert.equal(decisionsOf("Done.\n**Decisions:** none"), "none");
   assert.equal(decisionsOf("Done, nothing else."), null);
+});
+
+test("Build unattended work waits for unknown or low allowance while approved manual work remains explicit", () => {
+  assert.match(unattendedAllowanceReason("claudeAgent", undefined)!, /unreported/);
+  assert.match(unattendedAllowanceReason("codex", 14)!, /low/);
+  assert.equal(unattendedAllowanceReason("codex", 15), null);
 });

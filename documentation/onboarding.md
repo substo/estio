@@ -53,7 +53,7 @@ Order: a ready paired Mac first (owner decision: subscriptions first), then the 
 **A Mac is ready** (`deviceResearchReadiness`, `lib/studio/devices-policy.ts`) only while its companion is running (heartbeat
 within 90 s, not draining), processing is On and not paused, `studio.onboarding_research` is in its allowed kinds, the
 companion advertises the research handler (release `studio-companion-3`+), its local gate is open (power/disk/working
-hours from Setup), and Codex or Claude is signed in with a subscription that has fresh QuotaCell capacity. The same rule
+hours from Setup), and Codex or Claude is signed in with a subscription that is natively ready and has no current confirmed limit. The same rule
 gates the onboarding screen (`lib/onboarding/service.ts`), picks the Mac (`lib/onboarding/device-route.ts`) and shows
 "Business research: Ready / Not available: reason" on Studio → Settings → Connected computer.
 
@@ -61,7 +61,7 @@ gates the onboarding screen (`lib/onboarding/service.ts`), picks the Mac (`lib/o
 queues each topic with `studio_enqueue_device_onboarding_research` as a device job carrying the page excerpts; the run
 shows provider `mac:<deviceId>` and the screen says "Researching on <Mac> with your own subscription" or what it waits
 for. The companion builds the prompt locally from `research-contract.ts`, runs it on the subscription CLI with capacity
-(`summaryProviders`, same QuotaCell rules as Library summaries; only a completed rate-limit rejection moves to the other
+(`summaryProviders`, same native subscription rules as Library summaries; only a completed rate-limit rejection moves to the other
 CLI; never an API fallback) and returns `{research, provider, model:"native-default"}`. When the device job finishes,
 fails or is cancelled, a database trigger queues a hosted `studio.onboarding_apply` job that applies it with the same
 parser, mapping and confirmed-fact protection as server research (run provider `mac_codex` / `mac_claude`). Attempts and

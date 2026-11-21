@@ -12,6 +12,7 @@ import { isSignedInTopbar, macVideoSchema, parseYoutubeSearchData, youtubeSearch
 import { applyRankings, buildPlanPrompt, buildRankPrompt, fitResultSize, planJsonSchema, planSchema, rankJsonSchema, rankSchema, relatedPayloadSchema, relatedResultSchema, relatedTraceSchema,
   type RankedCandidate, type RelatedCandidate, type RelatedTrace } from "../related-search-policy";
 import type { LocalProvider, LocalTextAdapter } from "./providers";
+import { hasNativeRejection, nativeSubscriptionReady } from "../subscription-readiness";
 import { localRoute, runLocalRoute, summaryProviders } from "./route";
 
 const CHROME_PATHS = ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium"];
@@ -66,20 +67,20 @@ export function createPlaywrightYoutubeBrowser(options: { executablePath: string
 export interface RelatedModelDeps { adapter(provider: LocalProvider): LocalTextAdapter; usage(): Promise<Usage>; config(): StudioDeviceConfig }
 const CONTRACT_NOTE = `[Studio capability contract ${AI_WORKFLOW_CONTRACT_VERSION} for related_video_search is prepended by the Mac]\n`;
 
-/** The Mac's own signed-in Codex/Claude subscription, only when signed in with capacity. Never an API key.
+/** The Mac's own signed-in Codex/Claude subscription, when signed in and no native limit is known. Never an API key.
  * When none is usable the reason is returned so the run's log can say exactly why (capacity reading, sign-in, or a failed probe). */
 async function pickModel(models: RelatedModelDeps, signal: AbortSignal): Promise<{ picked: Picked } | { reason: string }> {
   const config = models.config();
   const usage = await models.usage().catch(() => null);
-  if (!usage || !Object.keys(usage).length) return { reason: "the subscription capacity reading was unavailable" };
-  const providers = summaryProviders(usage).filter(p => !config.textProvider || p === config.textProvider);
-  if (!providers.length) return { reason: config.textProvider ? `${config.textProvider} has no fresh subscription capacity (or is not the provider chosen in Setup)` : "no Codex/Claude subscription has fresh capacity" };
+  const providers = summaryProviders(usage ?? {}).filter(p => !config.textProvider || p === config.textProvider);
+  if (!providers.length) return { reason: config.textProvider ? `${config.textProvider} is currently limited` : "both Mac subscriptions are currently limited" };
   const reasons: string[] = [];
   for (const provider of providers) {
     const adapter = models.adapter(provider);
+    if (hasNativeRejection(adapter.quotaRetryAt?.())) { reasons.push(`${provider} is currently limited`); continue; }
     for (let attempt = 0; attempt < 2; attempt++) {
       const ready = await adapter.readiness(signal).catch(() => null);
-      if (ready?.ready && ready.authenticated && ready.loginMethod === (provider === "codex" ? "chatgpt" : "claudeai")) return { picked: { provider, adapter, model: config.textModel ?? undefined } };
+      if (nativeSubscriptionReady(provider, ready ?? undefined)) return { picked: { provider, adapter, model: config.textModel ?? undefined } };
       if (ready) { reasons.push(`${provider} is not ready or not signed in with its subscription`); break; }
       if (attempt === 1) reasons.push(`${provider}'s readiness check failed`);
     }

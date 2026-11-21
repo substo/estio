@@ -183,7 +183,7 @@ test("relevance gate: high transcribes; borderline and low never download audio;
 
 test("relevance waits for subscription capacity and fails visibly (no replay, no API) when scoring is unusable", async () => {
   const f = fixture();
-  await assert.rejects(createVideoTranscribeHandler({ ...f.deps(), usage: async () => ({}) })(job({ gate }), context()), (e: unknown) => e instanceof StudioJobError && e.code === "video_provider_waiting" && e.retryable);
+  await assert.rejects(createVideoTranscribeHandler({ ...f.deps(), usage: async () => ({ codex: { remaining: 0, windows: [], at: new Date().toISOString() } }) })(job({ gate }), context()), (e: unknown) => e instanceof StudioJobError && e.code === "video_provider_waiting" && e.retryable);
   const bad = fixture();
   await assert.rejects(createVideoTranscribeHandler(bad.deps(async request => request.validate({ relevant: "yes", score: 500 })))(job({ gate }), context()), (e: unknown) => e instanceof StudioJobError && e.code === "video_relevance_failed" && !e.retryable);
   assert.ok(!bad.runs.some(r => r.args.includes("-x")));
@@ -198,7 +198,7 @@ test("routed relevance switches before generation and reports the actual local s
   const reports: unknown[] = [];
   const handler = createVideoTranscribeHandler({
     ...deps,
-    usage: async () => ({ ...await usage(), codex: { remaining: 1, windows: [], at: new Date().toISOString() } }),
+    usage: async () => ({ ...await usage(), codex: { remaining: 0, windows: [], at: new Date().toISOString() } }),
     adapter: provider => {
       assert.equal(provider, "claude");
       return { ...codex, provider, readiness: async () => ({ installed: true, ready: true, authenticated: true, loginMethod: "claudeai", models: [] }) };

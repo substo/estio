@@ -1,6 +1,7 @@
 import { StudioCommandError } from "./command-error";
 import { relatedResultSchema } from "./related-search-policy";
 import { readFramesReserve, readFramesVerify, readTranscriptChunk, readVideoResult, VIDEO_TOOL_NAMES } from "./video-transcription-policy";
+import { NATIVE_REJECTION_BACKOFF_MS, reportedSubscriptionLimit } from "./subscription-readiness";
 import { usageSpec } from "../build/contract";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const modelPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
@@ -111,7 +112,18 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
   // Route-aware companion: runs the provider/model each job carries instead of only Setup's (lib/ai/routing.ts).
   if (v.textRouteVersion === 1) result.textRouteVersion = 1;
   if (v.deviceAiRouteVersion === 1) result.deviceAiRouteVersion = 1;
-  // QuotaCell readings (remaining % and reset time per window), so the server can say when a limit resets.
+  if (v.nativeSubscriptionVersion === 1) {
+    result.nativeSubscriptionVersion = 1;
+    if (v.nativeRetryAt && typeof v.nativeRetryAt === "object") {
+      const attempts = v.nativeRetryAt as Record<string, unknown>;
+      const now = Date.now();
+      result.nativeRetryAt = Object.fromEntries(["codex", "claude"].flatMap(provider => {
+        const at = attempts[provider];
+        return typeof at === "number" && Number.isSafeInteger(at) && at > now && at <= now + NATIVE_REJECTION_BACKOFF_MS ? [[provider, at]] : [];
+      }));
+    }
+  }
+  // Optional native/legacy allowance readings, independent of readiness.
   if (v.usage && typeof v.usage === "object" && !Array.isArray(v.usage)) {
     const usage = usageSpec.safeParse(Object.fromEntries(Object.entries(v.usage as Record<string, unknown>).filter(([k]) => k === "codex" || k === "claudeAgent")));
     if (usage.success && Object.keys(usage.data).length) result.usage = usage.data;
@@ -384,8 +396,13 @@ export function deviceResearchReadiness(input: DeviceResearchInput, now = Date.n
   });
   if (!signedIn.length) return no("Codex or Claude isn't signed in with a subscription");
   const capacity = input.capabilities.capacity as Partial<Record<DeviceProvider, boolean>> | undefined;
-  const providers = signedIn.filter(p => capacity?.[p] === true);
-  if (!providers.length) return no("No current subscription allowance confirmed by QuotaCell");
+  const providers = signedIn.filter(p => capacity?.[p] === true && !reportedSubscriptionLimit(input.capabilities, p, now));
+  if (!providers.length) {
+    if (signedIn.every(p => reportedSubscriptionLimit(input.capabilities, p, now))) return no("Subscription limit reached on this Mac");
+    return no(input.capabilities.nativeSubscriptionVersion === 1
+      ? "The native subscription on this Mac is temporarily unavailable"
+      : "No current subscription allowance confirmed. Update the Studio companion to use native subscription readiness.");
+  }
   return { online, ready: true, providers, reason: null };
 }
 

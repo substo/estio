@@ -67,8 +67,8 @@ test("when no model is usable the log says exactly why", async () => {
     models: { adapter: (provider: LocalProvider): LocalTextAdapter => ({ provider, readiness: async () => { if (ready === "throws") throw new Error("probe"); return { installed: true, authenticated: ready, ready, models: [], loginMethod: provider === "codex" ? "chatgpt" : "claudeai" }; }, generate: async () => { throw new Error("unused"); } }),
       usage: usageFn as never, config: () => ({ ...defaultDeviceConfig, textProvider: "codex" as const }) } });
   const payload = { query: "k", limit: 6, mode: "plan_search_rank", source, context };
-  assert.match((await run(mk(async () => ({}), true), payload)).trace.notes!.join(" "), /capacity reading was unavailable/);
-  assert.match((await run(mk(async () => ({ codex: reading(1) }), true), payload)).trace.notes!.join(" "), /no fresh subscription capacity/);
+  assert.match((await run(mk(async () => ({}), true), payload)).trace.notes!.join(" "), /planning model did not return usable queries/);
+  assert.match((await run(mk(async () => ({ codex: reading(0) }), true), payload)).trace.notes!.join(" "), /currently limited/);
   assert.match((await run(mk(usage, false), payload)).trace.notes!.join(" "), /not ready or not signed in/);
   assert.match((await run(mk(usage, "throws"), payload)).trace.notes!.join(" "), /readiness check failed/);
 });
@@ -86,7 +86,7 @@ test("a realistically large source, context and candidate pool never crashes the
   assert.ok(result.trace.planner!.prompt.length <= 9000 && result.trace.ranker!.prompt.length <= 9000); assert.equal(result.videos[0].band, "relevant");
 });
 test("a long 'no model' reason is shortened to fit the trace instead of crashing", async () => {
-  const longReason = { enabled: () => true, browser: browser({ k: [v(ids.a, "A")] }), models: { adapter: () => { throw new Error("x"); }, usage: (async () => ({ codex: reading(1) })) as never, config: () => ({ ...defaultDeviceConfig, textProvider: "codex" as const }) } };
+  const longReason = { enabled: () => true, browser: browser({ k: [v(ids.a, "A")] }), models: { adapter: () => { throw new Error("x"); }, usage: (async () => ({ codex: reading(0) })) as never, config: () => ({ ...defaultDeviceConfig, textProvider: "codex" as const }) } };
   const result = await run(longReason, { query: "k", limit: 6, mode: "plan_search_rank", source, context });
   assert.ok(result.trace.notes!.every(n => n.length <= 200)); assert.equal(result.videos[0].band, "unranked");
 });
@@ -127,7 +127,7 @@ test("a route-aware rank uses the ordered model and only advances on a pre-gener
       } },
     }, payload, route);
   };
-  const switched = await runAttempt(new StudioProviderRejectedError("rate_limited", "limit", true));
+  const switched = await runAttempt(new StudioProviderRejectedError("rate_limited", "limit", true, undefined, "before_generation"));
   assert.deepEqual(calls.splice(0), ["claude:sonnet", "codex:gpt-5.5"]);
   assert.equal(switched.trace.ranker?.model, "gpt-5.5");
 

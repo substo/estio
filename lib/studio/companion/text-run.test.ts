@@ -45,12 +45,12 @@ test("selected CLI receives exact schema, bounded evidence, model and no tools, 
  const bad = handler(() => adapter(async request => request.validate({ findings: [{ ...extraction.findings[0], quote: "invented quote" }] })));
  await assert.rejects(bad(job, context), /Automatic replay stopped/);
 });
-test("config changes, invalid payloads, missing capacity, API login and unsupported versions stop before execution", async () => {
+test("config changes, invalid payloads, confirmed limits, API login and unsupported versions stop before execution", async () => {
  let calls = 0; const get = () => adapter(async () => { calls++; throw Error(); });
  for (const patch of [{ provider: "gemini" }, { configVersion: 1 }, { model: "bad model" }, { promptVersion: "old" }, { workflow: "image_generation" }])
   await assert.rejects(handler(get)({ ...job, payload: { ...job.payload, ...patch } }, context));
  await assert.rejects(handler(get, { config: () => ({ ...config, features: { text: false, transcription: false } }) })(job, context), /settings changed/);
- await assert.rejects(handler(get, { usage: async () => ({}) })(job, context), (e: Error & { code?: string; retryable?: boolean }) => e.code === "subscription_capacity" && e.retryable === true);
+ await assert.rejects(handler(get, { usage: async () => ({ codex: { remaining: 0, windows: [], at: new Date().toISOString() } }) })(job, context), (e: Error & { code?: string; retryable?: boolean }) => e.code === "subscription_capacity" && e.retryable === true);
  await assert.rejects(handler(() => ({ ...get(), readiness: async () => ({ installed: true, authenticated: true, ready: true, loginMethod: "api_key", models: [] }) }))(job, context));
  assert.equal(calls, 0);
 });
@@ -63,10 +63,10 @@ test("route-aware: runs the provider/model the server admitted, not Setup's, and
  assert.deepEqual(await handler(() => adapter(async request => { assert.equal(request.model, undefined); return request.validate(extraction); }))(nativeDefault, context),
   { output: extraction, provider: "codex", model: "native-default" });
 });
-test("a limit before generation (no capacity, or a completed rate-limit rejection) is a capacity wait the server re-routes; nothing else is", async () => {
+test("a limit before generation (a native reading or a completed rate-limit rejection) is a capacity wait the server re-routes; nothing else is", async () => {
  const { StudioProviderRejectedError } = await import("../worker/handlers");
  const calls: string[] = [];
- const limited = handler(p => { calls.push(p); return adapter(async () => { throw new StudioProviderRejectedError("rate_limited", "limit", true); }); });
+ const limited = handler(p => { calls.push(p); return adapter(async () => { throw new StudioProviderRejectedError("rate_limited", "limit", true, undefined, "before_generation"); }); });
  await assert.rejects(limited(job, context), (e: Error & { code?: string; retryable?: boolean }) => e.code === "subscription_capacity" && e.retryable === true);
  // The Mac never runs the other provider itself: the result must match the admitted step.
  assert.deepEqual(calls, ["codex"]);
@@ -94,7 +94,7 @@ test("actual native CLI outbound input contains the bundled capability contract 
   input = request.input!;assert.ok(request.args.includes("--ignore-rules"));assert.ok(request.args.includes('web_search="disabled"'));
   return { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(extraction) } }) + '\n' + JSON.stringify({ type: "turn.completed" }), stderr: "" };
  });
- await handler(() => native)(job, context);
+ await handler(() => native, { usage: async () => ({}) })(job, context);
  assert.ok(input.includes(AI_WORKFLOW_CONTRACT_VERSION));assert.match(input, /Subscriptions do not unlock audio, realtime, vision/);assert.match(input, /never replayed on another step/);assert.match(input, /only the requesting person.s own paired Mac/);
  assert.match(input, /onboarding typed answers require a server connection/);
  assert.ok(!input.includes("api_key_secret"));

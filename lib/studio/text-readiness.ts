@@ -1,3 +1,4 @@
+import { nativeAllowance } from "./subscription-readiness";
 import type { StudioDeviceConfig } from "./devices-policy";
 import { deviceResearchReadiness, type DeviceResearchInput } from "./devices-policy";
 export type TextDeviceInput = DeviceResearchInput & { config: StudioDeviceConfig; configVersion: number; appliedVersion: number; configStatus: string };
@@ -12,8 +13,7 @@ export function deviceTextReadiness(input: TextDeviceInput, now = Date.now()) {
   if (!provider) return no("Choose Codex or Claude in Connected computer → Setup.");
   if (input.configVersion !== input.appliedVersion || input.configStatus !== "applied") return no("Waiting for the Mac to apply Setup.");
   const readiness = deviceResearchReadiness({ ...input, allowedKinds: [...input.allowedKinds, "studio.onboarding_research"],
-    capabilities: { ...input.capabilities, handlers: [...handlers, "studio.onboarding_research"] } }, now);
+    capabilities: { ...input.capabilities, [provider === "codex" ? "claude" : "codex"]: undefined, handlers: [...handlers, "studio.onboarding_research"] } }, now);
   if (!readiness.ready) return no(readiness.reason!);
-  if (!readiness.providers.includes(provider)) return no(`Waiting for ${provider} subscription sign-in and fresh capacity.`);
-  return { ready: true, label: `${provider === "codex" ? "Codex" : "Claude"} · ${input.config.textModel || "CLI default"}`, reason: `Ready on your Mac with ${provider}${input.config.textModel ? ` (${input.config.textModel})` : " (CLI default)"}.` };
+  return { ready: true, label: `${provider === "codex" ? "Codex" : "Claude"} · ${input.config.textModel || "CLI default"}`, reason: `Ready on your Mac with ${provider}${input.config.textModel ? ` (${input.config.textModel})` : " (CLI default)"}.${input.capabilities.nativeSubscriptionVersion === 1 && !nativeAllowance(input.capabilities.usage, provider, now) ? " Remaining allowance is unknown. The CLI checks it when the request runs." : ""}` };
 }

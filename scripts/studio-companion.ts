@@ -17,11 +17,11 @@ import { runStudioJob, runStudioWorker } from "../lib/studio/worker/runner";
 import type { StudioQueue } from "../lib/studio/worker/queue";
 import type { StudioJobHandler } from "../lib/studio/worker/handlers";
 
-import path from "node:path";
 import { createCapacityTracker } from "../lib/studio/companion/capacity";
-import { readUsage } from "../lib/build/usage";
+import { readNativeUsage } from "../lib/studio/companion/native-usage";
+import { nativeSubscriptionBlocked, nativeSubscriptionReady } from "../lib/studio/subscription-readiness";
 import { createLibrarySummaryHandler } from "../lib/studio/companion/library-summary";
-import { createOnboardingResearchHandler, subscriptionCapacity } from "../lib/studio/companion/onboarding-research";
+import { createOnboardingResearchHandler } from "../lib/studio/companion/onboarding-research";
 import { DEVICE_BLOCK_REASONS } from "../lib/studio/devices-policy";
 import { discoverVideoTools, type VideoTools } from "../lib/studio/companion/video-tools";
 import { createVideoTranscribeHandler } from "../lib/studio/companion/video-transcribe";
@@ -29,8 +29,7 @@ import { createVideoDeviceApi } from "../lib/studio/companion/video-api";
 import { fileURLToPath } from "node:url";
 import { createPlaywrightYoutubeBrowser, createYoutubeSearchHandler, findChrome, openYoutubeLogin, youtubeBrowserProfile } from "../lib/studio/companion/youtube-search";
 
-const version = "studio-companion-12";
-const quotaHelper = () => path.join(os.homedir(), "Applications/QuotaCell.app/Contents/Helpers/CodexBarCLI");
+const version = "studio-companion-13";
 const rediscoverMs = 10 * 60_000;
 const usage = "Usage: npm run start:studio-companion -- pair --origin <https origin> [--name 'My Mac'] | start [--once] | readiness | youtube-login\nRun in the background: bash scripts/studio-companion-launchagent.sh install";
 const messages: Record<string, string> = {
@@ -83,18 +82,24 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const instanceId = randomUUID();
     const workerId = `mac:${config.deviceId}:${process.pid}`;
     const settings = new DeviceSettings();
-    const tracker = createCapacityTracker(() => readUsage(quotaHelper()));
-    const usageNow = tracker.usage;
-    await usageNow();
+    const tracker = createCapacityTracker(() => readNativeUsage(undefined, controller.signal));
+    const usageNow = async () => tracker.snapshot();
+    void tracker.usage();
     let chromePath: string | null = await findChrome();
     let youtubeSignedIn: boolean | undefined;
     const gate = () => localGate({ state: settings.state, config: settings.config, power: discovery.hardware.power, freeDiskGb: discovery.hardware.freeDiskGb });
-    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, knowledgeOutlineVersion: 2, knowledgeCurationVersion: 1, stagedCreationVersion: 1, videoTemplateVersion: 1, sourceAssistVersion: 1, textRouteVersion: TEXT_ROUTE_VERSION, deviceAiRouteVersion: 1, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search"], youtubeSearch: { ready: youtubeReady(), signedIn: youtubeSignedIn, rank: researchReady() }, ...providers, ...discovery, video: videoTools.report,
-      capacity: subscriptionCapacity(tracker.snapshot()), usage: tracker.snapshot(), processingBlocked: gate().reasons.filter(reason => reason in DEVICE_BLOCK_REASONS) });
-    const researchReady = () => {
-      const capacity = subscriptionCapacity(tracker.snapshot());
-      return gate().processing && (["codex", "claude"] as const).some(p => capacity[p] && providers[p].ready);
+    const nativeRetryAt = () => ({ codex: adapters.codex.quotaRetryAt?.(), claude: adapters.claude.quotaRetryAt?.() });
+    // The existing SQL flag means this CLI is eligible to attempt work. A percentage remains optional telemetry.
+    const capacity = () => {
+      const retry = nativeRetryAt();
+      return {
+        codex: nativeSubscriptionReady("codex", providers.codex) && !nativeSubscriptionBlocked(tracker.snapshot(), "codex", retry.codex),
+        claude: nativeSubscriptionReady("claude", providers.claude) && !nativeSubscriptionBlocked(tracker.snapshot(), "claude", retry.claude),
+      };
     };
+    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, knowledgeOutlineVersion: 2, knowledgeCurationVersion: 1, stagedCreationVersion: 1, videoTemplateVersion: 1, sourceAssistVersion: 1, textRouteVersion: TEXT_ROUTE_VERSION, deviceAiRouteVersion: 1, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search"], youtubeSearch: { ready: youtubeReady(), signedIn: youtubeSignedIn, rank: researchReady() }, ...providers, ...discovery, video: videoTools.report,
+      nativeSubscriptionVersion: 1, nativeRetryAt: nativeRetryAt(), capacity: capacity(), usage: tracker.snapshot(), processingBlocked: gate().reasons.filter(reason => reason in DEVICE_BLOCK_REASONS) });
+    const researchReady = () => gate().processing && Object.values(capacity()).some(Boolean);
 
     const youtubeReady = () => (chromePath !== null || researchReady()) && gate().processing;
     const videoReady = () => settings.config.features.transcription && gate().processing && videoTools.report.ready;
@@ -171,7 +176,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const refresh = setInterval(() => { if (!refreshing && !controller.signal.aborted) {
       refreshing = true; void Promise.all([readiness(), discover(), discoverVideoTools(), findChrome()]).then(([p, d, v, c]) => { providers = p; discovery = d; videoTools = v; chromePath = c; }).catch(() => {}).finally(() => { refreshing = false; });
     } }, rediscoverMs);
-    const quick = setInterval(() => { if (!refreshing) void Promise.all([discoverPowerAndDisk().then(v => { discovery = { ...discovery, hardware: { ...discovery.hardware, ...v } }; }), usageNow()]).catch(() => {}); }, 60_000);
+    const quick = setInterval(() => { if (!refreshing) void Promise.all([discoverPowerAndDisk().then(v => { discovery = { ...discovery, hardware: { ...discovery.hardware, ...v } }; }), tracker.usage()]).catch(() => {}); }, 60_000);
     try { await runStudioWorker({ queue, handlers, workerId, release: version, report, concurrency: 1,
       // Sign-in commands ride on heartbeats, so they stay at 30s; an idle Mac claims at most once a minute.
       heartbeatMs: 30_000, idlePollMaxMs: 60_000, signal: controller.signal, log }); }

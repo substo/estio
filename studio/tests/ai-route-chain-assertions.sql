@@ -46,10 +46,11 @@ begin
   raise exception 'Teammate Mac borrowed'; exception when sqlstate 'P2020' then null; end;
  update studio.studio_devices set revoked_at=clock_timestamp() where id=mate;
 
+ -- Native companion can be eligible with no usage telemetry. The preceding legacy report still needed its capacity bit.
  -- Admin order includes the paid API: Codex → Claude → OpenAI, with a key and a monthly cap.
  insert into public.settings_documents values('LOCATION',w,'location.ai','{"aiRouting":{"version":1,"chain":[{"kind":"device_codex","model":null},{"kind":"device_claude","model":null},{"kind":"openai_key","model":null}],"taskDefaults":{}}}');
  insert into public.settings_secrets values('LOCATION',w,'location.ai','openai_api_key');
- update studio.studio_devices set report=report||'{"capacity":{"codex":true,"claude":true}}' where id=d;
+ update studio.studio_devices set report=(report-'usage')||'{"nativeSubscriptionVersion":1,"capacity":{"codex":true,"claude":true}}' where id=d;
  cmd:=jsonb_set(cmd,'{requestId}',to_jsonb(gen_random_uuid()));
  r:=studio.studio_enqueue_routed_text_run(w,'substo','route-owner','idea_review',cmd);
  select * into j from studio.studio_jobs where id=(r->>'jobId')::uuid;
