@@ -2,10 +2,13 @@
 
 ## Local worktree closeout
 
-1. **Inventory first.** Check free space with `df -h` on the build volume and list registered checkouts with `git worktree list --porcelain`. Use `du -sh` on existing task checkouts' `.next` and `node_modules` paths to find the largest candidates. Treat symlinked dependencies as links. List each candidate's path, size, and reason to keep or clean it before making changes.
+1. **Inventory first.** Run `python3 scripts/deploy-local-space.py` from the build checkout before a separate prebuild or when a test checkout finishes. The deploy script also prints this read-only inventory before acquiring its lease. It reports free space and the largest `.next` and `node_modules` directories on that volume, skips dependency symlinks, and identifies protected or unintegrated work. Use the report to find review candidates. It cannot determine whether a session is idle or inspect every ignored file.
 2. **Confirm the checkout can be retired.** Verify the task's commits are pushed and the work is present in the intended integration branch. Run `git -C <path> status --short --untracked-files=all` and inspect ignored files as well (`git -C <path> status --short --ignored`). Preserve local evidence, configuration, and any other non-regenerable files. Check that no T3 session, editor, build, dev server, deploy, or companion is using the path. Protect the shared root and canonical release checkout. If ownership, integration, or use is uncertain, keep the checkout and record why.
 3. **Reclaim only reviewed space.** Use `git worktree remove <path>` without `--force` for a confirmed clean, idle, integrated task checkout. This leaves the branch intact. If the checkout is still needed, remove only verified regenerable output such as `.next` after its processes stop. Keep artifacts needed for an active or pending release. Never follow a dependency symlink into a shared install or use broad `git clean` against a checkout.
 4. **Report and defer.** Check free space again and record what was reclaimed and what remains protected. Use `git worktree prune --dry-run --verbose` to identify metadata for directories already gone. Pruning that metadata is separate from reclaiming build space. Use manual, reviewed cleanup at closeout or when space is tight, with no automatic deletion.
+
+
+Server cleanup and Mac closeout have different lifecycles. The deploy replaces the inactive server slot and drains the prior web process after cutover. On the Mac a fresh owned build replaces its own `.next`; a verified prebuild is reused. Neither path closes feature worktrees. Review the output of completed test worktrees during task closeout, including when handing off a release or when the next build is blocked. Record the retained paths and their sizes if a session or unpublished result still needs them.
 
 ## Page consolidation
 

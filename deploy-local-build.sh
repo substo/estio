@@ -55,6 +55,11 @@ if [ ! -s Caddyfile ]; then
     exit 1
 fi
 
+# Surface other worktrees' retained build output before acquiring the production lease.
+if ! python3 scripts/deploy-local-space.py --limit 8; then
+    echo "⚠️ Local build-output inventory unavailable. Check local space and worktree closeout before building."
+fi
+
 # A single committed canonical tip and server identity are mandatory before any mutation.
 if [ "$PRISMA_SCHEMA_SYNC_MODE" != "migrate-only" ]; then
     echo "Only migrate-only is supported by the agent-owned release workflow." >&2; exit 1
