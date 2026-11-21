@@ -3,7 +3,6 @@ import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import { getEditorWebsiteConfig } from "@/lib/website/editor-config";
 import { getSubstoLocationActor } from "@/lib/locations/substo-locations";
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import db from "@/lib/db";
 import { SiteSettingsForm } from "./site-settings-form";
 import { getLocationContext } from "@/lib/auth/location-context";
@@ -11,7 +10,6 @@ import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import { overlayWebsiteLayout } from "@/lib/website/settings";
 import { listPublicSiteDomains } from "@/lib/public-site-domains/service";
-import { PublicSiteDomainManager } from "./public-site-domain-manager";
 import { getBusinessViewIfAny } from "@/lib/business-profile/service";
 import { overlayBusinessDetails } from "@/lib/business-profile/overlay";
 
@@ -27,7 +25,7 @@ export default async function SiteSettingsPage() {
         const actor = await getSubstoLocationActor();
         if (!actor || actor.role !== "ADMIN") notFound();
         const config = await getEditorWebsiteConfig(locationId);
-        return <div className="p-6 max-w-4xl space-y-6"><div><h1 className="text-2xl font-bold tracking-tight">Public Website Settings</h1><p className="text-muted-foreground">Configure how your website looks to the public.</p></div><Link href="/admin/content/website" className="underline">Website address and publishing</Link><div className="border rounded-lg p-6 bg-card"><SiteSettingsForm initialData={config} locationId={locationId} locationName={actor.locationName} locationTimeZone="" settingsVersion={0} realEstateEnabled={false} /></div></div>;
+        return <div className="p-6 max-w-4xl space-y-6"><div><h1 className="text-2xl font-bold tracking-tight">Website appearance</h1><p className="text-muted-foreground">Configure how your website looks to the public.</p></div><div className="border rounded-lg p-6 bg-card"><SiteSettingsForm initialData={config} locationId={locationId} locationName={actor.locationName} locationTimeZone="" settingsVersion={0} realEstateEnabled={false} /></div></div>;
     }
 
     // Fetch existing config + location details + new settings document
@@ -66,25 +64,11 @@ export default async function SiteSettingsPage() {
     return (
         <div className="p-6 max-w-4xl space-y-6">
             <div>
-                <h1 className="text-2xl font-bold tracking-tight">Public Website Settings</h1>
+                <h1 className="text-2xl font-bold tracking-tight">Website appearance</h1>
                 <p className="text-muted-foreground">
                     Configure how your real estate site looks to the public.
                 </p>
             </div>
-
-            <PublicSiteDomainManager
-                locationId={locationId}
-                initialDomains={publicSiteDomains.map((item) => ({
-                    id: item.id,
-                    hostname: item.hostname,
-                    role: item.role,
-                    status: item.status,
-                    verificationToken: item.verificationToken,
-                    provisioningError: item.provisioningError,
-                    verifiedAt: item.verifiedAt?.toISOString() || null,
-                    activatedAt: item.activatedAt?.toISOString() || null,
-                }))}
-            />
 
             <div className="border rounded-lg p-6 bg-card">
                 <SiteSettingsForm

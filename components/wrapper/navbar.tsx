@@ -37,7 +37,7 @@ const components: { title: string; href: string; description: string }[] = [
     },
     {
         title: "Site Settings",
-        href: "/settings/website",
+        href: "/admin/content/website/appearance",
         description: "Customize your public-facing website with your own branding.",
     },
 ];

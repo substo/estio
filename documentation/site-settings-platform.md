@@ -237,8 +237,8 @@ Core platform:
 
 Admin actions/pages (settings now routed through `SettingsService`):
 
-- `/settings/website`
-- `/settings/website/navigation`
+- `/admin/content/website/appearance`
+- `/admin/content/website/navigation`
 - `/admin/content/*` settings writes
 - `/settings/ai`
 - `/settings/integrations/old-crm`

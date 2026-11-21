@@ -47,7 +47,7 @@ export async function updateSiteSettings(
         const actor = await getSubstoLocationActor();
         if (!actor) return { message: "Brand admin access is required." };
         const result = await saveWebsiteDesign(db, actor, formData, saveBusinessDetails, saveWebsiteLayout);
-        revalidatePath("/settings/website");
+        revalidatePath("/admin/content/website/appearance");
         revalidatePath("/admin/content/website");
         return result;
     }
@@ -209,7 +209,7 @@ export async function updateSiteSettings(
 
         clearLocationMarketContextCache(locationId);
 
-        revalidatePath("/settings/website");
+        revalidatePath("/admin/content/website/appearance");
         return { message: "Settings saved successfully", version: savedDoc.version };
     } catch (error: any) {
         console.error(error);

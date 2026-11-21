@@ -137,6 +137,6 @@ test("CRM and Studio share the sidebar shell and team uses the shared settings l
   const shell = read("components/app-shell/app-shell.tsx");
   assert.match(shell, /<AppSidebar/);
   assert.match(shell, /useSidebarCollapsed\(\)/);
-  assert.match(shell, /<AdminNavigationGroups collapsed=\{collapsed\} groups=\{productConfig\.navGroups\} \/>/);
+  assert.match(shell, /<AdminNavigationGroups collapsed=\{collapsed\} groups=\{groups\} locationAdmin=\{shell\.locationAdmin\} \/>/);
   assert.equal(fs.existsSync("app/(main)/studio/_components/studio-header.tsx"), false);
 });

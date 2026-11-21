@@ -14,6 +14,7 @@ export function AppSidebar({
   logo,
   switcher,
   navigation,
+  footer,
 }: {
   collapsed: boolean
   appSurface?: boolean
@@ -21,6 +22,7 @@ export function AppSidebar({
   logo: ReactNode
   switcher: ReactNode
   navigation: ReactNode
+  footer: ReactNode
 }) {
   const ToggleIcon = collapsed ? ChevronRight : ChevronLeft
   const toggleLabel = collapsed ? "Expand sidebar" : "Collapse sidebar"
@@ -40,6 +42,7 @@ export function AppSidebar({
         <div className="flex-1 overflow-auto py-1">
           {navigation}
         </div>
+        <div className="shrink-0 border-t py-2">{footer}</div>
       </div>
       <TooltipProvider delayDuration={150}>
         <Tooltip>

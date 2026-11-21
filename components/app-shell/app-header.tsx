@@ -10,7 +10,7 @@ import { ProductSwitcher, type ProductKey } from "@/components/product-switcher"
 import { TenantHeaderSelector } from "@/components/tenant-header-selector"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { UserProfile } from "@/components/user-profile"
-import { AdminNavigationGroups } from "@/app/(main)/admin/_components/admin-navigation"
+import { AdminNavigationGroups, type AdminNavGroup } from "@/app/(main)/admin/_components/admin-navigation"
 import { QuickAssistStartButton } from "@/app/(main)/admin/viewings/sessions/_components/quick-assist-start-button"
 import { appIdentity } from "@/lib/branding/app-identity"
 import { VIEWING_SESSION_KINDS, VIEWING_SESSION_MODES } from "@/lib/viewings/sessions/types"
@@ -32,9 +32,15 @@ export function AppHeader({
   platformLoginLocations,
   canViewAiUsage,
   productConfig,
+  groups,
+  footerGroups,
+  locationAdmin,
 }: Pick<AppShellData, "app" | "activeLocationId" | "locations" | "platformLoginLocations" | "canViewAiUsage"> & {
   product: ProductKey
   productConfig: ProductShellConfig
+  groups?: AdminNavGroup[]
+  footerGroups?: AdminNavGroup[]
+  locationAdmin?: boolean
 }) {
   // Live Assist is an Estio feature; it is offered from either product there.
   const liveAssist = app === "estio"
@@ -70,8 +76,9 @@ export function AppHeader({
               />
             ) : null}
             <ProductSwitcher active={product} targets={productConfig.targets} />
-            <AdminNavigationGroups variant="mobile" groups={productConfig.navGroups} />
+            <AdminNavigationGroups variant="mobile" groups={groups ?? productConfig.navGroups} locationAdmin={locationAdmin} />
           </div>
+          {footerGroups ? <div className="shrink-0 border-t p-3"><AdminNavigationGroups variant="mobile" groups={footerGroups} /></div> : null}
         </SheetContent>
       </Sheet>
       <TenantHeaderSelector app={app} product={product} activeLocationId={activeLocationId} locations={locations} platformLoginLocations={platformLoginLocations} />

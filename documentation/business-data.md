@@ -10,9 +10,9 @@ For compactness, these labels identify exact files (reader/writer labels in the 
 
 | Label | File and role |
 | --- | --- |
-| General W | `app/(main)/settings/website/actions.ts`, general site save |
-| General R | `app/(main)/settings/website/page.tsx`, settings editor; `site-settings-form.tsx` in the same directory supplies inputs |
-| Navigation W/R | `app/(main)/settings/website/navigation/actions.ts` / `page.tsx` |
+| General W | `app/(main)/admin/content/website/appearance/actions.ts`, general site save |
+| General R | `app/(main)/admin/content/website/appearance/page.tsx`, settings editor; `site-settings-form.tsx` in the same directory supplies inputs |
+| Navigation W/R | `app/(main)/admin/content/website/navigation/actions.ts` / `page.tsx` |
 | Substo W/R | `lib/substo-sites/service.ts`, `saveWebsiteSettings`, `saveWebsiteDesign` / `getPublishedWebsite`; sanitisation in `lib/substo-sites/policy.ts` |
 | Hosted R | `lib/website/config.ts` (`hostedWebsiteConfig`); substitutions in `lib/website/hosted-content.ts` |
 | Estio R | `lib/public-data.ts` (`getSiteConfig`); `app/(public-site)/[domain]/layout.tsx`, `page.tsx`, `_components/public-header.tsx`, `_components/public-footer.tsx`; `app/(public-site)/_components/public-block-renderer.tsx` |

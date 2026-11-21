@@ -1,3 +1,4 @@
+import { auth } from "@clerk/nextjs/server";
 import { Prisma } from "@prisma/client";
 import { studioDb } from "@/lib/studio/studio-db";
 import "server-only";
@@ -56,15 +57,15 @@ function safeConfigReport(value: Record<string, unknown>): StudioDeviceSummary["
 
 export async function getStudioDevices(locationId: string) {
   const access = await getStudioAccess(locationId); if (!access) return null;
-  const rows = await studioDb.rows<DeviceRow>(Prisma.sql`select id,name,platform,created_at,revoked_at,seen_at,release,started_at,allowed_kinds,report,processing_enabled,paused,desired_config,config_version,applied_config_version,config_status,config_report from studio.studio_devices t where location_id = ${access.locationId} and app = ${access.app} order by created_at desc limit 100`);
-  const active = rows.filter(row => !row.revoked_at).map(row => row.id);
+  const rows = await studioDb.rows<DeviceRow>(Prisma.sql`select id,name,platform,created_at,revoked_at,seen_at,release,started_at,allowed_kinds,report,processing_enabled,paused,desired_config,config_version,applied_config_version,config_status,config_report from studio.studio_devices t where location_id = ${access.locationId} and app = ${access.app} and revoked_at is null order by seen_at desc nulls last, created_at desc, id limit 100`);
+  const active = rows.map(row => row.id);
   const [running, commands] = active.length ? await Promise.all([
     studioDb.rows<{ device_id: string }>(Prisma.sql`select device_id from studio.studio_jobs t where location_id = ${access.locationId} and device_id = any(string_to_array(${active.join(",")}, ',')::uuid[]) and status = ${'running'} limit 100`),
     studioDb.rows<StudioDeviceCommandSummary & { device_id: string }>(Prisma.sql`select id,device_id,kind,provider,status,display,error,created_at,updated_at,finished_at from studio.studio_device_commands t where location_id = ${access.locationId} and device_id = any(string_to_array(${active.join(",")}, ',')::uuid[]) order by created_at desc limit 200`),
   ]) : [[], []];
   const busy = new Set(running.map(job => job.device_id));
   const now = Date.now();
-  return { canManage: canManageStudioAi(access), devices: rows.map((row): StudioDeviceSummary => {
+  return { canManage: canManageStudioAi(access) && !(await auth()).actor, devices: rows.map((row): StudioDeviceSummary => {
     const online = !row.revoked_at && deviceOnline(row.seen_at, row.report, now);
     const status: StudioDeviceStatus = row.revoked_at ? "revoked" : row.paused ? "paused" : !online ? "offline" : busy.has(row.id) ? "busy" : "online";
     const latest: StudioDeviceCommandSummary[] = [];

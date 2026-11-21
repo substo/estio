@@ -170,7 +170,7 @@ function ConnectionsSection({ connections, kinds, links, canManage, openAiKey, e
           <div className="shrink-0">
             {row.kind === "openai_key" ? <AiKeyManage canManage={canManage} hasKey={!!openAiKey} encryptionReady={encryptionReady} form={keyForm} />
               : row.kind === "gemini_key" && geminiKeyForm ? <AiKeyManage canManage={canManage} hasKey={status === "ready"} encryptionReady={encryptionReady} form={geminiKeyForm} />
-              : row.kind === "device_codex" || row.kind === "device_claude" ? <ManageLink href={links.computer}>{row.connection ? "Manage Mac" : "Set up your Mac"}</ManageLink>
+              : row.kind === "device_codex" || row.kind === "device_claude" ? <ManageLink href={row.connection?.deviceId ? `${links.computer}#computer-${encodeURIComponent(row.connection.deviceId)}` : links.computer}>{row.connection ? "Manage Mac" : "Set up your Mac"}</ManageLink>
               : (row.kind === "gemini_key" ? links.gemini : links.chatgpt) ? <ManageLink href={(row.kind === "gemini_key" ? links.gemini : links.chatgpt)!}>{status === "not_connected" ? "Connect" : "Manage"}</ManageLink>
               : <span className="text-xs text-muted-foreground">Managed in Estio settings</span>}
           </div>

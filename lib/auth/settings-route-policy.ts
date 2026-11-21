@@ -6,8 +6,6 @@ const SUBSTO_SETTINGS_PAGES = new Set([
   "/settings/general",
   "/settings/notifications",
   "/settings/team",
-  "/settings/website",
-  "/settings/website/navigation",
 ]);
 
 export function isSettingsPath(pathname: string): boolean {

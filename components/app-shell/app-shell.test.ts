@@ -119,7 +119,7 @@ test("CRM and Studio render the shared product shell and settings has one shared
   assert.match(read("app/(main)/admin/layout.tsx"), /<AppShell product="crm" \{\.\.\.shell\}>/);
   assert.match(read("app/(main)/studio/(tenant)/layout.tsx"), /<AppShell product="studio" \{\.\.\.shell\}/);
   assert.match(read("app/(main)/studio/select/page.tsx"), /<AppShell product="studio" \{\.\.\.shell\}>/);
-  assert.match(read("app/(main)/settings/layout.tsx"), /<SettingsNav sections=\{/);
+  assert.match(read("app/(main)/settings/layout.tsx"), /<SettingsShell shell=\{/);
   for (const page of ["team", "general", "computer"]) assert.doesNotMatch(read(`app/(main)/settings/${page}/page.tsx`), /<AppShell/);
   for (const retired of [
     "app/(main)/admin/_components/admin-shell-layout.tsx",

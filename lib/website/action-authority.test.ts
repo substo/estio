@@ -35,7 +35,7 @@ test("every shared website AI entry rejects a different brand before reading con
 
 test("shared navigation rejects foreign brand IDs and resolves the admin inside the request realm", async () => {
     let reads = 0;
-    const actions = load("app/(main)/settings/website/navigation/actions.ts", {
+    const actions = load("app/(main)/admin/content/website/navigation/actions.ts", {
         "@/lib/auth/crm-action-guard": { assertCrmActionAllowed: async () => {} },
         "@clerk/nextjs/server": { auth: async () => ({ userId: "clerk-user" }) },
         "@/lib/auth/request-realm": { getRequestAuthRealm: async () => "substo" },

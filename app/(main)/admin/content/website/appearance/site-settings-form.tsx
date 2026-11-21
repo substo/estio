@@ -770,7 +770,7 @@ export function SiteSettingsForm({
                     <div>
                         <h4 className="font-semibold text-sm">Navigation Menu</h4>
                         <p className="text-xs text-muted-foreground">
-                            Manage your site&apos;s header and footer links in the dedicated <Link href="/settings/website/navigation" className="text-indigo-600 hover:underline">Navigation Builder</Link>.
+                            Manage your site&apos;s header and footer links in the dedicated <Link href="/admin/content/website/navigation" className="text-indigo-600 hover:underline">Navigation Builder</Link>.
                         </p>
                     </div>
                 </div>

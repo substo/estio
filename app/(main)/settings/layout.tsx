@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { StudioTenantProvider } from "@/app/(main)/studio/_components/studio-tenant-context";
 import { requireSettingsContext } from "./_components/context";
 import { visibleSettingsSections } from "./_components/sections";
-import { SettingsBackLink, SettingsNav } from "./_components/settings-nav";
+import { getStudioShellData } from "@/app/(main)/studio/_components/studio-shell-data";
+import { SettingsShell } from "./_components/settings-nav";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Settings" };
@@ -12,22 +13,17 @@ export const metadata = { title: "Settings" };
 /** Settings shared by CRM and Studio: one Location, one section nav, and a way back to the product the person came from. */
 export default async function SettingsLayout({ children }: { children: ReactNode }) {
   const { app, access, tenantHost } = await requireSettingsContext();
-  return <div className="min-h-screen bg-background">
-    <header className="border-b">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-4 py-3 md:px-6">
-        <Suspense fallback={null}><SettingsBackLink fallback={app === "substo" ? "studio" : "crm"} /></Suspense>
-        {access ? <p className="text-sm text-muted-foreground">Settings for <span className="font-medium text-foreground">{access.locationName}</span></p> : null}
-      </div>
-    </header>
-    {access ? <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6 md:flex-row md:px-6">
-      <aside className="md:w-48 md:shrink-0"><SettingsNav sections={visibleSettingsSections(app, access.role, tenantHost)} /></aside>
-      <div className="min-w-0 flex-1">
-        <StudioTenantProvider locationId={access.locationId}>{children}</StudioTenantProvider>
-      </div>
-    </div> : <main className="mx-auto max-w-6xl space-y-3 px-4 py-6 md:px-6">
+  const shell = await getStudioShellData();
+  const content = access ? <StudioTenantProvider locationId={access.locationId}>{children}</StudioTenantProvider>
+    : <main className="max-w-3xl space-y-3">
       <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
       <p className="text-sm text-muted-foreground">Select a Location to view its settings.</p>
       <Button asChild><Link href={app === "substo" ? "/studio/select" : "/select-location"}>Select Location</Link></Button>
-    </main>}
-  </div>;
+    </main>;
+  if (!shell) return <div className="p-4">{content}</div>;
+  return <Suspense>
+    <SettingsShell shell={shell} tenantHost={tenantHost} sections={access ? visibleSettingsSections(app, access.role, tenantHost) : []}>
+      {content}
+    </SettingsShell>
+  </Suspense>;
 }

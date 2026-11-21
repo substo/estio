@@ -5,10 +5,9 @@ import test from "node:test";
 import ts from "typescript";
 
 /** Execute the actual actions with request/Clerk/storage ports; never contact a real service. */
-function actions(options: { app?: string; access?: any; resolution?: any } = {}) {
+function actions(options: { app?: string; resolution?: any } = {}) {
   const writes: unknown[][] = [];
   const checks: string[] = [];
-  const workspace = "11111111-1111-4111-8111-111111111111";
   const deps: Record<string, any> = {
     "server-only": {},
     "@/lib/auth/request-realm": { getRequestAuthRealm: async () => options.app ?? "substo" },
@@ -19,11 +18,7 @@ function actions(options: { app?: string; access?: any; resolution?: any } = {})
       ACTIVE_LOCATION_COOKIE: "active_location_id", ACTIVE_LOCATION_COOKIE_OPTIONS: { httpOnly: true, path: "/" },
       validateActiveLocationSelection: async (id: string) => { checks.push(id); return options.resolution ?? { status: "authorized", user: { clerkId: "substo-user" }, location: { id: "brand-b", authRealm: "substo" } }; },
     },
-    "@/lib/studio/access": { getStudioAccess: async (id: string) => { assert.equal(id, workspace); return options.access === undefined ? { brand: "substo", locationId: "brand-b" } : options.access; } },
     "@/lib/auth/host-brand": { getHostBrandConfig: () => ({}), resolveHostBrand: () => options.app ?? "substo" },
-    "@/lib/studio/supabase-service": {},
-    "@/lib/locations/location-service": { ensureLocationWorkspace: async (_deps: unknown, brand: any, clerkId: string) => { assert.equal(brand.authRealm, "substo"); assert.equal(clerkId, "substo-user"); return workspace; } },
-    "@/lib/locations/substo-locations": { substoLocationDeps: () => ({}) },
   };
   deps["./request-realm"] = deps["@/lib/auth/request-realm"];
   deps["./active-location"] = deps["@/lib/auth/active-location"];
@@ -34,27 +29,27 @@ function actions(options: { app?: string; access?: any; resolution?: any } = {})
   const source = ts.transpileModule(fs.readFileSync("app/(main)/studio/actions.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
   const exports: any = {};
   vm.runInNewContext(`(function(require, exports) {${source}\n})`)((name: string) => { assert.ok(name in deps, name); return deps[name]; }, exports);
-  return { ...exports, writes, checks, workspace };
+  return { ...exports, writes, checks };
 }
 
-test("Studio → CRM rechecks and selects the displayed workspace's brand instead of the stale active cookie", async () => {
+test("Studio → CRM rechecks and selects the displayed Location instead of the stale active cookie", async () => {
   const api = actions();
-  await assert.rejects(api.openSubstoStudioCrmAction(api.workspace), /REDIRECT:\/admin$/);
+  await assert.rejects(api.openSubstoStudioCrmAction("brand-b"), /REDIRECT:\/admin$/);
   assert.deepEqual(api.checks, ["brand-b"]);
   assert.equal(api.writes.length, 1);
   assert.equal(api.writes[0][0], "active_location_id");
   assert.equal(api.writes[0][1], "brand-b");
 });
 
-test("foreign, deleted or revoked workspace access never changes the active brand", async () => {
+test("foreign or unauthorized Location access never changes the active brand", async () => {
   for (const options of [
-    { app: "estio" }, { access: null }, { access: { brand: "estio", locationId: "estio" } },
+    { app: "estio" },
     { resolution: { status: "no_access", location: null } },
     { resolution: { status: "authorized", location: { id: "brand-b", authRealm: "estio" } } },
     { resolution: { status: "authorized", location: { id: "other", authRealm: "substo" } } },
   ]) {
     const api = actions(options);
-    await assert.rejects(api.openSubstoStudioCrmAction(api.workspace), /REDIRECT:\/studio\/select\?error=access/);
+    await assert.rejects(api.openSubstoStudioCrmAction("brand-b"), /REDIRECT:\/studio\/select\?error=access/);
     assert.equal(api.writes.length, 0);
   }
 });
@@ -89,7 +84,7 @@ test("CRM switch uses the correct realm action and brand field on desktop, colla
   const estio = () => {};
   for (const realm of ["estio", "substo"]) {
     const { productShellConfig } = productConfigModule({ "@/app/(main)/studio/actions": { openEstioStudioLocation: estio } });
-    const { targets } = productShellConfig(realm, "crm", { locationId: "brand-b", locationId: null });
+    const { targets } = productShellConfig(realm, "crm", { locationId: "brand-b", studioLocationId: null });
     assert.equal(targets.crm.href, "/admin");
     if (realm === "substo") { assert.equal(targets.studio.formAction, "/api/studio/product-switch"); assert.equal(targets.studio.fields.product, "studio"); } else assert.equal(targets.studio.action, estio);
     assert.equal(targets.studio.fields[realm === "substo" ? "brandId" : "locationId"], "brand-b");
@@ -100,7 +95,7 @@ test("CRM switch uses the correct realm action and brand field on desktop, colla
 function renderShell(app: string, product: "crm" | "studio", overrides: Record<string, unknown> = {}) {
   const ProductSwitcher = () => {};
   const AppHeader = () => {};
-  const { productShellConfig } = productConfigModule({ "@/app/(main)/studio/actions": { openEstioStudioLocation: () => {} } });
+  const { productShellConfig, settingsNavItem } = productConfigModule({ "@/app/(main)/studio/actions": { openEstioStudioLocation: () => {} } });
   const { AppShell } = uiModule("components/app-shell/app-shell.tsx", {
     "./sidebar-preference": { useSidebarCollapsed: () => [false, () => {}], SidebarPreferenceScript: () => null },
     "@/app/(main)/admin/_components/admin-layout-policy": { useResolvedAdminLayoutPolicy: () => ({ appSurface: false }), AdminLayoutPolicyProvider: "policy" },
@@ -108,7 +103,7 @@ function renderShell(app: string, product: "crm" | "studio", overrides: Record<s
     "@/lib/utils": { cn: (...args: string[]) => args.filter(Boolean).join(" ") },
     "@/components/product-switcher": { ProductSwitcher },
     "./app-header": { AppHeader },
-    "./product-config": { productShellConfig },
+    "./product-config": { productShellConfig, settingsNavItem },
   });
   const tree = AppShell({
     product, app, activeLocationId: "location-b", locations: [{ id: "location-b", name: "Tenant B" }], platformLoginLocations: null,
@@ -134,7 +129,7 @@ test("both Studio menus bind CRM to the displayed Location rather than a storage
     for (const targets of [switches[0].props.targets, headers[0].props.productConfig.targets]) {
       assert.equal(targets.crm.formAction, "/api/studio/tenant-switch");
       assert.equal(targets.crm.fields.locationId, "location-b");
-      assert.equal(targets.crm.fields.locationId, undefined);
+      assert.equal(targets.crm.fields.workspaceId, undefined);
     }
   }
 });
@@ -156,15 +151,18 @@ test("CRM and Studio headers render the same tenant-only control including platf
   assert.doesNotMatch(header, /AppLogo|AppTenantIdentity|Support access|Manage brands|Manage locations/);
 });
 
-test("Studio team management is in Settings and no independent brand management section is added", () => {
+test("CRM and Studio put one shared Settings entry in the sidebar footer", () => {
   const { studioNavGroups } = productConfigModule();
+  const groups = studioNavGroups("location-a");
+  assert.equal(groups.flatMap((group: any) => group.items).some((item: any) => item.href?.startsWith("/settings")), false);
   for (const app of ["estio", "substo"]) {
-    const groups = studioNavGroups(app, "workspace", "location-a");
-    assert.equal(groups.some((group: any) => group.label === "Brand" || group.label === "Workspace"), false);
-    const settings = groups.find((group: any) => group.label === "Settings");
-    const team = settings.items.find((item: any) => item.label === "Team"); assert.ok(team);
-    if (app === "estio") { assert.equal(team.formTarget.fields.locationId, "location-a"); assert.equal(team.formTarget.fields.product, "team"); }
-    else assert.equal(team.href, "/settings/team?from=studio");
+    for (const product of ["crm", "studio"] as const) {
+      const { headers } = renderShell(app, product);
+      const [settings] = headers[0].props.footerGroups[0].items;
+      assert.equal(headers[0].props.footerGroups[0].items.length, 1);
+      assert.equal(settings.label, "Settings");
+      assert.equal(settings.href, `/settings?from=${product}`);
+    }
   }
 });
 

@@ -81,8 +81,8 @@ export async function saveNavigation(locationId: string, type: "nav" | "footer" 
         const socialLinks = links.flatMap((link: any) => typeof link?.url === "string" && link.url.trim() && typeof link?.platform === "string" && link.platform.trim()
             ? [{ platform: link.platform.trim(), url: link.url.trim() }] : []);
         await saveBusinessDetails(locationId, { socialLinks }, actorUserId);
-        revalidatePath("/settings/website/navigation");
-        revalidatePath("/settings/website");
+        revalidatePath("/admin/content/website/navigation");
+        revalidatePath("/admin/content/website/appearance");
         return;
     }
     const { payload } = await getNavigationPayload(locationId);
@@ -95,8 +95,8 @@ export async function saveNavigation(locationId: string, type: "nav" | "footer" 
     };
 
     await saveNavigationPayload(locationId, actorUserId, nextPayload);
-    revalidatePath("/settings/website/navigation");
-    revalidatePath("/settings/website");
+    revalidatePath("/admin/content/website/navigation");
+    revalidatePath("/admin/content/website/appearance");
 }
 
 export async function getLivePages(locationId: string) {
@@ -134,7 +134,7 @@ export async function saveFooterDisclaimer(locationId: string, text: string) {
         ...payload,
         footerDisclaimer: text || null,
     });
-    revalidatePath("/settings/website/navigation");
+    revalidatePath("/admin/content/website/navigation");
 }
 
 export async function saveFooterBio(locationId: string, text: string) {
@@ -142,7 +142,7 @@ export async function saveFooterBio(locationId: string, text: string) {
     const actorUserId = await assertAdmin(locationId);
     // The footer description is the business summary (one text, in the Business profile).
     await saveBusinessDetails(locationId, { summary: text?.trim() || null }, actorUserId);
-    revalidatePath("/settings/website/navigation");
+    revalidatePath("/admin/content/website/navigation");
 }
 
 export async function saveNavigationStyle(locationId: string, style: "side" | "top") {
@@ -153,8 +153,8 @@ export async function saveNavigationStyle(locationId: string, style: "side" | "t
         ...payload,
         menuStyle: style,
     });
-    revalidatePath("/settings/website/navigation");
-    revalidatePath("/settings/website");
+    revalidatePath("/admin/content/website/navigation");
+    revalidatePath("/admin/content/website/appearance");
 }
 
 export async function savePublicListingEnabled(locationId: string, enabled: boolean) {
@@ -165,6 +165,6 @@ export async function savePublicListingEnabled(locationId: string, enabled: bool
         ...payload,
         publicListingEnabled: enabled,
     });
-    revalidatePath("/settings/website/navigation");
+    revalidatePath("/admin/content/website/navigation");
     revalidatePath("/", "layout");
 }

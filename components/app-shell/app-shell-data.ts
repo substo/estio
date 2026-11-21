@@ -34,6 +34,7 @@ export async function getAppShellData({ app, resolution, studioLocationId, imper
     lightUrl: theme?.logo?.lightUrl,
     // Same rule as getLocationAiUsageSummary: location-wide spend is for location admins.
     canViewAiUsage: Boolean(location) && canAccessAiUsageView("location", resolution.role === "ADMIN"),
+    locationAdmin: resolution.role === "ADMIN",
     studioLocationId,
   };
 }

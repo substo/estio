@@ -33,7 +33,7 @@ The main homepage (`app/(main)/page.tsx`) consists of:
 - Features dropdown menu with links to:
   - Property Management (`/admin/properties`)
   - Contact CRM (`/admin/contacts`)
-  - Site Settings (`/settings/website`)
+  - Site Settings (`/admin/content/website/appearance`)
 - Uses `ClerkLoaded` wrapper to prevent hydration mismatch
 - Implements `mounted` state pattern to avoid Radix UI random ID issues
 

@@ -2,7 +2,6 @@
 
 import { useCrmRealm } from "./crm-realm"
 import { isSubstoCrmPage } from "@/lib/auth/substo-crm-policy"
-import { isSubstoSettingsPage } from "@/lib/auth/settings-route-policy"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import type { LucideIcon } from "lucide-react"
@@ -17,7 +16,8 @@ import {
   PanelsTopLeft,
   Radar,
   Radio,
-  SlidersHorizontal,
+  Palette,
+  Rocket,
   SquareMenu,
   UsersRound,
 } from "lucide-react"
@@ -33,6 +33,7 @@ export type AdminNavItem = {
   activePath: (pathname: string) => boolean
   formTarget?: { action: string; fields: Record<string, string> }
   setupPending?: boolean
+  substoAdminOnly?: boolean
 }
 
 export type AdminNavGroup = {
@@ -110,36 +111,45 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     ],
   },
   {
-    label: "Content",
+    label: "Website",
     items: [
+      {
+        href: "/admin/content/website",
+        label: "Publishing",
+        icon: Rocket,
+        activePath: (pathname) => pathname === "/admin/content/website",
+      },
+      {
+        href: "/admin/content/home",
+        label: "Homepage",
+        icon: House,
+        activePath: (pathname) => pathname === "/admin/content/home",
+      },
       {
         href: "/admin/content/pages",
         label: "Pages",
         icon: PanelsTopLeft,
-        activePath: (pathname) => pathname.includes("/admin/content/pages"),
+        activePath: (pathname) => pathname.startsWith("/admin/content/pages"),
       },
       {
         href: "/admin/content/posts",
         label: "Blog",
         icon: Newspaper,
-        activePath: (pathname) => pathname.includes("/admin/content/posts"),
+        activePath: (pathname) => pathname.startsWith("/admin/content/posts"),
       },
-    ],
-  },
-  {
-    label: "System",
-    items: [
       {
-        href: "/settings/website/navigation?from=crm",
+        href: "/admin/content/website/navigation",
         label: "Menus",
         icon: SquareMenu,
-        activePath: (pathname) => pathname.includes("/settings/website/navigation"),
+        activePath: (pathname) => pathname === "/admin/content/website/navigation",
+        substoAdminOnly: true,
       },
       {
-        href: "/settings?from=crm",
-        label: "Settings",
-        icon: SlidersHorizontal,
-        activePath: (pathname) => pathname === "/settings" || pathname.startsWith("/settings/"),
+        href: "/admin/content/website/appearance",
+        label: "Appearance",
+        icon: Palette,
+        activePath: (pathname) => pathname === "/admin/content/website/appearance",
+        substoAdminOnly: true,
       },
     ],
   },
@@ -217,7 +227,7 @@ function AdminNavLink({ item, variant, collapsed = false }: { item: AdminNavItem
   if (variant === "mobile") {
     return (
       <SheetClose asChild>
-        <Link href={item.href} prefetch>
+        <Link href={item.href} prefetch aria-current={active ? "page" : undefined}>
           <Button variant="ghost" className="h-10 w-full justify-start font-normal">
             <AdminNavIcon icon={Icon} active={active} variant="mobile" />
             {item.label}
@@ -232,6 +242,7 @@ function AdminNavLink({ item, variant, collapsed = false }: { item: AdminNavItem
       href={item.href}
       prefetch
       aria-label={collapsed ? item.label : undefined}
+      aria-current={active ? "page" : undefined}
       className={clsx(
         "flex min-h-10 min-w-0 items-center rounded-lg text-sm font-medium text-gray-500 transition-all hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-50",
         collapsed ? "h-10 w-10 justify-center p-0" : "gap-2 px-2.5 py-2",
@@ -259,19 +270,23 @@ export function AdminNavigationGroups({
   variant = "desktop",
   collapsed = false,
   groups = ADMIN_NAV_GROUPS,
+  locationAdmin = true,
 }: {
   variant?: "desktop" | "mobile"
   collapsed?: boolean
   /** Defaults to the CRM menu; Studio passes its own groups with the same look. */
   groups?: AdminNavGroup[]
+  locationAdmin?: boolean
 }) {
   const realm = useCrmRealm()
-  const visibleGroups = realm === "substo" && groups === ADMIN_NAV_GROUPS
-    ? groups.map((group) => ({ ...group, items: group.items.map((item) => ({ ...item, setupPending: !isSubstoCrmPage(item.href) && !isSubstoSettingsPage(item.href.split("?")[0]) })) })).filter((group) => group.items.length > 0)
+  const visibleGroups = groups === ADMIN_NAV_GROUPS
+    ? groups.map((group) => ({
+      ...group,
+      items: group.items
+        .filter(item => realm !== "substo" || !item.substoAdminOnly || locationAdmin)
+        .map(item => realm === "substo" ? { ...item, setupPending: !isSubstoCrmPage(item.href) } : item),
+    }))
     : groups
-  if (realm === "substo" && groups === ADMIN_NAV_GROUPS) {
-    visibleGroups.find((group) => group.label === "Content")?.items.unshift({ href: "/admin/content/website", label: "Website", icon: PanelsTopLeft, activePath: (pathname) => pathname === "/admin/content/website" })
-  }
   const compact = variant === "desktop" && collapsed
 
   return (

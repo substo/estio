@@ -46,3 +46,14 @@ test("Estio keeps every existing live menu destination and no setup-pending labe
   for (const group of api.ADMIN_NAV_GROUPS) for (const item of group.items) assert.ok(html.includes(`href="${item.href}"`));
   assert.doesNotMatch(html, /setup pending|aria-disabled/);
 });
+
+test("Website tools share one sidebar group and Substo members do not see admin-only links", () => {
+  const api = navigation("substo");
+  const group = api.ADMIN_NAV_GROUPS.find((entry: { label: string }) => entry.label === "Website");
+  assert.deepEqual(Array.from(group.items, (item: { label: string }) => item.label), [
+    "Publishing", "Homepage", "Pages", "Blog", "Menus", "Appearance",
+  ]);
+  const member = renderToStaticMarkup(React.createElement(api.AdminNavigationGroups, { locationAdmin: false }));
+  assert.match(member, /href="\/admin\/content\/website"/);
+  assert.doesNotMatch(member, /href="\/admin\/content\/website\/(navigation|appearance)"/);
+});

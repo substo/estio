@@ -61,8 +61,9 @@ async function renderSettings({ app, role, devices, code }: Case) {
     "next/link": Link,
     "@/components/ui/button": { Button: () => null },
     "@/app/(main)/studio/_components/studio-tenant-context": { StudioTenantProvider },
+    "@/app/(main)/studio/_components/studio-shell-data": { getStudioShellData: async () => ({ app }) },
     "./_components/sections": { visibleSettingsSections },
-    "./_components/settings-nav": { SettingsBackLink: () => null, SettingsNav: () => null },
+    "./_components/settings-nav": { SettingsShell: ({ children }: { children: ReactNode }) => children },
   });
   const page = loadRoute<{ searchParams: Promise<{ code?: string }> }>(new URL("./page.tsx", import.meta.url), {
     "react/jsx-runtime": jsx,
@@ -108,18 +109,12 @@ test("Connected computer renders offline and never-seen Macs with processing con
   assert.match(html, /Paired, but the companion has never connected/);
   assert.match(html, /Turn processing on/);
   assert.match(html, /Turn processing off/);
+  assert.match(html, /id="computer-fixture-mac"/);
+  assert.equal([...html.matchAll(/>Remove Mac</g)].length, 2);
 });
 
 test("Connected computer is read-only for Location members", async () => {
   const html = await renderSettings({ app: "substo", role: "MEMBER", devices: [offline] });
   assert.match(html, /Ask a Business admin to change settings/);
-  assert.doesNotMatch(html, /Turn processing off|>Revoke<|>Save setup</);
-});
-
-test("Settings lists Website for people who can open it", () => {
-  const showsWebsite = (app: Case["app"], role: Case["role"]) =>
-    visibleSettingsSections(app, role, false).some(section => section.href === "/settings/website");
-  assert.equal(showsWebsite("substo", "MEMBER"), false);
-  assert.equal(showsWebsite("substo", "ADMIN"), true);
-  assert.equal(showsWebsite("estio", "MEMBER"), true);
+  assert.doesNotMatch(html, /Turn processing off|>Remove Mac<|>Save setup</);
 });

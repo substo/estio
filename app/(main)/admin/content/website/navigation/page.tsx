@@ -1,3 +1,5 @@
+import { notFound } from "next/navigation";
+import { getSubstoLocationActor } from "@/lib/locations/substo-locations";
 import { getLocationConfig } from "@/lib/location-config/service";
 import { getRequestAuthRealm } from "@/lib/auth/request-realm";
 import db from "@/lib/db";
@@ -19,6 +21,9 @@ export default async function NavigationSettingsPage() {
 
     if (!orgId) return null;
 
+    const realEstateEnabled = await getRequestAuthRealm() !== "substo";
+    if (!realEstateEnabled && (await getSubstoLocationActor())?.role !== "ADMIN") notFound();
+
     // Layout from the website document over the stored row (Locations without a document keep the row).
     const [config, website] = await Promise.all([
         getLocationConfig(orgId),
@@ -26,7 +31,6 @@ export default async function NavigationSettingsPage() {
     ]);
     const row = overlayWebsiteLayout({ ...(config ?? {}) } as Record<string, any>, website?.payload);
 
-    const realEstateEnabled = await getRequestAuthRealm() !== "substo";
     const livePages = await getLivePages(orgId);
     const theme = (row.theme as any) || {};
 
@@ -43,7 +47,7 @@ export default async function NavigationSettingsPage() {
     return (
         <div className="p-6 space-y-8 max-w-4xl">
             <div>
-                <h1 className="text-2xl font-bold">Navigation Settings</h1>
+                <h1 className="text-2xl font-bold">Website menus</h1>
                 <p className="text-muted-foreground">Manage the links in your public site header and footer.</p>
             </div>
 

@@ -22,7 +22,7 @@ const populated: AiClientConnection[] = [
   conn({ id: "chatgpt_subscription", kind: "chatgpt_subscription", status: "ready", label: "ChatGPT subscription", models: [{ id: "gpt-5.5", label: "GPT-5.5" }],
     remainingPercent: 60, usageResetsAt: "2026-11-20T17:00:00Z" }),
   conn({ id: "device_codex:d1", kind: "device_codex", status: "limit_reached", reason: "Codex limit reached", resetsAt: "2026-11-20T18:00:00Z", remainingPercent: 0,
-    label: "Codex (ChatGPT) on Studio Mac", mine: true, models: [{ id: "gpt-5.5", label: "gpt-5.5" }], modelsSource: "reported" }),
+    label: "Codex (ChatGPT) on Studio Mac", deviceId: "d1", mine: true, models: [{ id: "gpt-5.5", label: "gpt-5.5" }], modelsSource: "reported" }),
   conn({ id: "device_claude:d2", kind: "device_claude", status: "ready", label: "Claude on Teammate Mac", mine: false, models: [{ id: "opus", label: "Opus" }] }),
 ];
 const view = (over: Partial<LocationAiRoutingView> = {}): LocationAiRoutingView => ({
@@ -75,6 +75,7 @@ test("populated admin view shows all four sections, statuses, paid marks and the
   assert.match(html, /aria-label="Move Codex up"[^>]*disabled/);
   assert.match(html, /Alt \+ Up or Down arrow/);
   assert.match(html, /href="\/settings\/computer"/);
+  assert.match(html, /href="\/settings\/computer#computer-d1"/);
   assert.match(html, /\$5\.00<\/span> spent/);
   assert.match(html, /60% left · resets .*17:00 UTC/);
   assert.match(html, /Save order and models/);

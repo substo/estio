@@ -195,45 +195,51 @@ function TaskChecklist({ device, canManage }: { device: StudioDeviceSummary; can
 }
 
 function DeviceCard({ device, canManage }: { device: StudioDeviceSummary; canManage: boolean }) {
-  const revoked = Boolean(device.revoked_at);
-  return <article className="space-y-4 rounded-lg border p-4">
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <h3 className="font-medium">{device.name}{device.platform ? <span className="text-muted-foreground"> · {device.platform}</span> : null}</h3>
-      <span className="rounded-full border px-2 py-0.5 text-xs">{statusLabel[device.status]}</span>
-    </div>
-    <p className="text-muted-foreground">{revoked ? `Revoked ${when(device.revoked_at!)}. Pair again to reconnect.`
-      : device.online ? `Companion running · last seen ${device.last_seen_at ? sinceText(device.last_seen_at) : "just now"}`
-      : device.last_seen_at ? `Companion not running · last seen ${sinceText(device.last_seen_at)} (${when(device.last_seen_at)})` : "Paired, but the companion has never connected"}</p>
-    {revoked ? null : <>
-      {!device.online && device.processingEnabled ? <div id={`companion-${device.id}`} role="status" className="scroll-mt-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
-        <p className="font-medium">Processing is on, but nothing will run until the Studio companion is running on this Mac.</p>
-        <p className="text-muted-foreground">On the Mac, in this app&apos;s source checkout, run <code className="rounded bg-muted px-1">{companionRunCommand}</code> once. It starts the companion now and at every login, and restarts it if it stops.</p>
-      </div> : null}
-      <TaskChecklist device={device} canManage={canManage} />
-      <div className="space-y-2">
-        <p className="font-medium">Use this computer for processing?</p>
-        <p className="text-muted-foreground">When On, this Mac may run Business research (onboarding) and Library summaries on its own Codex or Claude subscription while the companion is running. Library summaries also need Text work in Setup and use only Mac subscriptions. Onboarding can use other eligible connections in the Location AI order. Off by default. Mac checks work either way.</p>
-        <p>Processing: <span className="font-medium">{device.processingEnabled ? "On" : "Off"}</span>{device.paused ? " · Paused (nothing will be picked up, including checks)" : ""}</p>
-        {canManage ? <div className="flex flex-wrap gap-2">
-          <ActionButton label={device.processingEnabled ? "Turn processing off" : "Turn processing on"} pendingLabel="Saving…" className={device.processingEnabled ? buttonClass : primaryButtonClass} command={{ action: "set_processing", deviceId: device.id, enabled: !device.processingEnabled }}
-            confirm={device.processingEnabled ? undefined : `Use ${device.name} to process this Business's work?`} />
-          <ActionButton label={device.paused ? "Resume" : "Pause"} pendingLabel="Saving…" command={{ action: "set_paused", deviceId: device.id, paused: !device.paused }} />
-          <ActionButton label="Revoke" pendingLabel="Revoking…" className={`${buttonClass} text-destructive`} command={{ action: "revoke", deviceId: device.id }}
-            confirm={`Revoke ${device.name}? It will stop working until you pair it again.`} />
-        </div> : null}
+  const id = `computer-${device.id}`;
+  const identity = `${device.name} · paired ${when(device.created_at)} · ${device.id.slice(-8)}`;
+  return <article id={id} aria-labelledby={`${id}-name`} className="scroll-mt-4 space-y-4 rounded-lg border p-4 target:ring-2 target:ring-primary">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 id={`${id}-name`} className="break-words font-medium">{device.name}</h3>
+          <span className="rounded-full border px-2 py-0.5 text-xs">{statusLabel[device.status]}</span>
+        </div>
+        <p className="text-xs text-muted-foreground">Paired {when(device.created_at)} · ID {device.id.slice(-8)}</p>
       </div>
+      {canManage ? <ActionButton label="Remove Mac" pendingLabel="Removing…" className={`${buttonClass} text-destructive`}
+        command={{ action: "revoke", deviceId: device.id }}
+        confirm={`Remove ${identity}? This disconnects this pairing. The Mac must be paired again to reconnect.`} /> : null}
+    </div>
+    <p className="text-muted-foreground">{device.online
+      ? `Companion running · last seen ${device.last_seen_at ? sinceText(device.last_seen_at) : "just now"}`
+      : device.last_seen_at
+        ? `Companion not running · last seen ${sinceText(device.last_seen_at)} (${when(device.last_seen_at)})`
+        : "Paired, but the companion has never connected"}</p>
+    <p>Processing: <span className="font-medium">{device.processingEnabled ? "On" : "Off"}</span>{device.paused ? " · Paused" : ""}</p>
+    {!device.online && device.processingEnabled ? <div id={`companion-${device.id}`} role="status" className="scroll-mt-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
+      <p className="font-medium">Processing is on, but nothing will run until the Studio companion is running on this Mac.</p>
+      <p className="text-muted-foreground">On the Mac, in this app&apos;s source checkout, run <code className="rounded bg-muted px-1">{companionRunCommand}</code>.</p>
+    </div> : null}
+    <details className="space-y-3 rounded-lg border p-3">
+      <summary className="cursor-pointer font-medium">Setup and checks</summary>
+      <TaskChecklist device={device} canManage={canManage} />
+      {canManage ? <div className="flex flex-wrap gap-2">
+        <ActionButton label={device.processingEnabled ? "Turn processing off" : "Turn processing on"} pendingLabel="Saving…" className={device.processingEnabled ? buttonClass : primaryButtonClass}
+          command={{ action: "set_processing", deviceId: device.id, enabled: !device.processingEnabled }}
+          confirm={device.processingEnabled ? undefined : `Use ${device.name} to process this Business's work?`} />
+        <ActionButton label={device.paused ? "Resume" : "Pause"} pendingLabel="Saving…" command={{ action: "set_paused", deviceId: device.id, paused: !device.paused }} />
+      </div> : null}
       <div id={`providers-${device.id}`} className="scroll-mt-4 space-y-2">
         <h4 className="font-medium">Codex and Claude</h4>
-        <p className="text-muted-foreground">Uses the CLI sign-in already on this Mac. Connect runs the CLI&apos;s own sign-in on the Mac; your credentials stay there.</p>
+        <p className="text-muted-foreground">The CLI sign-in runs on this Mac and keeps credentials there.</p>
         {(["codex", "claude"] as const).map(provider => <ProviderConnection key={provider} device={device} provider={provider} canManage={canManage} />)}
       </div>
       <div id={`setup-${device.id}`} className="scroll-mt-4"><DeviceSetupForm device={device} canManage={canManage} /></div>
-      <details id={`diagnostics-${device.id}`} open={computerTasks(device).some(task => !task.ready && task.fix !== null && /tools|Chrome|Update/.test(task.fix))} className="scroll-mt-4 space-y-3 rounded-lg border p-3">
-        <summary className="cursor-pointer font-medium">Details and checks</summary>
-        <div className="mt-3 space-y-4"><Capabilities device={device} /><Hardware device={device} />
-          {canManage ? <div className="space-y-4"><DeviceCheck device={device} /><DeviceCheck device={device} cli /></div> : null}</div>
-      </details>
-    </>}
+      <div id={`diagnostics-${device.id}`} className="scroll-mt-4 space-y-3">
+        <Capabilities device={device} /><Hardware device={device} />
+        {canManage ? <div className="space-y-4"><DeviceCheck device={device} /><DeviceCheck device={device} cli /></div> : null}
+      </div>
+    </details>
   </article>;
 }
 

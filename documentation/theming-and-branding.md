@@ -68,7 +68,7 @@ The text appearing below the logo in the footer is customizable via **Admin > Si
 
 All logos are hosted on **Cloudflare Images** for performance and optimization.
 
-*   **Upload Process**: When a user uploads a logo via the Admin Panel (`/settings/website`), the file is sent directly to Cloudflare via the API.
+*   **Upload Process**: When a user uploads a logo via the Admin Panel (`/admin/content/website/appearance`), the file is sent directly to Cloudflare via the API.
 *   **Storage**: We store the optimized Cloudflare URL (e.g., `https://imagedelivery.net/.../public`) in the database.
 *   **Transparency**: Cloudflare preserves PNG transparency, which is critical for the header overlay effects.
 

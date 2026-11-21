@@ -3,14 +3,12 @@ import {
   CalendarClock,
   Clapperboard,
   Compass,
-  Laptop,
   LayoutDashboard,
   Library,
   ListChecks,
   PlugZap,
   Settings,
   Sparkles,
-  UsersRound,
 } from "lucide-react"
 import type { ProductKey, ProductTarget } from "@/components/product-switcher"
 import type { AdminNavGroup } from "@/app/(main)/admin/_components/admin-navigation"
@@ -26,7 +24,7 @@ export type ProductShellConfig = {
 }
 
 /** Sidebar menu for Studio, in the same groups and style as the CRM menu. */
-export function studioNavGroups(app: ShellApp, studioLocationId: string | null, locationId: string | null = null): AdminNavGroup[] {
+export function studioNavGroups(studioLocationId: string | null): AdminNavGroup[] {
   const base = studioLocationId ? `/studio` : null
   const groups: AdminNavGroup[] = []
   if (base) {
@@ -43,22 +41,13 @@ export function studioNavGroups(app: ShellApp, studioLocationId: string | null, 
       ],
     })
   }
-  const settings: AdminNavGroup["items"] = []
-  if (base) settings.push(
-    { href: "/settings?from=studio", label: "Settings", icon: Settings, activePath: (pathname) => pathname === "/settings" || pathname === "/settings/general" },
-    { href: "/settings/ai?from=studio", label: "AI settings", icon: Sparkles, activePath: (pathname) => pathname.startsWith("/settings/ai") },
-    { href: "/settings/computer?from=studio", label: "Connected computer", icon: Laptop, activePath: (pathname) => pathname === "/settings/computer" },
-  )
-  settings.push({ href: "/account/connections", label: "My connections", icon: PlugZap, activePath: (pathname) => pathname.startsWith("/account/connections") })
-  if (app === "substo" && locationId) {
-    settings.push(
-      { href: "/settings/team?from=studio", label: "Team", icon: UsersRound, activePath: (pathname) => pathname === "/settings/team" },
-    )
-  } else if (app === "estio" && locationId) {
-    settings.push({ href: "/settings/team?from=studio", label: "Team", icon: UsersRound, activePath: (pathname) => pathname === "/settings/team", formTarget: { action: "/api/studio/tenant-switch", fields: { product: "team", locationId } } })
-  }
-  groups.push({ label: "Settings", items: settings })
+  groups.push({ items: [{ href: "/account/connections", label: "My connections", icon: PlugZap, activePath: (pathname) => pathname.startsWith("/account/connections") }] })
   return groups
+}
+
+export function settingsNavItem(product: ProductKey) {
+  return { href: `/settings?from=${product}`, label: "Settings", icon: Settings,
+    activePath: (pathname: string) => pathname === "/settings" || pathname.startsWith("/settings/") }
 }
 
 /**
@@ -84,7 +73,7 @@ export function productShellConfig(
   }
   return {
     homeHref: studioLocationId ? "/studio" : "/studio/select?choose=1",
-    navGroups: studioNavGroups(app, studioLocationId, locationId),
+    navGroups: studioNavGroups(studioLocationId),
     targets: {
       crm: locationId ? { formAction: "/api/studio/tenant-switch", fields: { product: "crm", locationId } } : { href: "/admin", document: true },
       studio: { href: "/studio" },
