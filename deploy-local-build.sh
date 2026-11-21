@@ -55,7 +55,7 @@ if [ ! -s Caddyfile ]; then
     exit 1
 fi
 
-# Surface other worktrees' retained build output before acquiring the production lease.
+# Surface retained output and recorded closeout decisions before acquiring the production lease.
 if ! python3 scripts/deploy-local-space.py --limit 8; then
     echo "⚠️ Local build-output inventory unavailable. Check local space and worktree closeout before building."
 fi

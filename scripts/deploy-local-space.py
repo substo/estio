@@ -5,30 +5,18 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
+# The deployment source check rejects new files under scripts/.
+sys.dont_write_bytecode = True
+from worktree_closeout import DEFAULT_MAC_HEADROOM, GIB, git, report_queue, worktrees
 
-GIB = 1024**3
 RELEASE_REF = "refs/remotes/origin/release/studio-go-live"
 OUTPUTS = (".next", "node_modules")
 
 
-def git(path, *args):
-    return subprocess.run(
-        ["git", "-C", str(path), *args], capture_output=True, check=False
-    )
-
-
-def worktrees(path):
-    result = git(path, "worktree", "list", "--porcelain", "-z")
-    result.check_returncode()
-    for block in result.stdout.decode(errors="surrogateescape").split("\0\0"):
-        fields = dict(line.partition(" ")[::2] for line in block.split("\0") if line)
-        if "worktree" in fields:
-            yield fields
-
-
 def output_size(path):
-    result = subprocess.run(["du", "-sk", str(path)], capture_output=True, text=True)
+    result = subprocess.run(["du", "-skx", str(path)], capture_output=True, text=True)
     if result.returncode:
         return None
     return int(result.stdout.split(maxsplit=1)[0]) * 1024
@@ -79,11 +67,14 @@ def inventory(checkout):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=12, help="maximum rows to display")
+    parser.add_argument("--min-free-bytes", type=int, default=DEFAULT_MAC_HEADROOM,
+                        help="below this advisory threshold also report recorded closeout decisions")
     args = parser.parse_args()
-    if args.limit < 1:
-        parser.error("--limit must be positive")
+    if args.limit < 1 or args.min_free_bytes < 1:
+        parser.error("--limit and --min-free-bytes must be positive")
     checkout = Path.cwd().resolve()
-    print(f"Local release volume has {shutil.disk_usage(checkout).free / GIB:.2f} GiB free", flush=True)
+    free = shutil.disk_usage(checkout).free
+    print(f"Local release volume has {free} bytes ({free / GIB:.2f} GiB) free", flush=True)
     rows, unreadable = inventory(checkout)
     print(f"Measured {sum(size for size, _, _ in rows) / GIB:.2f} GiB of local build output and dependencies "
           f"across {len(rows)} directories. Volumes with shared blocks may reclaim less.")
@@ -92,6 +83,9 @@ def main():
         print(f"{size / GIB:7.2f} GiB  {reason:37} {path}")
     if unreadable:
         print(f"Could not measure {unreadable} directories that were inaccessible or changed during the scan.")
+    if free < args.min_free_bytes:
+        print(f"Below the {args.min_free_bytes}-byte advisory threshold. Review closeout before building or acquiring a lease.")
+        report_queue(checkout)
 
 
 if __name__ == "__main__":
