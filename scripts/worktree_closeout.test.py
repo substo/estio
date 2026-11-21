@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -79,6 +80,130 @@ class WorktreeCloseoutTest(unittest.TestCase):
         (output / "server").mkdir()
         (output / "server/generated.js").write_text("generated")
         return output
+
+    def registered_cache(self):
+        self.binding = {"threadId": "cache-fixture", "worktreePath": str(self.task), "branch": "task",
+                        "status": "completed", "activeRunId": None, "pendingRequestCount": 0, "settled": False}
+        self.enterContext(patch.object(closeout, "t3_thread", return_value=self.binding))
+        self.enterContext(patch.object(closeout, "assert_no_build_or_companion"))
+        self.cli("register", self.task, "--session", "cache-fixture", "--t3")
+        output = self.build()
+        cache = output / "cache"
+        packs = cache / "webpack/client-production"
+        packs.mkdir(parents=True)
+        (packs / "index.pack").write_bytes(b"fixture pack")
+        (cache / ".rscinfo").write_text("fixture")
+        return cache
+
+    def test_cache_preview_and_apply_preserve_build_and_audit(self):
+        cache = self.registered_cache()
+        parent = cache.parent
+        artifact = {p.relative_to(parent): p.read_bytes() for p in parent.rglob("*")
+                    if p.is_file() and cache not in p.parents}
+        audit = closeout.registry(self.repo) / "cache-audit"
+        self.assertIn("Verified cache", self.cli("cache", self.task))
+        self.assertTrue(cache.is_dir())
+        self.assertFalse(audit.exists())
+        self.assertIn("cleared", self.cli("cache", self.task, "--apply"))
+        self.assertFalse(cache.exists())
+        self.assertEqual({p.relative_to(parent): p.read_bytes() for p in parent.rglob("*")
+                          if p.is_file()}, artifact)
+        report = json.loads(next(audit.glob("*.json")).read_text())
+        self.assertEqual((report["path"], report["status"]), (str(cache), "cleared"))
+        self.assertEqual(report["head"], self.git(self.task, "rev-parse", "HEAD").decode().strip())
+        self.assertIsInstance(report["free_before"], int)
+        self.assertIsInstance(report["free_after"], int)
+        self.assertIn("No Next compiler cache", self.cli("cache", self.task, "--apply"))
+
+    def test_cache_batch_stops_at_target(self):
+        cache = self.registered_cache()
+        self.assertIn("target reached", self.cli("cache", "--apply", "--target-free-bytes", 1))
+        self.assertTrue(cache.exists())
+
+    def test_deploy_space_inventory_applies_cache_only_when_requested(self):
+        cache = self.registered_cache()
+        inventory = Path(closeout.__file__).with_name("deploy-local-space.py")
+        args = [str(inventory), "--limit", "1", "--min-free-bytes", str(10**18)]
+        with patch.object(sys, "argv", args), contextlib.redirect_stdout(io.StringIO()):
+            runpy.run_path(str(inventory), run_name="__main__")
+        self.assertTrue(cache.exists())
+        with patch.object(sys, "argv", [*args, "--reclaim-cache"]), contextlib.redirect_stdout(io.StringIO()) as output:
+            runpy.run_path(str(inventory), run_name="__main__")
+        self.assertIn("Free after cache preflight:", output.getvalue())
+        self.assertFalse(cache.exists())
+
+    def test_cache_requires_verified_t3_registration(self):
+        self.cli("cache", self.task, "--apply", refused="unregistered")
+        self.register()
+        self.cli("cache", self.task, "--apply", refused="positively registered T3")
+
+    def test_cache_defers_queued_active_or_moved_t3_session(self):
+        cache = self.registered_cache()
+        for status in ("queued", "running", "waiting", "idle"):
+            with self.subTest(status=status):
+                self.binding["status"] = status
+                self.cli("cache", self.task, "--apply", refused="not in a verified completed state")
+                self.assertTrue(cache.exists())
+        self.binding.update(status="completed", pendingRequestCount=1)
+        self.cli("cache", self.task, "--apply", refused="not in a verified completed state")
+        self.binding.update(pendingRequestCount=0, worktreePath=None)
+        self.cli("cache", self.task, "--apply", refused="no longer confirms this checkout")
+
+    def test_cache_refuses_noncanonical_or_protected_work(self):
+        cache = self.registered_cache()
+        with patch.object(closeout, "CANONICAL", self.task):
+            self.cli("cache", self.task, "--apply", refused="canonical checkout is protected")
+        with patch.object(closeout, "companion_checkout", return_value=self.task):
+            self.cli("cache", self.task, "--apply", refused="companion LaunchAgent checkout is protected")
+        self.git(self.task, "commit", "--allow-empty", "-qm", "only local")
+        self.cli("cache", self.task, "--apply", refused="unpublished or outside pushed canonical ancestry")
+        self.assertTrue(cache.exists())
+
+    def test_cache_defers_unexpected_and_linked_entries(self):
+        cache = self.registered_cache()
+        extra = cache / "private-artifact.txt"
+        extra.write_text("keep")
+        self.cli("cache", self.task, "--apply", refused="unexpected Next cache entry")
+        extra.unlink()
+        extra.symlink_to(cache.parent / "BUILD_ID")
+        self.cli("cache", self.task, "--apply", refused="contains a symlink")
+        self.assertTrue(extra.is_symlink())
+        extra.unlink()
+        elsewhere = cache.with_name("kept-cache")
+        cache.rename(elsewhere)
+        cache.symlink_to(elsewhere)
+        self.cli("cache", self.task, "--apply", refused="is a symlink, mount or non-directory")
+        self.assertTrue(elsewhere.is_dir())
+
+    def test_cache_rechecks_stamps_and_in_use_state_before_removal(self):
+        cache = self.registered_cache()
+        with patch.object(closeout, "assert_idle", side_effect=closeout.Deferred("checkout open")):
+            self.cli("cache", self.task, "--apply", refused="checkout open")
+        verify = closeout.verify_cache
+        snapshots = []
+
+        def rebuild_between_checks(*args):
+            result = verify(*args)
+            if not snapshots:
+                (cache / ".rscinfo").write_text("changed during planning")
+            snapshots.append(result)
+            return result
+
+        with patch.object(closeout, "verify_cache", side_effect=rebuild_between_checks):
+            self.cli("cache", self.task, "--apply", refused="cache or pushed tip changed")
+        self.assertTrue(cache.exists())
+
+    def test_cache_process_probe_handles_build_companion_and_failed_listing(self):
+        for line, reason in (
+            (b"/opt/bin/node   node /project/node_modules/next/dist/bin/next build\n", "Next build"),
+            (os.fsencode(f"/opt/bin/node   node --import tsx {self.task}/scripts/studio-companion.ts start\n"),
+             "companion process"),
+            (b"", "process command inventory unavailable"),
+        ):
+            with self.subTest(line=line):
+                with patch.object(closeout, "run", return_value=subprocess.CompletedProcess([], 0, line, b"")):
+                    with self.assertRaisesRegex(closeout.Deferred, reason):
+                        closeout.assert_no_build_or_companion(self.task)
 
     def test_default_retirement_preserves_commits_and_is_idempotent(self):
         self.register()

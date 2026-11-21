@@ -9,7 +9,7 @@ import sys
 
 # The deployment source check rejects new files under scripts/.
 sys.dont_write_bytecode = True
-from worktree_closeout import DEFAULT_MAC_HEADROOM, GIB, git, report_queue, worktrees
+from worktree_closeout import DEFAULT_MAC_HEADROOM, GIB, cache_cleanup, git, report_queue, worktrees
 
 RELEASE_REF = "refs/remotes/origin/release/studio-go-live"
 OUTPUTS = (".next", "node_modules")
@@ -69,6 +69,8 @@ def main():
     parser.add_argument("--limit", type=int, default=12, help="maximum rows to display")
     parser.add_argument("--min-free-bytes", type=int, default=DEFAULT_MAC_HEADROOM,
                         help="below this advisory threshold also report recorded closeout decisions")
+    parser.add_argument("--reclaim-cache", action="store_true",
+                        help="apply verified registered compiler-cache cleanup below the free-space target")
     args = parser.parse_args()
     if args.limit < 1 or args.min_free_bytes < 1:
         parser.error("--limit and --min-free-bytes must be positive")
@@ -85,6 +87,9 @@ def main():
         print(f"Could not measure {unreadable} directories that were inaccessible or changed during the scan.")
     if free < args.min_free_bytes:
         print(f"Below the {args.min_free_bytes}-byte advisory threshold. Review closeout before building or acquiring a lease.")
+        if args.reclaim_cache:
+            cache_cleanup(checkout, apply=True, target=args.min_free_bytes)
+            print(f"Free after cache preflight: {shutil.disk_usage(checkout).free} bytes")
         report_queue(checkout)
 
 

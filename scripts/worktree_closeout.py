@@ -14,6 +14,7 @@ import stat
 import subprocess
 import tempfile
 from datetime import datetime, timezone
+from uuid import uuid4
 
 GIB = 1024**3
 RELEASE_BRANCH = "refs/heads/release/studio-go-live"
@@ -141,7 +142,8 @@ def t3_thread(record):
     result = run(str(command), "thread", "show", record["session"], "--json", "--messages", "1")
     thread = json.loads(checked(result, "T3 owner state unavailable"))["thread"]
     fields = {"threadId", "branch", "worktreePath", "status", "activeRunId", "pendingRequestCount"}
-    require(fields <= thread.keys() and thread["threadId"] == record["session"], "T3 owner state incomplete")
+    require(isinstance(thread, dict) and fields <= thread.keys()
+            and thread["threadId"] == record["session"], "T3 owner state incomplete")
     return thread
 
 
@@ -199,7 +201,11 @@ def volume_entries(path, generated=False):
                             "Next output contains a symlink, shared link or special file")
                 else:
                     continue
-                yield (os.path.relpath(entry.path, path), info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+                yield os.path.relpath(entry.path, path), info
+
+
+def file_stamp(info):
+    return (info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
 def next_output(path):
@@ -215,8 +221,8 @@ def next_output(path):
     require(git(path, "check-ignore", "--", ".next/BUILD_ID").returncode == 0, ".next is not ignored by Git")
     require({item.name for item in output.iterdir()} <= NEXT_ENTRIES, ".next contains unexpected top-level entries")
     digest = hashlib.sha256()
-    for entry in volume_entries(output, generated=True):
-        digest.update(json.dumps(entry).encode() + b"\n")
+    for name, info in volume_entries(output, generated=True):
+        digest.update(json.dumps((name, file_stamp(info))).encode() + b"\n")
     manifest = json.loads((output / "required-server-files.json").read_text())
     app_dir = Path(manifest["appDir"])
     require(app_dir.is_absolute() and app_dir.resolve() == path and manifest["config"]["distDir"] == ".next",
@@ -242,10 +248,197 @@ def assert_idle(path):
     aliases = {os.fsencode(path)}
     if str(path).startswith("/private/"):
         aliases.add(os.fsencode(str(path).removeprefix("/private")))
+    if str(path).startswith(("/private/", "/Users/")):
+        aliases.add(os.fsencode("/System/Volumes/Data" + str(path)))
     for field in result.stdout.split(b"\0"):
         field = field.removeprefix(b"\n")
         require(not any(field == b"n" + name or field.startswith(b"n" + name + b"/") for name in aliases),
                 "a process has this checkout open")
+
+
+def cache_snapshot(path):
+    """Identify only the production compiler cache format made by this Next build."""
+    output = path / ".next"
+    cache = output / "cache"
+    if not os.path.lexists(output):
+        return None
+    volume = path.stat().st_dev
+    for folder in (output, cache):
+        if not os.path.lexists(folder):
+            return None
+        info = folder.lstat()
+        require(stat.S_ISDIR(info.st_mode) and info.st_dev == volume
+                and not folder.is_mount(), "Next output or cache is a symlink, mount or non-directory")
+    provenance = []
+    for marker in ("BUILD_ID", "required-server-files.json"):
+        info = (output / marker).lstat()
+        require(stat.S_ISREG(info.st_mode) and info.st_dev == volume,
+                "Next build provenance marker is not an ordinary file")
+        provenance.append(file_stamp(info))
+    manifest = json.loads((output / "required-server-files.json").read_text())
+    app_dir = Path(manifest["appDir"])
+    require(app_dir.is_absolute() and app_dir.resolve() == path and manifest["config"]["distDir"] == ".next",
+            "Next build manifest does not identify this checkout")
+    build = (output / "BUILD_ID").read_text().strip()
+    require(re.fullmatch(r"[A-Za-z0-9_-]{1,128}", build), "invalid Next build ID")
+    require(not checked(git(path, "ls-files", "-z", "--", ".next/cache"), "cannot verify cache index"),
+            "Next cache contains tracked files")
+    require(git(path, "check-ignore", "--", ".next/cache/").returncode == 0, "Next cache is not ignored by Git")
+    digest = hashlib.sha256()
+    size = 0
+    for name, info in volume_entries(cache, generated=True):
+        is_dir = stat.S_ISDIR(info.st_mode)
+        allowed = (r"webpack(?:/(?:client|server|edge-server)-production)?|"
+                   r"swc(?:/plugins(?:/[a-zA-Z0-9_.-]+)?)?") if is_dir else (
+                   r"\.(?:previewinfo|rscinfo)|webpack/(?:client|server|edge-server)-production/"
+                   r"(?:index|[0-9]+)\.pack(?:\.old)?")
+        require(re.fullmatch(allowed, name), f"unexpected Next cache entry: {name}")
+        size += info.st_blocks * 512
+        digest.update(json.dumps((name, file_stamp(info))).encode() + b"\n")
+    return {"next_id": identity(output), "id": identity(cache), "build": build,
+            "provenance": provenance, "digest": digest.hexdigest(), "allocated_bytes": size}
+
+
+def cache_owner(record, path):
+    require(record["t3"], "cache cleanup requires a positively registered T3 session")
+    thread = t3_thread(record)
+    binding = thread["worktreePath"]
+    require(isinstance(binding, str) and Path(binding).is_absolute() and Path(binding).resolve() == path
+            and thread["branch"] == record["branch"].removeprefix("refs/heads/"),
+            "T3 no longer confirms this checkout and branch")
+    require(thread["status"] == "completed" and thread["activeRunId"] is None
+            and thread["pendingRequestCount"] == 0, "T3 session is not in a verified completed state")
+
+
+def assert_no_build_or_companion(path):
+    result = run("/bin/ps", "-axww", "-o", "comm=,args=")
+    require(result.returncode == 0 and result.stdout and not result.stderr, "process command inventory unavailable")
+    output = result.stdout
+    for line in os.fsdecode(output).splitlines():
+        fields = line.split(maxsplit=1)
+        if not fields:
+            continue
+        executable, *arguments = fields
+        args = arguments[0] if arguments else ""
+        name = Path(executable).name
+        require(name != "next-server", "Next build or server process is present")
+        if name in {"node", "next", "npm", "pnpm", "yarn", "bun"}:
+            require(not re.search(r"\bnext(?:/dist/bin/next)?\s+(?:build|dev|start)\b|"
+                                  r"\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:build|dev)\b|\bnext-server\b", args),
+                    "Next build or server process is present")
+            require(not ("studio-companion.ts" in args and str(path) + "/" in args),
+                    "companion process references this checkout")
+
+
+def verify_cache(repo, path, record):
+    require(not under(repo, path), "run cache cleanup from another checkout")
+    current = checkout_identity(repo, path)
+    assert_registration(record, path, current)
+    release = pushed_release(repo)
+    require(git(repo, "merge-base", "--is-ancestor", current["head"], release).returncode == 0,
+            "checkout HEAD is unpublished or outside pushed canonical ancestry")
+    check_clean(path)
+    cache_owner(record, path)
+    snapshot = cache_snapshot(path)
+    assert_no_build_or_companion(path)
+    assert_idle(path)
+    require(checkout_identity(repo, path) == current, "checkout changed during cache verification")
+    check_clean(path)
+    return current, snapshot, release
+
+
+def clear_cache(path, current, snapshot):
+    require(shutil.rmtree.avoids_symlink_attacks, "safe directory removal is unavailable")
+    with contextlib.ExitStack() as stack:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        stack.callback(os.close, fd)
+        entry = os.fstat(fd)
+        require([entry.st_dev, entry.st_ino] == current["checkout_id"], "checkout replaced")
+        next_fd = os.open(".next", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+        stack.callback(os.close, next_fd)
+        entry = os.fstat(next_fd)
+        require([entry.st_dev, entry.st_ino] == snapshot["next_id"], "Next output replaced")
+        entry = os.stat("cache", dir_fd=next_fd, follow_symlinks=False)
+        require([entry.st_dev, entry.st_ino] == snapshot["id"], "Next cache replaced")
+        shutil.rmtree("cache", dir_fd=next_fd)
+
+
+def cache_cleanup(repo, path=None, apply=False, target=None):
+    """Plan one or more registered caches, then repeat verification at mutation."""
+    if apply and target is not None and shutil.disk_usage(repo).free >= target:
+        print(f"Cache cleanup target reached ({target} bytes).")
+        return
+    directory = registry(repo)
+    if not directory.is_dir():
+        require(path is None, "task worktree is unregistered")
+        print("No worktree closeout registrations available for cache cleanup.")
+        return
+    files = [receipt(directory, path)] if path else sorted(directory.glob("*.json"))
+    candidates = []
+    errors = (Deferred, OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError, plistlib.InvalidFileException)
+    for file in files:
+        try:
+            record = load(file)
+            candidate = Path(record["path"])
+            require(file == receipt(directory, candidate), "cache record path mismatch")
+            if not path:
+                if not os.path.lexists(candidate):
+                    continue
+                checkout = candidate.lstat()
+                require(stat.S_ISDIR(checkout.st_mode), "registered checkout is a symlink or non-directory")
+                if checkout.st_dev != repo.stat().st_dev:
+                    continue
+                output = candidate / ".next"
+                if not output.is_symlink() and not os.path.lexists(output / "cache"):
+                    continue
+            plan = verify_cache(repo, candidate, record)
+            if plan[1]:
+                candidates.append((candidate, record, plan))
+            else:
+                print(f"No Next compiler cache at {candidate}")
+        except errors as exc:
+            if path:
+                raise Deferred(str(exc)) from exc
+            print(f"Cache deferred ({file.name}): {exc}")
+    for candidate, record, plan in sorted(candidates, key=lambda item: item[2][1]["allocated_bytes"], reverse=True):
+        cache = candidate / ".next/cache"
+        print(f"Verified cache {cache} ({plan[1]['allocated_bytes']} allocated bytes)")
+        if not apply:
+            continue
+        try:
+            with locked(directory):
+                if target is not None and shutil.disk_usage(repo).free >= target:
+                    print(f"Cache cleanup target reached ({target} bytes).")
+                    break
+                require(load(receipt(directory, candidate)) == record, "cache registration changed after planning")
+                current, snapshot, release = verify_cache(repo, candidate, record)
+                require((current, snapshot, release) == plan, "checkout, cache or pushed tip changed after planning")
+                audit = directory / "cache-audit"
+                audit.mkdir(mode=0o700, exist_ok=True)
+                event = audit / f"{uuid4()}.json"
+                before = shutil.disk_usage(candidate).free
+                details = {"path": str(cache), "session": record["session"], "branch": current["branch"],
+                           "head": current["head"], "release": release, "cache": snapshot,
+                           "started_at": timestamp(), "free_before": before, "status": "started"}
+                save(event, details)
+                try:
+                    clear_cache(candidate, current, snapshot)
+                except Deferred:
+                    details["status"] = "deferred"
+                    raise
+                except OSError:
+                    details["status"] = "interrupted"
+                    raise
+                else:
+                    details["status"] = "cleared"
+                finally:
+                    after = shutil.disk_usage(candidate).free
+                    save(event, {**details, "free_after": after, "finished_at": timestamp()})
+                    print(f"{details['status']} {cache}: free before {before}, after {after} bytes (change {after - before:+d})")
+        except errors as exc:
+            if path:
+                raise Deferred(str(exc)) from exc
+            print(f"Cache deferred ({cache}): {exc}")
 
 
 def verify(repo, path, record):
@@ -309,6 +502,11 @@ def report_queue(repo):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    cache = commands.add_parser("cache", help="plan or clear only registered Next compiler caches")
+    cache.add_argument("worktree", type=Path, nargs="?")
+    cache.add_argument("--apply", action="store_true")
+    cache.add_argument("--target-free-bytes", type=int, default=DEFAULT_MAC_HEADROOM,
+                       help="stop after reaching this free-space target when selecting multiple caches")
     for name in ("register", "decide", "closeout"):
         command = commands.add_parser(name)
         command.add_argument("worktree", type=Path)
@@ -325,13 +523,17 @@ def main():
                                  help="confirm all sessions, editors, builds, deployments and artifact use have been freshly checked")
     args = parser.parse_args()
     repo = Path.cwd().resolve()
-    requested = Path(os.path.abspath(args.worktree))
+    requested = Path(os.path.abspath(args.worktree)) if args.worktree else None
     path = requested
     try:
-        path = requested.resolve()
+        path = requested.resolve() if requested else None
         require(requested == path or (str(requested).startswith(("/tmp/", "/var/"))
                                       and str(path) == "/private" + str(requested)),
                 "use the exact Git worktree path without symlink aliases")
+        if args.command == "cache":
+            require(args.target_free_bytes > 0, "cache target must be positive")
+            cache_cleanup(repo, path, args.apply, None if path else args.target_free_bytes)
+            return
         directory = registry(repo)
         file = receipt(directory, path)
         mutating = args.command != "closeout" or args.apply
@@ -405,7 +607,7 @@ def main():
             finally:
                 after = shutil.disk_usage(path.parent).free
                 print(f"Free after: {after} bytes on the same volume (change {after - before:+d} bytes)")
-    except (Deferred, OSError, ValueError, KeyError, subprocess.SubprocessError, plistlib.InvalidFileException) as exc:
+    except (Deferred, OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError, plistlib.InvalidFileException) as exc:
         parser.exit(1, f"Closeout deferred for {path}: {exc}\n")
 
 
