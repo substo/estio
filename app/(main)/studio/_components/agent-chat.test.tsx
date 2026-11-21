@@ -12,7 +12,7 @@ import type { CreationRecord } from "@/lib/studio/creation-policy";
 const record: CreationRecord = { id: "r1", version: 3, templateId: null, state: { schema: 1, brief: "", source: null, history: [],
   direction: { choice: "conversation", publisher: "", viewer: "", goal: "", angle: "", rationale: "" },
   stages: { Hook: { text: "Old hook text", approved: true, shortlist: [], previous: { text: "", approved: false } } } } };
-const base = { seq: 1, message: "Make the opener sharper", error: null, activity: [], waiting: null, route: null, inputs: { reads: [], context: ["Your message"] } } as const;
+const base: Omit<AgentTurnView, "id" | "status" | "result"> = { seq: 1, message: "Make the opener sharper", error: null, activity: [], waiting: null, route: null, inputs: { reads: [], context: ["Your message"] } };
 const done: AgentTurnView = { ...base, id: "t1", status: "done", route: "Your Mac subscription · codex", activity: ["Searched the saved source for “opening” · 2 passages"],
   inputs: { reads: [{ tool: "Searched the saved source for “opening” · 2 passages", items: ["MrBeast · characters 0–420"] }], context: ["Your message"] },
   result: { reply: "Is this promoting Substo or a customer's video?", choices: ["Promote Substo to new creators", "A customer's video"], decisions: [{ key: "style", value: "punchy", basis: "sharper" }], plan: ["Pick the publisher"],
