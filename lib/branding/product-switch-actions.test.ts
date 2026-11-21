@@ -3,6 +3,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 import test from "node:test";
 import ts from "typescript";
+import { visibleSettingsSections } from "@/app/(main)/settings/_components/sections";
 
 /** Execute the actual actions with request/Clerk/storage ports; never contact a real service. */
 function actions(options: { app?: string; resolution?: any } = {}) {
@@ -95,7 +96,7 @@ test("CRM switch uses the correct realm action and brand field on desktop, colla
 function renderShell(app: string, product: "crm" | "studio", overrides: Record<string, unknown> = {}) {
   const ProductSwitcher = () => {};
   const AppHeader = () => {};
-  const { productShellConfig, settingsNavItem } = productConfigModule({ "@/app/(main)/studio/actions": { openEstioStudioLocation: () => {} } });
+  const { productShellConfig, settingsNavGroup } = productConfigModule({ "@/app/(main)/studio/actions": { openEstioStudioLocation: () => {} } });
   const { AppShell } = uiModule("components/app-shell/app-shell.tsx", {
     "./sidebar-preference": { useSidebarCollapsed: () => [false, () => {}], SidebarPreferenceScript: () => null },
     "@/app/(main)/admin/_components/admin-layout-policy": { useResolvedAdminLayoutPolicy: () => ({ appSurface: false }), AdminLayoutPolicyProvider: "policy" },
@@ -103,7 +104,8 @@ function renderShell(app: string, product: "crm" | "studio", overrides: Record<s
     "@/lib/utils": { cn: (...args: string[]) => args.filter(Boolean).join(" ") },
     "@/components/product-switcher": { ProductSwitcher },
     "./app-header": { AppHeader },
-    "./product-config": { productShellConfig, settingsNavItem },
+    "./product-config": { productShellConfig, settingsNavGroup },
+    "@/app/(main)/settings/_components/sections": { visibleSettingsSections },
   });
   const tree = AppShell({
     product, app, activeLocationId: "location-b", locations: [{ id: "location-b", name: "Tenant B" }], platformLoginLocations: null,
@@ -158,10 +160,12 @@ test("CRM and Studio put one shared Settings entry in the sidebar footer", () =>
   for (const app of ["estio", "substo"]) {
     for (const product of ["crm", "studio"] as const) {
       const { headers } = renderShell(app, product);
-      const [settings] = headers[0].props.footerGroups[0].items;
-      assert.equal(headers[0].props.footerGroups[0].items.length, 1);
+      const [settings] = headers[0].props.footerGroups;
+      assert.equal(headers[0].props.footerGroups.length, 1);
       assert.equal(settings.label, "Settings");
-      assert.equal(settings.href, `/settings?from=${product}`);
+      assert.equal(settings.disclosure.bottom, true);
+      assert.ok(settings.items.some((item: { href: string }) => item.href === `/settings?from=${product}`));
+      assert.ok(settings.items.some((item: { href: string }) => item.href === `/account/connections?from=${product}`));
     }
   }
 });

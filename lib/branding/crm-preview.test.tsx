@@ -9,15 +9,16 @@ import clsx from "clsx";
 import ts from "typescript";
 import { isSubstoCrmPage } from "@/lib/auth/substo-crm-policy";
 
-function navigation(realm: "estio" | "substo") {
+function navigation(realm: "estio" | "substo", pathname = "/admin") {
   const passthrough = ({ children }: any) => React.createElement(React.Fragment, null, children);
   const deps: Record<string, any> = {
+    "react": React,
     "./crm-realm": { useCrmRealm: () => realm },
     "@/lib/auth/substo-crm-policy": { isSubstoCrmPage },
     "next/link": { default: ({ children, href }: any) => React.createElement("a", { href }, children) },
-    "next/navigation": { usePathname: () => "/admin" },
+    "next/navigation": { usePathname: () => pathname },
     "lucide-react": icons, "clsx": { default: clsx },
-    "@/components/ui/button": { Button: ({ children }: any) => React.createElement("button", null, children) },
+    "@/components/ui/button": { Button: ({ asChild, children }: any) => asChild ? children : React.createElement("button", null, children) },
     "@/components/ui/sheet": { SheetClose: passthrough },
     "@/components/ui/tooltip": Object.fromEntries(["Tooltip", "TooltipContent", "TooltipProvider", "TooltipTrigger"].map(name => [name, passthrough])),
   };
@@ -56,4 +57,13 @@ test("Website tools share one sidebar group and Substo members do not see admin-
   const member = renderToStaticMarkup(React.createElement(api.AdminNavigationGroups, { locationAdmin: false }));
   assert.match(member, /href="\/admin\/content\/website"/);
   assert.doesNotMatch(member, /href="\/admin\/content\/website\/(navigation|appearance)"/);
+});
+
+
+test("Website disclosure starts closed outside Website and expanded on its child routes", () => {
+  for (const [path, expanded] of [["/admin", false], ["/admin/content/posts", true]] as const) {
+    const api = navigation("estio", path);
+    const html = renderToStaticMarkup(React.createElement(api.AdminNavigationGroups));
+    assert.match(html, new RegExp(`<button[^>]*aria-expanded="${expanded}"[^>]*>[\\s\\S]*?<span[^>]*>Website</span>`));
+  }
 });

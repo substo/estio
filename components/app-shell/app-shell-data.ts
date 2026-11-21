@@ -1,6 +1,7 @@
 import "server-only";
 import { getLocationConfig } from "@/lib/location-config/service";
-import db from "@/lib/db";
+import { headers } from "next/headers";
+import { getHostBrandConfig, resolveHostBrand } from "@/lib/auth/host-brand";
 import { canAccessAiUsageView } from "@/lib/ai/usage-summary-scope";
 import { getPlatformAdminContext } from "@/lib/auth/platform-access";
 import { listPlatformLocationLoginOptions } from "@/lib/auth/platform-location-options";
@@ -35,6 +36,7 @@ export async function getAppShellData({ app, resolution, studioLocationId, imper
     // Same rule as getLocationAiUsageSummary: location-wide spend is for location admins.
     canViewAiUsage: Boolean(location) && canAccessAiUsageView("location", resolution.role === "ADMIN"),
     locationAdmin: resolution.role === "ADMIN",
+    tenantHost: resolveHostBrand((await headers()).get("host"), getHostBrandConfig()) === "tenant",
     studioLocationId,
   };
 }

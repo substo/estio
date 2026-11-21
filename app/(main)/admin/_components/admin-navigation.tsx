@@ -2,12 +2,14 @@
 
 import { useCrmRealm } from "./crm-realm"
 import { isSubstoCrmPage } from "@/lib/auth/substo-crm-policy"
+import { useId, useRef, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import type { LucideIcon } from "lucide-react"
 import {
   BriefcaseBusiness,
   Building2,
+  ChevronDown,
   House,
   Inbox,
   LayoutDashboard,
@@ -39,6 +41,7 @@ export type AdminNavItem = {
 export type AdminNavGroup = {
   label?: string
   items: AdminNavItem[]
+  disclosure?: { icon: LucideIcon; bottom?: boolean }
 }
 
 export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
@@ -112,6 +115,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   },
   {
     label: "Website",
+    disclosure: { icon: PanelsTopLeft },
     items: [
       {
         href: "/admin/content/website",
@@ -227,12 +231,12 @@ function AdminNavLink({ item, variant, collapsed = false }: { item: AdminNavItem
   if (variant === "mobile") {
     return (
       <SheetClose asChild>
-        <Link href={item.href} prefetch aria-current={active ? "page" : undefined}>
-          <Button variant="ghost" className="h-10 w-full justify-start font-normal">
+        <Button asChild variant={active ? "secondary" : "ghost"} className="min-h-11 w-full justify-start font-normal">
+          <Link href={item.href} prefetch aria-current={active ? "page" : undefined}>
             <AdminNavIcon icon={Icon} active={active} variant="mobile" />
             {item.label}
-          </Button>
-        </Link>
+          </Link>
+        </Button>
       </SheetClose>
     )
   }
@@ -266,6 +270,74 @@ function AdminNavLink({ item, variant, collapsed = false }: { item: AdminNavItem
   )
 }
 
+function NavDisclosure({ group, variant, compact }: {
+  group: AdminNavGroup & { disclosure: NonNullable<AdminNavGroup["disclosure"]> }
+  variant: "desktop" | "mobile"
+  compact: boolean
+}) {
+  const pathname = usePathname()
+  const active = group.items.some(item => item.activePath(pathname))
+  const [manual, setManual] = useState<boolean | null>(null)
+  const [hovering, setHovering] = useState(false)
+  const [childFocused, setChildFocused] = useState(false)
+  const trigger = useRef<HTMLButtonElement>(null)
+  const id = useId()
+  const open = hovering || childFocused || (manual ?? active)
+  const bottom = group.disclosure.bottom && variant === "desktop"
+
+  return (
+    <div
+      className={clsx("flex", bottom ? "flex-col-reverse" : "flex-col")}
+      onPointerEnter={event => {
+        if (variant === "desktop" && event.pointerType === "mouse") setHovering(true)
+      }}
+      onPointerLeave={() => setHovering(false)}
+      onKeyDown={event => {
+        if (event.key !== "Escape" || !open) return
+        event.stopPropagation()
+        setManual(false)
+        setHovering(false)
+        setChildFocused(false)
+        trigger.current?.focus()
+      }}
+    >
+      <button
+        type="button"
+        ref={trigger}
+        aria-expanded={open}
+        aria-controls={id}
+        title={compact ? group.label : undefined}
+        className={clsx(
+          "flex shrink-0 items-center rounded-lg text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+          compact ? "h-10 w-10 justify-center" : "min-h-11 w-full gap-2 px-2.5 text-left",
+          active && "bg-accent text-foreground"
+        )}
+        onClick={() => {
+          setHovering(false)
+          setManual(!(manual ?? active))
+        }}
+      >
+        <AdminNavIcon icon={group.disclosure.icon} active={active} variant={variant} collapsed={compact} />
+        <span className={compact ? "sr-only" : "truncate"}>{group.label}</span>
+        {!compact && <ChevronDown aria-hidden="true" className={clsx("ml-auto size-4 shrink-0", open && "rotate-180")} />}
+      </button>
+      <div
+        id={id}
+        hidden={!open}
+        className={clsx("space-y-1 py-1", !compact && "ml-3 border-l pl-2", group.disclosure.bottom && "max-h-[45dvh] overflow-y-auto")}
+        onFocus={() => setChildFocused(true)}
+        onBlur={event => {
+          if (!event.currentTarget.contains(event.relatedTarget)) setChildFocused(false)
+        }}
+      >
+        {group.items.map(item => (
+          <AdminNavLink key={item.href} item={item} variant={variant} collapsed={compact} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function AdminNavigationGroups({
   variant = "desktop",
   collapsed = false,
@@ -292,7 +364,9 @@ export function AdminNavigationGroups({
   return (
     <TooltipProvider delayDuration={150}>
       <nav className={clsx(variant === "mobile" ? "space-y-6" : compact ? "space-y-3 px-3.5 text-sm" : "space-y-4 px-3 text-sm")}>
-        {visibleGroups.map((group, index) => (
+        {visibleGroups.map((group, index) => group.disclosure ? (
+          <NavDisclosure key={group.label} group={{ ...group, disclosure: group.disclosure }} variant={variant} compact={compact} />
+        ) : (
           <div key={group.label || `primary-${index}`} className={clsx(compact ? "space-y-1.5" : "space-y-1")}>
             {group.label && (
               <h4

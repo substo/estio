@@ -1,5 +1,14 @@
 import {
+  Bell,
   BookOpenText,
+  Database,
+  Images,
+  Laptop,
+  MessagesSquare,
+  PlugZap,
+  Radar,
+  Radio,
+  UsersRound,
   CalendarClock,
   Clapperboard,
   Compass,
@@ -12,6 +21,7 @@ import {
 import type { ProductKey, ProductTarget } from "@/components/product-switcher"
 import type { AdminNavGroup } from "@/app/(main)/admin/_components/admin-navigation"
 import { openEstioStudioLocation } from "@/app/(main)/studio/actions"
+import type { SettingsSection } from "@/app/(main)/settings/_components/sections"
 import type { ShellApp } from "./types"
 
 export type ProductShellConfig = {
@@ -43,9 +53,34 @@ export function studioNavGroups(studioLocationId: string | null): AdminNavGroup[
   return groups
 }
 
-export function settingsNavItem(product: ProductKey) {
-  return { href: `/settings?from=${product}`, label: "Settings", icon: Settings,
-    activePath: (pathname: string) => pathname === "/settings" || pathname.startsWith("/settings/") }
+const settingsIcons: Record<string, typeof Settings> = {
+  "/settings": LayoutDashboard,
+  "/account/connections": PlugZap,
+  "/settings/ai": Sparkles,
+  "/settings/computer": Laptop,
+  "/settings/team": UsersRound,
+  "/settings/notifications": Bell,
+  "/settings/conversations": MessagesSquare,
+  "/settings/live-assist": Radio,
+  "/settings/integrations": PlugZap,
+  "/settings/prospecting": Radar,
+  "/settings/media": Images,
+  "/settings/location-data": Database,
+}
+
+export function settingsNavGroup(product: ProductKey, sections: SettingsSection[]): AdminNavGroup {
+  const location = sections.filter(section => section.scope !== "account")
+  const account = sections.filter(section => section.scope === "account")
+  return {
+    label: "Settings",
+    disclosure: { icon: Settings, bottom: true },
+    items: [{ href: "/settings", label: "Overview" }, ...location, ...account].map(({ href, label }) => ({
+      href: `${href}?from=${product}`,
+      label,
+      icon: settingsIcons[href] ?? Settings,
+      activePath: pathname => pathname === href || (href !== "/settings" && pathname.startsWith(`${href}/`)),
+    })),
+  }
 }
 
 /**

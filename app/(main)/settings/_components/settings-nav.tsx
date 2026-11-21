@@ -1,17 +1,12 @@
 "use client";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import {
-  ArrowLeft, Bell, Database, Images, Laptop, LayoutDashboard, MessagesSquare,
-  PlugZap, Radio, Radar, Settings, Sparkles, UsersRound, type LucideIcon,
-} from "lucide-react";
 import { AppShell } from "@/components/app-shell/app-shell";
 import type { AppShellData } from "@/components/app-shell/types";
 import type { ReactNode } from "react";
 import type { SettingsSection } from "./sections";
 
 type Product = "crm" | "studio";
-const PRODUCTS: Record<Product, { href: string; label: string }> = { crm: { href: "/admin", label: "CRM" }, studio: { href: "/studio", label: "Studio" } };
 const STORAGE_KEY = "estio.settings.from";
 const fromPath = (path: string | null): Product | null => !path ? null : /^\/admin(\/|$)/.test(path) ? "crm" : /^\/studio(\/|$)/.test(path) ? "studio" : null;
 
@@ -31,21 +26,6 @@ function useOrigin(fallback: Product): Product {
   return query === "crm" || query === "studio" ? query : product;
 }
 
-const sectionIcons: Record<string, LucideIcon> = {
-  "/settings": LayoutDashboard,
-  "/account/connections": PlugZap,
-  "/settings/ai": Sparkles,
-  "/settings/computer": Laptop,
-  "/settings/team": UsersRound,
-  "/settings/notifications": Bell,
-  "/settings/conversations": MessagesSquare,
-  "/settings/live-assist": Radio,
-  "/settings/integrations": PlugZap,
-  "/settings/prospecting": Radar,
-  "/settings/media": Images,
-  "/settings/location-data": Database,
-};
-
 export function SettingsShell({ shell, sections, tenantHost, children }: {
   shell: AppShellData;
   sections: SettingsSection[];
@@ -54,25 +34,7 @@ export function SettingsShell({ shell, sections, tenantHost, children }: {
 }) {
   const origin = useOrigin(shell.app === "substo" ? "studio" : "crm");
   const product = tenantHost ? "crm" : origin;
-  const account = sections.filter(section => section.scope === "account");
-  const location = sections.filter(section => section.scope !== "account");
-  const groups = [
-    { label: "Settings", items: [{ href: "/settings", label: "Overview" }, ...location] },
-    ...(account.length ? [{ label: "Account", items: account }] : []),
-  ];
-  const navigation = {
-    groups: groups.map(group => ({
-      label: group.label,
-      items: group.items.map(({ href, label }) => ({
-        href: `${href}?from=${product}`,
-        label,
-        icon: sectionIcons[href] ?? Settings,
-        activePath: (pathname: string) => pathname === href || (href !== "/settings" && pathname.startsWith(`${href}/`)),
-      })),
-    })),
-    footer: { href: PRODUCTS[product].href, label: `Back to ${PRODUCTS[product].label}`, icon: ArrowLeft, activePath: () => false },
-  };
-  return <AppShell product={product} {...shell} navigation={navigation}>
+  return <AppShell product={product} {...shell} settingsSections={sections}>
     <div className="min-w-0 p-4 lg:p-6">{children}</div>
   </AppShell>;
 }
