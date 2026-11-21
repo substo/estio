@@ -24,6 +24,22 @@ export const DEVICE_BLOCK_REASONS = {
   outside_working_hours: "Outside the working hours in Setup",
   low_disk_space: "Less free disk than Setup requires",
 } as const;
+/** Explain the local gate from a heartbeat without trusting device-supplied prose. */
+export function deviceProcessingBlock(capabilities: Record<string, unknown>): string | null {
+  const reasons = capabilities.processingBlocked;
+  if (!Array.isArray(reasons) || reasons.length === 0) return null;
+  if (reasons.includes("low_disk_space")) {
+    const hardware = capabilities.hardware as { freeDiskGb?: unknown } | undefined;
+    const free = hardware?.freeDiskGb;
+    return typeof free === "number" && Number.isFinite(free) && free >= 0
+      ? `Low disk space (${free.toFixed(1)} GB free). Free disk space on the Mac until it meets the minimum in Devices → Setup.`
+      : "Low disk space. Free disk space on the Mac until it meets the minimum in Devices → Setup.";
+  }
+  const first = reasons[0];
+  return typeof first === "string" && Object.hasOwn(DEVICE_BLOCK_REASONS, first)
+    ? DEVICE_BLOCK_REASONS[first as keyof typeof DEVICE_BLOCK_REASONS]
+    : "Held back by the Mac’s Setup";
+}
 export type DeviceManagementCommand =
   | { action: "approve_pairing"; userCode: string; requestId: string }
   | { action: "deny_pairing" | "lookup_pairing"; userCode: string }
@@ -353,14 +369,15 @@ export function deviceResearchReadiness(input: DeviceResearchInput, now = Date.n
   const online = !input.revoked && deviceOnline(input.seenAt, input.capabilities, now, onlineSeconds);
   const no = (reason: string): DeviceResearchReadiness => ({ online, ready: false, providers: [], reason });
   if (input.revoked) return no("Revoked");
-  if (!online) return no("The Studio companion isn't running on this Mac");
+  if (input.capabilities.draining === true) return no("The Studio companion is draining on this Mac");
+  if (!online) return no("No recent heartbeat from the Studio companion");
   if (input.paused) return no("Paused");
   if (!input.processingEnabled) return no("Processing is off");
   if (!input.allowedKinds.includes(ONBOARDING_RESEARCH_KIND)) return no("Business research isn't allowed yet: turn processing off and on again");
   const handlers = Array.isArray(input.capabilities.handlers) ? input.capabilities.handlers : [];
   if (!handlers.includes(ONBOARDING_RESEARCH_KIND)) return no("Update the Studio companion on this Mac");
-  const blocked = Array.isArray(input.capabilities.processingBlocked) ? input.capabilities.processingBlocked as (keyof typeof DEVICE_BLOCK_REASONS)[] : [];
-  if (blocked.length) return no(DEVICE_BLOCK_REASONS[blocked[0]] ?? "Held back by the Mac's Setup");
+  const blocked = deviceProcessingBlock(input.capabilities);
+  if (blocked) return no(blocked);
   const signedIn = (["codex", "claude"] as const).filter(p => {
     const r = input.capabilities[p] as { authenticated?: unknown; ready?: unknown; loginMethod?: unknown } | undefined;
     return r?.authenticated === true && r.ready === true && r.loginMethod === subscriptionLogin[p];
@@ -368,7 +385,7 @@ export function deviceResearchReadiness(input: DeviceResearchInput, now = Date.n
   if (!signedIn.length) return no("Codex or Claude isn't signed in with a subscription");
   const capacity = input.capabilities.capacity as Partial<Record<DeviceProvider, boolean>> | undefined;
   const providers = signedIn.filter(p => capacity?.[p] === true);
-  if (!providers.length) return no("No subscription capacity reading (QuotaCell), or the limits are used up");
+  if (!providers.length) return no("No current subscription allowance confirmed by QuotaCell");
   return { online, ready: true, providers, reason: null };
 }
 

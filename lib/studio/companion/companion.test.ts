@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeFile, readFile } from "node:fs/promises";
 import { appOrigin, saveConfig, loadConfig, defaultConfigDir, type CompanionConfig } from "./config";
-import { createDeviceStudioQueue, postCommandStatus, type HeartbeatState } from "./http-queue";
+import { createDeviceStudioQueue, deviceFailureDetails, postCommandStatus, type HeartbeatState } from "./http-queue";
 import { createKeychainStore, keychainService, loadCredentials, type DeviceTokenStore } from "./keychain";
 import { pairDevice } from "./pairing";
 import { parseDf, parseGpu, parseMemoryGb, parseOsVersion, parsePmset, versionOf, discoverHardware, discoverLocalModels, discoverRuntimes } from "./discovery";
@@ -416,4 +416,19 @@ test("login process runner streams only parsed display, never a shell, and times
   assert.deepEqual(displays, [{ verificationUrl: "https://auth.openai.com/codex/device", userCode: "Q7RM-4KXD" }]);
   assert.equal(await runLoginProcess({ command: process.execPath, args: ["-e", "process.exit(0)"], timeoutMs: 5000, signal: new AbortController().signal, onDisplay: () => {} }), "exited");
   assert.equal(await runLoginProcess({ command: "definitely-not-a-cli-xyz", args: [], timeoutMs: 5000, signal: new AbortController().signal, onDisplay: () => {} }), "failed");
+});
+
+test("heartbeat failure telemetry only exposes the failure class and HTTP status", async () => {
+  for (const [fetcher, expected] of [
+    [async () => new Response("private server body", { status: 403 }), { kind: "http", status: 403 }],
+    [async () => new Response("private non-JSON body"), { kind: "invalid_response" }],
+    [async () => { throw new Error("private transport error"); }, { kind: "transport" }],
+  ] as const) {
+    const queue = createDeviceStudioQueue(credentials, { fetcher });
+    await assert.rejects(queue.heartbeat("mac:test", null, new Date(0)), (error: Error) => {
+      assert.equal(error.message, "device_heartbeat_failed");
+      assert.deepEqual(deviceFailureDetails(error), expected);
+      return true;
+    });
+  }
 });

@@ -138,8 +138,8 @@ test("Devices groups online and offline Macs by connectivity, even if processing
   const html = await renderSettings({ app: "estio", role: "ADMIN", devices: [offline, waiting, online] });
   assert.match(html, /Online \(1\).*Offline \(2\)/);
   assert.match(html, /Paused/);
-  assert.match(html, /Companion not running/);
-  assert.match(html, /nothing will run until the Studio companion is running/);
+  assert.match(html, /No recent heartbeat/);
+  assert.match(html, /work waits until the Studio companion reconnects/);
   assert.match(html, /Paired, but the companion has never connected/);
   assert.match(html, /Turn processing on/);
   assert.match(html, /Turn processing off/);

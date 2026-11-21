@@ -1,12 +1,17 @@
-export type ComputerReadinessDevice = { name: string; status: "online" | "busy" | "paused" | "offline" | "revoked"; processingEnabled: boolean };
+import { deviceProcessingBlock } from "./devices-policy";
+
+export type ComputerReadinessDevice = { name: string; status: "online" | "busy" | "paused" | "offline" | "revoked"; processingEnabled: boolean; capabilities?: Record<string, unknown> };
 export type ComputerReadiness = { tone: "ready" | "attention" | "none"; label: string; detail: string; action: string };
 
 /** One plain-language line about the connected computer. Mac work is queued even when it is offline, so offline is "attention", not blocked. */
 export function summarizeComputerReadiness(devices: readonly ComputerReadinessDevice[]): ComputerReadiness {
   const active = devices.filter(device => device.status !== "revoked");
   if (!active.length) return { tone: "none", label: "No computer connected", detail: "Transcription, summaries and related-video search run on your own Mac.", action: "Connect a computer" };
-  const ready = active.find(device => (device.status === "online" || device.status === "busy") && device.processingEnabled);
-  if (ready) return { tone: "ready", label: `${ready.name} is ready`, detail: ready.status === "busy" ? "Working on a request now." : "Transcription and research can start immediately.", action: "Manage" };
+  const ready = active.find(device => (device.status === "online" || device.status === "busy") && device.processingEnabled && !deviceProcessingBlock(device.capabilities ?? {}));
+  if (ready) return { tone: "ready", label: `${ready.name} is connected`, detail: ready.status === "busy" ? "Working on a request now." : "Check Devices for readiness by task.", action: "Manage" };
+  const blocked = active.find(device => (device.status === "online" || device.status === "busy") && device.processingEnabled && deviceProcessingBlock(device.capabilities ?? {}));
+  if (blocked) return { tone: "attention", label: `${blocked.name} is connected · processing blocked`,
+    detail: deviceProcessingBlock(blocked.capabilities ?? {})!, action: "Check Devices" };
   const paused = active.find(device => device.status === "paused" || !device.processingEnabled);
   if (paused) return { tone: "attention", label: `${paused.name} is paused`, detail: "Requests wait until processing is turned on in Setup.", action: "Open Setup" };
   return { tone: "attention", label: `${active[0].name} is offline`, detail: "Requests wait and start by themselves when the companion reconnects.", action: "Check connection" };
@@ -24,9 +29,11 @@ const handles = (caps: Record<string, unknown>, kind: string) => Array.isArray(c
 /** What this computer can do for the user right now, and the single next step for each thing that cannot. */
 export function computerTasks(device: ComputerTaskInput): ComputerTask[] {
   const caps = device.capabilities;
-  const blocked = device.status === "offline" ? { detail: "The Studio companion isn't running on this Mac.", fix: "Start the companion" }
+  const localBlock = deviceProcessingBlock(caps);
+  const blocked = device.status === "offline" ? { detail: "No recent heartbeat from the Studio companion.", fix: "Start the companion" }
     : device.status === "paused" ? { detail: "This Mac is paused.", fix: "Resume" }
-    : !device.processingEnabled ? { detail: "Processing is off.", fix: "Turn processing on" } : null;
+    : !device.processingEnabled ? { detail: "Processing is off.", fix: "Turn processing on" }
+    : localBlock ? { detail: localBlock, fix: "Open Setup" } : null;
   const task = (id: ComputerTask["id"], label: string, ready: boolean, detail: string, fix: string | null, okDetail: string): ComputerTask =>
     blocked ? { id, label, ready: false, ...blocked } : { id, label, ready, detail: ready ? okDetail : detail, fix: ready ? null : fix };
   const video = record(caps.video); const search = record(caps.youtubeSearch);

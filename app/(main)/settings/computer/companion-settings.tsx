@@ -245,14 +245,14 @@ function DeviceCard({ device, canManage }: { device: StudioDeviceSummary; canMan
     <p className="text-muted-foreground">{device.online
       ? `Companion running · last seen ${device.last_seen_at ? sinceText(device.last_seen_at) : "just now"}`
       : device.last_seen_at
-        ? `Companion not running · last seen ${sinceText(device.last_seen_at)} (${when(device.last_seen_at)})`
+        ? `No recent heartbeat · last seen ${sinceText(device.last_seen_at)} (${when(device.last_seen_at)})`
         : "Paired, but the companion has never connected"}</p>
     <p>Processing: <span className="font-medium">{device.processingEnabled ? "On" : "Off"}</span>{device.paused ? " · Paused" : device.busy ? " · Busy" : ""}</p>
     <details className="space-y-3 rounded-lg border p-3">
       <summary className="cursor-pointer font-medium">Setup and checks</summary>
       {!device.online && device.processingEnabled ? <div id={`companion-${device.id}`} role="status" className="scroll-mt-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
-        <p className="font-medium">Processing is on, but nothing will run until the Studio companion is running on this Mac.</p>
-        <p className="text-muted-foreground">On the Mac, in this app&apos;s source checkout, run <code className="rounded bg-muted px-1">{companionRunCommand}</code>.</p>
+        <p className="font-medium">Processing is on, but work waits until the Studio companion reconnects.</p>
+        <p className="text-muted-foreground">If the companion is stopped, start it from this app&apos;s source checkout on the Mac: <code className="rounded bg-muted px-1">{companionRunCommand}</code>.</p>
       </div> : null}
       <TaskChecklist device={device} canManage={canManage} />
       {canManage ? <div className="flex flex-wrap gap-2">

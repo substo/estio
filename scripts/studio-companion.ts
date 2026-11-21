@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import os from "node:os";
 import { pathToFileURL } from "node:url";
 import { appOrigin } from "../lib/studio/companion/config";
-import { createDeviceStudioQueue, postCommandStatus, type ProviderCommand } from "../lib/studio/companion/http-queue";
+import { createDeviceStudioQueue, deviceFailureDetails, postCommandStatus, type ProviderCommand } from "../lib/studio/companion/http-queue";
 import { createCompanionDiagnostic } from "../lib/studio/companion/diagnostic";
 import { createLocalTextAdapter, type LocalProvider } from "../lib/studio/companion/providers";
 import { TEXT_ROUTE_VERSION, type ReportLocalRoute } from "../lib/studio/companion/route";
@@ -18,6 +18,7 @@ import type { StudioQueue } from "../lib/studio/worker/queue";
 import type { StudioJobHandler } from "../lib/studio/worker/handlers";
 
 import path from "node:path";
+import { createCapacityTracker } from "../lib/studio/companion/capacity";
 import { readUsage } from "../lib/build/usage";
 import { createLibrarySummaryHandler } from "../lib/studio/companion/library-summary";
 import { createOnboardingResearchHandler, subscriptionCapacity } from "../lib/studio/companion/onboarding-research";
@@ -28,8 +29,7 @@ import { createVideoDeviceApi } from "../lib/studio/companion/video-api";
 import { fileURLToPath } from "node:url";
 import { createPlaywrightYoutubeBrowser, createYoutubeSearchHandler, findChrome, openYoutubeLogin, youtubeBrowserProfile } from "../lib/studio/companion/youtube-search";
 
-const version = "studio-companion-11";
-const quotaMs = 5 * 60_000;
+const version = "studio-companion-12";
 const quotaHelper = () => path.join(os.homedir(), "Applications/QuotaCell.app/Contents/Helpers/CodexBarCLI");
 const rediscoverMs = 10 * 60_000;
 const usage = "Usage: npm run start:studio-companion -- pair --origin <https origin> [--name 'My Mac'] | start [--once] | readiness | youtube-login\nRun in the background: bash scripts/studio-companion-launchagent.sh install";
@@ -75,7 +75,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     if (command === "readiness") { console.log(JSON.stringify({ ...providers, ...discovery, video: videoTools.report })); return; }
     const { config, credentials, migrated } = await loadCredentials().catch(error => {
       throw error instanceof Error && error.message === "keychain_write_failed" ? error : new Error("not_paired"); });
-    const log = (event: Record<string, unknown>) => console.log(JSON.stringify(event));
+    const log = (event: Record<string, unknown>) => console.log(JSON.stringify({ at: new Date().toISOString(), ...event }));
     const reportRoute: ReportLocalRoute = (jobId, { provider, model, firstLocalStep, switchReason }) => log({
       event: "local_text_route", jobId, provider, model: model ?? "native-default", firstLocalStep, switchReason,
     });
@@ -83,17 +83,16 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const instanceId = randomUUID();
     const workerId = `mac:${config.deviceId}:${process.pid}`;
     const settings = new DeviceSettings();
-    // QuotaCell capacity readings: refreshed every 5 minutes and reported, so the server only routes research to a Mac with capacity.
-    let quotaAt = 0; let quota: Awaited<ReturnType<typeof readUsage>> = {};
-    const usageNow = async () => { if (Date.now() - quotaAt >= quotaMs) { quota = await readUsage(quotaHelper()).catch(() => ({})); quotaAt = Date.now(); } return quota; };
+    const tracker = createCapacityTracker(() => readUsage(quotaHelper()));
+    const usageNow = tracker.usage;
     await usageNow();
     let chromePath: string | null = await findChrome();
     let youtubeSignedIn: boolean | undefined;
     const gate = () => localGate({ state: settings.state, config: settings.config, power: discovery.hardware.power, freeDiskGb: discovery.hardware.freeDiskGb });
     const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, knowledgeOutlineVersion: 2, knowledgeCurationVersion: 1, stagedCreationVersion: 1, videoTemplateVersion: 1, sourceAssistVersion: 1, textRouteVersion: TEXT_ROUTE_VERSION, deviceAiRouteVersion: 1, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search"], youtubeSearch: { ready: youtubeReady(), signedIn: youtubeSignedIn, rank: researchReady() }, ...providers, ...discovery, video: videoTools.report,
-      capacity: subscriptionCapacity(quota), usage: quota, processingBlocked: gate().reasons.filter(reason => reason in DEVICE_BLOCK_REASONS) });
+      capacity: subscriptionCapacity(tracker.snapshot()), usage: tracker.snapshot(), processingBlocked: gate().reasons.filter(reason => reason in DEVICE_BLOCK_REASONS) });
     const researchReady = () => {
-      const capacity = subscriptionCapacity(quota);
+      const capacity = subscriptionCapacity(tracker.snapshot());
       return gate().processing && (["codex", "claude"] as const).some(p => capacity[p] && providers[p].ready);
     };
 
@@ -120,11 +119,18 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
         if (settings.update(state, sentAck)) { log({ event: "config_applied", version: settings.appliedVersion, status: settings.pendingAck?.status }); pulse(); }
         if (state && !once) for (const cmd of state.commands) runCommand(cmd);
       } });
+    const sendHeartbeat: StudioQueue["heartbeat"] = async (...args) => {
+      try { await inner.heartbeat(...args); }
+      catch (error) {
+        log({ event: "device_heartbeat_failure", ...deviceFailureDetails(error) });
+        throw error;
+      }
+    };
     let last: Parameters<StudioQueue["heartbeat"]> | undefined; let pulsing = false;
-    pulse = () => { if (!last || pulsing) return; pulsing = true; void inner.heartbeat(...last).catch(() => {}).finally(() => { pulsing = false; }); };
+    pulse = () => { if (!last || pulsing) return; pulsing = true; void sendHeartbeat(...last).catch(() => {}).finally(() => { pulsing = false; }); };
     let lastReasons = "";
     const queue: StudioQueue = { ...inner,
-      heartbeat: (...args) => { last = args; return inner.heartbeat(...args); },
+      heartbeat: (...args) => { last = args; return sendHeartbeat(...args); },
       claim: async (id, limit, leaseSeconds) => {
         // Local policy before claiming. Processing kinds are only requested (summaryReady/researchReady) when gate.processing allows.
         const current = gate();

@@ -32,7 +32,7 @@ test("a paid step that the admin did not put in the chain is never used; the sto
   const list = connections([mac("d1", "user_me", { codex: false, claude: false })]);
   const r = resolveAiRoute({ operation: "idea_review", settings: chain("device_codex", "device_claude"), connections: list, requester: me, budget });
   assert.equal(r.candidates.length, 0);
-  assert.equal(r.stopReason, "Codex limit reached; Claude limit reached");
+  assert.equal(r.stopReason, "Codex: no current subscription allowance confirmed on this Mac; Claude: no current subscription allowance confirmed on this Mac");
   assert.ok(!r.skipped.some(s => s.kind === "openai_key" || s.kind === "gemini_key"));
 });
 
@@ -111,4 +111,16 @@ test("connection statuses: signed out, offline, paused, no reading", () => {
   const out = connections([mac("d1", "user_me", { codex: true }, { codex: { installed: true, authenticated: true, loginMethod: "api_key" } })]);
   assert.equal(out.find(c => c.kind === "device_codex")!.status, "not_connected");
   assert.equal(connections([], { openAiKey: false }).find(c => c.kind === "openai_key")!.status, "not_connected");
+});
+
+test("source assist reports the Mac disk block, missing Claude and unsupported hosted ChatGPT separately", () => {
+  const device = mac("d1", "user_me", { codex: true }, {
+    claude: { installed: false }, processingBlocked: ["low_disk_space"], hardware: { freeDiskGb: 18.2 },
+  });
+  const result = resolveAiRoute({ operation: "source_assist", settings: chain("device_codex", "device_claude", "chatgpt_subscription"),
+    connections: connections([device]), requester: me, budget });
+  assert.deepEqual(result.candidates, []);
+  assert.match(result.stopReason!, /Codex: low disk space \(18.2 GB free\)/);
+  assert.match(result.stopReason!, /Claude isn't set up on your Mac/);
+  assert.match(result.stopReason!, /Location ChatGPT isn't supported for source assist/);
 });

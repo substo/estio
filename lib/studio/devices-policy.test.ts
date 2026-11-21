@@ -104,16 +104,16 @@ test("a Mac is research-capable only while running, opted in, allowed, signed in
       codex: { authenticated: true, ready: true, loginMethod: "chatgpt" }, claude: { authenticated: true, ready: true, loginMethod: "console" } } };
   assert.deepEqual(deviceResearchReadiness(good, now), { online: true, ready: true, providers: ["codex"], reason: null });
   const reason = (patch: Record<string, unknown>, caps: Record<string, unknown> = {}) => deviceResearchReadiness({ ...good, ...patch, capabilities: { ...good.capabilities, ...caps } }, now).reason;
-  assert.match(reason({ seenAt: "2026-11-06T11:55:00Z" })!, /companion isn't running/);
-  assert.match(reason({}, { draining: true })!, /companion isn't running/);
+  assert.match(reason({ seenAt: "2026-11-06T11:55:00Z" })!, /No recent heartbeat/);
+  assert.match(reason({}, { draining: true })!, /draining/);
   assert.equal(reason({ paused: true }), "Paused");
   assert.equal(reason({ processingEnabled: false }), "Processing is off");
   assert.match(reason({ allowedKinds: ["studio.diagnostic"] })!, /isn't allowed/);
   assert.match(reason({}, { handlers: ["studio.diagnostic"] })!, /Update the Studio companion/);
   assert.match(reason({}, { processingBlocked: ["on_battery_or_unknown_power"] })!, /battery/);
   assert.match(reason({}, { codex: { authenticated: true, ready: true, loginMethod: "api_key" } })!, /subscription/);
-  assert.match(reason({}, { capacity: { codex: false } })!, /capacity/);
-  assert.match(reason({}, { capacity: undefined })!, /capacity/);
+  assert.match(reason({}, { capacity: { codex: false } })!, /allowance/);
+  assert.match(reason({}, { capacity: undefined })!, /allowance/);
 });
 
 test("YouTube Mac search capability is whitelisted and the claim flag is boolean-only", () => {

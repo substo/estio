@@ -92,3 +92,13 @@ test("setup gaps give a specific fix", () => {
   assert.equal(tasks.related.fix, "Install Google Chrome");
   assert.equal(tasks.research.detail, "Paused");
 });
+
+test("an online and signed-in Mac cannot show ready while its disk gate blocks processing", () => {
+  const mac = device();
+  mac.capabilities.processingBlocked = ["low_disk_space"];
+  mac.capabilities.hardware = { freeDiskGb: 18.2 };
+  assert.ok(computerTasks(mac).every(task => !task.ready && task.detail.startsWith("Low disk space (18.2 GB free)")));
+  const summary = summarizeComputerReadiness([{ name: "Mac", ...mac }]);
+  assert.equal(summary.tone, "attention");
+  assert.match(summary.detail, /Low disk space/);
+});

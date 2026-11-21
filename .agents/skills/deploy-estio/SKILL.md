@@ -18,6 +18,8 @@ Before any production mutation:
 5. Run targeted tests appropriate to the changed area. The deployment script performs the production build itself; avoid a redundant full build unless the risk or recent failure justifies it.
 6. Check available space with `df -h .` from the canonical checkout before building or acquiring the lease. Allow room for dependencies, the production build, and the release artifact. If space is tight, use the read-only inventory in [local worktree closeout](../../../documentation/release-workflow.md#local-worktree-closeout) to identify reviewed cleanup candidates before proceeding.
 
+For builds on the companion Mac, apply the [shared-volume headroom and continuity checks](../../../documentation/release-workflow.md#companion-continuity-checks) before any prebuild. Record pre-build, peak and post-build free space. Capture the no-spend device readiness baseline for both editions.
+
 If the branch, commit, or dirty-tree scope is surprising, stop before mutation and obtain direction.
 
 ## Choose the schema mode
@@ -58,7 +60,8 @@ After a successful script exit, verify proportionately:
 - `https://estio.co/api/version` matches the intended release when that endpoint is available;
 - PM2 shows the expected web slot and required background services healthy;
 - the public application serves through Caddy and Cloudflare;
-- changed user-facing or operational behavior passes a focused smoke test.
+- changed user-facing or operational behavior passes a focused smoke test;
+- the [no-spend companion check](../../../documentation/studio-readiness-runbook.md#paired-mac-continuity-at-release) matches the preflight on Estio and Substo, with any missing signed-in evidence recorded. Report the Mac runtime separately from the hosted worker. A Mac restart belongs to a separately authorized companion update or recovery.
 
 Return a concise report containing the deployed commit and dirty-tree state, schema mode, checks run, active slot or process when known, health/version results, service state, warnings, and rollback status. Never include secret values.
 

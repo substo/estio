@@ -19,17 +19,35 @@ export interface CommandStatus {
 }
 export interface DeviceCallOptions { fetcher?: typeof fetch; timeoutMs?: number }
 
+type FailureKind = "http" | "transport" | "timeout" | "invalid_response";
+class DeviceCallError extends Error {
+  constructor(operation: string, readonly kind: FailureKind, readonly status?: number) {
+    super(`device_${operation.replaceAll("/", "_")}_failed`);
+  }
+}
+
+/** A heartbeat log may contain only a bounded classification and an HTTP status. */
+export function deviceFailureDetails(error: unknown): { kind: FailureKind | "unknown"; status?: number } {
+  return error instanceof DeviceCallError
+    ? { kind: error.kind, ...(error.status === undefined ? {} : { status: error.status }) }
+    : { kind: "unknown" };
+}
+
 /** One JSON POST to /api/studio/device/<operation>. Never propagate response bodies/errors:
  * they may contain credentials or untrusted server text. */
 export async function deviceCall<T>(origin: string, token: string | null, operation: string, body: unknown, schema: z.ZodType<T>, options: DeviceCallOptions = {}): Promise<T> {
+  const timeout = AbortSignal.timeout(options.timeoutMs ?? 15_000);
+  let responseReceived = false;
   try {
     if (token !== null && !deviceTokenPattern.test(token)) throw new Error();
     const response = await (options.fetcher ?? fetch)(`${appOrigin(origin)}/api/studio/device/${operation}`, {
       method: "POST", redirect: "error",
       headers: { ...(token === null ? {} : { authorization: `Bearer ${token}` }), "content-type": "application/json" },
-      body: JSON.stringify(body), signal: AbortSignal.timeout(options.timeoutMs ?? 15_000),
+      body: JSON.stringify(body), signal: timeout,
     });
-    if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) throw new Error();
+    responseReceived = true;
+    if (!response.ok) throw new DeviceCallError(operation, "http", response.status);
+    if (!response.headers.get("content-type")?.includes("application/json")) throw new Error();
     const reader = response.body?.getReader();
     if (!reader) throw new Error();
     const chunks: Uint8Array[] = []; let bytes = 0;
@@ -43,7 +61,10 @@ export async function deviceCall<T>(origin: string, token: string | null, operat
     } finally { reader.releaseLock(); }
     const envelope = z.object({ ok: z.literal(true), data: z.unknown() }).parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
     return schema.parse(envelope.data);
-  } catch { throw new Error(`device_${operation.replaceAll("/", "_")}_failed`); }
+  } catch (error) {
+    if (error instanceof DeviceCallError) throw error;
+    throw new DeviceCallError(operation, timeout.aborted ? "timeout" : responseReceived ? "invalid_response" : "transport");
+  }
 }
 
 export function createDeviceStudioQueue(credentials: DeviceCredentials, options: DeviceCallOptions & {

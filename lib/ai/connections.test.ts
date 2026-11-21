@@ -25,3 +25,18 @@ test("any one ready source makes AI available: a key, a connected ChatGPT subscr
   // An API-key login on the Mac is not the business's subscription.
   assert.equal(assembleAiConnections(mac2(recent, { ...signedIn, loginMethod: "console" }), now).available, false);
 });
+
+test("the disk gate outranks allowance and an unreadable allowance is distinct from exhaustion", () => {
+  const caps = {
+    codex: { installed: true, authenticated: true, ready: true, loginMethod: "chatgpt" },
+    capacity: { codex: false },
+  };
+  const connection = (capabilities: Record<string, unknown>) => assembleAiConnections({ ...none, devices: [{
+    name: "Mac", revoked: false, paused: false, seenAt: recent, draining: false, capabilities,
+  }] }, now).connections!.at(-1)!;
+  const disk = connection({ ...caps, processingBlocked: ["low_disk_space"], hardware: { freeDiskGb: 18.2 } });
+  assert.equal(disk.status, "unavailable");
+  assert.match(disk.reason!, /Low disk space \(18.2 GB free\)/);
+  assert.equal(connection(caps).status, "unavailable");
+  assert.equal(connection({ ...caps, usage: { codex: { remaining: 0, windows: [], at: recent } } }).status, "limit_reached");
+});

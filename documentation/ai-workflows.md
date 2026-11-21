@@ -139,3 +139,7 @@ A full-source review keeps every completed batch when one batch stops. The Mac r
 ## Staged creation (local candidate)
 
 The manual `script_brief` queue also admits `staged_creation` snapshots using `studio.creation.v1`. The owner confirms direction before choosing a route and authorizing generation. Proposals cover stage suggestions, a selected-span rewrite, or a full-script draft. The same account-scoped Mac subscription and Location OpenAI meter apply. The Mac advertises `stagedCreationVersion: 1`. A separate version-fenced application command applies reviewed output. Literal replacement and undo only edit the record and use neither provider. [Staged creation](studio-staged-creation.md)
+
+### Paired Mac readiness at release
+
+Processing On is permission. Current task readiness also depends on a recent heartbeat, local gates such as free disk, the relevant handler and protocol version, a subscription login and a fresh allowance reading. Devices and the AI connection views explain the same reported local block. A missing allowance reading is unavailable capacity; exhaustion requires a fresh reading. Source Assistant's Location order reports unsupported connections separately, including hosted Location ChatGPT. The read-only readiness snapshot supplements atomic admission. It does not acquire a lease, create a paid hold or permit replay. See the [release canary](studio-readiness-runbook.md#paired-mac-continuity-at-release).
