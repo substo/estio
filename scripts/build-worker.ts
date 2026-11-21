@@ -3,7 +3,7 @@ import { runThreadAction } from "../lib/build/thread-action";
 import { runCliAttempt, type CliOutcome } from "../lib/build/cli";
 import { adoptDelivery, prepareDelivery, verifyDelivery, type DeliveryCheckpoint } from "../lib/build/delivery";
 import { runT3Attempt, showThread, t3Branch, t3Catalog, talkTurn } from "../lib/build/t3";
-import { readUsage } from "../lib/build/usage";
+import { readNativeUsage } from "../lib/studio/companion/native-usage";
 import { describeChanges } from "../lib/build/review";
 import { execFileSync } from "node:child_process";
 import { checkGithub } from "../lib/build/watch";
@@ -183,11 +183,10 @@ async function main() {
       await new Promise(resolve => setTimeout(resolve, 3000));
     }
   };
-  // Usage from QuotaCell's helper every 5 minutes: no model call. Missing helper means no readings, never a guess.
-  const helper = process.env.BUILD_QUOTA_HELPER ?? path.join(process.env.HOME ?? "", "Applications/QuotaCell.app/Contents/Helpers/CodexBarCLI");
+  // Optional native allowance telemetry. A missing reading cannot clear a recorded provider stop.
   const usageLoop = async () => {
     for (;;) {
-      if (existsSync(helper)) try { const usage = await readUsage(helper); if (Object.keys(usage).length) await call({ action: "usage", workerId, usage }); } catch (error) { console.error("Build usage read failed", error instanceof Error ? error.message : ""); }
+      try { const usage = await readNativeUsage(); if (Object.keys(usage).length) await call({ action: "usage", workerId, usage }); } catch (error) { console.error("Build usage read failed", error instanceof Error ? error.message : ""); }
       await new Promise(resolve => setTimeout(resolve, 5 * 60_000));
     }
   };

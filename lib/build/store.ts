@@ -14,7 +14,7 @@ import { releaseFrom } from "./release";
 import { readFile } from "node:fs/promises";
 import { decisionsOf, playbookNames, playbookText, type PlaybookEdits } from "./playbook";
 import { memoryHeading, memoryText, remember, type MemoryEntry, type MemoryKind } from "./memory";
-import { remainingByBucket, usageFloor, usageLow, usageSpec } from "./contract";
+import { remainingByBucket, unattendedAllowanceReason, usageFloor, usageSpec } from "./contract";
 import { difficulty } from "./contract";
 import { assessDifficulty, autoApprovable, autoApprovePolicy, catalogSpec, proposalDraft, edgeSpec, id, jobSpec, nodeSpec, profilesSpec, selectProfile, validLease, canRevoke } from "./contract";
 
@@ -327,11 +327,15 @@ async function autoDecide(tx: Prisma.TransactionClient, control: { revision: num
   const verdict = autoApprovable(spec);
   const profile = selectProfile(profilesSpec.parse(control.profiles), spec, routing(control.worker));
   if (!profile) verdict.reasons.push("no approved model available");
-  else if ((routing(control.worker).remaining[profile.quotaBucket] ?? 100) < usageLow) verdict.reasons.push(`${profile.quotaBucket} usage is low`);
+  else {
+    const remaining = routing(control.worker).remaining[profile.quotaBucket];
+    const reason = unattendedAllowanceReason(profile.quotaBucket, remaining);
+    if (reason) verdict.reasons.push(reason);
+  }
   const today = await tx.buildJob.count({ where: { AND: [{ approval: { path: ["auto"], equals: true } }, { approval: { path: ["at"], string_starts_with: now.toISOString().slice(0, 10) } }] } });
   const withinBudget = today < autoApprovePolicy.dailyBudget;
   if (verdict.ok && profile && !withinBudget) verdict.reasons.push(`daily budget of ${autoApprovePolicy.dailyBudget} used`);
-  const ok = verdict.ok && !!profile && withinBudget;
+  const ok = verdict.reasons.length === 0 && !!profile && withinBudget;
   const auto = { mode, wouldApprove: ok, reasons: verdict.reasons, at: now.toISOString() };
   if (mode === "on" && ok) {
     const nodes = await tx.buildNode.findMany({ where: { id: { in: spec.nodeIds } } });
@@ -354,7 +358,7 @@ async function admitDaily(tx: Prisma.TransactionClient, control: { revision: num
   const profiles = profilesSpec.parse(control.profiles);
   const profile = selectProfile(profiles, { profileId: grant.profileId, taskType: "review", tools: ["git-read"], quality: 2 } as import("./contract").JobSpec, routing(meta));
   // The daily review is background work: it waits while the chosen subscription is low.
-  if (!profile || (routing(meta).remaining[profile.quotaBucket] ?? 100) < usageLow) return;
+  if (!profile || unattendedAllowanceReason(profile.quotaBucket, routing(meta).remaining[profile.quotaBucket])) return;
   const stalePage = { AND: [{ spec: { path: ["kind"], equals: "page" } }, { spec: { path: ["freshness"], not: "verified" } }] };
   const afterCursor = grant.lastNodeId ? await tx.buildNode.findFirst({ where: { ...stalePage, id: { gt: grant.lastNodeId } }, orderBy: { id: "asc" } }) : null;
   // A watched reference that changed since the owner looked takes priority for one of its linked screens.
@@ -422,7 +426,8 @@ export async function worker(input: z.infer<typeof workerCommand>) {
       const c = job.checkpoint as { workflow: ThreadAction; t3: { threadId: string; branch: string; worktreePath: string }; evidence: { ok: boolean; files: string[]; diffDigest: string } };
       const profile = (job.attempt as { profile?: import("./contract").Profile } | null)?.profile;
       const allowed = profilesSpec.parse(control.profiles).find(p => p.enabled && p.provider === profile?.provider && p.model === profile?.model && p.tools.includes("code-write"));
-      if (!c.workflow.reconcile && (!allowed || (routing(control.worker).remaining[allowed.quotaBucket] ?? 100) <= usageFloor)) {
+      const observed = routing(control.worker);
+      if (!c.workflow.reconcile && (!allowed || observed.exhaustedBuckets.includes(allowed.quotaBucket) || (observed.remaining[allowed.quotaBucket] ?? 100) <= usageFloor)) {
         await tx.buildJob.update({ where: { id: job.id }, data: { checkpoint: json({ ...c, workflow: { ...c.workflow, state: "blocked", stopped: true, reason: "The conversation model is unavailable or no longer approved; open the thread to resolve capacity" } }) } });
         return { job: null };
       }
@@ -453,7 +458,11 @@ export async function worker(input: z.infer<typeof workerCommand>) {
     if (input.action === "usage") {
       const meta = (await tx.buildControl.findUniqueOrThrow({ where: { id: "build" } })).worker as { quotaBuckets?: Record<string, { observedAt: string }> };
       // A fresh reading with allowance left clears a hit limit, so nobody has to confirm the reset by hand.
-      const quotaBuckets = Object.fromEntries(Object.entries(meta.quotaBuckets ?? {}).filter(([bucket, hit]) => { const u = input.usage[bucket]; return !(u && u.remaining > usageFloor && Date.parse(u.at) > Date.parse(hit.observedAt)); }));
+      const fresh = remainingByBucket(input.usage, now.getTime());
+      const quotaBuckets = Object.fromEntries(Object.entries(meta.quotaBuckets ?? {}).filter(([bucket, hit]) => {
+        const reading = input.usage[bucket];
+        return !(reading && (fresh[bucket] ?? 0) > usageFloor && Date.parse(reading.at) > Date.parse(hit.observedAt));
+      }));
       await tx.buildControl.update({ where: { id: "build" }, data: { worker: json({ ...meta, quotaBuckets, usage: input.usage }) } });
       return { ok: true };
     }

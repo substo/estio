@@ -88,7 +88,7 @@ export function selectProfile(profiles: Profile[], job: JobSpec, options: { prev
     (!options.previous || (p.id !== options.previous.id && p.quotaBucket !== options.previous.quotaBucket));
   return ordered.find(p => eligible(p) && p.quality === job.quality) ?? ordered.find(eligible) ?? null;
 }
-// Subscription usage, read on the Mac by QuotaCell's helper (no model call). Remaining is the lowest across windows.
+// Optional native subscription usage read without generation. Remaining is the lowest across windows.
 export const usageWindow = z.object({ label: z.string().max(40), remaining: z.number().min(0).max(100), resetsAt: z.string().max(40).optional() }).strict();
 export const usageSpec = z.record(id, z.object({ remaining: z.number().min(0).max(100), windows: z.array(usageWindow).max(4), plan: z.string().max(40).optional(), at: z.string().max(40) }).strict());
 export type Usage = z.infer<typeof usageSpec>;
@@ -98,7 +98,11 @@ export function remainingByBucket(usage: unknown, now = Date.now()) {
   const parsed = usageSpec.safeParse(usage ?? {});
   if (!parsed.success) return {};
   // Readings older than 30 minutes are not used for routing.
-  return Object.fromEntries(Object.entries(parsed.data).filter(([, u]) => now - Date.parse(u.at) < 30 * 60_000).map(([k, u]) => [k, u.remaining]));
+  return Object.fromEntries(Object.entries(parsed.data).filter(([, u]) => Date.parse(u.at) <= now && now - Date.parse(u.at) < 30 * 60_000).map(([k, u]) => [k, u.remaining]));
+}
+export function unattendedAllowanceReason(bucket: string, remaining: number | undefined) {
+  if (remaining === undefined) return `${bucket} allowance is unreported`;
+  return remaining < usageLow ? `${bucket} usage is low` : null;
 }
 export function canRevoke(state: string) { return ["proposed", "approved", "review", "working", "waiting-for-capacity", "blocked-configuration", "blocked-stale-approval", "failed"].includes(state); }
 export function validLease(job: { state: string; leaseToken: string | null; workerId: string | null; leaseUntil: Date | null }, token: string, workerId: string, now: Date) {

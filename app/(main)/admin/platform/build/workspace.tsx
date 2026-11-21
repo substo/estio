@@ -80,7 +80,7 @@ export default function BuildWorkspace() {
   </main>;
 }
 
-/** Allowance left, as in QuotaCell: the lowest of the session and weekly windows; details on hover/tap. */
+/** Reported allowance left: the lowest of the session and weekly windows; details on hover/tap. */
 function UsageGauge({ name, usage }: { name: string; usage: Usage[string] }) {
   const stale = Date.now() - Date.parse(usage.at) > 30 * 60_000, r = Math.round(usage.remaining);
   const color = stale ? "bg-muted-foreground" : r > 30 ? "bg-emerald-500" : r >= 10 ? "bg-amber-500" : "bg-red-500";

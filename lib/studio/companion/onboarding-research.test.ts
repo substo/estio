@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createOnboardingResearchHandler, subscriptionCapacity } from "./onboarding-research";
+import { createOnboardingResearchHandler } from "./onboarding-research";
 import { createLocalTextAdapter, type LocalProvider, type LocalTextAdapter, type TextRequest } from "./providers";
 import { StudioProviderRejectedError } from "../worker/handlers";
 import type { ProcessRequest } from "./process";
@@ -28,8 +28,8 @@ test("research runs on a subscription with web search on, prompt built locally, 
 test("no capacity, policy off, API logins and invalid payloads never call a provider", async () => {
   let calls = 0;
   const adapter = (p: LocalProvider): LocalTextAdapter => ({ provider: p, readiness: ready(p, "api_key"), generate: async () => { calls++; throw new Error(); } });
-  await assert.rejects(createOnboardingResearchHandler({ adapter, enabled: () => true, usage: async () => ({ codex: reading(90), claudeAgent: reading(90) }) })(job, context), /subscription capacity/);
-  await assert.rejects(createOnboardingResearchHandler({ adapter, enabled: () => true, usage: async () => ({}) })(job, context), /subscription capacity/);
+  await assert.rejects(createOnboardingResearchHandler({ adapter, enabled: () => true, usage: async () => ({ codex: reading(90), claudeAgent: reading(90) }) })(job, context), /signed-in Mac subscription/);
+  await assert.rejects(createOnboardingResearchHandler({ adapter, enabled: () => true, usage: async () => ({}) })(job, context), /signed-in Mac subscription/);
   await assert.rejects(createOnboardingResearchHandler({ adapter, enabled: () => false, usage: async () => ({}) })(job, context), /processing settings/);
   await assert.rejects(createOnboardingResearchHandler({ adapter, enabled: () => true, usage: async () => ({}) })({ ...job, payload: { ...payload, topic: "nope" } }, context), /not valid/);
   assert.equal(calls, 0);
@@ -37,13 +37,12 @@ test("no capacity, policy off, API logins and invalid payloads never call a prov
 test("only a completed rate-limit rejection moves to the other subscription; bad replies are not retried", async () => {
   const calls: string[] = [];
   const adapter = (p: LocalProvider): LocalTextAdapter => ({ provider: p, readiness: ready(p), generate: async <T>(req: TextRequest<T>) => {
-    calls.push(p); if (p === "codex") throw new StudioProviderRejectedError("rate_limited", "limit", true); return req.validate(reply); } });
+    calls.push(p); if (p === "codex") throw new StudioProviderRejectedError("rate_limited", "limit", true, undefined, "before_generation"); return req.validate(reply); } });
   const usage = async () => ({ codex: reading(90), claudeAgent: reading(50) });
   assert.equal((await createOnboardingResearchHandler({ adapter, enabled: () => true, usage })(job, context)).provider, "claude");
   assert.deepEqual(calls, ["codex", "claude"]);
   const bad = (p: LocalProvider): LocalTextAdapter => ({ provider: p, readiness: ready(p), generate: async () => { throw new Error("invalid_provider_result"); } });
   await assert.rejects(createOnboardingResearchHandler({ adapter: bad, enabled: () => true, usage })(job, context), (e: { code?: string; retryable?: boolean }) => e.code === "research_invalid" && e.retryable === false);
-  assert.deepEqual(subscriptionCapacity({ codex: reading(2), claudeAgent: reading(40) }, now), { codex: false, claude: true });
 });
 
 const help = "--ignore-user-config --ignore-rules --ephemeral --output-schema --json --safe-mode --restricted --tools --allowedTools --strict-mcp-config --json-schema --no-session-persistence";

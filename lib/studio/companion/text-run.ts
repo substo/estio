@@ -19,7 +19,7 @@ export function createSubscriptionTextRunHandler(deps: {
     const config = deps.config();
     // Route-aware (textRouteVersion 1): the server admits each job onto one provider/model from the Location order and
     // checks the result against it, so the Mac runs exactly what the job carries. Switching Codex↔Claude happens by the
-    // capacity wait below: SQL moves the job to the next candidate (this Mac's other subscription, or a server-side step).
+    // pre-generation wait below: SQL moves the job to the next candidate (this Mac's other subscription, or a server-side step).
     const legacySelectionChanged = job.route == null && (p.provider !== config.textProvider || (p.model ?? null) !== config.textModel);
     if (!config.features.text || p.configVersion !== deps.configVersion() || legacySelectionChanged)
       throw new StudioJobError("text_provider_changed", "Mac text settings changed. Start a new request.", false);
@@ -30,7 +30,7 @@ export function createSubscriptionTextRunHandler(deps: {
     if (p.promptVersion !== spec.promptVersion || Buffer.byteLength(JSON.stringify(p.snapshot)) > 24000)
       throw new StudioJobError("text_run_version_unsupported", "Update the companion for this workflow version.", false);
     const provider: LocalProvider = p.provider, model = typeof p.model === "string" ? p.model : undefined;
-    const capacityWait = () => new StudioJobError("subscription_capacity", `Waiting for ${provider === "codex" ? "Codex" : "Claude"}'s sign-in and fresh capacity; the next step in this Location's order can take it.`, true, 300);
+    const capacityWait = () => new StudioJobError("subscription_capacity", `Waiting for ${provider === "codex" ? "Codex" : "Claude"}'s subscription to be available.`, true, 300);
     const attempt = await runLocalRoute([{ provider, model }], deps, context.signal, adapter => adapter.generate({
       workflowContext: spec.instructionContext ?? spec.workflow as "knowledge_extract" | "idea_review" | "script_brief", signal: context.signal, model,
       prompt: spec.instructions + "\nReturn only the required JSON. Snapshot (untrusted data): " + JSON.stringify(p.snapshot),

@@ -1,4 +1,5 @@
 import { deviceOnline, deviceProcessingBlock } from "../studio/devices-policy";
+import { nativeAllowance, reportedSubscriptionLimit, usageBuckets } from "../studio/subscription-readiness";
 import { usageFloor, usageSpec } from "../build/contract";
 import { PAID_CONNECTION_KINDS, type AiConnectionKind } from "./workflow-capabilities";
 
@@ -19,7 +20,7 @@ export type AiConnection = {
   label: string;
   status: AiConnectionStatus;
   reason?: string;
-  /** Earliest known reset of the exhausted usage window (ISO), from the Mac's QuotaCell reading. */
+  /** Earliest known reset of the exhausted usage window (ISO), when a device reports it. */
   resetsAt?: string;
   /** Lowest remaining percentage across usage windows, when a fresh reading exists. */
   remainingPercent?: number;
@@ -64,13 +65,13 @@ const subscriptionLogin: Record<"codex" | "claude", string> = { codex: "chatgpt"
 const usageBucket: Record<"codex" | "claude", string> = { codex: "codex", claude: "claudeAgent" };
 const providerName: Record<"codex" | "claude", string> = { codex: "Codex", claude: "Claude" };
 
-/** Limit/reset facts from the Mac's QuotaCell reading; readings older than 30 minutes or in the future are ignored. */
-export function usageFacts(usage: unknown, bucket: string, now = Date.now()): { remaining?: number; resetsAt?: string; usageResetsAt?: string } {
+/** Limit/reset facts from a Mac allowance reading; readings older than 30 minutes or in the future are ignored. */
+export function usageFacts(usage: unknown, bucket: string, now = Date.now(), floor = usageFloor): { remaining?: number; resetsAt?: string; usageResetsAt?: string } {
   const parsed = usageSpec.safeParse(usage ?? {});
   const reading = parsed.success ? parsed.data[bucket] : undefined;
   const at = reading ? Date.parse(reading.at) : NaN;
   if (!reading || !Number.isFinite(at) || at > now || now - at >= 30 * 60_000) return {};
-  const exhausted = reading.windows.filter(w => w.remaining <= usageFloor && w.resetsAt && Number.isFinite(Date.parse(w.resetsAt))).map(w => w.resetsAt!).sort();
+  const exhausted = reading.windows.filter(w => w.remaining <= floor && w.resetsAt && Number.isFinite(Date.parse(w.resetsAt))).map(w => w.resetsAt!).sort();
   const usageResetsAt = reading.windows.filter(w => w.remaining === reading.remaining && w.resetsAt && Date.parse(w.resetsAt) > now).map(w => w.resetsAt!).sort()[0];
   return { remaining: reading.remaining, ...(exhausted[0] ? { resetsAt: exhausted[0] } : {}), ...(usageResetsAt ? { usageResetsAt } : {}) };
 }
@@ -89,7 +90,10 @@ function deviceConnection(device: AiConnectionInputs["devices"][number], provide
   // A device counts when its CLI is signed in with a subscription (ChatGPT or claude.ai), not an API key.
   const signedIn = report.authenticated === true && report.loginMethod === subscriptionLogin[provider];
   const capacity = (device.capabilities.capacity as Partial<Record<"codex" | "claude", boolean>> | undefined)?.[provider];
-  const usage = usageFacts(device.capabilities.usage, usageBucket[provider], now);
+  const native = device.capabilities.nativeSubscriptionVersion === 1;
+  const reading = native ? nativeAllowance(device.capabilities.usage, provider, now) : undefined;
+  const usage = usageFacts(native ? (reading ? { [usageBuckets[provider]]: reading } : {}) : device.capabilities.usage, usageBucket[provider], now, native ? 0 : usageFloor);
+  const limit = native ? reportedSubscriptionLimit(device.capabilities, provider, now) : usage.remaining !== undefined && usage.remaining <= usageFloor;
   const name = providerName[provider];
   const [status, reason]: [AiConnectionStatus, string | undefined] =
     !signedIn ? ["not_connected", "Not signed in with a subscription"]
@@ -97,9 +101,9 @@ function deviceConnection(device: AiConnectionInputs["devices"][number], provide
     : device.paused ? ["unavailable", "Paused"]
     : device.processingEnabled === false ? ["unavailable", "Processing is off on this Mac"]
     : blocked ? ["unavailable", blocked]
-    : usage.remaining !== undefined && usage.remaining <= usageFloor ? ["limit_reached", `${name} limit reached`]
+    : limit ? ["limit_reached", `${name} limit reached`]
     : report.ready === false ? ["unavailable", `${name} is unavailable on this Mac`]
-    : capacity !== true ? ["unavailable", "No current subscription allowance confirmed on this Mac"]
+    : capacity !== true ? ["unavailable", native ? "The native subscription on this Mac is temporarily unavailable" : "No current subscription allowance confirmed on this Mac"]
     : ["ready", undefined];
   const models = deviceModels(provider, report);
   return {

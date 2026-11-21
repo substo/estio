@@ -120,7 +120,7 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
           return adapter.generate({ workflowContext: "video_relevance", signal, model: step.model, prompt: buildRelevancePrompt(candidate, payload.gate!.context as RelevanceContext, thresholds),
             jsonSchema: relevanceJsonSchema as unknown as Record<string, unknown>, validate: value => relevanceResultSchema.parse(value), timeoutMs: 120_000, maxResultBytes: 4096 });
         }, () => fail("video_relevance_failed", "Relevance could not be scored with your subscription. Use Transcribe on your Mac to run it anyway."));
-        if (!attempt) fail("video_provider_waiting", "Waiting for a subscription in this Location's order to be signed in with fresh capacity.", true, 300);
+        if (!attempt) fail("video_provider_waiting", "Waiting for a subscription in this Location's order to be signed in and available.", true, 300);
         deps.reportRoute?.(job.id, attempt);
         if (routed) routeActual = { provider: attempt.provider, model: attempt.model ?? "native-default" };
         relevance = attempt.value;

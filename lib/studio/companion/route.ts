@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { remainingByBucket, usageFloor, type Usage } from "../../build/contract";
+import type { Usage } from "../../build/contract";
+import { hasNativeRejection, nativeAllowance, nativeSubscriptionBlocked, nativeSubscriptionReady, subscriptionProviders } from "../subscription-readiness";
 import { StudioJobError, StudioProviderRejectedError } from "../worker/handlers";
 import type { StudioJob } from "../worker/queue";
 import { CompanionProcessError } from "./process";
@@ -8,7 +9,7 @@ import { modelPattern, type LocalProvider, type LocalTextAdapter } from "./provi
 /**
  * Per-job Codex↔Claude switching on the requester's own Mac (textRouteVersion 1). The server supplies the Location order with
  * the job (`job.route`, or `payload.route`): the step it admitted (`actual`) and the remaining `candidates`. The Mac walks the
- * leading device steps that are this Mac, and switches only BEFORE generation starts: no fresh capacity, not signed in with the
+ * leading device steps that are this Mac, and switches only BEFORE generation starts: a current native limit, not signed in with the
  * subscription, or an explicit pre-output rate-limit rejection. Any other failure is a started/uncertain run and is never
  * replayed. When the next step is server-side (hosted, paid, another Mac), the handler returns its retryable capacity wait so
  * the server moves the job on.
@@ -19,10 +20,9 @@ export type LocalRoute = { steps: LocalStep[]; serverNext: boolean };
 const step = z.object({ kind: z.string().max(40), model: z.string().max(120).nullish(), deviceId: z.string().max(64).optional() }).passthrough();
 const route = z.object({ actual: step.nullish(), candidates: z.array(step).max(5).default([]) }).passthrough();
 export function summaryProviders(usage: Usage, now = Date.now()): LocalProvider[] {
-  // Reject future timestamps as well as stale readings before applying the shared quota rules.
-  const actual = Object.fromEntries(Object.entries(usage).filter(([, r]) => Number.isFinite(Date.parse(r.at)) && Date.parse(r.at) <= now));
-  const remaining = remainingByBucket(actual, now);
-  return (["codex", "claude"] as const).filter(p => (remaining[p === "claude" ? "claudeAgent" : p] ?? 0) > usageFloor).sort((a, b) => Math.floor((remaining[b === "claude" ? "claudeAgent" : b] ?? 0) / 10) - Math.floor((remaining[a === "claude" ? "claudeAgent" : a] ?? 0) / 10));
+  return subscriptionProviders.filter(p => !nativeSubscriptionBlocked(usage, p, undefined, now))
+    .sort((a, b) => Math.floor((nativeAllowance(usage, b, now)?.remaining ?? -10) / 10)
+      - Math.floor((nativeAllowance(usage, a, now)?.remaining ?? -10) / 10));
 }
 
 /** The leading steps this Mac can run, in the server's order, or null when the job carries no route. */
@@ -43,7 +43,6 @@ export function localRoute(job: Pick<StudioJob, "payload"> & { route?: unknown }
   return { steps, serverNext: false };
 }
 
-const subscriptionLogin: Record<LocalProvider, string> = { codex: "chatgpt", claude: "claudeai" };
 export type LocalRouteDeps = { adapter: (p: LocalProvider) => LocalTextAdapter; usage: () => Promise<Usage> };
 type LocalRouteReport = LocalStep & { firstLocalStep: LocalStep; switchReason?: string };
 export type ReportLocalRoute = (jobId: string, route: LocalRouteReport) => void;
@@ -63,8 +62,9 @@ export async function runLocalRoute<T>(routeSteps: LocalStep[] | ((capacity: Loc
     const label = s.provider === "codex" ? "Codex" : "Claude";
     if (!capacity.includes(s.provider)) { skipped.push(`${label} limit reached`); continue; }
     const adapter = deps.adapter(s.provider);
+    if (hasNativeRejection(adapter.quotaRetryAt?.())) { skipped.push(`${label} limit reached`); continue; }
     const ready = await adapter.readiness(signal).catch(() => null);
-    if (!ready?.ready || !ready.authenticated || ready.loginMethod !== subscriptionLogin[s.provider]) { skipped.push(`${label} isn't signed in with its subscription`); continue; }
+    if (!nativeSubscriptionReady(s.provider, ready ?? undefined)) { skipped.push(`${label} isn't signed in with its subscription`); continue; }
     signal.throwIfAborted();
     try {
       const value = await generate(adapter, s);
@@ -73,7 +73,7 @@ export async function runLocalRoute<T>(routeSteps: LocalStep[] | ((capacity: Loc
       // Spawn failure or an explicit rejection before output leaves no generation to replay.
       if ((error instanceof CompanionProcessError && error.code === "cli_unavailable") ||
           (error instanceof Error && error.message === "provider_not_ready")) { skipped.push(`${label} is unavailable`); continue; }
-      if (error instanceof StudioProviderRejectedError && error.code === "rate_limited") { skipped.push(`${label} limit reached`); continue; }
+      if (error instanceof StudioProviderRejectedError && error.code === "rate_limited" && error.stage === "before_generation") { skipped.push(`${label} limit reached`); continue; }
       onStarted(error);
     }
   }

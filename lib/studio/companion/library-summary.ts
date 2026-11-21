@@ -27,6 +27,6 @@ export function createLibrarySummaryHandler(deps: { adapter: (p: LocalProvider) 
       deps.reportRoute?.(job.id, attempt);
       return { summary: attempt.value.summary, provider: attempt.provider, model: attempt.model ?? "native-default" };
     }
-    throw new StudioJobError("subscription_capacity", "Waiting for fresh local subscription capacity.", true, 300);
+    throw new StudioJobError("subscription_capacity", "Waiting for an available local subscription.", true, 300);
   };
 }

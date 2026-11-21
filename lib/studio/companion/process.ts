@@ -7,16 +7,33 @@ export class CompanionProcessError extends Error {
   }
 }
 /** Only native structured rejection metadata, after a nonzero process close. No model text matching. */
-export function completedRateLimit(stdout: string, exitCode: number | null): boolean {
+export function completedRateLimit(stdout: string, exitCode: number | null, provider: "codex" | "claude" = "codex"): boolean {
   if (exitCode === null || exitCode === 0) return false;
   try {
     const events = stdout.trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
-    return events.length > 0 && events.every(e => e && typeof e === "object") &&
-      !events.some(e => e.type === "turn.completed" || e.type === "assistant" || e.type === "stream_event" || String(e.type).startsWith("item.")) &&
-      events.some(e => e.type === "error" && e.error?.code === "rate_limit_exceeded");
+    if (!events.length || events.some(e => !e || typeof e !== "object")) return false;
+    if (provider === "codex") {
+      const terminal = events.at(-1);
+      const metadataOnly = events.every(e => ["thread.started", "turn.started", "turn.failed", "error"].includes(e.type));
+      if (!metadataOnly || !["error", "turn.failed"].includes(terminal.type)) return false;
+      const error = terminal.error ?? terminal;
+      return ["rate_limit_exceeded", "usage_limit_reached"].includes(error.code)
+        || (terminal.type === "turn.failed" && typeof error.message === "string"
+          && /^(?:You(?:'ve| have) (?:hit|reached) your (?:usage )?limit|Usage limit (?:reached|exceeded))(?:[. !·:]|$)/i.test(error.message));
+    }
+    // Claude prints a synthetic assistant error for a 429. Real assistant output, tools, partial events,
+    // successful or ambiguous result envelopes are deliberately outside this retry fence.
+    const result = events.at(-1);
+    const rejected = events.some(e => e.type === "rate_limit_event" && e.rate_limit_info?.status === "rejected"
+      || e.type === "assistant" && ["rate_limit", "rate_limit_error"].includes(e.error) && e.message?.model === "<synthetic>");
+    return rejected && result.type === "result" && result.is_error === true && result.usage?.output_tokens === 0
+      && (!result.result || typeof result.result === "string") && result.structured_output == null
+      && events.slice(0, -1).every(e => e.type === "system" && e.subtype === "init" || e.type === "rate_limit_event"
+        || e.type === "assistant" && ["rate_limit", "rate_limit_error"].includes(e.error) && e.message?.model === "<synthetic>");
   } catch { return false; }
 }
 export interface ProcessRequest {
+  subscriptionGeneration?: "codex" | "claude";
   command: string; args: string[]; cwd: string; input?: string; signal?: AbortSignal;
   timeoutMs?: number; maxOutputBytes?: number; env?: NodeJS.ProcessEnv;
   /** Interactive servers (Codex app-server): keep stdin open and stop the process once stdout satisfies this. */
@@ -66,5 +83,5 @@ export const runNativeProcess: ProcessRunner = request => new Promise((resolve, 
   child.once("error", () => { cleanup(); reject(new CompanionProcessError("cli_unavailable")); });
   child.once("close", code => { cleanup(); if (failure) reject(failure);
     else if (request.until) { if (satisfied) resolve({ stdout, stderr }); else reject(new CompanionProcessError("cli_failed")); }
-    else if (code !== 0) reject(completedRateLimit(stdout, code) ? new StudioProviderRejectedError("rate_limited", "Subscription rejected the request due to a rate limit.", true) : new CompanionProcessError("cli_failed")); else resolve({ stdout, stderr }); });
+    else if (code !== 0) reject(request.subscriptionGeneration && completedRateLimit(stdout, code, request.subscriptionGeneration) ? new StudioProviderRejectedError("rate_limited", "Subscription rejected the request before generation.", true, undefined, "before_generation") : new CompanionProcessError("cli_failed")); else resolve({ stdout, stderr }); });
 });

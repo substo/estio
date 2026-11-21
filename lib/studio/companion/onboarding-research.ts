@@ -5,7 +5,7 @@ import { researchInput, researchOutputJsonSchema, researchOutputSchema, research
 import { pageExcerptSchema } from "../../onboarding/state";
 import { DEVICE_RESEARCH_RESULT_BYTES } from "../devices-policy";
 import { StudioJobError, type StudioJobHandler } from "../worker/handlers";
-import { localRoute, runLocalRoute, summaryProviders, type ReportLocalRoute } from "./route";
+import { localRoute, runLocalRoute, type ReportLocalRoute } from "./route";
 import type { LocalProvider, LocalTextAdapter } from "./providers";
 
 /**
@@ -24,12 +24,6 @@ export const researchPayloadSchema = z.object({
 /** Room for the provider/model keys inside the device result bound. */
 const replyBytes = DEVICE_RESEARCH_RESULT_BYTES - 200;
 export const researchTimeoutMs = 8 * 60_000;
-/** Which subscriptions have fresh capacity now, for the heartbeat (the server routes research only to a Mac with capacity). */
-export function subscriptionCapacity(usage: Usage, now = Date.now()): Record<LocalProvider, boolean> {
-  const ok = summaryProviders(usage, now);
-  return { codex: ok.includes("codex"), claude: ok.includes("claude") };
-}
-
 export function createOnboardingResearchHandler(deps: { adapter: (p: LocalProvider) => LocalTextAdapter; usage: () => Promise<Usage>; enabled: () => boolean; deviceId?: string; reportRoute?: ReportLocalRoute }): StudioJobHandler {
   return async (job, context) => {
     if (!deps.enabled()) throw new StudioJobError("local_policy", "Waiting for the computer's processing settings.", true, 300);
@@ -38,7 +32,7 @@ export function createOnboardingResearchHandler(deps: { adapter: (p: LocalProvid
     if (!parsed.success || !topic) throw new StudioJobError("invalid_research", "This research request is not valid for this companion version.", false);
     const data = parsed.data;
     const prompt = `${researchPrompt(topic, { ...data.input, ...data.context, app: data.app, webSearch: true })}\n\n${researchInput({ ...data.input, pages: data.pages })}`;
-    // The Location order supplied with the job; without one, whichever subscription has more fresh capacity first.
+    // The Location order supplied with the job; without one, prefer an eligible subscription with a known allowance.
     const routed = localRoute(job, { deviceId: deps.deviceId });
     const steps = routed?.steps ?? ((capacity: LocalProvider[]) => capacity.map(provider => ({ provider, model: undefined })));
     const attempt = await runLocalRoute(steps, deps, context.signal, (adapter, step) => adapter.generate({ workflowContext: "onboarding_research", signal: context.signal, prompt, webSearch: true, timeoutMs: researchTimeoutMs, maxResultBytes: replyBytes,
@@ -52,6 +46,6 @@ export function createOnboardingResearchHandler(deps: { adapter: (p: LocalProvid
       return { research: researchOutputSchema.parse(attempt.value), provider: attempt.provider, model: attempt.model ?? "native-default" };
     }
     if (routed) throw new StudioJobError("onboarding_route_wait", "The Mac subscriptions in this step were unavailable before generation.", false);
-    throw new StudioJobError("subscription_capacity", "Waiting for fresh subscription capacity on the Mac.", true, 300);
+    throw new StudioJobError("subscription_capacity", "Waiting for a signed-in Mac subscription to be available.", true, 300);
   };
 }
