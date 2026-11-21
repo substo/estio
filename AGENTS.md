@@ -29,7 +29,7 @@ Read [Studio product concept](documentation/studio-product-concept.md) before ch
 
 ## UI design
 
-Follow [UI design principles](documentation/ui-design-principles.md). The first viewport serves the page's primary task: collection screens put existing content and browsing controls first, with secondary creation disclosed through compact actions. This does not require every form to be a modal. Verify populated/empty/mobile and keyboard disclosure states; do not surface idle automation telemetry.
+Follow [UI design principles](documentation/ui-design-principles.md). The first viewport serves the page's primary task: collection screens put existing content and browsing controls first, with secondary creation disclosed through compact actions. This does not require every form to be a modal. Use the app’s Dialog or AlertDialog for prompts. Verify populated/empty/mobile and keyboard disclosure states; do not surface idle automation telemetry.
 
 ## Release integration
 

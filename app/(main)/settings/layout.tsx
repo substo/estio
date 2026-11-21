@@ -22,7 +22,7 @@ export default async function SettingsLayout({ children }: { children: ReactNode
     </main>;
   if (!shell) return <div className="p-4">{content}</div>;
   return <Suspense>
-    <SettingsShell shell={shell} tenantHost={tenantHost} sections={access ? visibleSettingsSections(app, access.role, tenantHost) : []}>
+    <SettingsShell shell={shell} tenantHost={tenantHost} sections={visibleSettingsSections(app, access?.role ?? null, tenantHost, Boolean(shell.impersonation))}>
       {content}
     </SettingsShell>
   </Suspense>;

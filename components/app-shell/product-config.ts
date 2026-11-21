@@ -6,7 +6,6 @@ import {
   LayoutDashboard,
   Library,
   ListChecks,
-  PlugZap,
   Settings,
   Sparkles,
 } from "lucide-react"
@@ -41,7 +40,6 @@ export function studioNavGroups(studioLocationId: string | null): AdminNavGroup[
       ],
     })
   }
-  groups.push({ items: [{ href: "/account/connections", label: "My connections", icon: PlugZap, activePath: (pathname) => pathname.startsWith("/account/connections") }] })
   return groups
 }
 

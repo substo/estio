@@ -7,6 +7,10 @@
 3. **Reclaim only reviewed space.** Use `git worktree remove <path>` without `--force` for a confirmed clean, idle, integrated task checkout. This leaves the branch intact. If the checkout is still needed, remove only verified regenerable output such as `.next` after its processes stop. Keep artifacts needed for an active or pending release. Never follow a dependency symlink into a shared install or use broad `git clean` against a checkout.
 4. **Report and defer.** Check free space again and record what was reclaimed and what remains protected. Use `git worktree prune --dry-run --verbose` to identify metadata for directories already gone. Pruning that metadata is separate from reclaiming build space. Use manual, reviewed cleanup at closeout or when space is tight, with no automatic deletion.
 
+## Page consolidation
+
+For route or menu consolidation, inventory affected pages and controls from both parents before merging. Record old and new routes, entry points, realm and role access, and action or callback dependencies. Verify intended moves, replacements and retirements against the final candidate in the relevant access states. Use the [settings consolidation audit](settings-consolidation-audit.md) as an example.
+
 ## Release procedure
 
 Tasks run in their own worktrees. Merge reviewed work into `release/studio-go-live` using Build's existing merge flow or a reviewed Git merge; preserve both parents' behavior and migrations. This is the only deployable branch, and its candidate must equal the freshly fetched remote tip. The canonical clean checkout is `/tmp/estio-combined-release-20261105`; the shared root is a working checkout on `work/shared-root-20261105`, retaining SIMRelay. Never deploy a task branch or copy a sibling tree over production.

@@ -10,12 +10,13 @@ import * as jsx from "react/jsx-runtime";
 import ts from "typescript";
 import { StudioTenantProvider, useStudioTenantHeaders } from "@/app/(main)/studio/_components/studio-tenant-context";
 import type { StudioDeviceSummary } from "@/lib/studio/devices";
+import { normalizeSmsRelayPlatform } from "@/lib/sms-relay/device-capabilities";
 import { defaultDeviceConfig } from "@/lib/studio/devices-policy";
 import { visibleSettingsSections } from "../_components/sections";
 import { CompanionSettings } from "./companion-settings";
 
-function loadRoute<Props>(url: URL, dependencies: Record<string, unknown>) {
-  const module: { exports: { default?: (props: Props) => Promise<ReactNode> } } = { exports: {} };
+function loadRoute<Props>(url: URL, dependencies: Record<string, unknown>, exportName = "default") {
+  const module: { exports: Record<string, (props: Props) => Promise<ReactNode>> } = { exports: {} };
   const source = ts.transpileModule(readFileSync(url, "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
   }).outputText;
@@ -26,8 +27,8 @@ function loadRoute<Props>(url: URL, dependencies: Record<string, unknown>) {
       return dependencies[name];
     },
   });
-  assert.ok(module.exports.default);
-  return module.exports.default;
+  assert.ok(module.exports[exportName]);
+  return module.exports[exportName];
 }
 
 type Case = {
@@ -35,6 +36,8 @@ type Case = {
   role: "ADMIN" | "MEMBER";
   devices: StudioDeviceSummary[];
   code?: string;
+  type?: "mobile";
+  impersonating?: boolean;
 };
 const offline: StudioDeviceSummary = {
   id: "fixture-mac", name: "Fixture Mac", platform: "macOS", created_at: "2026-10-01T00:00:00Z",
@@ -49,7 +52,7 @@ function TenantProbe() {
   return createElement("output", {}, useStudioTenantHeaders()["X-Studio-Tenant"]);
 }
 
-async function renderSettings({ app, role, devices, code }: Case) {
+async function renderSettings({ app, role, devices, code, type, impersonating }: Case) {
   const locationId = `${app}-fixture-location`;
   const requireSettingsContext = async () => ({
     app, locationId, tenantHost: false, access: { locationId, locationName: "Fixture location", role },
@@ -65,12 +68,33 @@ async function renderSettings({ app, role, devices, code }: Case) {
     "./_components/sections": { visibleSettingsSections },
     "./_components/settings-nav": { SettingsShell: ({ children }: { children: ReactNode }) => children },
   });
-  const page = loadRoute<{ searchParams: Promise<{ code?: string }> }>(new URL("./page.tsx", import.meta.url), {
+  let mobileReads = 0;
+  const MobileDevices = loadRoute<{ app: Case["app"]; role: Case["role"]; impersonating: boolean }>(new URL("./mobile-devices.tsx", import.meta.url), {
+    "react/jsx-runtime": jsx,
+    "next/link": Link,
+    "@/lib/sms-relay/device-capabilities": { normalizeSmsRelayPlatform },
+    "@/components/ui/button": { Button: ({ children }: { children: ReactNode }) => children },
+    "./device-status": { DeviceStatus: ({ state }: { state: string }) => state },
+    "../integrations/sms-relay/actions": { getSmsRelayDevices: async () => {
+      mobileReads++;
+      return [
+        { id: "android_fixture", label: "Fixture Android", platform: "android", paired: true, status: "online", lastSeenAt: new Date().toISOString() },
+        { id: "stale_fixture", label: "Old Android", platform: "android", paired: true, status: "online", lastSeenAt: "2020-01-01T00:00:00Z" },
+        { id: "ios_fixture", label: "Fixture iPhone", platform: "ios", paired: true, status: "online" },
+      ];
+    } },
+  }, "MobileDevices");
+  const page = loadRoute<{ searchParams: Promise<{ code?: string; type?: "mobile"; from: "crm" }> }>(new URL("./page.tsx", import.meta.url), {
     "react/jsx-runtime": jsx,
     "next/navigation": { notFound: () => assert.fail("Unexpected notFound") },
+    "next/link": Link,
+    "@clerk/nextjs/server": { auth: async () => ({ actor: impersonating ? {} : undefined }) },
+    "@/components/ui/button": { Button: ({ children }: { children: ReactNode }) => children },
+    "./mobile-devices": { MobileDevices },
     "@/lib/platform/profile": { getPlatformProfile: async () => ({ origin: `https://${app}.example` }) },
     "@/lib/studio/devices": {
       getStudioDevices: async (id: string) => {
+        assert.ok(type !== "mobile" || code, "mobile view skips Mac inventory");
         assert.equal(id, locationId);
         return { canManage: role === "ADMIN", devices };
       },
@@ -78,7 +102,13 @@ async function renderSettings({ app, role, devices, code }: Case) {
     "../_components/context": { requireSettingsContext },
     "./companion-settings": { CompanionSettings },
   });
-  const content = await page({ searchParams: Promise.resolve({ code }) });
+  const route = await page({ searchParams: Promise.resolve({ code, type, from: "crm" }) });
+  assert.ok(React.isValidElement<{ children: ReactNode[] }>(route));
+  // Resolve the nested server component before rendering through React's synchronous SSR test runtime.
+  const children = await Promise.all(route.props.children.map(child => React.isValidElement<Parameters<typeof MobileDevices>[0]>(child)
+    && child.type === MobileDevices ? MobileDevices(child.props) : child));
+  assert.equal(mobileReads, type === "mobile" && !code && app === "estio" && role === "ADMIN" && !impersonating ? 1 : 0);
+  const content = React.cloneElement(route, { children });
   const shell = await layout({ children: createElement(Fragment, null, content, createElement(TenantProbe)) });
   // tsx follows the repository's JSX preserve option for imported client components.
   const previous = Object.getOwnPropertyDescriptor(globalThis, "React");
@@ -93,28 +123,52 @@ async function renderSettings({ app, role, devices, code }: Case) {
   }
 }
 
-test("Connected computer renders an empty Location and a pairing link through Settings", async () => {
+test("Devices renders an empty Location and a pairing link through Settings", async () => {
   const empty = await renderSettings({ app: "substo", role: "ADMIN", devices: [] });
+  assert.match(empty, />Devices<\/h1>/);
   assert.match(empty, /No computers connected yet/);
   assert.match(empty, /Pairing code/);
   const pairing = await renderSettings({ app: "substo", role: "ADMIN", devices: [], code: "TEST-1234" });
   assert.match(pairing, /TEST-1234/);
 });
 
-test("Connected computer renders offline and never-seen Macs with processing controls", async () => {
-  const waiting = { ...offline, id: "waiting", last_seen_at: null, processingEnabled: false };
-  const html = await renderSettings({ app: "estio", role: "ADMIN", devices: [offline, waiting] });
+test("Devices groups online and offline Macs by connectivity, even if processing is paused", async () => {
+  const waiting: StudioDeviceSummary = { ...offline, id: "waiting", last_seen_at: null, processingEnabled: false };
+  const online: StudioDeviceSummary = { ...offline, id: "online", name: "Online Mac", online: true, status: "paused", paused: true };
+  const html = await renderSettings({ app: "estio", role: "ADMIN", devices: [offline, waiting, online] });
+  assert.match(html, /Online \(1\).*Offline \(2\)/);
+  assert.match(html, /Paused/);
   assert.match(html, /Companion not running/);
   assert.match(html, /nothing will run until the Studio companion is running/);
   assert.match(html, /Paired, but the companion has never connected/);
   assert.match(html, /Turn processing on/);
   assert.match(html, /Turn processing off/);
   assert.match(html, /id="computer-fixture-mac"/);
-  assert.equal([...html.matchAll(/>Remove Mac</g)].length, 2);
+  assert.equal([...html.matchAll(/>Remove Mac</g)].length, 3);
 });
 
-test("Connected computer is read-only for Location members", async () => {
+test("Devices is read-only for Location members", async () => {
   const html = await renderSettings({ app: "substo", role: "MEMBER", devices: [offline] });
   assert.match(html, /Ask a Business admin to change settings/);
   assert.doesNotMatch(html, /Turn processing off|>Remove Mac<|>Save setup</);
+});
+
+
+test("The mobile filter preserves the originating product and limits the relay inventory to Estio admins", async () => {
+  const admin = await renderSettings({ app: "estio", role: "ADMIN", devices: [], type: "mobile" });
+  assert.match(admin, /Fixture Android<\/span>Online/);
+  assert.match(admin, /Old Android<\/span>Offline/);
+  assert.match(admin, /Fixture iPhone<\/span>Approval required/);
+  assert.match(admin, /Manage mobile devices/);
+  assert.match(admin, /aria-current="page" href="\/settings\/computer\?type=mobile&amp;from=crm"/);
+  for (const [app, role, impersonating] of [["estio", "MEMBER", false], ["estio", "ADMIN", true], ["substo", "ADMIN", false]] as const) {
+    const html = await renderSettings({ app, role, impersonating, devices: [], type: "mobile" });
+    assert.doesNotMatch(html, /Fixture Android|Manage mobile devices/);
+  }
+});
+
+test("A Mac pairing code opens Computers when the mobile filter is also present", async () => {
+  const html = await renderSettings({ app: "substo", role: "ADMIN", devices: [], type: "mobile", code: "TEST-1234" });
+  assert.match(html, /TEST-1234/);
+  assert.match(html, /aria-current="page" href="\/settings\/computer\?from=crm"/);
 });

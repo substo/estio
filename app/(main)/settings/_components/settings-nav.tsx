@@ -33,6 +33,7 @@ function useOrigin(fallback: Product): Product {
 
 const sectionIcons: Record<string, LucideIcon> = {
   "/settings": LayoutDashboard,
+  "/account/connections": PlugZap,
   "/settings/ai": Sparkles,
   "/settings/computer": Laptop,
   "/settings/team": UsersRound,
@@ -53,17 +54,22 @@ export function SettingsShell({ shell, sections, tenantHost, children }: {
 }) {
   const origin = useOrigin(shell.app === "substo" ? "studio" : "crm");
   const product = tenantHost ? "crm" : origin;
-  const links = [{ href: "/settings", label: "Overview" }, ...sections];
+  const account = sections.filter(section => section.scope === "account");
+  const location = sections.filter(section => section.scope !== "account");
+  const groups = [
+    { label: "Settings", items: [{ href: "/settings", label: "Overview" }, ...location] },
+    ...(account.length ? [{ label: "Account", items: account }] : []),
+  ];
   const navigation = {
-    groups: [{
-      label: "Settings",
-      items: links.map(({ href, label }) => ({
+    groups: groups.map(group => ({
+      label: group.label,
+      items: group.items.map(({ href, label }) => ({
         href: `${href}?from=${product}`,
         label,
         icon: sectionIcons[href] ?? Settings,
         activePath: (pathname: string) => pathname === href || (href !== "/settings" && pathname.startsWith(`${href}/`)),
       })),
-    }],
+    })),
     footer: { href: PRODUCTS[product].href, label: `Back to ${PRODUCTS[product].label}`, icon: ArrowLeft, activePath: () => false },
   };
   return <AppShell product={product} {...shell} navigation={navigation}>

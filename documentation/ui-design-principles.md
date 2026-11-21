@@ -12,6 +12,8 @@ Design populated, genuinely empty and filtered-empty states distinctly. An empty
 
 ## Accessible disclosure
 
+Use the app’s Dialog and AlertDialog for interaction prompts. Destructive confirmations use AlertDialog and name the action and its consequence. Report failures inline or in the dialog. Avoid native browser prompts (`window.alert`, `window.confirm`, and `window.prompt`).
+
 Reuse the project's Radix/shadcn Dialog components for modal flows. Provide a visible title, useful description and close control; put initial focus on the appropriate input, contain keyboard focus, support Escape, and return focus to the invoking action. Constrain the dialog to the viewport with scrolling for short screens. Keep pending/error/save outcomes truthful and visible; saving metadata must not imply that summary generation succeeded.
 
 ## Verify the actual states

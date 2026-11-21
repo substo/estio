@@ -1,9 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useTransition } from "react";
+import { Fragment, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useStudioCommand } from "@/app/(main)/studio/_components/use-studio-command";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
+  AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { DeviceStatus } from "./device-status";
 import type { StudioDeviceCommandSummary, StudioDeviceSummary } from "@/lib/studio/devices";
 import { DeviceSetupForm } from "./device-setup-form";
 import { buttonClass, endpoint, inputClass, primaryButtonClass, providerReport, record, type Provider } from "./shared";
@@ -26,7 +32,6 @@ export function sinceText(value: string, now = Date.now()) {
 export const companionRunCommand = "bash scripts/studio-companion-launchagent.sh install";
 const finalStatuses = ["succeeded", "failed", "cancelled"];
 export const isCommandActive = (command: StudioDeviceCommandSummary) => !finalStatuses.includes(command.status);
-const statusLabel: Record<StudioDeviceSummary["status"], string> = { online: "Online", busy: "Busy", paused: "Paused", offline: "Offline", revoked: "Revoked" };
 const commandLabel: Record<StudioDeviceCommandSummary["status"], string> = {
   pending: "Waiting for the Mac to pick this up…", running: "Running on the Mac…", waiting_for_user: "Finish signing in using the link below.",
   succeeded: "Done.", failed: "Failed.", cancelled: "Cancelled.",
@@ -50,19 +55,46 @@ function useAutoRefresh(fast: boolean) {
   }, [fast, router]);
 }
 
-function ActionButton({ label, pendingLabel, command, className = buttonClass, confirm }: {
-  label: string; pendingLabel: string; command: Record<string, unknown>; className?: string; confirm?: string;
+function ActionButton({ label, pendingLabel, command, className = buttonClass, confirm, destructive = false }: {
+  label: string; pendingLabel: string; command: Record<string, unknown>; className?: string;
+  confirm?: string; destructive?: boolean;
 }) {
   const router = useRouter();
   const run = useStudioCommand(endpoint);
-  return <span className="inline-flex flex-col gap-1">
-    <button type="button" className={className} disabled={run.pending} onClick={async () => {
-      if (confirm && !run.retry && !window.confirm(confirm)) return;
-      const result = await run.run(command);
-      if (result?.ok) router.refresh();
-    }}>{run.pending ? pendingLabel : run.retry ? `Retry: ${label}` : label}</button>
-    {run.error ? <span role="alert" className="text-destructive">{run.error}</span> : null}
+  const [open, setOpen] = useState(false);
+  const error = run.error ? <span role="alert" className="text-sm text-destructive">{run.error}</span> : null;
+  const actionLabel = run.pending ? pendingLabel : run.retry ? `Retry: ${label}` : label;
+  async function execute() {
+    const result = await run.run(command);
+    if (result?.ok) {
+      setOpen(false);
+      router.refresh();
+    }
+  }
+
+  if (!confirm) return <span className="inline-flex flex-col gap-1">
+    <button type="button" className={className} disabled={run.pending} onClick={execute}>{actionLabel}</button>
+    {error}
   </span>;
+
+  return <AlertDialog open={open} onOpenChange={next => { if (!run.pending) setOpen(next); }}>
+    <AlertDialogTrigger asChild>
+      <button type="button" className={className}>{label}</button>
+    </AlertDialogTrigger>
+    <AlertDialogContent className="max-h-[90dvh] w-[calc(100%_-_2rem)] overflow-y-auto">
+      <AlertDialogHeader>
+        <AlertDialogTitle>{label}?</AlertDialogTitle>
+        <AlertDialogDescription className="break-words">{confirm}</AlertDialogDescription>
+      </AlertDialogHeader>
+      {error}
+      <AlertDialogFooter>
+        <AlertDialogCancel disabled={run.pending}>Cancel</AlertDialogCancel>
+        <Button type="button" variant={destructive ? "destructive" : "default"} disabled={run.pending} onClick={execute}>
+          {actionLabel}
+        </Button>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>;
 }
 
 function DeviceCheck({ device, cli = false }: { device: StudioDeviceSummary; cli?: boolean }) {
@@ -155,7 +187,7 @@ function ProviderConnection({ device, provider, canManage }: { device: StudioDev
   const report = providerReport(device, provider);
   const command = device.commands.find(c => c.provider === provider) ?? null;
   const active = command ? isCommandActive(command) : false;
-  const usable = canManage && !device.revoked_at && device.status !== "offline";
+  const usable = canManage && !device.revoked_at && device.online;
   const state = report.installed === false ? "Not installed" : report.authenticated ? `Signed in${report.version ? ` · ${report.version}` : ""}` : report.installed ? "Installed, not signed in" : "Unknown";
   return <div className="space-y-2 rounded-md border p-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -185,7 +217,7 @@ function TaskChecklist({ device, canManage }: { device: StudioDeviceSummary; can
     return anchor[task.fix] ? <a href={anchor[task.fix]} className="font-medium text-primary hover:underline">{task.fix}</a> : null;
   };
   return <section aria-label="What this computer can do" className="space-y-2">
-    <h4 className="font-medium">What this Mac can do for you</h4>
+    <h5 className="font-medium">What this Mac can do for you</h5>
     <ul className="divide-y rounded-lg border">{tasks.map(task => <li key={task.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 p-3">
       <span aria-hidden="true" className={`h-2.5 w-2.5 shrink-0 rounded-full ${task.ready ? "bg-emerald-500" : "bg-amber-500"}`} />
       <span className="min-w-0 flex-1"><span className="font-medium">{task.label}</span><span className="sr-only">{task.ready ? ": ready" : ": needs attention"}</span><span className="block text-muted-foreground">{task.detail}</span></span>
@@ -201,27 +233,27 @@ function DeviceCard({ device, canManage }: { device: StudioDeviceSummary; canMan
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 id={`${id}-name`} className="break-words font-medium">{device.name}</h3>
-          <span className="rounded-full border px-2 py-0.5 text-xs">{statusLabel[device.status]}</span>
+          <h4 id={`${id}-name`} className="break-words font-medium">{device.name}</h4>
+          <DeviceStatus state={device.online ? "Online" : "Offline"} />
         </div>
         <p className="text-xs text-muted-foreground">Paired {when(device.created_at)} · ID {device.id.slice(-8)}</p>
       </div>
-      {canManage ? <ActionButton label="Remove Mac" pendingLabel="Removing…" className={`${buttonClass} text-destructive`}
+      {canManage ? <ActionButton label="Remove Mac" pendingLabel="Removing…" destructive className={`${buttonClass} text-destructive`}
         command={{ action: "revoke", deviceId: device.id }}
-        confirm={`Remove ${identity}? This disconnects this pairing. The Mac must be paired again to reconnect.`} /> : null}
+        confirm={`${identity}. Removing this pairing disconnects the Mac. To reconnect, pair it again.`} /> : null}
     </div>
     <p className="text-muted-foreground">{device.online
       ? `Companion running · last seen ${device.last_seen_at ? sinceText(device.last_seen_at) : "just now"}`
       : device.last_seen_at
         ? `Companion not running · last seen ${sinceText(device.last_seen_at)} (${when(device.last_seen_at)})`
         : "Paired, but the companion has never connected"}</p>
-    <p>Processing: <span className="font-medium">{device.processingEnabled ? "On" : "Off"}</span>{device.paused ? " · Paused" : ""}</p>
-    {!device.online && device.processingEnabled ? <div id={`companion-${device.id}`} role="status" className="scroll-mt-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
-      <p className="font-medium">Processing is on, but nothing will run until the Studio companion is running on this Mac.</p>
-      <p className="text-muted-foreground">On the Mac, in this app&apos;s source checkout, run <code className="rounded bg-muted px-1">{companionRunCommand}</code>.</p>
-    </div> : null}
+    <p>Processing: <span className="font-medium">{device.processingEnabled ? "On" : "Off"}</span>{device.paused ? " · Paused" : device.busy ? " · Busy" : ""}</p>
     <details className="space-y-3 rounded-lg border p-3">
       <summary className="cursor-pointer font-medium">Setup and checks</summary>
+      {!device.online && device.processingEnabled ? <div id={`companion-${device.id}`} role="status" className="scroll-mt-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
+        <p className="font-medium">Processing is on, but nothing will run until the Studio companion is running on this Mac.</p>
+        <p className="text-muted-foreground">On the Mac, in this app&apos;s source checkout, run <code className="rounded bg-muted px-1">{companionRunCommand}</code>.</p>
+      </div> : null}
       <TaskChecklist device={device} canManage={canManage} />
       {canManage ? <div className="flex flex-wrap gap-2">
         <ActionButton label={device.processingEnabled ? "Turn processing off" : "Turn processing on"} pendingLabel="Saving…" className={device.processingEnabled ? buttonClass : primaryButtonClass}
@@ -230,7 +262,7 @@ function DeviceCard({ device, canManage }: { device: StudioDeviceSummary; canMan
         <ActionButton label={device.paused ? "Resume" : "Pause"} pendingLabel="Saving…" command={{ action: "set_paused", deviceId: device.id, paused: !device.paused }} />
       </div> : null}
       <div id={`providers-${device.id}`} className="scroll-mt-4 space-y-2">
-        <h4 className="font-medium">Codex and Claude</h4>
+        <h5 className="font-medium">Codex and Claude</h5>
         <p className="text-muted-foreground">The CLI sign-in runs on this Mac and keeps credentials there.</p>
         {(["codex", "claude"] as const).map(provider => <ProviderConnection key={provider} device={device} provider={provider} canManage={canManage} />)}
       </div>
@@ -249,7 +281,7 @@ function formatCode(value: string) {
 }
 
 type Pairing = { name: string; platform: string | null; expiresAt: string; status: string };
-function PairingApproval({ code, businessName, canManage }: { code: string; businessName: string; canManage: boolean }) {
+function PairingApproval({ code, businessName, canManage, computersHref }: { code: string; businessName: string; canManage: boolean; computersHref: string }) {
   const router = useRouter();
   const lookup = useStudioCommand(endpoint);
   const decide = useStudioCommand(endpoint);
@@ -263,7 +295,7 @@ function PairingApproval({ code, businessName, canManage }: { code: string; busi
     void lookup.run({ action: "lookup_pairing", userCode }).then(result => { if (result?.ok && result.data.ok) setPairing(result.data.data); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canManage, userCode]);
-  const done = (next: "approved" | "denied") => { setOutcome(next); router.replace("/settings/computer"); router.refresh(); };
+  const done = (next: "approved" | "denied") => { setOutcome(next); router.replace(computersHref); router.refresh(); };
   return <section className="space-y-3 rounded-xl border-2 border-primary/40 bg-card p-5 text-sm" aria-labelledby="pairing-heading">
     <h2 id="pairing-heading" className="text-lg font-medium">Approve this computer?</h2>
     <p>Code <code className="rounded bg-muted px-1 font-mono">{userCode}</code> · Business: <span className="font-medium">{businessName}</span></p>
@@ -304,30 +336,37 @@ function PairingApproval({ code, businessName, canManage }: { code: string; busi
   </section>;
 }
 
-function CodeEntry() {
+function CodeEntry({ computersHref }: { computersHref: string }) {
   const router = useRouter();
   const [code, setCode] = useState("");
-  return <form className="flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); router.push(`/settings/computer?code=${encodeURIComponent(formatCode(code))}`); }}>
+  return <form className="flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); const url = new URL(computersHref, window.location.origin); url.searchParams.set("code", formatCode(code)); router.push(url.pathname + url.search); }}>
     <label className="block">Pairing code<input className={`${inputClass} font-mono uppercase`} value={code} onChange={event => setCode(formatCode(event.target.value))} placeholder="XXXX-XXXX" required minLength={9} maxLength={9} autoComplete="off" spellCheck={false} /></label>
     <button className={primaryButtonClass}>Continue</button>
   </form>;
 }
 
-export function CompanionSettings({ canManage, devices, origin, businessName, code }: {
-  canManage: boolean; devices: StudioDeviceSummary[]; origin: string; businessName: string; code: string | null;
+export function CompanionSettings({ canManage, devices, origin, businessName, code, computersHref = "/settings/computer" }: {
+  canManage: boolean; devices: StudioDeviceSummary[]; origin: string; businessName: string; code: string | null; computersHref?: string;
 }) {
   const router = useRouter();
   const [refreshing, startRefresh] = useTransition();
   useAutoRefresh(devices.some(device => device.commands.some(isCommandActive)));
+  const onlineCount = devices.filter(device => device.online).length;
+  const sortedDevices = [...devices].sort((a, b) => Number(b.online) - Number(a.online));
   return <div className="space-y-6">
-    {code ? <PairingApproval code={code} businessName={businessName} canManage={canManage} /> : null}
+    {code ? <PairingApproval code={code} businessName={businessName} canManage={canManage} computersHref={computersHref} /> : null}
     <section className="space-y-4 rounded-xl border bg-card p-5 text-sm" aria-labelledby="devices-heading">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 id="devices-heading" className="text-lg font-medium">Computers</h2>
         <button type="button" className={buttonClass} disabled={refreshing} onClick={() => startRefresh(() => router.refresh())}>{refreshing ? "Refreshing…" : "Refresh status"}</button>
       </div>
       {!canManage ? <p className="text-muted-foreground">You can see status. Ask a Business admin to change settings.</p> : null}
-      {devices.map(device => <DeviceCard key={device.id} device={device} canManage={canManage} />)}
+      {sortedDevices.map((device, index) => <Fragment key={device.id}>
+        {index === 0 || device.online !== sortedDevices[index - 1].online
+          ? <h3 className="font-semibold">{device.online ? `Online (${onlineCount})` : `Offline (${devices.length - onlineCount})`}</h3>
+          : null}
+        <DeviceCard device={device} canManage={canManage} />
+      </Fragment>)}
       {!devices.length ? <p className="text-muted-foreground">No computers connected yet.</p> : null}
     </section>
     <section className="space-y-3 rounded-xl border bg-card p-5 text-sm" aria-labelledby="pair-heading">
@@ -339,7 +378,7 @@ export function CompanionSettings({ canManage, devices, origin, businessName, co
         <li>It opens this page with a code. Check the code matches, then approve.</li>
         <li>Keep the companion running in the background (starts at login, restarts if it stops, logs in <code>~/Library/Logs/Estio/</code>): <code>{companionRunCommand}</code></li>
       </ol>
-      {canManage ? code ? null : <CodeEntry /> : <p className="text-muted-foreground">Ask a Business admin to approve a new computer.</p>}
+      {canManage ? code ? null : <CodeEntry computersHref={computersHref} /> : <p className="text-muted-foreground">Ask a Business admin to approve a new computer.</p>}
     </section>
   </div>;
 }

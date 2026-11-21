@@ -1,11 +1,12 @@
 import { isSubstoSettingsPage } from "@/lib/auth/settings-route-policy";
 
-export type SettingsSection = { href: string; label: string; description: string; adminOnly?: boolean; adminOnlyIn?: "estio" | "substo"; firstPartyOnly?: boolean };
+export type SettingsSection = { href: string; label: string; description: string; adminOnly?: boolean; adminOnlyIn?: "estio" | "substo"; firstPartyOnly?: boolean; scope?: "account" };
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
+  { href: "/account/connections", label: "My connections", description: "Social accounts and permissions for your profile.", firstPartyOnly: true, scope: "account" },
   { href: "/settings/general", label: "General", description: "Business profile and name." },
   { href: "/settings/ai", label: "AI", description: "Connections, models, fallback order, and usage limits.", firstPartyOnly: true },
-  { href: "/settings/computer", label: "Connected computer", description: "Pair and manage the Mac that runs Studio jobs.", firstPartyOnly: true },
+  { href: "/settings/computer", label: "Devices", description: "Manage paired computers and mobile devices.", firstPartyOnly: true },
   { href: "/settings/team", label: "Team", description: "Members, roles, and invitations.", adminOnlyIn: "estio" },
   { href: "/settings/notifications", label: "Notifications", description: "Task reminders, quiet hours, and browser push." },
   { href: "/settings/integrations", label: "Integrations", description: "CRM, messaging, and workspace connections." },
@@ -18,9 +19,12 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/settings/location-data", label: "Location data", description: "Review the records retained or removed by cleanups.", adminOnly: true },
 ];
 
-export function visibleSettingsSections(app: "estio" | "substo", role: "ADMIN" | "MEMBER", tenantHost: boolean) {
+export function visibleSettingsSections(app: "estio" | "substo", role: "ADMIN" | "MEMBER" | null, tenantHost: boolean, impersonating = false) {
   return SETTINGS_SECTIONS.filter((section) =>
-    (app !== "substo" || isSubstoSettingsPage(section.href))
-    && (!tenantHost || !section.firstPartyOnly)
-    && (!(section.adminOnly || section.adminOnlyIn === app) || role === "ADMIN"));
+    (!tenantHost || !section.firstPartyOnly)
+    && (section.scope === "account" ? !impersonating : (
+      role !== null
+      && (app !== "substo" || isSubstoSettingsPage(section.href))
+      && (!(section.adminOnly || section.adminOnlyIn === app) || role === "ADMIN")
+    )));
 }
