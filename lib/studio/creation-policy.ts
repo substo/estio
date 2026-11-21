@@ -11,7 +11,7 @@ export const DIRECTION_CHOICES = [
   { id: "customer", label: "Make a customer’s video", description: "Help a business speak to its own customers. Specify the business, viewers and desired outcome." },
   { id: "educate", label: "Teach creators", description: "Give creators a practical lesson. The publisher’s product can appear as an example." },
 ] as const;
-export type DirectionChoice = typeof DIRECTION_CHOICES[number]["id"] | "brief" | "custom";
+export type DirectionChoice = typeof DIRECTION_CHOICES[number]["id"] | "brief" | "custom" | "conversation";
 export type ConfirmedDirection = Direction & { choice: DirectionChoice; rationale: string };
 export type LinkedDraft = { id: string; version: number; title: string };
 export type DraftContextChoice = Pick<LinkedDraft, "id" | "version"> & { purpose: "compare" | "revise" };

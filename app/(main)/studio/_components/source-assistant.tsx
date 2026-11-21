@@ -12,6 +12,8 @@ import { StudioTextProviderChoice } from "./text-provider-choice";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
 import { DRAFT_FROM_FINDINGS_EVENT, useSourceWorkspace } from "./source-workspace";
 import { OPEN_TAB_EVENT } from "./source-tabs";
+import { AgentChat, type AgentSource } from "./agent-chat";
+import type { AgentTurnView } from "@/lib/studio/agent";
 
 type Intent = "discuss" | "rewrite_note" | "propose_idea";
 type Mode = Intent | "knowledge" | "template";
@@ -29,7 +31,7 @@ const INTENTS: Array<{ value: Mode; label: string; hint: string }> = [
 ];
 const clock = (seconds: number) => new Date(seconds * 1000).toISOString().slice(seconds >= 3600 ? 11 : 14, 19);
 
-export function SourceAssistant({ locationId, sourceId, sourceTitle, version, canRelated, archived, hasEvidence, knowledgeInputs, canTemplate, canCreate }: { knowledgeInputs: KnowledgeInput[]; canTemplate: boolean; canCreate?: boolean; locationId: string; sourceId: string; sourceTitle: string; version: number; canRelated: boolean; archived: boolean; hasEvidence: boolean }) {
+export function SourceAssistant({ locationId, sourceId, sourceTitle, version, canRelated, archived, hasEvidence, knowledgeInputs, canTemplate, canCreate, agent }: { agent?: { source: AgentSource; turns: AgentTurnView[]; newDraftHref: string }; knowledgeInputs: KnowledgeInput[]; canTemplate: boolean; canCreate?: boolean; locationId: string; sourceId: string; sourceTitle: string; version: number; canRelated: boolean; archived: boolean; hasEvidence: boolean }) {
   const router = useRouter();
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
   const [open, setOpen] = useState(false);
@@ -37,7 +39,7 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
   const [log, setLog] = useState<Entry[]>([]);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
-  const { setNoteProposal, setIdeaProposal, findingSelection, setFindingSelection, provider, setProvider, creating, setCreating, setCreationControls } = useSourceWorkspace();
+  const { setNoteProposal, setIdeaProposal, findingSelection, setFindingSelection, provider, setProvider, creating, setCreating } = useSourceWorkspace();
   const [inputChoice, setInputChoice] = useState(0);
   const knowledgeInput = knowledgeInputs[inputChoice] ?? null;
   const showIn = (tab: string, line: string) => {
@@ -213,7 +215,11 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
     window.history.replaceState(null, "", url);
   }
 
-  const body = (variant: string) => <>
+  const createToggle = canCreate && <div className="shrink-0 border-t p-3">
+      <Button type="button" variant={creating ? "outline" : "default"} className="min-h-11 w-full"
+        data-create-entry onClick={() => changeWorkspace(!creating)}>{creating ? "Back to source research" : "Create with Studio"}</Button>
+    </div>;
+  const researchBody = (variant: string) => <>
     <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3" role="log" aria-live="polite" aria-label="Conversation">
       {!creating && log.length === 0 ? <p className="text-muted-foreground">Pick what to work on, then tell me your reaction. Everything is answered from this source only, and nothing is saved until you choose.</p> : null}
       {log.map(entry => entry.role === "you"
@@ -221,7 +227,6 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
         : entry.role === "ai" ? <AiAnswer key={entry.id} entry={entry} />
         : <p key={entry.id} role={entry.tone === "error" ? "alert" : undefined} className={`mr-6 whitespace-pre-wrap break-words rounded-lg bg-muted p-3 ${entry.tone === "error" ? "text-destructive" : ""}`}>{entry.text}{entry.link ? <> <a href={entry.link.href} className="font-medium text-primary underline">{entry.link.label}</a></> : null}</p>)}
     </div>
-    {variant === "side" && <div ref={setCreationControls} hidden={!creating} className="min-h-0 shrink overflow-y-auto border-t px-4 py-3" />}
     <div className={creating ? "hidden" : "space-y-2 border-t p-3"}>
       {archived ? <p className="text-xs text-muted-foreground">This source is archived, so notes and ideas are read-only.</p> : null}
       {selectedIdea ? <div className="flex flex-wrap items-center gap-2 rounded-md border px-2 text-sm">
@@ -250,15 +255,15 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
       </div>
       <p role="status" className="text-xs text-muted-foreground">{listening ? "Listening…" : dictationNote}</p>
     </div>
-    {canCreate && <div className="shrink-0 border-t p-3">
-      <Button type="button" variant={creating ? "outline" : "default"} className="min-h-11 w-full"
-        data-create-entry onClick={() => changeWorkspace(!creating)}>{creating ? "Back to source research" : "Create with Studio"}</Button>
-    </div>}
+    {createToggle}
   </>;
+  const body = (variant: string) => creating && agent
+    ? <><AgentChat locationId={locationId} source={agent.source} initialTurns={agent.turns} provider={provider} onProvider={setProvider} newDraftHref={agent.newDraftHref} />{createToggle}</>
+    : researchBody(variant);
   const header = <div className="min-w-0"><h2 className="font-semibold">Assistant</h2><p className="truncate text-xs text-muted-foreground">{creating ? "Creating from: " : "Only this source: "}{sourceTitle}</p></div>;
   return <>
     {!creating && <button ref={opener} type="button" onClick={() => setOpen(true)} aria-haspopup="dialog" className="fixed bottom-4 right-4 z-30 inline-flex min-h-12 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground shadow-lg lg:hidden"><MessageSquare aria-hidden="true" className="h-4 w-4" />Assistant</button>}
-    <aside id="source-assistant" tabIndex={-1} aria-label="Source assistant" className={`min-h-0 flex-col rounded-xl border bg-card text-sm lg:sticky lg:top-4 lg:flex lg:max-h-[calc(100dvh-2rem)] ${creating ? "flex" : "hidden"}`}>
+    <aside id="source-assistant" tabIndex={-1} aria-label="Source assistant" className={`min-h-0 flex-col rounded-xl border bg-card text-sm lg:sticky lg:top-4 lg:flex lg:max-h-[calc(100dvh-2rem)] ${creating ? "order-first flex max-h-[85dvh] lg:order-none" : "hidden"}`}>
       <header className="border-b px-4 py-3">{header}</header>
       {body("side")}
     </aside>

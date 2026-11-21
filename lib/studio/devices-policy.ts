@@ -107,6 +107,7 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
   if (v.videoTemplateVersion === 1) result.videoTemplateVersion = 1;
   if (v.sourceAssistVersion === 1) result.sourceAssistVersion = 1;
   if (v.stagedCreationVersion === 1) result.stagedCreationVersion = 1;
+  if (v.studioAgentVersion === 1) result.studioAgentVersion = 1;
   if (v.knowledgeCurationVersion === 1) result.knowledgeCurationVersion = 1;
   if (v.knowledgeOutlineVersion === 2) result.knowledgeOutlineVersion = 2;
   // Route-aware companion: runs the provider/model each job carries instead of only Setup's (lib/ai/routing.ts).

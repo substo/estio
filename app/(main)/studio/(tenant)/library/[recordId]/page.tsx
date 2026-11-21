@@ -1,7 +1,6 @@
-import { CreationWorkspace } from "../../../_components/creation-workspace";
+import { AgentDraftProvider, DraftPanel } from "../../../_components/agent-workspace";
+import { getAgentConversation, latestSourceDraft } from "@/lib/studio/agent";
 import { getCreationPage } from "@/lib/studio/creation";
-import { CREATION_STAGES } from "@/lib/studio/creation-policy";
-import { getStudioScriptTemplateChoices } from "@/lib/studio/script-templates";
 import { randomUUID } from "node:crypto";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -36,7 +35,7 @@ import { SourceAssistant } from "../../../_components/source-assistant";
 export const dynamic = "force-dynamic";
 const card = "scroll-mt-16 space-y-3 rounded-xl border bg-card p-4 md:p-5";
 
-export default async function StudioLibraryRecordPage({ params, searchParams }: { params: Promise<{ recordId: string }>; searchParams: Promise<{ knowledgeReview?: string; draft?: string; mode?: string; stage?: string }> }) {
+export default async function StudioLibraryRecordPage({ params, searchParams }: { params: Promise<{ recordId: string }>; searchParams: Promise<{ knowledgeReview?: string; draft?: string; mode?: string; stage?: string; new?: string }> }) {
   const { locationId, recordId } = await studioRouteParams(params);
   const result = await getStudioLibraryRecord(locationId, recordId);
   if (!result) notFound();
@@ -48,13 +47,15 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
   const isSource = record.kind === "reference";
   const active = isSource && !record.archived;
   const query = await searchParams;
-  const draftId = links.find(link => link.id === query.draft && link.kind === "content")?.id;
+  const requestedDraft = links.find(link => link.id === query.draft && link.kind === "content")?.id;
   const creationData = async () => {
     if (!active) return null;
+    // Create continues this source's latest conversation after a reload; "new" starts a fresh draft.
+    const draftId = requestedDraft ?? (query.new === "1" ? undefined : await latestSourceDraft(locationId, recordId) ?? undefined);
     const data = await getCreationPage(locationId, draftId, recordId) ?? (draftId ? await getCreationPage(locationId, undefined, recordId) : null);
     if (!data) return null;
-    const { options } = await getStudioScriptTemplateChoices(locationId, data.record?.templateId);
-    return { ...data, templates: options.map(({ id, name, version }) => ({ id, name, version })) };
+    const conversation = data.record ? await getAgentConversation(locationId, data.record.id) : { turns: [], plan: [] };
+    return { ...data, conversation };
   };
   const [pendingUploads, latestOutline, videoStatus, knowledgeInputs, creation] = await Promise.all([
     listPendingStudioUploads(locationId, recordId),
@@ -143,13 +144,10 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     { id: "more", label: "Files", panel: moreLinks },
   ];
 
-  return <SourceWorkspaceProvider startInCreation={Boolean(creation) && query.mode === "create"} draftId={creation?.record?.id}><main className="mx-auto w-full min-w-0 max-w-7xl space-y-3 p-4 pb-24 md:p-6 lg:pb-6">
+  return <SourceWorkspaceProvider startInCreation={Boolean(creation) && query.mode === "create"} draftId={creation?.record?.id}><AgentDraftProvider recordId={creation?.record?.id ?? randomUUID()} initialRecord={creation?.record ?? null} initialPlan={creation?.conversation.plan ?? []}><main className="mx-auto w-full min-w-0 max-w-7xl space-y-3 p-4 pb-24 md:p-6 lg:pb-6">
     {breadcrumb}
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
-      <SourceWorkArea creation={creation && <CreationWorkspace key={creation.record?.id ?? recordId}
-        recordId={creation.record?.id ?? randomUUID()} initial={creation.record} source={creation.source}
-        initialStage={CREATION_STAGES.find(stage => stage.toLowerCase() === query.stage)}
-        templates={creation.templates} publisher={creation.publisher} history={creation.runs} linkedDrafts={creation.linkedDrafts} />}
+      <SourceWorkArea creation={creation && <DraftPanel />}
         research={<div className="flex min-w-0 flex-col gap-4">
         <div className="grid gap-4 md:grid-cols-[minmax(0,320px)_minmax(0,1fr)] md:items-start">
           <SourcePlayer title={record.title} thumbnail={view.thumbnail} videoId={youtube?.videoId ?? null} url={view.url} portrait={view.portrait} />
@@ -161,7 +159,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
         </div>
         <SourceTabs tabs={tabs} />
       </div>} />
-      <SourceAssistant canCreate={Boolean(creation)} locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} canRelated={active} archived={record.archived} knowledgeInputs={knowledgeInputs?.inputs ?? []} canTemplate={Boolean(youtube) && hasTranscript} />
+      <SourceAssistant canCreate={Boolean(creation)} locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} canRelated={active} archived={record.archived} knowledgeInputs={knowledgeInputs?.inputs ?? []} canTemplate={Boolean(youtube) && hasTranscript} agent={creation ? { source: { id: recordId, version: record.version, title: record.title, hasText: hasTranscript || Boolean(value('description').trim()) }, turns: creation.conversation.turns, newDraftHref: `/studio/library/${recordId}?mode=create&new=1` } : undefined} />
     </div>
-  </main></SourceWorkspaceProvider>;
+  </main></AgentDraftProvider></SourceWorkspaceProvider>;
 }

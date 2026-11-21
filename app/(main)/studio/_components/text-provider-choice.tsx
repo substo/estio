@@ -3,17 +3,17 @@ import { useEffect, useId, useState } from "react";
 import type { StudioTextProvider } from "@/lib/studio/text-provider";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
 type Readiness = Record<StudioTextProvider, { ready: boolean; reason: string; label?: string }>;
-export function StudioTextProviderChoice({ provider, onChange, fullSource = false, videoTemplate = false, sourceAssist = false, selectedIdea = false, stagedCreation = false, compact = false }: { provider: StudioTextProvider; onChange: (value: StudioTextProvider) => void; fullSource?: boolean; videoTemplate?: boolean; sourceAssist?: boolean; selectedIdea?: boolean; stagedCreation?: boolean; compact?: boolean }) {
+export function StudioTextProviderChoice({ provider, onChange, fullSource = false, videoTemplate = false, sourceAssist = false, selectedIdea = false, stagedCreation = false, studioAgent = false, compact = false }: { provider: StudioTextProvider; onChange: (value: StudioTextProvider) => void; fullSource?: boolean; videoTemplate?: boolean; sourceAssist?: boolean; selectedIdea?: boolean; stagedCreation?: boolean; studioAgent?: boolean; compact?: boolean }) {
   const selectId = useId();
   const headers = useStudioTenantHeaders();
   const tenant = headers["X-Studio-Tenant"];
   const [state, setState] = useState<Readiness | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => { const controller = new AbortController(); setState(null); setFailed(false);
-    void fetch(stagedCreation ? "/studio/ai-capabilities/api?workflow=staged_creation" : selectedIdea ? "/studio/ai-capabilities/api?workflow=selected_idea" : sourceAssist ? "/studio/ai-capabilities/api?workflow=source_assist" : videoTemplate ? "/studio/ai-capabilities/api?workflow=video_template" : fullSource ? "/studio/ai-capabilities/api?workflow=knowledge_outline" : "/studio/ai-capabilities/api", { headers: { "X-Studio-Tenant": tenant }, cache: "no-store", signal: controller.signal })
+    void fetch(studioAgent ? "/studio/ai-capabilities/api?workflow=studio_agent" : stagedCreation ? "/studio/ai-capabilities/api?workflow=staged_creation" : selectedIdea ? "/studio/ai-capabilities/api?workflow=selected_idea" : sourceAssist ? "/studio/ai-capabilities/api?workflow=source_assist" : videoTemplate ? "/studio/ai-capabilities/api?workflow=video_template" : fullSource ? "/studio/ai-capabilities/api?workflow=knowledge_outline" : "/studio/ai-capabilities/api", { headers: { "X-Studio-Tenant": tenant }, cache: "no-store", signal: controller.signal })
       .then(r => r.ok ? r.json() : Promise.reject(new Error("unavailable"))).then(setState).catch(error => { if (!controller.signal.aborted) setFailed(true); });
     return () => controller.abort();
-  }, [tenant, fullSource, videoTemplate, sourceAssist, selectedIdea, stagedCreation]);
+  }, [tenant, fullSource, videoTemplate, sourceAssist, selectedIdea, stagedCreation, studioAgent]);
   const choices = <>
     <option value="location_order">Location AI order</option>
     <option value="subscription">{state?.subscription.label ?? "My paired Mac subscription"}</option>

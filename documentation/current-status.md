@@ -2,6 +2,10 @@
 
 Updated 2026-11-08. This is the task/status source of truth; [architecture and decisions](how-the-app-works.md) owns product rules. Historical checkpoints do not override this page.
 
+## Conversational creation assistant (2026-11-21, local candidate, not deployed)
+
+Create in the source Assistant and `/studio/content/create` now open one conversation with a bounded model→read-tool→observation loop (up to four calls per message), on-demand skills, a persisted next-steps plan and explicit **Use**/Undo on proposals. See [AI workflows](ai-workflows.md#conversational-creation-assistant-2026-11-21-local-candidate). Needs migration `20261121120000_studio_agent_conversation` and a companion reporting `studioAgentVersion` before it can run on a Mac; hosted OpenAI uses the same worker. No live provider call, signed-in browser acceptance or deployment has happened.
+
 ## Unified settings and Location AI routing (2026-11-20, local candidate)
 
 `feature/unified-ai-settings` combines the shared Location order, model lists, per-task models and spending cap with the canonical staged-creation work. CRM and Studio link directly to the same `/settings` area and `/settings/ai`, where Location admins can connect OpenAI and Gemini keys. General, Team, Website, integrations, Connected computer and the other Location settings use the shared shell. The old settings pages have been removed. CRM-specific controls live under Conversations, Contacts, Live Assist, and Property media. Brand voice lives in Business Profile.

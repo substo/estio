@@ -10,7 +10,6 @@ type Workspace = {
   noteProposal: string | null; setNoteProposal: (value: string | null) => void;
   provider: StudioTextProvider; setProvider: (value: StudioTextProvider) => void;
   creating: boolean; setCreating: (value: boolean) => void;
-  creationControls: HTMLDivElement | null; setCreationControls: (node: HTMLDivElement | null) => void;
   ideaProposal: IdeaProposal | null; setIdeaProposal: (value: IdeaProposal | null) => void;
   findingSelection: FindingSelection | null; setFindingSelection: (value: FindingSelection | null) => void;
 };
@@ -20,11 +19,10 @@ export function SourceWorkspaceProvider({ children, startInCreation = false, dra
   const [provider, setProvider] = useState<StudioTextProvider>("location_order");
   const [creating, setCreating] = useState(startInCreation);
   useEffect(() => { setCreating(startInCreation); }, [startInCreation, draftId]);
-  const [creationControls, setCreationControls] = useState<HTMLDivElement | null>(null);
   const [noteProposal, setNoteProposal] = useState<string | null>(null);
   const [ideaProposal, setIdeaProposal] = useState<IdeaProposal | null>(null);
   const [findingSelection, setFindingSelection] = useState<FindingSelection | null>(null);
-  const value = useMemo(() => ({ provider, setProvider, creating, setCreating, creationControls, setCreationControls, noteProposal, setNoteProposal, ideaProposal, setIdeaProposal, findingSelection, setFindingSelection }), [provider, creating, creationControls, noteProposal, ideaProposal, findingSelection]);
+  const value = useMemo(() => ({ provider, setProvider, creating, setCreating, noteProposal, setNoteProposal, ideaProposal, setIdeaProposal, findingSelection, setFindingSelection }), [provider, creating, noteProposal, ideaProposal, findingSelection]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 export function useOptionalSourceWorkspace() { return useContext(Context); }

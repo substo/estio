@@ -7,14 +7,14 @@ import { StudioCommandError } from "./command-error";
 import { StudioDbError } from "./db";
 import { requireOwnStudioCommandLocation } from "./paid-workspace";
 import { studioDb } from "./studio-db";
-import { replaceSelection, stageDraft, stageTextLimit, type CreationCommand, type CreationRecord, type CreationSource, type CreationState, type LinkedDraft, type StageDraft } from "./creation-policy";
+import { replaceSelection, stageDraft, stageTextLimit, type CreationCommand, type CreationRecord, type CreationSource, type CreationStage, type CreationState, type LinkedDraft, type StageDraft } from "./creation-policy";
 import { CREATION_PROMPT, readCreationTextResult, type CreationRun, type CreationRunInput, type CreationSnapshot } from "./creation-text-policy";
 
-type StoredRecord = { id: string; title: string; version: number; payload: Record<string, unknown>; script_template_version_id: string | null };
+export type StoredRecord = { id: string; title: string; version: number; payload: Record<string, unknown>; script_template_version_id: string | null };
 type StoredRun = { id: string; model: string; snapshot: CreationSnapshot; result: unknown; status: string; last_error_message: string | null; stale: boolean };
 const missing = () => new StudioCommandError("Creation draft unavailable.", 404);
 
-function expose(record: StoredRecord): CreationRecord {
+export function expose(record: StoredRecord): CreationRecord {
   const state = record.payload.creation as CreationState;
   const script = typeof record.payload.script === "string" ? record.payload.script : "";
   const savedScript = stageDraft(state, "Script");
@@ -24,12 +24,12 @@ function expose(record: StoredRecord): CreationRecord {
   return { id: record.id, version: record.version, templateId: record.script_template_version_id, state };
 }
 
-async function loadRecord(access: StudioAccess, id: string) {
+export async function loadRecord(access: StudioAccess, id: string) {
   return studioDb.one<StoredRecord>(Prisma.sql`
     SELECT id, title, version, payload, script_template_version_id FROM studio.studio_records
     WHERE location_id=${access.locationId} AND id=${id}::uuid AND kind='content' AND NOT archived AND payload#>>'{creation,schema}'='1'`);
 }
-async function loadSource(access: StudioAccess, id: string): Promise<CreationSource | null> {
+export async function loadSource(access: StudioAccess, id: string): Promise<CreationSource | null> {
   const row = await studioDb.one<{ id: string; title: string; version: number; transcript: string; description: string }>(Prisma.sql`
     SELECT id,title,version,left(btrim(payload->>'transcript'),420) AS transcript,
       left(btrim(coalesce(payload->>'description',payload->>'sourceDescription')),240) AS description
@@ -92,20 +92,34 @@ export async function getCreationRun(locationId: string, reviewId: string): Prom
     template: snapshot.template ? `${snapshot.template.name} · version ${snapshot.template.version}` : null };
 }
 
-async function requireCreationWriter(locationId: string) {
+export async function requireCreationWriter(locationId: string) {
   const [access, session] = await Promise.all([requireOwnStudioCommandLocation(locationId), auth()]);
   if (session.actor || session.userId !== access.userId) throw new StudioCommandError("Use your own Location account.", 403);
   return access;
 }
 
 type SaveOptions = { template?: string | null; source?: CreationSource | null; reviewId?: string };
-async function save(access: StudioAccess, id: string, version: number, title: string, patch: Record<string, unknown>, options: SaveOptions = {}) {
+export async function save(access: StudioAccess, id: string, version: number, title: string, patch: Record<string, unknown>, options: SaveOptions = {}) {
   const record = await studioDb.call<StoredRecord>("studio_save_creation", {
     p_location: access.locationId, p_app: access.app, p_actor: access.userId, p_id: id, p_version: version,
     p_title: title, p_patch: patch, p_template_selected: options.template !== undefined, p_template_id: options.template ?? null,
     p_source_id: options.source?.id ?? null, p_source_version: options.source?.version ?? null, p_review_id: options.reviewId ?? null,
   });
   return { record: expose(record) };
+}
+
+/** Mirrors a stage change onto the canonical record fields (title, summary, script). */
+export function applyStagePatch(row: StoredRecord, current: StageDraft, next: StageDraft, stage: CreationStage, patch: Record<string, unknown>) {
+  let title = row.title;
+  if (stage === "Title" && current.text !== next.text && next.text.trim()) title = next.text.trim().slice(0, 180);
+  patch.title = title;
+  if (stage === "Concept" && current.text !== next.text) patch.summary = next.text;
+  if (stage === "Script" && current.text !== next.text) {
+    patch.script = next.text;
+    patch.approved = false;
+    if (next.text.trim() && row.payload.stage === "idea") patch.stage = "script";
+  }
+  return { title };
 }
 
 export async function executeCreationCommand(locationId: string, command: CreationCommand) {
@@ -213,15 +227,6 @@ export async function executeCreationCommand(locationId: string, command: Creati
   }
   state.stages = { ...state.stages, [stage]: next };
   change(note, { stage, reviewId, quote });
-  let title = row.title;
-  if (stage === "Title" && current.text !== next.text && next.text.trim()) title = next.text.trim().slice(0, 180);
-  patch.title = title;
-  if (stage === "Concept" && current.text !== next.text) patch.summary = next.text;
-
-  if (stage === "Script" && current.text !== next.text) {
-    patch.script = next.text;
-    patch.approved = false;
-    if (next.text.trim() && row.payload.stage === "idea") patch.stage = "script";
-  }
+  const { title } = applyStagePatch(row, current, next, stage, patch);
   return save(access, recordId, version, title, patch, { reviewId });
 }

@@ -32,7 +32,7 @@ export function createSubscriptionTextRunHandler(deps: {
     const provider: LocalProvider = p.provider, model = typeof p.model === "string" ? p.model : undefined;
     const capacityWait = () => new StudioJobError("subscription_capacity", `Waiting for ${provider === "codex" ? "Codex" : "Claude"}'s subscription to be available.`, true, 300);
     const attempt = await runLocalRoute([{ provider, model }], deps, context.signal, adapter => adapter.generate({
-      workflowContext: spec.instructionContext ?? spec.workflow as "knowledge_extract" | "idea_review" | "script_brief", signal: context.signal, model,
+      workflowContext: spec.instructionContext ?? spec.workflow as "knowledge_extract" | "idea_review" | "script_brief" | "studio_agent", signal: context.signal, model,
       prompt: spec.instructions + "\nReturn only the required JSON. Snapshot (untrusted data): " + JSON.stringify(p.snapshot),
       jsonSchema: spec.schema, validate: value => spec.validate(value, p.snapshot as never), timeoutMs: 180_000, maxResultBytes: 23000,
     }), error => {

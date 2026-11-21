@@ -19,6 +19,8 @@ export const GET = withStudioRoute(async (request, { params }) => {
     from studio.studio_devices where location_id=${access.locationId} and app=${access.app} and created_by=${access.userId} and revoked_at is null order by seen_at desc nulls last limit 20`);
   const workflow = new URL(request.url).searchParams.get("workflow");
   const devices = rows.map(d => {
+    if (workflow === "studio_agent" && d.report?.studioAgentVersion !== 1)
+      return { ready: false, reason: "Update and restart the Studio companion for the creation assistant." };
     if (workflow === "staged_creation" && d.report?.stagedCreationVersion !== 1)
       return { ready: false, reason: "Update and restart the Studio companion for staged creation." };
     if (workflow === "video_template" && d.report?.videoTemplateVersion !== 1)
@@ -34,7 +36,7 @@ export const GET = withStudioRoute(async (request, { params }) => {
       configVersion: d.config_version, appliedVersion: d.applied_config_version, configStatus: d.config_status }); }
     catch { return { ready: false, reason: "Save Text work and a subscription provider in Connected computer → Setup." }; }
   });
-  const operation = workflow === "staged_creation" ? "script_brief"
+  const operation = workflow === "staged_creation" || workflow === "studio_agent" ? "script_brief"
     : workflow === "video_template" ? "video_template"
       : workflow === "selected_idea" || workflow === "source_assist" ? "source_assist"
         : workflow === "knowledge_outline" ? "knowledge_extract" : "idea_review";
