@@ -33,12 +33,35 @@ BEGIN
     'ideas',jsonb_build_array(jsonb_build_object('id',draft,'version',(saved->>'version')::bigint,'agent',jsonb_build_object('turnId',t1,'round',1))));
   BEGIN PERFORM studio.studio_enqueue_routed_text_run(loc,'substo',actor,'script_brief',cmd); RAISE EXCEPTION 'Old companion received an agent round';
   EXCEPTION WHEN SQLSTATE 'P2017' THEN NULL; END;
+  -- A companion that only reports the first agent contract (no duration targets, 4,000-character Scripts) never receives a new round.
   UPDATE studio.studio_devices SET report=report||'{"studioAgentVersion":1}' WHERE id=device;
+  BEGIN PERFORM studio.studio_enqueue_routed_text_run(loc,'substo',actor,'script_brief',cmd); RAISE EXCEPTION 'v1 companion received a v2 round';
+  EXCEPTION WHEN SQLSTATE 'P2017' THEN NULL; END;
+  -- Pinning: v2 snapshots (scriptLimits) need version 2; rounds stored under v1 (no scriptLimits) run on 1 or 2.
+  IF studio.studio_pick_text_device(loc,'substo',actor,'script_brief','{}','{"mode":"studio_agent","scriptLimits":{}}'::jsonb,'codex',device) IS NOT NULL
+    OR studio.studio_pick_text_device(loc,'substo',actor,'script_brief','{}','{"mode":"studio_agent"}'::jsonb,'codex',device) IS NULL THEN
+    RAISE EXCEPTION 'Agent contract pinning is wrong for a version-1 companion';
+  END IF;
+  UPDATE studio.studio_devices SET report=report||'{"studioAgentVersion":2}' WHERE id=device;
+  IF studio.studio_pick_text_device(loc,'substo',actor,'script_brief','{}','{"mode":"studio_agent","scriptLimits":{}}'::jsonb,'codex',device) IS NULL
+    OR studio.studio_pick_text_device(loc,'substo',actor,'script_brief','{}','{"mode":"studio_agent"}'::jsonb,'codex',device) IS NULL THEN
+    RAISE EXCEPTION 'Agent contract pinning is wrong for a version-2 companion';
+  END IF;
+  -- The validator follows the contract a round was stamped with: 4,000 characters under v1, 9,000 under v2.
+  DECLARE long_reply jsonb:=jsonb_build_object('step','reply','tool',NULL,'reply','ok','choices','[]'::jsonb,'decisions','[]'::jsonb,'plan','[]'::jsonb,
+      'proposals',jsonb_build_array(jsonb_build_object('stage','Script','text',repeat('word ',1000),'rationale','r','evidenceIds','[]'::jsonb,'verify','[]'::jsonb)));
+  BEGIN
+  BEGIN
+    PERFORM studio.studio_validate_text_run_result('script_brief',long_reply,'{"mode":"studio_agent","message":"x","operation":{"mustReply":false},"observations":[]}'::jsonb);
+    RAISE EXCEPTION 'A v1 round accepted a 5,000-character Script';
+  EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
+  PERFORM studio.studio_validate_text_run_result('script_brief',long_reply,'{"mode":"studio_agent","scriptLimits":{},"message":"x","operation":{"mustReply":false},"observations":[]}'::jsonb);
+  END;
   queued:=studio.studio_enqueue_routed_text_run(loc,'substo',actor,'script_brief',cmd);
   IF studio.studio_enqueue_routed_text_run(loc,'substo',actor,'script_brief',cmd)<>queued THEN RAISE EXCEPTION 'Round enqueue not idempotent'; END IF;
   job:=(queued->>'jobId')::uuid; review:=(queued->>'reviewId')::uuid;
   SELECT r.snapshot INTO snapshot FROM studio.studio_idea_reviews r WHERE id=review;
-  IF (SELECT prompt_version FROM studio.studio_idea_reviews WHERE id=review)<>'studio.agent.v1' OR snapshot->>'mode'<>'studio_agent'
+  IF (SELECT prompt_version FROM studio.studio_idea_reviews WHERE id=review)<>'studio.agent.v2' OR snapshot->>'mode'<>'studio_agent'
     OR snapshot::text LIKE '%ZEBRA-TRANSCRIPT%' OR snapshot#>>'{sources,0,id}'<>source::text OR snapshot#>>'{sources,0,approvedFindings}'<>'0'
     OR snapshot->>'message'<>'Make something inspired by this opening' OR snapshot->'observations'<>'[]'::jsonb THEN
     RAISE EXCEPTION 'Agent snapshot exposed source text or lost scope: %',snapshot;

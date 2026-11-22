@@ -65,7 +65,7 @@ before(async () => {
       perform studio.studio_device_pairing_action(w,'substo',actor,'approve',code,gen_random_uuid());
       r:=studio.studio_device_pair_poll('substo',(r->>'pairingId')::uuid,h,hash);d:=(r->>'deviceId')::uuid;
       update studio.studio_devices set processing_enabled=true,desired_config='{"features":{"text":true},"textProvider":"codex","textModel":null}',config_version=2,applied_config_version=2,config_status='applied',seen_at=clock_timestamp(),
-        report='{"handlers":["studio.text_run"],"studioAgentVersion":1,"codex":{"ready":true,"authenticated":true,"loginMethod":"chatgpt"},"capacity":{"codex":true}}' where id=d; return d; end $$`);
+        report='{"handlers":["studio.text_run"],"studioAgentVersion":2,"codex":{"ready":true,"authenticated":true,"loginMethod":"chatgpt"},"capacity":{"codex":true}}' where id=d; return d; end $$`);
   await sql(`select public.test_pair_device($1,$2,'AGENTBBB',$3)`, loc, user, token);
   await db.call("studio_create_substo_location", { p_location_id: "e1a90000-0000-4000-8000-000000000002", p_name: "Agent other", p_clerk_user_id: "other-user" });
   agent = await import("./agent");

@@ -1,5 +1,6 @@
 import { StudioCommandError } from "./command-error";
 import { CREATION_STAGES, type CreationStage } from "./creation-policy";
+import { AGENT_SCRIPT_LIMIT_V1, agentInstructionsV1 } from "./agent-policy-v1";
 import { MAX_SCRIPT_CHARS, MAX_SCRIPT_WORDS, MAX_SINGLE_SCRIPT_SECONDS, SPEAKING_WPM } from "./script-length";
 import { hasStudioTextConsent, readStudioTextProvider } from "./text-provider";
 
@@ -8,7 +9,11 @@ import { hasStudioTextConsent, readStudioTextProvider } from "./text-provider";
  * The server executes the tool, stores the observation and queues the next round on the same authorized route.
  * The model never gets a tool the server did not allowlist, never writes, and every argument is typed and bounded.
  */
-export const AGENT_PROMPT = "studio.agent.v1";
+/** v1: Scripts to 4,000 characters, no duration target (frozen in agent-policy-v1.ts). v2: duration targets and Scripts to 9,000 characters. */
+export const AGENT_PROMPT_V1 = "studio.agent.v1";
+export const AGENT_PROMPT = "studio.agent.v2";
+/** Companion capability (`studioAgentVersion`) a job of each prompt needs. A v2 job is never sent to a companion that only reports 1. */
+export const AGENT_CAPABILITY_V2 = 2;
 export const AGENT_MAX_ROUNDS = 4;
 export const AGENT_MESSAGE_LIMIT = 2000;
 export const AGENT_TOOLS = ["search_source", "read_source", "list_findings", "read_stage", "search_library", "load_skill"] as const;
@@ -52,7 +57,8 @@ export function isAgentSnapshot(value: unknown): value is AgentSnapshot {
 }
 /** Identity of the conversation a page shows. Server props that change this key must reset chat, route and polling state. */
 export const agentSessionKey = (draftId: string | null | undefined, freshNonce?: string | null) => draftId ? `draft:${draftId}` : `fresh:${freshNonce ?? ""}`;
-export function agentStageLimit(stage: CreationStage) { return stage === "Title" ? 180 : stage === "Script" ? MAX_SCRIPT_CHARS : 1200; }
+export function agentStageLimit(stage: CreationStage, version: string = AGENT_PROMPT) { return stage === "Title" ? 180 : stage === "Script" ? (version === AGENT_PROMPT_V1 ? AGENT_SCRIPT_LIMIT_V1 : MAX_SCRIPT_CHARS) : 1200; }
+export const agentInstructionsFor = (version: string) => version === AGENT_PROMPT_V1 ? agentInstructionsV1 : agentInstructions;
 
 export function readAgentSendCommand(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new StudioCommandError("Invalid message.");
@@ -85,7 +91,7 @@ export function readAgentApplyCommand(value: unknown): AgentApplyCommand {
   return { recordId, turnId, version: input.version, index: input.index, baseText: input.baseText };
 }
 
-export function readAgentResult(value: unknown, snapshot: AgentSnapshot): AgentResult {
+export function readAgentResult(value: unknown, snapshot: AgentSnapshot, version: string = AGENT_PROMPT): AgentResult {
   const fail = (): never => { throw new Error("Invalid assistant result"); };
   function object(item: unknown, keys: string[]) {
     if (!item || typeof item !== "object" || Array.isArray(item) || Object.keys(item).length !== keys.length || !keys.every(key => Object.hasOwn(item, key))) return fail();
@@ -108,7 +114,7 @@ export function readAgentResult(value: unknown, snapshot: AgentSnapshot): AgentR
       offset: tool.offset as number | null, stage: tool.stage as CreationStage | null, skill: tool.skill as AgentSkillName | null } };
   }
   if (r.step !== "reply" || r.tool !== null || r.choices.length > 3 || r.proposals.length > 3 || r.decisions.length > 4 || r.plan.length > 4) return fail();
-  if (r.proposals.filter(p => (p as { stage?: unknown })?.stage === "Script").length > 1) return fail();
+  if (version !== AGENT_PROMPT_V1 && r.proposals.filter(p => (p as { stage?: unknown })?.stage === "Script").length > 1) return fail();
   const cited = new Set(snapshot.observations.flatMap(o => o.result.items.filter(i => i.cite).map(i => i.id)));
   const choices = r.choices.map(c => text(c, 90));
   if (new Set(choices).size !== choices.length) return fail();
@@ -116,7 +122,7 @@ export function readAgentResult(value: unknown, snapshot: AgentSnapshot): AgentR
     const p = object(raw, ["stage", "text", "rationale", "evidenceIds", "verify"]);
     if (!CREATION_STAGES.includes(p.stage as CreationStage) || !Array.isArray(p.evidenceIds) || p.evidenceIds.length > 4 || !Array.isArray(p.verify) || p.verify.length > 3) return fail();
     const stage = p.stage as CreationStage;
-    return { stage, text: text(p.text, agentStageLimit(stage)), rationale: text(p.rationale, 300),
+    return { stage, text: text(p.text, agentStageLimit(stage, version)), rationale: text(p.rationale, 300),
       evidenceIds: p.evidenceIds.map(id => typeof id === "string" && cited.has(id) ? id : fail()), verify: p.verify.map(v => text(v, 200)) };
   });
   const decisions = r.decisions.map(raw => {

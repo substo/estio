@@ -1,5 +1,5 @@
 import { CREATION_PROMPT, creationInstructions, creationTextSchema, isCreationSnapshot, readCreationTextResult, type CreationSnapshot, type CreationTextResult } from "../creation-text-policy";
-import { AGENT_PROMPT, agentInstructions, agentSchema, isAgentSnapshot, readAgentResult, type AgentResult, type AgentSnapshot } from "../agent-policy";
+import { AGENT_PROMPT, AGENT_PROMPT_V1, agentInstructions, agentInstructionsFor, agentSchema, isAgentSnapshot, readAgentResult, type AgentResult, type AgentSnapshot } from "../agent-policy";
 import { IDEA_REVIEW_MODEL, type IdeaSnapshot } from "../idea-review-policy";
 import { SCRIPT_BRIEF_MAX_OUTPUT, SCRIPT_BRIEF_PROMPT, scriptBriefInstructions, scriptBriefSchema, readScriptBriefResult, type ScriptBriefResult } from "../script-brief-policy";
 import { requestStructuredText, type TextRunSpec } from "./openai-text";
@@ -11,19 +11,23 @@ export const creationTextSpec: TextRunSpec<CreationTextResult, CreationSnapshot>
   workflow: "script_brief", model: IDEA_REVIEW_MODEL, promptVersion: CREATION_PROMPT,
   instructions: creationInstructions, schema: creationTextSchema, maxOutputTokens: SCRIPT_BRIEF_MAX_OUTPUT, validate: readCreationTextResult,
 };
-/** Conversational agent round (studio.agent.v1): one typed step per call; the server runs the tools between calls. */
+/** Conversational agent round: one typed step per call; the server runs the tools between calls. v2 adds duration targets and 9,000-character Scripts. */
 export const agentSpec: TextRunSpec<AgentResult, AgentSnapshot> = { workflow: "script_brief", model: IDEA_REVIEW_MODEL, promptVersion: AGENT_PROMPT, instructionContext: "studio_agent",
   instructions: agentInstructions, schema: agentSchema, maxOutputTokens: SCRIPT_BRIEF_MAX_OUTPUT, validate: readAgentResult };
 type CombinedSpec = TextRunSpec<ScriptBriefResult | CreationTextResult | AgentResult, IdeaSnapshot>;
-const agentCombined: CombinedSpec = { ...agentSpec, validate(value, snapshot) {
+const agentCombined = (version: string): CombinedSpec => ({ ...agentSpec, promptVersion: version, instructions: agentInstructionsFor(version), validate(value, snapshot) {
   if (!isAgentSnapshot(snapshot)) throw new Error("Invalid Studio agent snapshot");
-  return readAgentResult(value, snapshot);
-} } as CombinedSpec;
+  return readAgentResult(value, snapshot, version);
+} }) as CombinedSpec;
+const agentV1 = agentCombined(AGENT_PROMPT_V1), agentV2 = agentCombined(AGENT_PROMPT);
 const stagedSpec: CombinedSpec = { ...creationTextSpec, validate(value, snapshot) {
   if (!isCreationSnapshot(snapshot)) throw new Error("Invalid Studio creation snapshot");
   return readCreationTextResult(value, snapshot);
 } };
-export const scriptBriefSpecFor = (snapshot: unknown): CombinedSpec => isAgentSnapshot(snapshot) ? agentCombined : isCreationSnapshot(snapshot) ? stagedSpec : scriptBriefSpec;
+/** An agent job runs under the exact prompt it was stamped with. Without one, the snapshot decides, as SQL stamping does: scriptLimits means v2. */
+const agentVersion = (snapshot: unknown, promptVersion?: string) => promptVersion ?? ((snapshot as { scriptLimits?: unknown }).scriptLimits ? AGENT_PROMPT : AGENT_PROMPT_V1);
+export const scriptBriefSpecFor = (snapshot: unknown, promptVersion?: string): CombinedSpec =>
+  isAgentSnapshot(snapshot) ? (agentVersion(snapshot, promptVersion) === AGENT_PROMPT_V1 ? agentV1 : agentV2) : isCreationSnapshot(snapshot) ? stagedSpec : scriptBriefSpec;
 export type ScriptBriefDeps = TextRunDeps<ScriptBriefResult | CreationTextResult | AgentResult>;
 export const createScriptBriefHandler = (deps: ScriptBriefDeps) => createTextRunHandler<ScriptBriefResult | CreationTextResult | AgentResult>(scriptBriefSpec, deps, scriptBriefSpecFor);
 export const productionScriptBriefDeps = (rest: ScriptBriefDeps["db"]) => productionTextRunDeps(rest,

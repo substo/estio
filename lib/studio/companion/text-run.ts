@@ -26,7 +26,7 @@ export function createSubscriptionTextRunHandler(deps: {
     if (p.provider !== "codex" && p.provider !== "claude" || !Object.hasOwn(specs, String(p.workflow)) || p.model != null && (typeof p.model !== "string" || !modelPattern.test(p.model)))
       throw new StudioJobError("invalid_job_payload", "Unsupported subscription workflow.", false);
     const spec = p.workflow === "knowledge_extract" ? knowledgeExtractionSpecFor(p.snapshot)
-      : p.workflow === "script_brief" ? scriptBriefSpecFor(p.snapshot) : ideaReviewSpec;
+      : p.workflow === "script_brief" ? scriptBriefSpecFor(p.snapshot, typeof p.promptVersion === "string" ? p.promptVersion : undefined) : ideaReviewSpec;
     if (p.promptVersion !== spec.promptVersion || Buffer.byteLength(JSON.stringify(p.snapshot)) > 24000)
       throw new StudioJobError("text_run_version_unsupported", "Update the companion for this workflow version.", false);
     const provider: LocalProvider = p.provider, model = typeof p.model === "string" ? p.model : undefined;

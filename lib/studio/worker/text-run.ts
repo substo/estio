@@ -11,13 +11,13 @@ export interface TextRunDeps<T, S = IdeaSnapshot> {
   loadKey(locationId: string): Promise<string | null>;
   generate(snapshot: S, key: string, signal: AbortSignal): Promise<TextProviderResult<T>>;
 }
-export function createTextRunHandler<T, S = IdeaSnapshot>(spec: TextRunSpec<T, S>, deps: TextRunDeps<T, S>, selectSpec?: (snapshot: S) => TextRunSpec<T, S>): StudioJobHandler {
+export function createTextRunHandler<T, S = IdeaSnapshot>(spec: TextRunSpec<T, S>, deps: TextRunDeps<T, S>, selectSpec?: (snapshot: S, promptVersion?: string) => TextRunSpec<T, S>): StudioJobHandler {
   return async (job, context) => {
     const reviewId = String(job.payload.reviewId ?? "");
     if (!/^[0-9a-f-]{36}$/.test(reviewId)) throw new StudioJobError("invalid_job_payload", "This job is missing its text workflow.", false);
     const [review] = await deps.db.rows<{ snapshot: S; result: unknown; model: string; prompt_version: string; workflow: string; execution_provider?: string }>(Prisma.sql`select snapshot,result,model,prompt_version,workflow,execution_provider from studio.studio_idea_reviews t where workflow = ${spec.workflow} and location_id = ${job.location_id} and id = ${reviewId}::uuid and job_id = ${job.id}::uuid limit 1`);
     if (!review) throw new StudioJobError("text_run_missing", "The text workflow is no longer available.", false);
-    const expectedSpec = selectSpec?.(review.snapshot) ?? spec;
+    const expectedSpec = selectSpec?.(review.snapshot, review.prompt_version) ?? spec;
     if (review.model !== expectedSpec.model || review.prompt_version !== expectedSpec.promptVersion || review.workflow !== expectedSpec.workflow) throw new StudioJobError("text_run_version_unsupported", "This review requires a matching worker version before processing.", false);
     if (review.execution_provider === "subscription") throw new StudioJobError("provider_route_mismatch", "Subscription work must run on its paired Mac.", false);
     if (review.result) return { reviewId, alreadyReviewed: true };

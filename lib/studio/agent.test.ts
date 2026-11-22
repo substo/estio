@@ -62,7 +62,8 @@ import { aiWorkflowInstructions } from "../ai/workflow-capabilities";
 import { scriptBriefSpecFor } from "./worker/script-brief";
 import { agentRoundRequestId } from "./agent-request";
 test("agent rounds coexist with older snapshots, carry the runtime guide and have stable request ids", () => {
-  assert.equal(scriptBriefSpecFor({ mode: "studio_agent" }).promptVersion, "studio.agent.v1");
+  assert.equal(scriptBriefSpecFor({ mode: "studio_agent" }).promptVersion, "studio.agent.v1");               // no scriptLimits: stored under the first contract
+  assert.equal(scriptBriefSpecFor({ mode: "studio_agent", scriptLimits: {} }).promptVersion, "studio.agent.v2");
   assert.equal(scriptBriefSpecFor({ mode: "staged_creation" }).promptVersion, "studio.creation.v1");
   assert.equal(scriptBriefSpecFor({ ideas: [] }).promptVersion, "studio.script-brief.v2");
   assert.match(aiWorkflowInstructions("studio_agent"), /no browsing, video watching, shell/);

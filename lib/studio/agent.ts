@@ -159,8 +159,8 @@ async function advanceStep(locationId: string, turnId: string): Promise<AgentTur
   const done = async (row: TurnRow, waiting: "queued" | "running" | null = null) => (await views(access, [row], new Map([[row.id, { waiting }]])))[0];
   if (turn.status !== "running") return done(turn);
   const round = turn.rounds.length + 1;
-  const review = await studioDb.one<{ id: string; result: unknown; snapshot: unknown; status: string; error: string | null }>(Prisma.sql`
-    SELECT r.id::text,r.result,r.snapshot,j.status,j.last_error_message AS error FROM studio.studio_idea_reviews r
+  const review = await studioDb.one<{ id: string; result: unknown; snapshot: unknown; status: string; error: string | null; prompt_version: string }>(Prisma.sql`
+    SELECT r.id::text,r.prompt_version,r.result,r.snapshot,j.status,j.last_error_message AS error FROM studio.studio_idea_reviews r
     JOIN studio.studio_jobs j ON j.location_id=r.location_id AND j.id=r.job_id
     WHERE r.location_id=${access.locationId} AND r.request_id=${agentRoundRequestId(turn.id, round)}::uuid AND r.created_by_clerk_user_id=${access.userId}`);
   const fail = async (message: string) => done(await failTurn(access, turn.id, message));
@@ -176,7 +176,7 @@ async function advanceStep(locationId: string, turnId: string): Promise<AgentTur
   }
   if (!isAgentSnapshot(review.snapshot)) return fail("The assistant result could not be read. Nothing was changed.");
   let step;
-  try { step = readAgentResult(review.result, review.snapshot as AgentSnapshot); } catch { return fail("The assistant returned an unreadable result. Nothing was changed."); }
+  try { step = readAgentResult(review.result, review.snapshot as AgentSnapshot, review.prompt_version); } catch { return fail("The assistant returned an unreadable result. Nothing was changed."); }
   let observation: AgentObservation | null = null;
   if (step.step === "reply" && turn.target_seconds && turn.rounds.length <= 1 && !turn.rounds.some(r => r.observation?.lengthRevision)) {
     // One bounded revision: a Script that misses the request by a meaningful margin is measured and sent back, never shown as a pass.

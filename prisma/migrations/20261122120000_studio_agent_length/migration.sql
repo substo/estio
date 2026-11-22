@@ -59,7 +59,7 @@ BEGIN
   IF t.status<>'running' OR jsonb_array_length(t.rounds)>=p_round THEN RETURN to_jsonb(t); END IF;
   IF p_round NOT BETWEEN 1 AND 4 OR jsonb_array_length(t.rounds)<>p_round-1 THEN RAISE EXCEPTION 'Round out of order' USING ERRCODE='40001'; END IF;
   SELECT * INTO run FROM studio.studio_idea_reviews WHERE id=p_review AND location_id=p_location AND actor_app=p_app AND created_by_clerk_user_id=p_actor
-    AND workflow='script_brief' AND prompt_version='studio.agent.v1' AND snapshot#>>'{operation,turnId}'=p_turn::text
+    AND workflow='script_brief' AND prompt_version IN ('studio.agent.v1','studio.agent.v2') AND snapshot#>>'{operation,turnId}'=p_turn::text
     AND snapshot#>>'{operation,round}'=p_round::text AND result IS NOT NULL;
   IF NOT FOUND THEN RAISE EXCEPTION 'Round result unavailable' USING ERRCODE='40001'; END IF;
   IF run.result->>'step'='tool' THEN
@@ -131,14 +131,14 @@ BEGIN
   END IF;
   SELECT coalesce(array_agg(i->>'id'),ARRAY[]::text[]) INTO ids FROM jsonb_array_elements(snapshot->'observations') o,
     jsonb_array_elements(coalesce(o->'result'->'items','[]'::jsonb)) i WHERE i->>'cite'='true';
-  IF (SELECT count(*) FROM jsonb_array_elements(p_result->'proposals') p WHERE p->>'stage'='Script')>1 THEN
+  IF snapshot ? 'scriptLimits' AND (SELECT count(*) FROM jsonb_array_elements(p_result->'proposals') p WHERE p->>'stage'='Script')>1 THEN
     RAISE EXCEPTION 'Only one Script proposal fits a reply' USING ERRCODE='22023';
   END IF;
   FOR item IN SELECT value FROM jsonb_array_elements(p_result->'proposals') LOOP
     IF jsonb_typeof(item) IS DISTINCT FROM 'object' OR NOT (item ?& ARRAY['stage','text','rationale','evidenceIds','verify'])
       OR item-ARRAY['stage','text','rationale','evidenceIds','verify']<>'{}'::jsonb OR coalesce(item->>'stage','')<>ALL(stages)
       OR jsonb_typeof(item->'text') IS DISTINCT FROM 'string' OR char_length(btrim(item->>'text'))<1
-      OR char_length(item->>'text')>(CASE item->>'stage' WHEN 'Title' THEN 180 WHEN 'Script' THEN 9000 ELSE 1200 END)
+      OR char_length(item->>'text')>(CASE item->>'stage' WHEN 'Title' THEN 180 WHEN 'Script' THEN (CASE WHEN snapshot ? 'scriptLimits' THEN 9000 ELSE 4000 END) ELSE 1200 END)
       OR jsonb_typeof(item->'rationale') IS DISTINCT FROM 'string' OR char_length(btrim(item->>'rationale')) NOT BETWEEN 1 AND 300
       OR jsonb_typeof(item->'evidenceIds') IS DISTINCT FROM 'array' OR jsonb_array_length(item->'evidenceIds')>4
       OR jsonb_typeof(item->'verify') IS DISTINCT FROM 'array' OR jsonb_array_length(item->'verify')>3
@@ -159,6 +159,58 @@ BEGIN
 END;
 $$;
 REVOKE ALL ON FUNCTION studio.studio_validate_text_run_result(text,jsonb,jsonb) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION studio.studio_pick_text_device(p_location text,p_app text,p_user text,p_workflow text,p_command jsonb,p_snapshot jsonb,p_provider text,p_device uuid)
+RETURNS studio.studio_devices LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+ select * from studio.studio_devices where location_id=p_location and app=p_app and created_by=p_user and (p_device is null or id=p_device)
+  and revoked_at is null and not paused and processing_enabled and 'studio.text_run'=any(allowed_kinds)
+  and seen_at<=clock_timestamp() and seen_at>clock_timestamp()-interval '90 seconds' and coalesce(report->>'draining','false')='false'
+  and report->'handlers' ? 'studio.text_run'
+  and (p_workflow<>'knowledge_extract' or p_command->>'mode' is distinct from 'outline' or report->>'knowledgeOutlineVersion'='2')
+  and (p_snapshot->>'curationVersion' is distinct from '1' or report->>'knowledgeCurationVersion'='1')
+  and (p_workflow<>'knowledge_extract' or p_command->>'mode' is distinct from 'script_template' or report->>'videoTemplateVersion'='1')
+  and (p_workflow<>'knowledge_extract' or p_command->>'mode' is distinct from 'source_assist' or report->>'sourceAssistVersion'='1')
+  and (p_snapshot->>'mode' is distinct from 'staged_creation' or report->>'stagedCreationVersion'='1')
+  -- A v2 round (its snapshot carries scriptLimits) needs a companion reporting studioAgentVersion 2. A round stored under the v1
+  -- contract (no scriptLimits) runs on a companion reporting 1 or 2, each executing it with the v1 prompt and validator it was stamped with.
+  and (p_snapshot->>'mode' is distinct from 'studio_agent' or case when p_snapshot ? 'scriptLimits' then report->>'studioAgentVersion'='2' else report->>'studioAgentVersion' in ('1','2') end)
+  and (p_snapshot->>'selectedOutline' is null or report->>'knowledgeCurationVersion'='1')
+  and desired_config#>>'{features,text}'='true' and config_version=applied_config_version and config_status='applied'
+  and (desired_config->>'textProvider'=p_provider or report->>'textRouteVersion'='1')
+  and report#>>ARRAY[p_provider,'ready']='true' and report#>>ARRAY[p_provider,'authenticated']='true'
+  and report#>>ARRAY[p_provider,'loginMethod']=case p_provider when 'codex' then 'chatgpt' else 'claudeai' end
+  and report#>>ARRAY['capacity',p_provider]='true'
+  and coalesce(report->'processingBlocked','[]'::jsonb)='[]'::jsonb
+  order by seen_at desc limit 1 for update;
+$$;
+
+
+-- Every new agent round is stamped with the duration-enabled contract.
+CREATE OR REPLACE FUNCTION studio.studio_stamp_agent_prompt() RETURNS trigger LANGUAGE plpgsql SET search_path='' AS $$
+BEGIN
+  IF new.workflow='script_brief' AND new.snapshot->>'mode'='studio_agent' THEN
+    new.prompt_version:=CASE WHEN new.snapshot ? 'scriptLimits' THEN 'studio.agent.v2' ELSE 'studio.agent.v1' END;
+  END IF;
+  RETURN new;
+END;
+$$;
+
+-- The explicit single-provider path selects its Mac inline: refuse a companion that lacks the contract the round needs.
+CREATE OR REPLACE FUNCTION studio.studio_enqueue_routed_text_run(p_location_id text,p_actor_app text,p_clerk_user_id text,p_workflow text,p_command jsonb) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE r jsonb; run studio.studio_idea_reviews%rowtype; d studio.studio_devices%rowtype;
+BEGIN
+  r:=studio.studio_enqueue_routed_text_run_before_agent(p_location_id,p_actor_app,p_clerk_user_id,p_workflow,p_command);
+  SELECT * INTO run FROM studio.studio_idea_reviews WHERE id=(r->>'reviewId')::uuid;
+  IF run.snapshot->>'mode'='studio_agent' THEN
+    SELECT dv.* INTO d FROM studio.studio_jobs j JOIN studio.studio_devices dv ON dv.id=j.device_id WHERE j.id=run.job_id;
+    IF d.id IS NOT NULL AND NOT coalesce(CASE WHEN run.snapshot ? 'scriptLimits' THEN d.report->>'studioAgentVersion'='2' ELSE d.report->>'studioAgentVersion' IN ('1','2') END,false) THEN
+      RAISE EXCEPTION 'The assistant-capable paired Mac is not ready' USING ERRCODE='P2017';
+    END IF;
+  END IF;
+  RETURN r;
+END;
+$$;
 
 -- Active context: the current canonical script (not the possibly truncated stage copy), its measured length and the target.
 ALTER FUNCTION studio.studio_build_selected_text_snapshot(text,jsonb,text,text) RENAME TO studio_build_selected_snapshot_before_agent_length;
