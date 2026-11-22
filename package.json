@@ -11,6 +11,7 @@
         "start:viewing-live-relay": "tsx scripts/start-viewing-live-relay.ts",
         "start:studio-worker": "tsx scripts/studio-worker.ts",
         "start:studio-companion": "tsx scripts/studio-companion.ts",
+        "studio:video-assemble": "tsx scripts/studio-video-assemble.ts",
         "start:whatsapp-web-bridge": "tsx scripts/whatsapp-web-bridge-service.ts",
         "start:device-tunnel-gateway": "tsx scripts/device-tunnel-gateway.ts",
         "ops:viewings:retention": "tsx scripts/cleanup-viewing-session-retention.ts",

@@ -31,6 +31,9 @@ For a Short created directly from portrait footage, use `new "<video-name>.subst
 
 ## Studio integration (next)
 
+First slice shipped: `npm run studio:video-assemble` turns a script plus footage into an exported edit (see `skills/script-to-video/SKILL.md`). The device job and upload-back below remain.
+
+
 The retired local Substo app linked a content piece to a `.substo` project under its own `data/video-projects/` folder, opened it here, and listed MP4s from the project's `exports/` folder. Hosted Studio does not do this yet. The plan is to run it through the paired Mac companion: Studio asks the Mac to create or open the project for a content item with its media, and finished exports upload back to Studio. See `documentation/studio-mac-processing-plan.md`.
 
 `skills/editor-v1/` (the Codex documentary-edit kit) and `skills/substo-video/SKILL.md` came over unchanged. Editor V1 still describes the retired local app's folders and will be adapted with the Studio integration.
