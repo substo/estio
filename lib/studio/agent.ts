@@ -158,7 +158,7 @@ async function advanceStep(locationId: string, turnId: string): Promise<AgentTur
     return done(turn, "queued");
   }
   if (review.result === null) {
-    if (["failed", "cancelled", "dead"].includes(review.status)) return fail(review.error?.slice(0, 280) ?? "The model run stopped before answering. Nothing was changed. Send your message again if you still want it.");
+    if (["failed", "cancelled", "dead"].includes(review.status)) return fail(review.error?.trim().slice(0, 280) || "The model run stopped before answering. Nothing was changed. Send your message again if you still want it.");
     return done(turn, review.status === "running" ? "running" : "queued");
   }
   if (!isAgentSnapshot(review.snapshot)) return fail("The assistant result could not be read. Nothing was changed.");

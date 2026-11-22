@@ -189,7 +189,7 @@ BEGIN
     'message',turn.message,'conversation',conversation,'decisions',decisions,'plan',plan,
     'draft',jsonb_build_object('stages',stages,'legacyDirection',CASE WHEN state#>>'{direction,choice}' IS DISTINCT FROM 'conversation' AND nullif(state#>>'{direction,goal}','') IS NOT NULL
       THEN (state->'direction')-'rationale'-'choice' END,'brief',left(coalesce(state->>'brief',''),600)),
-    'sources',sources,'profile',profile,'observations',observations);
+    'sources',sources,'profile',profile,'template',studio.studio_script_template_snapshot(p_location_id,record.id),'observations',observations);
   IF octet_length(snapshot::text)>23000 THEN RAISE EXCEPTION 'Assistant inputs exceed the bounded size' USING ERRCODE='22023'; END IF;
   RETURN snapshot;
 END;

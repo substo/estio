@@ -9,7 +9,7 @@ BEGIN
 END $f$;
 -- Conversational creation agent: round admission, model-chosen tool steps, bounded validation and Account-private history.
 DO $$
-DECLARE loc text:='studio-agent'; actor text:='agent-owner'; mate text:='agent-teammate'; outsider text:='agent-other';
+DECLARE tpl uuid:=gen_random_uuid(); tpl_v uuid:=gen_random_uuid(); pinned uuid:=gen_random_uuid(); pinned_saved jsonb; loc text:='studio-agent'; actor text:='agent-owner'; mate text:='agent-teammate'; outsider text:='agent-other';
   source uuid:=gen_random_uuid(); draft uuid:=gen_random_uuid(); device uuid; t1 uuid:=gen_random_uuid(); t2 uuid:=gen_random_uuid(); t3 uuid:=gen_random_uuid(); mate_turn uuid:=gen_random_uuid();
   patch jsonb:='{"title":"Source","stage":"idea","approved":false,"creation":{"schema":1,"brief":"","direction":{"choice":"conversation","publisher":"","viewer":"","goal":"","angle":"","rationale":""},"source":null,"stages":{},"history":[]}}';
   saved jsonb; cmd jsonb; queued jsonb; snapshot jsonb; claim jsonb; fenced jsonb; job uuid; review uuid; turn jsonb; obs jsonb;
@@ -86,4 +86,13 @@ BEGIN
     OR snapshot#>>'{decisions,0,value}'<>'Substo promoting to new creators' OR snapshot#>>'{plan,0}'<>'Compare two openings' THEN
     RAISE EXCEPTION 'Private history leaked or own history lost: %',snapshot;
   END IF;
+  -- An already-pinned approved template guides the chat without any new field.
+  PERFORM studio.studio_propose_script_template(loc,'substo',actor,tpl,tpl_v,0,'Promise then payoff','Test purpose','[{"name":"Promise","guidance":"Show the outcome"}]');
+  PERFORM studio.studio_approve_script_template(loc,'substo',actor,tpl,tpl_v);
+  pinned_saved:=studio.studio_save_creation(loc,'substo',actor,pinned,0,'Pinned',patch,true,tpl_v,NULL,NULL,NULL);
+  PERFORM studio.studio_agent_begin_turn(loc,'substo',actor,pinned,gen_random_uuid(),'Write the script','subscription');
+  queued:=studio.studio_enqueue_routed_text_run(loc,'substo',actor,'script_brief',jsonb_build_object('requestId',gen_random_uuid(),'provider','subscription','confirmSubscription',true,'focus','',
+    'ideas',jsonb_build_array(jsonb_build_object('id',pinned,'version',(pinned_saved->>'version')::bigint,'agent',jsonb_build_object('turnId',(SELECT id FROM studio.studio_agent_turns WHERE record_id=pinned),'round',1)))));
+  SELECT r.snapshot INTO snapshot FROM studio.studio_idea_reviews r WHERE id=(queued->>'reviewId')::uuid;
+  IF snapshot#>>'{template,name}'<>'Promise then payoff' OR snapshot#>>'{template,beats,0,name}'<>'Promise' THEN RAISE EXCEPTION 'Pinned template missing from agent snapshot: %',snapshot; END IF;
 END $$;

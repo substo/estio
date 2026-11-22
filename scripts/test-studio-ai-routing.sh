@@ -16,4 +16,5 @@ done
 "${routing_psql[@]}" --file=studio/tests/text-provider-assertions.sql --file=studio/tests/knowledge-outline-assertions.sql \
   --file=studio/tests/video-transcription-assertions.sql --file=studio/tests/video-template-assertions.sql --file=studio/tests/source-assist-assertions.sql --file=studio/tests/knowledge-curation-assertions.sql --file=studio/tests/knowledge-batch-retry-assertions.sql --file=studio/tests/ai-route-chain-assertions.sql --file=lib/ai/crm-route-budget.test.sql --file=studio/tests/staged-creation-assertions.sql --file=studio/tests/device-ai-route-assertions.sql --file=studio/tests/studio-agent-assertions.sql
 STUDIO_TEST_CURATION=1 STUDIO_TEST_DATABASE_URL="postgresql://studio_test@localhost:55439/postgres?host=$routing_test_dir/socket" npx tsx --test lib/studio/db.db.test.ts
+STUDIO_TEST_DATABASE_URL="postgresql://studio_test@localhost:55439/postgres?host=$routing_test_dir/socket" npx tsx --experimental-test-module-mocks --test lib/studio/agent.db.test.ts
 echo 'Studio AI routing disposable database tests passed.'
