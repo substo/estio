@@ -1,6 +1,6 @@
 # Local audience research for Studio
 
-Use a comment collection you have permission to collect and process. The Mac browser collector uses regular YouTube pages and your Studio Chrome profile. The analyzer reads the export locally and uses an installed Ollama model. Neither step needs a Google API key.
+Use a comment collection you have permission to collect and process. The Mac browser collector uses regular YouTube pages and your Studio Chrome profile. The analyzer reads the export on the Mac. You choose either on-device inference with Ollama or a native subscription. Neither step needs a Google API key.
 
 ## Collect from YouTube on the Mac
 
@@ -33,13 +33,21 @@ python3 scripts/studio-audience-brief.py creator-comments.json other-video.csv -
 
 Preview reports how many rows are usable, duplicate, empty or shortened. Each run accepts up to 50,000 rows and each input file up to 64 MiB. It removes exact duplicates within a source after whitespace normalization, contact redaction and case folding. Only the first 2,000 characters of a long comment go into analysis. Author fields are ignored. Review the output for any personal details that people wrote in the comment itself.
 
-## Analyze locally
+## Choose a model for comment analysis
 
-Use an installed instruction-following model that reliably produces structured output. Run `ollama list` to find its exact name and start the local Ollama service if needed. [Ollama structured outputs](https://docs.ollama.com/capabilities/structured-outputs)
+Open **Audience language → Choose an analysis model** on a draft. Select a route and enter its exact model name. Studio shows the Mac command. Run it from the checkout that has the collector and analyzer. The browser does not launch a local executable or upload the corpus. The route and model are per analysis run and appear on the imported brief.
+
+| Route | Model setting | Where comments are processed |
+| --- | --- | --- |
+| Ollama on the Mac | Use the exact installed name from `ollama list`. | The Mac, via its local Ollama service. |
+| Codex subscription | Supply a model from `npx tsx scripts/studio-audience-subscription.ts codex list status`, such as `gpt-6.2-sol`. | OpenAI, through the Mac's signed-in Codex CLI. |
+| Claude Code subscription | Supply a model from `npx tsx scripts/studio-audience-subscription.ts claude list status`, such as `claude-sonnet-5-5`. | Anthropic, through the Mac's signed-in Claude Code CLI. |
+
+Use a corpus you have permission to process on the route you choose. Subscription routes require native subscription sign-in. They exclude API-key and Console logins and never fall back to another provider. Ollama needs its local service running and an installed model. [Ollama structured outputs](https://docs.ollama.com/capabilities/structured-outputs)
 
 ```sh
 python3 scripts/studio-audience-brief.py ~/studio-comments/youtube-*.json \
-  --model YOUR_LOCAL_MODEL --output first-video-audience \
+  --provider codex --model gpt-6.2-sol --output first-video-audience \
   --topic "Help first-time creators test two openings for the same video"
 ```
 
@@ -49,6 +57,11 @@ The JSON file contains coverage and evidence with the source filename and row nu
 
 ## Use the brief in Studio
 
-Open **Create with Studio** from your source. Paste the suggestions you want to use and ask for a decision or proposal. For example, “Show me one alternative concept, one demonstration to deepen this script, and one passage to cut. Give me the spoken opening for each angle. Tell me which comments motivated the changes and which claims need factual sources.”
+Open **Create with Studio → Audience language → Open a local audience brief** and choose the JSON file. Expand **Review comment excerpts** to check each suggestion against its source. The brief stays in the browser until you choose what to save or send.
 
-On a draft, open **Audience language → Open a local audience brief** and choose the generated JSON file. Expand **Review comment excerpts** to check the suggestion against the source. Choose **Review as observation**, edit the wording, then choose **Add**. The contents of the file stay in the browser. The selected observation becomes draft context for wording and creative direction. Use approved Knowledge or an independent source for factual claims.
+- **Explore angles** asks for distinct concepts with titles, spoken hooks, and payoffs.
+- **Deepen the draft** asks for a demonstration, an objection to address, and precise lines or shots to add.
+- **Tighten the draft** asks what to cut and how to deliver the title's promise sooner.
+- **Review as observation** lets you edit and save one observation for later chat turns.
+
+The first three actions prepare an editable Assistant message with a small selection of supporting excerpts. Review it and choose **Process with** before pressing **Send**. That dropdown controls writing and revision, independently of the analysis model on the brief. The paired-Mac route follows the native text provider and model in **Settings → Devices**. **Location AI order** follows **Settings → AI** and its configured providers. The Assistant shows the route used in **What this answer used**. Use approved Knowledge or an independent source for factual claims.

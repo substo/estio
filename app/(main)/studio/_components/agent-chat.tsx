@@ -34,7 +34,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   resume?: AgentResume | null; scope: string;
 }) {
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
-  const { recordId, record, setRecord, setPlan, target, setTarget, sendRef } = useAgentDraft();
+  const { recordId, record, setRecord, setPlan, target, setTarget, sendRef, prepareMessage } = useAgentDraft();
   const [turns, setTurns] = useState(initialTurns);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -126,6 +126,16 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
 
   // The Draft panel asks for scoped edits through this same send (same route, same visible consent).
   useEffect(() => { sendRef.current = (message, selection) => void send(message, selection); return () => { sendRef.current = null; }; });
+  useEffect(() => {
+    prepareMessage.current = message => {
+      const next = [text.trim(), message].filter(Boolean).join("\n\n");
+      if (sending || running || next.length > AGENT_MESSAGE_LIMIT) return false;
+      setText(next);
+      field.current?.focus();
+      return true;
+    };
+    return () => { prepareMessage.current = null; };
+  }, [text, sending, running, prepareMessage]);
   const last = turns.at(-1);
   const workspace = useOptionalSourceWorkspace();
   /** One click into the existing Related videos search with the assistant's phrase; the owner stays in control of picking, saving and transcribing. */

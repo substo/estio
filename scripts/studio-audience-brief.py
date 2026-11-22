@@ -8,6 +8,7 @@ import http.client
 import json
 import os
 import re
+import subprocess
 import sys
 from collections import Counter
 from copy import deepcopy
@@ -36,8 +37,8 @@ SCHEMA = {
             "type": "object", "additionalProperties": False,
             "required": ["kind", "signal", "action", "beat", "suggestion", "evidence"],
             "properties": {
-                "kind": {"enum": KINDS}, "signal": {"type": "string", "minLength": 1, "maxLength": 180},
-                "action": {"enum": ACTIONS}, "beat": {"enum": BEATS},
+                "kind": {"type": "string", "enum": KINDS}, "signal": {"type": "string", "minLength": 1, "maxLength": 180},
+                "action": {"type": "string", "enum": ACTIONS}, "beat": {"type": "string", "enum": BEATS},
                 "suggestion": {"type": "string", "minLength": 1, "maxLength": 280},
                 "evidence": {"type": "array", "minItems": 1, "maxItems": 3,
                              "items": {
@@ -135,6 +136,31 @@ def evidence_texts(data):
     return texts
 
 
+def citation_schema(data):
+    schema = deepcopy(SCHEMA)
+    citation = schema["properties"]["signals"]["items"]["properties"]["evidence"]["items"]
+    citation["properties"]["id"]["enum"] = sorted(evidence_texts(data))
+    return schema
+
+
+class NativeSubscription:
+    def __init__(self, provider, model):
+        repo = Path(__file__).resolve().parent.parent
+        self.command = [str(repo / "node_modules/.bin/tsx"),
+                        str(repo / "scripts/studio-audience-subscription.ts"), provider, model]
+
+    def run(self, action, request=None):
+        result = subprocess.run(self.command + [action], input=json.dumps(request) if request else None,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=205)
+        if result.returncode:
+            raise ValueError("The chosen subscription could not complete this request. Check the native sign-in and model. No alternate route was used.")
+        return json.loads(result.stdout)
+
+    def __call__(self, data):
+        return self.run("generate", {"prompt": INSTRUCTIONS + "\n\n" + json.dumps(data, ensure_ascii=False),
+                                     "schema": citation_schema(data)})
+
+
 class LocalOllama:
     def __init__(self, model, port):
         self.model = model
@@ -164,11 +190,8 @@ class LocalOllama:
             connection.close()
 
     def __call__(self, data):
-        schema = deepcopy(SCHEMA)
-        citation = schema["properties"]["signals"]["items"]["properties"]["evidence"]["items"]
-        citation["properties"]["id"]["enum"] = sorted(evidence_texts(data))
         result = self.request("POST", "/api/chat", {
-            "model": self.model, "stream": False, "format": schema,
+            "model": self.model, "stream": False, "format": citation_schema(data),
             "options": {"temperature": 0.1, "num_ctx": 8192, "num_predict": 1500},
             "keep_alive": "2m",
             "messages": [{"role": "system", "content": INSTRUCTIONS},
@@ -277,13 +300,13 @@ def analyze(comments, counts, topic, ask, progress=lambda _: None):
     return summaries[0], len(groups)
 
 
-def make_report(comments, counts, signals, batches_read, topic, model):
+def make_report(comments, counts, signals, batches_read, topic, model, provider=None):
     sources = Counter(row["source"] for row in comments)
     labels = {row["source"]: row["video"] for row in comments}
     references = {ref["id"] for signal in signals for ref in signal["evidence"]}
     suggestions = [{**signal, "excerpts": signal["evidence"],
                     "evidence": [ref["id"] for ref in signal["evidence"]]} for signal in signals]
-    return {"format": "studio-audience-brief.v1", "topic": topic, "model": model,
+    return {"format": "studio-audience-brief.v1", "topic": topic, "model": model, "provider": provider,
             "coverage": {**counts, "analyzed": len(comments), "batches": batches_read,
                          "videos": {source: {"label": labels[source], "comments": count}
                                     for source, count in sources.items()}},
@@ -302,6 +325,8 @@ def render_brief(report):
     lines = ["# Audience research brief", "", markdown_text(report["topic"] or "General audience research"), "",
              f"Read {coverage['analyzed']:,} unique comments across {len(coverage['videos'])} sources.",
              "Use these as audience signals. Verify any factual claims before filming.", ""]
+    if report.get("provider") and report.get("model"):
+        lines.extend([f"Analysis: {markdown_text(report['provider'])} · {markdown_text(report['model'])}.", ""])
     if coverage.get("discarded_suggestions"):
         lines.append(f"Discarded {coverage['discarded_suggestions']:,} suggestions whose citations did not match.")
     if not report["signals"]:
@@ -328,7 +353,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("inputs", type=Path, nargs="+", help="Authorized JSON, JSONL or CSV exports")
     parser.add_argument("--topic", default="", help="What the video is meant to help the viewer do")
-    parser.add_argument("--model", help="Exact name of an already installed Ollama model")
+    parser.add_argument("--provider", choices=("ollama", "codex", "claude"), default="ollama",
+                        help="Ollama on the Mac, or an explicitly selected native subscription")
+    parser.add_argument("--model", help="Exact Ollama model name or native subscription model ID")
     parser.add_argument("--port", type=int, default=11434, help="Local Ollama port")
     parser.add_argument("--output", type=Path, default=Path("audience-brief"), help="Output file stem")
     parser.add_argument("--preview", action="store_true", help="Show import coverage without contacting a model")
@@ -346,9 +373,13 @@ def main():
         json_path, md_path = (args.output.with_suffix(suffix) for suffix in (".json", ".md"))
         if json_path.exists() or md_path.exists():
             raise ValueError("An output file already exists. Choose a new --output stem.")
-        signals, n = analyze(comments, counts, args.topic[:400], LocalOllama(args.model, args.port),
+        if args.provider == "ollama":
+            ask = LocalOllama(args.model, args.port)
+        else:
+            ask = NativeSubscription(args.provider, args.model)
+        signals, n = analyze(comments, counts, args.topic[:400], ask,
                              lambda message: print(message, file=sys.stderr))
-        report = make_report(comments, counts, signals, n, args.topic[:400], args.model)
+        report = make_report(comments, counts, signals, n, args.topic[:400], args.model, args.provider)
         os.umask(0o077)
         with json_path.open("x", encoding="utf-8") as handle:
             handle.write(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
@@ -356,7 +387,7 @@ def main():
             handle.write(render_brief(report))
         print(f"Wrote {json_path} and {md_path}.")
         return 0
-    except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException) as error:
+    except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException, subprocess.TimeoutExpired) as error:
         print(f"Audience brief: {error}", file=sys.stderr)
         return 1
 

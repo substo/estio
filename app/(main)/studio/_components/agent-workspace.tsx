@@ -7,12 +7,13 @@ import { formatClock, lengthFit, scriptStats, sectionStats, targetWords } from "
 import type { AgentSelection } from "@/lib/studio/agent-policy";
 import { Button } from "@/components/ui/button";
 import { AUDIENCE_KINDS, AUDIENCE_LIMIT, AUDIENCE_ORIGINS, AUDIENCE_TEXT_LIMIT, CREATION_STAGES, stageDraft, type AudienceSignal, type CreationRecord, type CreationStage } from "@/lib/studio/creation-policy";
-import { AUDIENCE_BRIEF_MAX_BYTES, audienceObservation, readAudienceBrief } from "@/lib/studio/audience-brief";
+import { AUDIENCE_ANALYSIS_ROUTES, AUDIENCE_BRIEF_MAX_BYTES, audienceAnalysisCommand, audienceBriefPrompt,
+  audienceObservation, readAudienceBrief, type AudienceAnalysisRoute } from "@/lib/studio/audience-brief";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
 
 type Draft = { recordId: string; record: CreationRecord | null; setRecord: (record: CreationRecord) => void; plan: string[]; setPlan: (plan: string[]) => void; target: number | null; setTarget: (seconds: number | null) => void;
   /** The saved source this draft was started from (comment sampling), and the chat's send function so the Draft panel can ask for an edit. */
-  sourceId: string | null; sendRef: MutableRefObject<((message: string, selection?: AgentSelection) => void) | null> };
+  sourceId: string | null; prepareMessage: MutableRefObject<((message: string) => boolean) | null>; sendRef: MutableRefObject<((message: string, selection?: AgentSelection) => void) | null> };
 const Context = createContext<Draft | null>(null);
 /** Shares the saved draft and the persisted work plan between the chat and the draft panel. */
 export function AgentDraftProvider({ recordId, sessionKey, initialRecord, initialPlan, initialTarget = null, sourceId = null, children }: { sourceId?: string | null; recordId: string | null; sessionKey: string; initialRecord: CreationRecord | null; initialPlan: string[]; initialTarget?: number | null; children: React.ReactNode }) {
@@ -34,9 +35,10 @@ export function AgentDraftProvider({ recordId, sessionKey, initialRecord, initia
   const setRecord = useCallback((record: CreationRecord) => setState(current => ({ ...current, record })), []);
   const setPlan = useCallback((plan: string[]) => setState(current => ({ ...current, plan })), []);
   const setTarget = useCallback((target: number | null) => setState(current => ({ ...current, target })), []);
+  const prepareMessage = useRef<((message: string) => boolean) | null>(null);
   const sendRef = useRef<((message: string, selection?: AgentSelection) => void) | null>(null);
   const id = recordId ?? session.generated;
-  const value = useMemo(() => ({ recordId: id, record: session.record, setRecord, plan: session.plan, setPlan, target: session.target, setTarget, sourceId, sendRef }), [id, session, setRecord, setPlan, setTarget, sourceId]);
+  const value = useMemo(() => ({ recordId: id, record: session.record, setRecord, plan: session.plan, setPlan, target: session.target, setTarget, sourceId, sendRef, prepareMessage }), [id, session, setRecord, setPlan, setTarget, sourceId]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 export function useAgentDraft() {
@@ -179,6 +181,7 @@ type CommentSample = { status: "ok"; size: number; fetchedAt: string; videoUrl: 
 /** The owner's own audience observations. Public comments can be read here, but nothing from YouTube is saved: you write what you notice. */
 function AudienceSignals({ record, sourceId, command, busy }: { record: CreationRecord | null; sourceId: string | null; command: (body: Record<string, unknown>) => Promise<boolean>; busy: boolean }) {
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
+  const { prepareMessage } = useAgentDraft();
   const [text, setText] = useState("");
   const [kind, setKind] = useState<AudienceSignal["kind"]>("question");
   const [origin, setOrigin] = useState<AudienceSignal["origin"]>("comments");
@@ -189,10 +192,17 @@ function AudienceSignals({ record, sourceId, command, busy }: { record: Creation
   const [brief, setBrief] = useState<ReturnType<typeof readAudienceBrief> | null>(null);
   const [briefError, setBriefError] = useState("");
   const [readingBrief, setReadingBrief] = useState(false);
+  const [opened, setOpened] = useState(false);
+  const [analysisRoute, setAnalysisRoute] = useState<AudienceAnalysisRoute>("ollama");
+  const [analysisModel, setAnalysisModel] = useState("");
+  const [briefStatus, setBriefStatus] = useState("");
+  const [copyStatus, setCopyStatus] = useState("");
+  const analysisCommand = audienceAnalysisCommand(analysisRoute, analysisModel);
 
   async function openBrief(file: File) {
     setBrief(null);
     setBriefError("");
+    setBriefStatus("");
     setReadingBrief(true);
     try {
       if (file.size > AUDIENCE_BRIEF_MAX_BYTES) throw new Error("Choose a Studio audience brief under 256 KB.");
@@ -213,10 +223,34 @@ function AudienceSignals({ record, sourceId, command, busy }: { record: Creation
     } catch { setSample({ status: "unavailable", reason: "Could not reach Studio. Try again." }); }
     finally { setLoading(false); }
   }
-  return <details className="rounded-md border p-3 text-sm" data-audience>
+  return <details className="rounded-md border p-3 text-sm" data-audience
+    onToggle={event => { if (event.currentTarget.open) setOpened(true); }}>
     <summary className="cursor-pointer font-medium">Audience language{signals.length ? ` · ${signals.length}` : ""} <span className="font-normal text-muted-foreground">(optional)</span></summary>
-    <div className="mt-3 space-y-3">
+    {opened ? <div className="mt-3 space-y-3">
       <p className="text-xs text-muted-foreground">Add what you have noticed in comments, interviews or FAQs, in your own words: a question people ask, an objection, a phrase they use. The assistant uses the wording and concerns. They are your observations, not evidence and not a claim about everyone.</p>
+      <details className="space-y-2">
+        <summary className="cursor-pointer text-xs font-medium">Choose an analysis model</summary>
+        <p className="text-xs text-muted-foreground">Run comment analysis from the Mac. The Assistant uses its own Process with setting when you send a message.</p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="block text-xs font-medium">Analyze comments with
+            <select className="mt-1 min-h-9 w-full rounded-md border bg-background px-2" value={analysisRoute} onChange={event => {
+              setAnalysisRoute(event.target.value as AudienceAnalysisRoute); setAnalysisModel(""); setCopyStatus("");
+            }}>{Object.entries(AUDIENCE_ANALYSIS_ROUTES).map(([value, route]) => <option key={value} value={value}>{route.label}</option>)}</select>
+          </label>
+          <label className="block text-xs font-medium">Analysis model
+            <input className="mt-1 min-h-9 w-full rounded-md border bg-background px-2" value={analysisModel} maxLength={100} onChange={event => { setAnalysisModel(event.target.value); setCopyStatus(""); }} placeholder={AUDIENCE_ANALYSIS_ROUTES[analysisRoute].modelHint} />
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">{AUDIENCE_ANALYSIS_ROUTES[analysisRoute].hint} The command uses only this route.</p>
+        {analysisCommand ? <div className="space-y-1">
+          <code className="block select-all break-all rounded-md bg-muted p-2 text-xs">{analysisCommand}</code>
+          <Button type="button" variant="ghost" className="min-h-8 text-xs" onClick={async () => {
+            try { await navigator.clipboard.writeText(analysisCommand); setCopyStatus("Command copied."); }
+            catch { setCopyStatus("Select and copy the command above."); }
+          }}>Copy Mac command</Button>
+          {copyStatus ? <p role="status" className="text-xs text-muted-foreground">{copyStatus}</p> : null}
+        </div> : null}
+      </details>
       <div className="space-y-2">
         <label className="block text-xs font-medium">Open a local audience brief
           <input type="file" accept=".json,application/json" disabled={readingBrief} className="mt-1 block w-full text-xs file:mr-2" onChange={event => {
@@ -228,9 +262,19 @@ function AudienceSignals({ record, sourceId, command, busy }: { record: Creation
         {briefError ? <p role="alert" className="text-xs text-destructive">{briefError}</p> : null}
         {brief ? <div className="space-y-2" aria-label="Audience brief">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p role="status" className="text-xs text-muted-foreground">{brief.analyzed.toLocaleString()} comments read. Only observations you add are saved.</p>
+            <p role="status" className="text-xs text-muted-foreground">{brief.analyzed.toLocaleString()} comments read. Opening this file saves nothing.</p>
             <Button type="button" variant="ghost" className="min-h-8 text-xs" onClick={() => setBrief(null)}>Close brief</Button>
           </div>
+          {brief.analysis ? <p className="text-xs text-muted-foreground">Analyzed with {brief.analysis}.</p> : null}
+          {brief.signals.length ? <div className="flex flex-wrap gap-1" aria-label="Use audience comments">
+            {([["explore", "Explore angles"], ["deepen", "Deepen the draft"], ["tighten", "Tighten the draft"]] as const).map(([action, label]) =>
+              <Button key={action} type="button" variant="outline" className="min-h-8 px-2 text-xs" onClick={() => {
+                const prepared = prepareMessage.current?.(audienceBriefPrompt(brief.signals, action));
+                setBriefStatus(prepared ? "Added to the Assistant message. Review it and choose Process with before sending." :
+                  "Finish the current Assistant message before adding this brief.");
+              }}>{label}</Button>)}
+          </div> : null}
+          {briefStatus ? <p role="status" className="text-xs text-muted-foreground">{briefStatus}</p> : null}
           {brief.discarded ? <p className="text-xs text-muted-foreground">Skipped {brief.discarded.toLocaleString()} suggestions with unmatched excerpts.</p> : null}
           {brief.signals.length === 0 ? <p className="text-xs text-muted-foreground">This brief has no supported suggestions.</p> : null}
           <ul className="space-y-2">{brief.signals.map((item, index) => <li key={index} className="space-y-1 rounded-md bg-muted/60 p-2 break-words">
@@ -274,6 +318,6 @@ function AudienceSignals({ record, sourceId, command, busy }: { record: Creation
           <ul className="max-h-60 space-y-1.5 overflow-y-auto text-xs">{sample.comments.map((c, i) => <li key={i} className="rounded-md bg-muted/60 p-2"><span className="whitespace-pre-wrap break-words">{c.text}</span> <a className="ml-1 text-primary hover:underline" href={c.href} target="_blank" rel="noopener noreferrer">View comment</a></li>)}</ul>
           <p className="text-xs text-muted-foreground">Then add what you notice above, in your own words.</p></div> : null}
       </div> : null}
-    </div>
+    </div> : null}
   </details>;
 }
