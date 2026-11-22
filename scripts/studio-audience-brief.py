@@ -10,6 +10,7 @@ import os
 import re
 import sys
 from collections import Counter
+from copy import deepcopy
 from pathlib import Path
 
 MAX_BYTES = 64 * 1024 * 1024
@@ -33,9 +34,9 @@ SCHEMA = {
             "type": "object", "additionalProperties": False,
             "required": ["kind", "signal", "action", "beat", "suggestion", "evidence"],
             "properties": {
-                "kind": {"enum": KINDS}, "signal": {"type": "string", "maxLength": 180},
+                "kind": {"enum": KINDS}, "signal": {"type": "string", "minLength": 1, "maxLength": 180},
                 "action": {"enum": ACTIONS}, "beat": {"enum": BEATS},
-                "suggestion": {"type": "string", "maxLength": 280},
+                "suggestion": {"type": "string", "minLength": 1, "maxLength": 280},
                 "evidence": {"type": "array", "minItems": 1, "maxItems": 3,
                              "items": {"type": "string"}},
             },
@@ -111,6 +112,12 @@ def read_collection(paths):
     return comments, counts
 
 
+def evidence_ids(data):
+    if "comments" in data:
+        return {row["id"] for row in data["comments"]}
+    return {ref for signal in data["signals"] for ref in signal["evidence"]}
+
+
 class LocalOllama:
     def __init__(self, model, port):
         self.model = model
@@ -140,8 +147,10 @@ class LocalOllama:
             connection.close()
 
     def __call__(self, data):
+        schema = deepcopy(SCHEMA)
+        schema["properties"]["signals"]["items"]["properties"]["evidence"]["items"]["enum"] = sorted(evidence_ids(data))
         result = self.request("POST", "/api/chat", {
-            "model": self.model, "stream": False, "format": SCHEMA,
+            "model": self.model, "stream": False, "format": schema,
             "options": {"temperature": 0.1, "num_ctx": 8192, "num_predict": 1500},
             "keep_alive": "2m",
             "messages": [{"role": "system", "content": INSTRUCTIONS},
@@ -181,8 +190,7 @@ def checked_signals(response, allowed_ids):
                 raise ValueError(f"The local model returned invalid {key} text.")
         ids = row.get("evidence")
         if (not isinstance(ids, list) or not 1 <= len(ids) <= 3
-                or any(not isinstance(ref, str) or ref not in allowed_ids for ref in ids)
-                or len(set(ids)) != len(ids)):
+                or any(not isinstance(ref, str) or ref not in allowed_ids for ref in ids)):
             raise ValueError("The local model cited a comment it did not receive.")
         signals.append({
             "kind": row["kind"],
@@ -190,7 +198,7 @@ def checked_signals(response, allowed_ids):
             "action": row["action"],
             "beat": row["beat"],
             "suggestion": CONTACT.sub("[redacted]", row["suggestion"]),
-            "evidence": ids,
+            "evidence": list(dict.fromkeys(ids)),
         })
     return signals
 
@@ -200,9 +208,8 @@ def analyze(comments, topic, ask, progress=lambda _: None):
     summaries = []
     for index, group in enumerate(groups, 1):
         progress(f"Reading batch {index}/{len(groups)}")
-        summaries.append(checked_signals(
-            ask({"task": "Extract useful audience signals from these comments.", "topic": topic, "comments": group}),
-            {row["id"] for row in group}))
+        request = {"task": "Extract useful audience signals from these comments.", "topic": topic, "comments": group}
+        summaries.append(checked_signals(ask(request), evidence_ids(request)))
     while len(summaries) > 1:
         merged = []
         for index in range(0, len(summaries), FAN_IN):
@@ -211,10 +218,9 @@ def analyze(comments, topic, ask, progress=lambda _: None):
                 merged.append(signals)
                 continue
             progress(f"Consolidating {len(signals)} candidate signals")
-            merged.append(checked_signals(
-                ask({"task": "Consolidate and prioritize these evidence-linked signals into a video brief.",
-                     "topic": topic, "signals": signals}),
-                {ref for signal in signals for ref in signal["evidence"]}))
+            request = {"task": "Consolidate and prioritize these evidence-linked signals into a video brief.",
+                       "topic": topic, "signals": signals}
+            merged.append(checked_signals(ask(request), evidence_ids(request)))
         summaries = merged
     return summaries[0], len(groups)
 
