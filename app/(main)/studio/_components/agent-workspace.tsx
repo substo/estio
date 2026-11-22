@@ -7,6 +7,7 @@ import { formatClock, lengthFit, scriptStats, sectionStats, targetWords } from "
 import type { AgentSelection } from "@/lib/studio/agent-policy";
 import { Button } from "@/components/ui/button";
 import { AUDIENCE_KINDS, AUDIENCE_LIMIT, AUDIENCE_ORIGINS, AUDIENCE_TEXT_LIMIT, CREATION_STAGES, stageDraft, type AudienceSignal, type CreationRecord, type CreationStage } from "@/lib/studio/creation-policy";
+import { AUDIENCE_BRIEF_MAX_BYTES, audienceObservation, readAudienceBrief } from "@/lib/studio/audience-brief";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
 
 type Draft = { recordId: string; record: CreationRecord | null; setRecord: (record: CreationRecord) => void; plan: string[]; setPlan: (plan: string[]) => void; target: number | null; setTarget: (seconds: number | null) => void;
@@ -137,7 +138,7 @@ export function DraftPanel() {
           </div> : null}
         </li>;
       })}</ul>
-      <AudienceSignals record={record} sourceId={sourceId} command={command} busy={busy} />
+      <AudienceSignals key={recordId} record={record} sourceId={sourceId} command={command} busy={busy} />
       {record ? <p className="border-t pt-3 text-xs text-muted-foreground">To set this whole draft aside, archive it from its <Link href={`/studio/content/${record.id}`} className="text-primary hover:underline">Content record</Link> (Archived option). Archived drafts can be restored there, and Content's “Include archived” filter shows them.</p> : null}
     </div>
   </section>;
@@ -184,6 +185,24 @@ function AudienceSignals({ record, sourceId, command, busy }: { record: Creation
   const [sample, setSample] = useState<CommentSample | null>(null);
   const [loading, setLoading] = useState(false);
   const signals = record?.state.audience ?? [];
+  const observationRef = useRef<HTMLTextAreaElement>(null);
+  const [brief, setBrief] = useState<ReturnType<typeof readAudienceBrief> | null>(null);
+  const [briefError, setBriefError] = useState("");
+  const [readingBrief, setReadingBrief] = useState(false);
+
+  async function openBrief(file: File) {
+    setBrief(null);
+    setBriefError("");
+    setReadingBrief(true);
+    try {
+      if (file.size > AUDIENCE_BRIEF_MAX_BYTES) throw new Error("Choose a Studio audience brief under 256 KB.");
+      setBrief(readAudienceBrief(await file.text()));
+    } catch (error) {
+      setBriefError(error instanceof SyntaxError ? "This file isn't valid JSON." : error instanceof Error ? error.message : "Could not open this brief.");
+    } finally {
+      setReadingBrief(false);
+    }
+  }
   async function readComments() {
     if (!sourceId) return;
     setLoading(true);
@@ -198,12 +217,49 @@ function AudienceSignals({ record, sourceId, command, busy }: { record: Creation
     <summary className="cursor-pointer font-medium">Audience language{signals.length ? ` · ${signals.length}` : ""} <span className="font-normal text-muted-foreground">(optional)</span></summary>
     <div className="mt-3 space-y-3">
       <p className="text-xs text-muted-foreground">Add what you have noticed in comments, interviews or FAQs, in your own words: a question people ask, an objection, a phrase they use. The assistant uses the wording and concerns. They are your observations, not evidence and not a claim about everyone.</p>
+      <div className="space-y-2">
+        <label className="block text-xs font-medium">Open a local audience brief
+          <input type="file" accept=".json,application/json" disabled={readingBrief} className="mt-1 block w-full text-xs file:mr-2" onChange={event => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = "";
+            if (file) void openBrief(file);
+          }} />
+        </label>
+        {briefError ? <p role="alert" className="text-xs text-destructive">{briefError}</p> : null}
+        {brief ? <div className="space-y-2" aria-label="Audience brief">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p role="status" className="text-xs text-muted-foreground">{brief.analyzed.toLocaleString()} comments read. Only observations you add are saved.</p>
+            <Button type="button" variant="ghost" className="min-h-8 text-xs" onClick={() => setBrief(null)}>Close brief</Button>
+          </div>
+          {brief.signals.length === 0 ? <p className="text-xs text-muted-foreground">This brief has no supported suggestions.</p> : null}
+          <ul className="space-y-2">{brief.signals.map((item, index) => <li key={index} className="space-y-1 rounded-md bg-muted/60 p-2 break-words">
+            <p className="text-xs font-medium capitalize">{item.beat} · {item.action}</p>
+            <p>{item.signal}</p>
+            <p className="text-xs">{item.suggestion}</p>
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer">Review comment excerpts</summary>
+              <ul className="space-y-1 pt-1">{item.evidence.map(row => <li key={row.id}>
+                <p>{row.video} · {row.file}, row {row.row}</p>
+                <blockquote>“{row.text}”</blockquote>
+              </li>)}</ul>
+            </details>
+            <Button type="button" variant="ghost" className="min-h-8 px-2 text-xs"
+              disabled={!record || busy || Boolean(text.trim()) || signals.length >= AUDIENCE_LIMIT}
+              onClick={() => {
+                setText(audienceObservation(item));
+                setKind(item.kind);
+                setOrigin("comments");
+                observationRef.current?.focus();
+              }}>Review as observation</Button>
+          </li>)}</ul>
+        </div> : null}
+      </div>
       {signals.length ? <ul className="space-y-1.5">{signals.map(item => <li key={item.id} className="flex items-start justify-between gap-2 rounded-md bg-muted/60 p-2">
         <span><span className="mr-1.5 rounded-full border px-1.5 py-0.5 text-[11px] capitalize">{item.kind}</span>{item.text}<span className="ml-1 text-xs text-muted-foreground">· {item.origin}</span></span>
         <Button type="button" variant="ghost" className="min-h-8 px-2 text-xs" disabled={busy} onClick={() => void command({ action: "audience_remove", signalId: item.id })} aria-label={`Remove observation: ${item.text.slice(0, 40)}`}>Remove</Button></li>)}</ul> : null}
       {record && signals.length < AUDIENCE_LIMIT ? <div className="space-y-2">
         <label className="sr-only" htmlFor="audience-text">Your observation</label>
-        <textarea id="audience-text" value={text} maxLength={AUDIENCE_TEXT_LIMIT} rows={2} onChange={event => setText(event.target.value)} placeholder="e.g. People keep asking whether this works without expensive gear" className="block w-full rounded-md border bg-background p-2 text-sm" />
+        <textarea ref={observationRef} id="audience-text" value={text} maxLength={AUDIENCE_TEXT_LIMIT} rows={2} onChange={event => setText(event.target.value)} placeholder="e.g. People keep asking whether this works without expensive gear" className="block w-full rounded-md border bg-background p-2 text-sm" />
         <div className="flex flex-wrap items-center gap-2">
           <select aria-label="Kind of observation" value={kind} onChange={event => setKind(event.target.value as AudienceSignal["kind"])} className="min-h-9 rounded-md border bg-background px-2 text-xs">{AUDIENCE_KINDS.map(k => <option key={k} value={k}>{k}</option>)}</select>
           <select aria-label="Where you saw it" value={origin} onChange={event => setOrigin(event.target.value as AudienceSignal["origin"])} className="min-h-9 rounded-md border bg-background px-2 text-xs">{AUDIENCE_ORIGINS.map(o => <option key={o} value={o}>from {o}</option>)}</select>
