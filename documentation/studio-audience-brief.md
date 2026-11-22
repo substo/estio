@@ -1,6 +1,23 @@
 # Local audience research for Studio
 
-Use a comment collection you have permission to process, such as an export supplied by the creator. The tool reads files on the Mac and asks an installed local Ollama model to look for useful patterns. A YouTube sign-in is for viewing. YouTube's terms generally restrict automated access without permission. Google's account export includes comments written by the account holder. It does not export the audience discussion under arbitrary videos. [YouTube Terms of Service](https://www.youtube.com/t/terms) · [Google Data Portability schema](https://developers.google.com/data-portability/schema-reference/youtube)
+Use a comment collection you have permission to collect and process. The Mac browser collector uses regular YouTube pages and your Studio Chrome profile. The analyzer reads the export locally and uses an installed Ollama model. Neither step needs a Google API key.
+
+## Collect from YouTube on the Mac
+
+Run from the Estio checkout with its Node dependencies installed. Use only video URLs covered by your permission. The collector uses the same dedicated profile as Studio's Related videos search. The collector rejects optional cookies when YouTube offers that choice. If the profile needs sign-in or a consent choice remains, open that profile through the existing Studio command, finish the browser prompt, and quit its Chrome windows before collecting.
+
+```sh
+npm run start:studio-companion -- youtube-login
+```
+
+```sh
+npx tsx scripts/studio-youtube-comments.ts --confirm-permission --output ~/studio-comments \
+  'https://www.youtube.com/watch?v=YOUR_VIDEO_ID'
+```
+
+Pass multiple URLs to collect from several videos in one run. Add `--limit 50` to cap a trial at 50 rows per video. The default tries to exhaust the top-level pages and expand the replies YouTube makes available. It attempts Newest first when the menu is available and records which order it could verify. Add `--keep-order` to keep YouTube's initial order for a sample. Each video gets a private JSON file with the visible count when available, the reason it stopped and any unresolved reply threads. An interrupted export is usable but partial. Reaching the end means the browser offered no further page. The visible count can differ, for example when YouTube withholds comments.
+
+The export includes comment text and comment/reply IDs for provenance. It excludes author and account metadata and redacts common contact details from the text. Existing export files are preserved. Use a new output folder for a new run.
 
 ## Prepare and preview
 
@@ -21,7 +38,7 @@ Preview reports how many rows are usable, duplicate, empty or shortened. Each ru
 Use an installed instruction-following model that reliably produces structured output. Run `ollama list` to find its exact name and start the local Ollama service if needed. [Ollama structured outputs](https://docs.ollama.com/capabilities/structured-outputs)
 
 ```sh
-python3 scripts/studio-audience-brief.py creator-comments.json other-video.csv \
+python3 scripts/studio-audience-brief.py ~/studio-comments/youtube-*.json \
   --model YOUR_LOCAL_MODEL --output first-video-audience \
   --topic "Help first-time creators test two openings for the same video"
 ```
