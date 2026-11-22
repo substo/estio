@@ -15,10 +15,18 @@ import { useDictation } from "./use-dictation";
 const API = "/studio/assistant/agent/api";
 const clock = (seconds: number) => new Date(seconds * 1000).toISOString().slice(seconds >= 3600 ? 11 : 14, 19);
 export type AgentSource = { id: string; version: number; title: string; hasText: boolean };
+export type AgentResume = { id: string; title: string; turns: number; updatedAt: string; href: string };
+
+/** Route memory is per browser, account and Location; a paid route is never restored without an existing thread that already used it. */
+const ROUTE_KEY = (scope: string) => `studio-agent-route:${scope}`;
+const readRoute = (scope: string): StudioTextProvider | null => {
+  try { const value = JSON.parse(localStorage.getItem(ROUTE_KEY(scope)) ?? "null"); return value === "location_order" || value === "subscription" ? value : null; } catch { return null; }
+};
 
 /** One conversation for a source or a blank draft. No fields to fill: say what you want, or tap a starter. */
-export function AgentChat({ locationId, source, initialTurns, provider, onProvider, newDraftHref }: {
+export function AgentChat({ locationId, source, initialTurns, provider, onProvider, newDraftHref, resume, scope }: {
   locationId: string; source: AgentSource | null; initialTurns: AgentTurnView[]; provider: StudioTextProvider; onProvider: (value: StudioTextProvider) => void; newDraftHref?: string;
+  resume?: AgentResume | null; scope: string;
 }) {
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
   const { recordId, record, setRecord, setPlan } = useAgentDraft();
@@ -33,7 +41,18 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   const field = useRef<HTMLTextAreaElement>(null);
   const fieldId = useId();
   const dictation = useDictation(useCallback((heard: string) => setText(previous => `${previous}${previous && !/\s$/.test(previous) ? " " : ""}${heard}`.slice(0, AGENT_MESSAGE_LIMIT)), []));
+  const [resumeDismissed, setResumeDismissed] = useState(false);
+  const [routeNote, setRouteNote] = useState("");
   const running = turns.find(turn => turn.status === "running");
+  // An existing thread keeps the route its last message used; a new one uses the last unpaid route chosen here, never a paid one.
+  useEffect(() => {
+    const kept = initialTurns.at(-1)?.provider ?? null;
+    const next = kept ?? readRoute(scope);
+    if (next && next !== provider) onProvider(next);
+    if (kept === "openai") setRouteNote("Paid route kept from your last message in this draft. Change it below before sending if you prefer.");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const chooseRoute = (value: StudioTextProvider) => { onProvider(value); setRouteNote(""); try { if (value !== "openai") localStorage.setItem(ROUTE_KEY(scope), JSON.stringify(value)); } catch { /* optional */ } };
   const headers = { "X-Studio-Tenant": tenant, "Content-Type": "application/json" };
   const upsert = useCallback((turn: AgentTurnView) => setTurns(previous => previous.some(item => item.id === turn.id) ? previous.map(item => item.id === turn.id ? turn : item) : [...previous, turn]), []);
 
@@ -78,9 +97,9 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
         version: created.current ? 1 : 0, sourceId: created.current ? null : source?.id ?? null, sourceVersion: created.current ? null : source?.version ?? null, message, ...studioTextConsent(provider, true) }) });
       const data = await response.json();
       if (!response.ok) { if (response.status < 500) pendingKey.current = null; setError(data.error || "The message could not be sent."); return; }
-      created.current = true; pendingKey.current = null; setText("");
+      created.current = true; pendingKey.current = null; setText(""); try { if (provider !== "openai") localStorage.setItem(ROUTE_KEY(scope), JSON.stringify(provider)); } catch { /* optional */ }
       const url = new URL(window.location.href); url.searchParams.set("draft", recordId); url.searchParams.delete("new"); window.history.replaceState(null, "", url);
-      upsert({ id: data.turnId, seq: turns.length + 1, message, status: "running", error: null, activity: [], waiting: "queued", route: null, result: null, inputs: { reads: [], context: [] } });
+      upsert({ id: data.turnId, seq: turns.length + 1, message, provider, status: "running", error: null, activity: [], waiting: "queued", route: null, result: null, inputs: { reads: [], context: [] } });
     } catch { setError("The outcome is unconfirmed. Press Send again to check this same message."); }
     finally { setSending(false); }
   }
@@ -107,6 +126,12 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
 
   return <>
     <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3" role="log" aria-live="polite" aria-label="Conversation">
+      {resume && !resumeDismissed && turns.length === 0 && !record ? <div className="mr-6 space-y-2 rounded-lg border border-primary/40 bg-background p-3" role="group" aria-label="Earlier draft from this source">
+        <p><strong>You already started a draft from this source:</strong> {resume.title}. {resume.turns ? `${resume.turns} earlier ${resume.turns === 1 ? "exchange" : "exchanges"}. ` : ""}Last changed {new Date(resume.updatedAt).toLocaleDateString()}.</p>
+        <div className="flex flex-wrap gap-2"><Button asChild className="min-h-10"><Link href={resume.href}>Resume that draft</Link></Button>
+          <Button type="button" variant="outline" className="min-h-10" onClick={() => { setResumeDismissed(true); field.current?.focus(); }}>Start new</Button></div>
+        <p className="text-xs text-muted-foreground">Starting new never changes the earlier draft.</p>
+      </div> : null}
       <div className="mr-6 space-y-2 rounded-lg bg-muted p-3">
         <p>{source ? <>I’m looking at <strong>{source.title}</strong>. {source.hasText ? "I can read its saved text and any approved findings, and compare ideas with your draft." : "It has no saved transcript or description, so I can only work from what you tell me."} Tell me what you want to make, or start from a suggestion. Nothing goes into your draft until you choose <strong>Use</strong>.</> : <>Tell me what you want to make, or tap Start for me. I’ll ask only what I need. Nothing goes into your draft until you choose <strong>Use</strong>.</>}</p>
         {turns.length === 0 ? <div className="flex flex-wrap gap-2">
@@ -160,9 +185,10 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" className="min-h-10" disabled={sending || Boolean(running) || !text.trim()} onClick={() => void send(text)}>{sending ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : <Send aria-hidden="true" className="mr-2 h-4 w-4" />}Send</Button>
         {dictation.supported ? <Button type="button" variant="outline" size="icon" className="h-10 w-10" onClick={dictation.toggle} aria-pressed={dictation.listening} aria-label={dictation.listening ? "Stop dictation" : "Dictate"}>{dictation.listening ? <MicOff aria-hidden="true" className="h-4 w-4" /> : <Mic aria-hidden="true" className="h-4 w-4" />}</Button> : null}
-        {newDraftHref && turns.length ? <Button asChild variant="ghost" className="min-h-9 px-2 text-xs"><Link href={newDraftHref}>Start a new draft</Link></Button> : null}
+        {newDraftHref && (turns.length || record) ? <Button asChild variant="ghost" className="min-h-9 px-2 text-xs"><Link href={newDraftHref}>Start a new draft</Link></Button> : null}
       </div>
-      <StudioTextProviderChoice studioAgent compact provider={provider} onChange={onProvider} />
+      <StudioTextProviderChoice studioAgent compact provider={provider} onChange={chooseRoute} />
+      {routeNote ? <p role="status" className="text-xs text-amber-700 dark:text-amber-400">{routeNote}</p> : null}
       <p className="text-xs text-muted-foreground">Each message may use up to four model calls on this route. Saved source text is read only when needed.</p>
       <p role="status" className="text-xs text-muted-foreground">{dictation.listening ? "Listening…" : dictation.note}</p>
     </div>

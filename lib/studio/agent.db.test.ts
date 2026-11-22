@@ -100,6 +100,11 @@ test("source entry → real saved-source read → reply → reload → out-of-or
   assert.equal(reloaded.turns.length, 1);
   assert.deepEqual(reloaded.plan, ["Confirm the publisher", "Draft two openings"]);
   assert.equal(reloaded.turns[0].result!.proposals[0].stage, "Hook");
+  assert.equal(reloaded.turns[0].provider, "subscription");                                  // a reopened thread keeps its route
+  const resume = await agent.latestSourceDraft(loc, source);                                 // offered inline as Resume; Create itself starts fresh
+  assert.equal(resume?.id, draft);
+  assert.equal(resume?.turns, 1);
+  assert.match(await agent.agentRouteScope(loc), /^[0-9a-f]{16}$/);
 
   // 4. Explicit Use: persisted, versioned, fenced.
   const record = view.record!;

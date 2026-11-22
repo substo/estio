@@ -12,15 +12,15 @@ import type { CreationRecord } from "@/lib/studio/creation-policy";
 const record: CreationRecord = { id: "r1", version: 3, templateId: null, state: { schema: 1, brief: "", source: null, history: [],
   direction: { choice: "conversation", publisher: "", viewer: "", goal: "", angle: "", rationale: "" },
   stages: { Hook: { text: "Old hook text", approved: true, shortlist: [], previous: { text: "", approved: false } } } } };
-const base: Omit<AgentTurnView, "id" | "status" | "result"> = { seq: 1, message: "Make the opener sharper", error: null, activity: [], waiting: null, route: null, inputs: { reads: [], context: ["Your message"] } };
+const base: Omit<AgentTurnView, "id" | "status" | "result"> = { provider: "location_order", seq: 1, message: "Make the opener sharper", error: null, activity: [], waiting: null, route: null, inputs: { reads: [], context: ["Your message"] } };
 const done: AgentTurnView = { ...base, id: "t1", status: "done", route: "Your Mac subscription · codex", activity: ["Searched the saved source for “opening” · 2 passages"],
   inputs: { reads: [{ tool: "Searched the saved source for “opening” · 2 passages", items: ["MrBeast · characters 0–420"] }], context: ["Your message"] },
   result: { reply: "Is this promoting Substo or a customer's video?", choices: ["Promote Substo to new creators", "A customer's video"], decisions: [{ key: "style", value: "punchy", basis: "sharper" }], plan: ["Pick the publisher"],
     proposals: [{ stage: "Hook", text: "Two openings, one promise.", rationale: "Uses the opener finding.", verify: ["Studio shows both openings"], evidenceIds: ["f:1"],
       evidence: [{ id: "f:1", label: "L", quote: "The opening sets the promise.", sourceId: "s1", at: 42 }] }] } };
-const render = (turns: AgentTurnView[], plan: string[] = []) => renderToStaticMarkup(
-  <StudioTenantProvider locationId="loc"><AgentDraftProvider recordId="r1" initialRecord={record} initialPlan={plan}>
-    <AgentChat locationId="loc" source={{ id: "s1", version: 1, title: "MrBeast on openings", hasText: true }} initialTurns={turns} provider="location_order" onProvider={() => {}} />
+const render = (turns: AgentTurnView[], plan: string[] = [], extra: Partial<React.ComponentProps<typeof AgentChat>> = {}, initialRecord: CreationRecord | null = record) => renderToStaticMarkup(
+  <StudioTenantProvider locationId="loc"><AgentDraftProvider recordId="r1" initialRecord={initialRecord} initialPlan={plan}>
+    <AgentChat locationId="loc" source={{ id: "s1", version: 1, title: "MrBeast on openings", hasText: true }} initialTurns={turns} provider="location_order" onProvider={() => {}} scope="test" {...extra} />
     <DraftPanel />
   </AgentDraftProvider></StudioTenantProvider>);
 
@@ -53,4 +53,18 @@ test("running and failed turns state what happened without internal reasoning", 
   const failed = render([{ ...base, id: "t3", status: "failed", error: "The model run stopped before answering.", result: null }]);
   assert.match(failed, /Nothing was changed/);
   assert.match(failed, /Send again/);
+});
+
+test("a fresh entry offers Resume versus Start new inline, without attaching to the old draft", () => {
+  const resume = { id: "old", title: "Earlier hook work", turns: 2, updatedAt: "2026-11-20T10:00:00Z", href: "/studio/library/s1?mode=create&draft=old" };
+  const html = render([], [], { resume }, null);
+  assert.match(html, /You already started a draft from this source/);
+  assert.match(html, /href="\/studio\/library\/s1\?mode=create&amp;draft=old"[^>]*>Resume that draft/);
+  assert.match(html, />Start new</);
+  assert.match(html, /Start for me/);
+  assert.ok(!/Start a new draft/.test(html), "no duplicate new-draft link before there is a draft");
+  // Resuming an explicit draft shows no offer, and a new-draft action is available straight away.
+  const resumed = render([], [], { resume, newDraftHref: "/x" });
+  assert.ok(!/already started a draft/.test(resumed));
+  assert.match(resumed, /Start a new draft/);
 });

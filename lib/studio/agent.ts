@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { StudioAccess } from "./access";
 import { StudioCommandError } from "./command-error";
@@ -14,7 +15,7 @@ import { agentRoundRequestId } from "./agent-request";
 type TurnRow = { id: string; location_id: string; record_id: string; seq: number; message: string; provider: string; status: "running" | "done" | "failed";
   rounds: Array<{ round: number; reviewId: string; tool: AgentToolCall | null; observation: AgentObservation | null }>; result: AgentFinal | null; error: string | null; created_by_clerk_user_id: string; created_at: string };
 export type AgentTurnView = {
-  id: string; seq: number; message: string; status: "running" | "done" | "failed"; error: string | null;
+  id: string; seq: number; message: string; provider: "location_order" | "subscription" | "openai"; status: "running" | "done" | "failed"; error: string | null;
   /** Real activity only: what the assistant actually read, in order. */
   activity: string[]; waiting: "queued" | "running" | null; route: string | null;
   result: (Omit<AgentFinal, "proposals"> & { proposals: Array<AgentProposal & { evidence: Array<{ id: string; label: string; quote: string; sourceId: string | null; at: number | null }> }> }) | null;
@@ -51,7 +52,7 @@ async function views(access: StudioAccess, turns: TurnRow[], pending: Map<string
     for (const round of turn.rounds) for (const item of round.observation?.items ?? []) items.set(item.id, item);
     const last = turn.rounds.at(-1);
     const run = last ? model.get(last.reviewId) : undefined;
-    return { id: turn.id, seq: turn.seq, message: turn.message, status: turn.status, error: turn.error,
+    return { id: turn.id, seq: turn.seq, message: turn.message, provider: turn.provider as AgentTurnView["provider"], status: turn.status, error: turn.error,
       activity: turn.rounds.filter(r => r.tool).map(r => describeAgentStep(r.tool!, r.observation)),
       waiting: turn.status === "running" ? pending.get(turn.id)?.waiting ?? "queued" : null,
       route: run ? `${run.execution_provider === "subscription" ? "Your Mac subscription" : "Location OpenAI key (paid)"} · ${run.model.replace(/^mac_/, "")}` : null,
@@ -213,12 +214,21 @@ export async function advanceAgentTurn(locationId: string, turnId: string) {
   return { turn, record: row ? expose(row) : null };
 }
 
-/** The draft this source most recently started with the assistant, so Create continues it after a reload. */
+/** The most recent draft this source started with the assistant, offered inline as Resume. Create itself always starts fresh. */
 export async function latestSourceDraft(locationId: string, sourceId: string) {
   const access = await requireCreationWriter(locationId);
-  const row = await studioDb.one<{ id: string }>(Prisma.sql`
-    SELECT c.id FROM studio.studio_records c JOIN studio.studio_record_links l ON l.location_id=c.location_id AND l.source_id=c.id
+  const row = await studioDb.one<{ id: string; title: string; updated_at: string; turns: number }>(Prisma.sql`
+    SELECT c.id,left(c.title,120) AS title,c.updated_at,
+      (SELECT count(*)::int FROM studio.studio_agent_turns t WHERE t.location_id=c.location_id AND t.record_id=c.id
+        AND t.actor_app=${access.app} AND t.created_by_clerk_user_id=${access.userId} AND t.status='done') AS turns
+    FROM studio.studio_records c JOIN studio.studio_record_links l ON l.location_id=c.location_id AND l.source_id=c.id
     WHERE c.location_id=${access.locationId} AND c.kind='content' AND NOT c.archived AND c.payload#>>'{creation,schema}'='1'
       AND l.target_id=${sourceId}::uuid ORDER BY c.updated_at DESC,c.id LIMIT 1`);
-  return row?.id ?? null;
+  return row ? { id: row.id, title: row.title, turns: row.turns, updatedAt: new Date(row.updated_at).toISOString() } : null;
+}
+
+/** Opaque per-account, per-Location key for remembering a route choice in this browser. */
+export async function agentRouteScope(locationId: string) {
+  const access = await requireCreationWriter(locationId);
+  return createHash("sha256").update(`${access.app}:${access.userId}:${access.locationId}`).digest("hex").slice(0, 16);
 }

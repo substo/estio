@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readAgentResult, readAgentSendCommand, type AgentSnapshot, type AgentToolCall } from "./agent-policy";
-import { runAgentToolOn, type AgentToolData } from "./agent-tool-core";
+import { findPassages, runAgentToolOn, snapWindow, type AgentToolData } from "./agent-tool-core";
 
 const A = "11111111-1111-4111-8111-111111111111", B = "22222222-2222-4222-8222-222222222222";
 const call = (over: Partial<AgentToolCall>): AgentToolCall => ({ name: "search_source", query: null, sourceId: null, offset: null, stage: null, skill: null, ...over });
@@ -69,4 +69,16 @@ test("agent rounds coexist with older snapshots, carry the runtime guide and hav
   assert.equal(agentRoundRequestId(A, 2), agentRoundRequestId(A, 2));
   assert.notEqual(agentRoundRequestId(A, 2), agentRoundRequestId(A, 3));
   assert.match(agentRoundRequestId(A, 1), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/);
+});
+
+test("displayed excerpts start and end on whole words yet stay exact substrings at their real offsets", async () => {
+  const text = "Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega ".repeat(8);
+  const mid = snapWindow(text, 8, 60);                         // offset 8 is inside "gamma"
+  assert.ok(text.startsWith(mid.text, mid.start));
+  assert.equal(mid.start, 11);
+  assert.ok(/\s|^[A-Z]/.test(text[mid.start - 1] ?? " ") && /\w$/.test(mid.text));
+  assert.ok(findPassages(text, "iota").every(p => text.startsWith(p.text, p.start) && (p.start === 0 || /\s/.test(text[p.start - 1]))));
+  const read = await runAgentToolOn(data({ sources: [{ id: A, title: "S", version: 1, text }] }), call({ name: "read_source", sourceId: A, offset: 8 }));
+  assert.equal(read.items[0].id, `${A.slice(0, 8)}:11`);
+  assert.ok(text.startsWith(read.items[0].text, 11));
 });

@@ -14,13 +14,30 @@ const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)
 const terms = (query: string | null) => [...new Set((query ?? "").toLowerCase().split(/[^\p{L}\p{N}']+/u).filter(word => word.length >= 3))].slice(0, 6);
 const short = (id: string) => id.slice(0, 8);
 
+/** Shows whole words at both ends of an excerpt. The text stays an exact substring of the saved text and `start` is its real offset. */
+export function snapWindow(text: string, start: number, length: number) {
+  const word = (char: string | undefined) => char !== undefined && /[\p{L}\p{N}']/u.test(char);
+  let from = start;
+  if (from > 0 && word(text[from - 1]) && word(text[from])) {
+    let next = from; while (next < text.length && next - from < 40 && word(text[next])) next++;
+    if (next - from < 40) from = next;
+  }
+  let to = Math.min(text.length, start + length);
+  if (to < text.length && word(text[to - 1]) && word(text[to])) {
+    let back = to; while (back > from && to - back < 40 && word(text[back - 1])) back--;
+    if (to - back < 40 && back > from) to = back;
+  }
+  while (from < to && /\s/.test(text[from])) from++;
+  return { start: from, text: text.slice(from, to).trimEnd() };
+}
+
 /** Highest-scoring non-overlapping passages; an empty query samples opening, middle and end. */
 export function findPassages(text: string, query: string | null, count = 4) {
   if (!text) return [];
   const wanted = terms(query);
   if (!wanted.length) {
     const starts = [0, Math.max(0, Math.floor(text.length / 2 - WINDOW / 2)), Math.max(0, text.length - WINDOW)];
-    return [...new Set(starts)].slice(0, 3).map(start => ({ start, text: text.slice(start, start + WINDOW) }));
+    return [...new Set(starts)].slice(0, 3).map(start => snapWindow(text, start, WINDOW));
   }
   const lower = text.toLowerCase();
   const scored: Array<{ start: number; score: number }> = [];
@@ -32,7 +49,7 @@ export function findPassages(text: string, query: string | null, count = 4) {
   scored.sort((a, b) => b.score - a.score || a.start - b.start);
   const chosen: number[] = [];
   for (const candidate of scored) if (chosen.length < count && chosen.every(start => Math.abs(start - candidate.start) >= WINDOW)) chosen.push(candidate.start);
-  return chosen.sort((a, b) => a - b).map(start => ({ start, text: text.slice(start, start + WINDOW) }));
+  return chosen.sort((a, b) => a - b).map(start => snapWindow(text, start, WINDOW));
 }
 
 function fit(observation: AgentObservation): AgentObservation {
@@ -73,8 +90,9 @@ export async function runAgentToolOn(data: AgentToolData, call: AgentToolCall): 
       if (!source) return fail("Choose one of this draft's linked sources.");
       if (!source.text) return fail("This source has no saved transcript or description.");
       const start = Math.min(call.offset ?? 0, Math.max(0, source.text.length - 1));
-      const text = source.text.slice(start, start + 1200);
-      return fit({ items: [{ id: `${short(source.id)}:${start}`, label: `${source.title} · characters ${start}–${start + text.length} of ${source.text.length}`, text, sourceId: source.id, cite: true }], untrusted: true });
+      const window = snapWindow(source.text, start, 1200);
+      const text = window.text;
+      return fit({ items: [{ id: `${short(source.id)}:${window.start}`, label: `${source.title} · characters ${window.start}–${window.start + text.length} of ${source.text.length}`, text, sourceId: source.id, cite: true }], untrusted: true });
     }
     case "list_findings": {
       if (call.sourceId && !pick(call.sourceId)) return fail("That source is not linked to this draft.");
