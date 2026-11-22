@@ -1,16 +1,18 @@
 "use client";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ExternalLink, Loader2, Mic, MicOff, Send } from "lucide-react";
+import { Search, AlertTriangle, ExternalLink, Loader2, Mic, MicOff, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AgentTurnView } from "@/lib/studio/agent";
-import { AGENT_MESSAGE_LIMIT } from "@/lib/studio/agent-policy";
-import { stageDraft } from "@/lib/studio/creation-policy";
-import { formatClock, parseDurationRequest, targetWords } from "@/lib/studio/script-length";
+import { AGENT_MESSAGE_LIMIT, type AgentSelection } from "@/lib/studio/agent-policy";
+import { CREATION_STAGES, stageDraft } from "@/lib/studio/creation-policy";
+import { formatClock, parseDurationRequest, scriptStats, targetWords } from "@/lib/studio/script-length";
 import { studioTextConsent, type StudioTextProvider } from "@/lib/studio/text-provider";
 import { StudioTextProviderChoice } from "./text-provider-choice";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
-import { useAgentDraft } from "./agent-workspace";
+import { SectionFit, useAgentDraft } from "./agent-workspace";
+import { OPEN_TAB_EVENT } from "./source-tabs";
+import { useOptionalSourceWorkspace } from "./source-workspace";
 import { useDictation } from "./use-dictation";
 
 const API = "/studio/assistant/agent/api";
@@ -32,7 +34,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   resume?: AgentResume | null; scope: string;
 }) {
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
-  const { recordId, record, setRecord, setPlan, target, setTarget } = useAgentDraft();
+  const { recordId, record, setRecord, setPlan, target, setTarget, sendRef } = useAgentDraft();
   const [turns, setTurns] = useState(initialTurns);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -91,7 +93,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runningId]);
 
-  async function send(raw: string) {
+  async function send(raw: string, selection?: AgentSelection) {
     const message = raw.trim();
     if (!message || sending || running) return;
     // The same text keeps the same request id, so a lost response can be retried without a second model call.
@@ -99,12 +101,12 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
     setSending(true); setError(""); dictation.stop();
     try {
       const response = await fetch(API, { method: "POST", headers, signal: AbortSignal.timeout(30_000), body: JSON.stringify({ action: "send", recordId, turnId: pendingKey.current.turnId,
-        version: created.current ? 1 : 0, sourceId: created.current ? null : source?.id ?? null, sourceVersion: created.current ? null : source?.version ?? null, message, ...studioTextConsent(provider, true) }) });
+        version: created.current ? 1 : 0, sourceId: created.current ? null : source?.id ?? null, sourceVersion: created.current ? null : source?.version ?? null, message, ...(selection ? { selection } : {}), ...studioTextConsent(provider, true) }) });
       const data = await response.json();
       if (!response.ok) { if (response.status < 500) pendingKey.current = null; setError(data.error || "The message could not be sent."); return; }
       created.current = true; pendingKey.current = null; setText(""); { const asked = parseDurationRequest(message); if (asked) setTarget(asked.kind === "set" ? asked.seconds : null); } try { if (provider !== "openai") localStorage.setItem(ROUTE_KEY(scope), JSON.stringify(provider)); } catch { /* optional */ }
       const url = new URL(window.location.href); url.searchParams.set("draft", recordId); url.searchParams.delete("new"); window.history.replaceState(null, "", url);
-      upsert({ id: data.turnId, seq: turns.length + 1, message, provider, target: (() => { const asked = parseDurationRequest(message); return asked?.kind === "set" ? asked.seconds : asked?.kind === "clear" ? null : target; })(), status: "running", error: null, activity: [], waiting: "queued", route: null, result: null, inputs: { reads: [], context: [] } });
+      upsert({ id: data.turnId, seq: turns.length + 1, message, provider, selection: selection ?? null, target: (() => { const asked = parseDurationRequest(message); return asked?.kind === "set" ? asked.seconds : asked?.kind === "clear" ? null : target; })(), status: "running", error: null, activity: [], waiting: "queued", route: null, result: null, inputs: { reads: [], checks: [], context: [] } });
     } catch { setError("The outcome is unconfirmed. Press Send again to check this same message."); }
     finally { setSending(false); }
   }
@@ -122,7 +124,24 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
     finally { setApplying(null); }
   }
 
+  // The Draft panel asks for scoped edits through this same send (same route, same visible consent).
+  useEffect(() => { sendRef.current = (message, selection) => void send(message, selection); return () => { sendRef.current = null; }; });
   const last = turns.at(-1);
+  const workspace = useOptionalSourceWorkspace();
+  /** One click into the existing Related videos search with the assistant's phrase; the owner stays in control of picking, saving and transcribing. */
+  function openRelated(query: string) {
+    workspace?.setCreating(false);
+    const url = new URL(window.location.href); url.searchParams.delete("mode"); window.history.replaceState(null, "", url);
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent(OPEN_TAB_EVENT, { detail: "related" }));
+      window.setTimeout(() => {
+        document.getElementById("related")?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+        window.dispatchEvent(new CustomEvent("studio:related-search", { detail: { phrase: query } }));
+      }, 60);
+    }, 120);
+  }
+  const hasWork = record ? CREATION_STAGES.some(stage => stageDraft(record.state, stage).text.trim().length > 0) : false;
+  const moves: Array<[string, string]> = [["Explore alternatives", "Explore two or three genuinely different alternatives for this (a different concept, audience lens or point of view), each with its own spoken opening line."], ["Deepen", "Deepen the weakest part with a concrete example, a counterexample or filmable proof."], ["Tighten", "Tighten this: remove redundancy and keep the promise, the evidence and the payoff."]];
   const starters = source ? ["Make something inspired by this video", "Sharpen how it opens", "Start for me"] : ["Start for me"];
   const status = (turn: AgentTurnView) => <div role="status" className="mr-6 space-y-1 rounded-lg bg-muted p-3 text-muted-foreground">
     {turn.activity.map((line, index) => <p key={index} className="text-xs">{line}</p>)}
@@ -157,13 +176,19 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
           {turn.result.proposals.map((proposal, index) => {
             const savedText = record ? stageDraft(record.state, proposal.stage).text : "";
             const inDraft = savedText === proposal.text && Boolean(savedText);
-            const replaces = proposal.stage === "Script" && savedText.trim().length > 0 && !inDraft;
+            const replaces = proposal.stage === "Script" && savedText.trim().length > 0 && !inDraft && !proposal.replaces;
+            const sel = turn.selection;
+            const patchable = Boolean(proposal.replaces && sel && savedText.slice(sel.start, sel.end) === sel.text);
+            const composed = patchable && sel ? savedText.slice(0, sel.start) + /^\s*/.exec(sel.text)![0] + proposal.text + /\s*$/.exec(sel.text)![0] + savedText.slice(sel.end) : null;
+            const after = composed ? scriptStats(composed) : null;
             return <div key={index} className="space-y-2 rounded-md border bg-background p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Proposed {proposal.stage}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{proposal.replaces ? `Proposed edit to your ${proposal.stage}` : `Proposed ${proposal.stage}`}</p>
+              {proposal.replaces ? <p className="whitespace-pre-wrap break-words rounded bg-muted/60 p-2 text-xs text-muted-foreground line-through decoration-muted-foreground/60" data-patch-before>{proposal.replaces}</p> : null}
               <p className="whitespace-pre-wrap break-words text-sm">{proposal.text}</p>
               <p className="text-xs text-muted-foreground">{proposal.rationale}</p>
               {proposal.length ? <div className="space-y-1.5 text-xs" data-length-check>
                 <p className="text-muted-foreground">Estimated about {formatClock(proposal.length.estimatedSeconds)} spoken · {proposal.length.spokenWords} spoken words{proposal.length.cueWords ? ` (+${proposal.length.cueWords} cue words not counted)` : ""}{proposal.length.targetSeconds ? ` · requested about ${formatClock(proposal.length.targetSeconds)}` : ""}</p>
+                <SectionFit text={proposal.text} target={proposal.length.targetSeconds} />
                 {proposal.length.fit ? <p className={proposal.length.fit.state === "match" ? "font-medium text-emerald-700" : "font-medium text-amber-700"}>{proposal.length.fit.beyondSupported ? "That runtime is longer than one script can hold, so this is a part; ask for the next part when you are ready."
                   : proposal.length.fit.state === "match" ? "Close to the request." : `${proposal.length.fit.percent}% ${proposal.length.fit.state} of the request${proposal.length.fit.meaningful ? " — it did not reach the length you asked for." : "."}`}</p> : null}
                 {proposal.length.fit && proposal.length.fit.state !== "match" && !proposal.length.fit.beyondSupported && proposal.length.targetSeconds ? <Button type="button" variant="outline" className="min-h-9 text-xs" disabled={sending || Boolean(running)}
@@ -173,15 +198,24 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
                 {item.quote.length > 220 ? <>“{quotePreview(item.quote)}” <details className="mt-0.5"><summary className="cursor-pointer text-primary">Show full quote</summary><span className="mt-1 block whitespace-pre-wrap">“{item.quote}”</span></details></> : <>“{item.quote}”</>}{item.at != null ? <span className="ml-1 tabular-nums">· {clock(item.at)}</span> : null}
                 {item.sourceId ? <Link href={`/studio/library/${item.sourceId}`} className="ml-2 inline-flex items-center gap-0.5 text-primary hover:underline">Source<ExternalLink aria-hidden="true" className="h-3 w-3" /></Link> : null}</li>)}</ul> : null}
               {proposal.verify.length ? <ul className="list-disc space-y-0.5 pl-5 text-xs text-amber-700 dark:text-amber-400">{proposal.verify.map((item, i) => <li key={i}>Check before filming: {item}</li>)}</ul> : null}
+              {proposal.replaces ? <p className="text-xs text-muted-foreground" data-patch-note>{patchable && after ? <>Only the selected words change; the rest stays exactly as saved. {proposal.stage === "Script" ? <>After applying, the whole script is about {formatClock(after.seconds)} spoken ({after.spokenWords} words).</> : null} <strong>Undo last change</strong> restores it.</> : "The selected words changed since this edit was written, so it can't be applied. Select them again."}</p> : null}
               {replaces ? <p className="text-xs text-muted-foreground">This replaces your saved {proposal.stage}. <strong>Undo last change</strong> in the Draft panel restores it.</p> : null}
-              <Button type="button" className="min-h-10" disabled={inDraft || applying === `${turn.id}:${index}`} onClick={() => void use(turn, index)}>{inDraft ? "In your draft" : replaces ? `Replace saved ${proposal.stage}` : `Use as ${proposal.stage}`}</Button>
+              <Button type="button" className="min-h-10" disabled={inDraft || (proposal.replaces ? !patchable : false) || applying === `${turn.id}:${index}`} onClick={() => void use(turn, index)}>{inDraft ? "In your draft" : proposal.replaces ? "Replace selected text" : replaces ? `Replace saved ${proposal.stage}` : `Use as ${proposal.stage}`}</Button>
             </div>;
           })}
+          {turn.result.research ? <div className="space-y-1.5 rounded-md border border-dashed p-3 text-xs" data-research-suggestion>
+            <p><strong>Worth looking for:</strong> “{turn.result.research.query}” — {turn.result.research.reason}</p>
+            <p className="text-muted-foreground">Nothing from related videos has been saved or read yet. To use one as evidence, pick it, save it, transcribe it and approve its findings.</p>
+            {source ? <Button type="button" variant="outline" className="min-h-9 text-xs" onClick={() => openRelated(turn.result!.research!.query)}><Search aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />Search related videos for this</Button> : null}
+          </div> : null}
+          {turn.inputs.checks.length ? <p className="text-xs text-muted-foreground" data-length-outcome>{turn.inputs.checks.join(" · ")}</p> : null}
           {turn.result.decisions.length ? <p className="text-xs text-muted-foreground">Noted: {turn.result.decisions.map(d => `${d.key} — ${d.value}`).join("; ")}</p> : null}
           {turn.id === last?.id && turn.result.choices.length ? <div className="flex flex-wrap gap-2">{turn.result.choices.map(choice => <Button key={choice} type="button" variant="outline" className="h-auto min-h-9 whitespace-normal py-1.5 text-left text-xs" disabled={sending} onClick={() => void send(choice)}>{choice}</Button>)}</div> : null}
           <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">What this answer used</summary>
             <div className="mt-1 space-y-1">
               <p>{turn.route ?? "Route not recorded"}</p>
+              {turn.inputs.checks.length ? <div><p className="font-medium">Length checks (measured by Studio)</p><ul className="list-disc pl-5">{turn.inputs.checks.map((check, i) => <li key={i}>{check}</li>)}</ul></div> : null}
+              <p className="font-medium">Reads</p>
               {turn.inputs.reads.length ? <ul className="list-disc pl-5">{turn.inputs.reads.map((read, i) => <li key={i}>{read.tool}{read.items.length ? ` — ${read.items.slice(0, 3).join("; ")}` : ""}</li>)}</ul> : <p>No saved source text was read for this answer.</p>}
               <p>Also supplied: {turn.inputs.context.join("; ")}.</p>
             </div></details>
@@ -191,6 +225,10 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
       <div ref={endRef} />
     </div>
     <div className="space-y-2 border-t p-3">
+      {hasWork || turns.length ? <div className="flex flex-wrap items-center gap-1.5 text-xs" data-creative-moves role="group" aria-label="Creative moves">
+        {moves.map(([label, message]) => <button key={label} type="button" disabled={Boolean(running) || sending} onClick={() => void send(message)} title={message}
+          className="min-h-8 rounded-full border px-2.5 hover:bg-accent disabled:opacity-50">{label}</button>)}
+      </div> : null}
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground" data-length-target>
         <span>{target ? <>Length: about <strong className="text-foreground">{formatClock(target)}</strong> (~{targetWords(target).target} spoken words)</> : "Length: not set. Say it in words, e.g. “about 90 seconds”."}</span>
         {[["60 sec", "about 60 seconds"], ["90 sec", "about 90 seconds"], ["3 min", "about 3 minutes"]].map(([label, phrase]) => <button key={label} type="button" disabled={Boolean(running)} className="min-h-8 rounded-full border px-2.5 hover:bg-accent disabled:opacity-50"

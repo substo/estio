@@ -42,7 +42,11 @@ async function model(script: (snapshot: any) => unknown) {
   await sql(`select studio.studio_text_device_command($1,'substo','complete',$2::jsonb)`, token,
     JSON.stringify({ workerId: "agent-int", jobId: job.id, leaseToken: job.lease_token, result: { output, provider: "codex", model: "native-default" } }));
 }
-const step = (over: Record<string, unknown>) => ({ step: "reply", tool: null, reply: "ok", choices: [], proposals: [], decisions: [], plan: [], ...over });
+const step = (over: Record<string, unknown>) => {
+  const out: Record<string, unknown> = { step: "reply", tool: null, reply: "ok", choices: [], proposals: [], decisions: [], plan: [], research: null, ...over };
+  if (Array.isArray(out.proposals)) out.proposals = out.proposals.map(p => ({ replaces: null, ...p }));
+  return out;
+};
 async function drive(turnId: string, script: (snapshot: any) => unknown, rounds: number) {
   let view = await agent.advanceAgentTurn(loc, turnId);                       // queues round 1 if needed
   for (let i = 0; i < rounds; i++) {
@@ -65,7 +69,7 @@ before(async () => {
       perform studio.studio_device_pairing_action(w,'substo',actor,'approve',code,gen_random_uuid());
       r:=studio.studio_device_pair_poll('substo',(r->>'pairingId')::uuid,h,hash);d:=(r->>'deviceId')::uuid;
       update studio.studio_devices set processing_enabled=true,desired_config='{"features":{"text":true},"textProvider":"codex","textModel":null}',config_version=2,applied_config_version=2,config_status='applied',seen_at=clock_timestamp(),
-        report='{"handlers":["studio.text_run"],"studioAgentVersion":3,"codex":{"ready":true,"authenticated":true,"loginMethod":"chatgpt"},"capacity":{"codex":true}}' where id=d; return d; end $$`);
+        report='{"handlers":["studio.text_run"],"studioAgentVersion":4,"codex":{"ready":true,"authenticated":true,"loginMethod":"chatgpt"},"capacity":{"codex":true}}' where id=d; return d; end $$`);
   await sql(`select public.test_pair_device($1,$2,'AGENTBBB',$3)`, loc, user, token);
   await db.call("studio_create_substo_location", { p_location_id: "e1a90000-0000-4000-8000-000000000002", p_name: "Agent other", p_clerk_user_id: "other-user" });
   agent = await import("./agent");
@@ -79,7 +83,7 @@ test("source entry → real saved-source read → reply → reload → out-of-or
   assert.equal(started.recordId, draft);
   assert.deepEqual(Object.keys((await sql(`select payload->'creation'->'direction' as d from studio.studio_records where id=$1::uuid`, draft))[0].d).sort(), ["angle", "choice", "goal", "publisher", "rationale", "viewer"]);
   assert.equal((await sql(`select payload#>>'{creation,direction,goal}' as g from studio.studio_records where id=$1::uuid`, draft))[0].g, "");
-  assert.equal((await sql(`select prompt_version from studio.studio_idea_reviews where snapshot#>>'{operation,turnId}'=$1 order by created_at limit 1`, t1))[0].prompt_version, "studio.agent.v3");   // a version-3 Mac gets the current contract
+  assert.equal((await sql(`select prompt_version from studio.studio_idea_reviews where snapshot#>>'{operation,turnId}'=$1 order by created_at limit 1`, t1))[0].prompt_version, "studio.agent.v4");   // a version-4 Mac gets the current contract
   await assert.rejects(send(crypto.randomUUID(), "second while running"), /still answering/);
 
   // 2. The model chooses a tool; the server reads the SAVED transcript and the model then answers citing what it read.
@@ -173,8 +177,8 @@ test("the duration target comes from the owner's words, persists across reload, 
   await send(t1, "Let's make it about 90 seconds");
   assert.equal((await settled(t1)).target_seconds, 90);
   const first = await drive(t1, snapshot => {
-    assert.deepEqual(snapshot.length, { targetSeconds: 90, targetWords: 225, minWords: 209, maxWords: 241, beyondSupported: false });   // the band is centred: the model aims at the middle
-    assert.equal(snapshot.contract, 3);
+    assert.deepEqual(snapshot.length, { targetSeconds: 90, targetWords: 225, minWords: 209, maxWords: 241, beyondSupported: false, beats: { Opening: 34, Development: 146, Payoff: 45 } });   // the band is centred: the model aims at the middle
+    assert.equal(snapshot.contract, 4);
     assert.deepEqual(snapshot.scriptLimits, { maxWords: 1200, maxChars: 9000, maxSeconds: 480, wordsPerMinute: 150 });
     return step({ reply: "Noted, I'll aim for about a minute and a half." });
   }, 1);
@@ -498,4 +502,189 @@ test("one bounded length correction: any miss beyond ±15%, after evidence reads
   assert.equal((await settled(e)).rounds.length, 4);                                          // never more than four rounds, one correction
   assert.equal(wordsOf(viewE.turn.result!.proposals[0].text), 880);
   assert.equal((await sql(`select count(*)::int as n from studio.studio_idea_reviews where snapshot#>>'{operation,turnId}'=$1`, e))[0].n, 4);
+});
+
+test("search_knowledge reads approved, current, live Knowledge from other sources only, with exact quotes, and the chat turns it into an applied artifact", async () => {
+  const S2 = "e1a90000-0000-4000-8000-0000000000a2", S3 = "e1a90000-0000-4000-8000-0000000000a3", SO = "e1a90000-0000-4000-8000-0000000000a9";
+  const quote = "Hooks that name a cost the viewer already feels hold attention longer.";
+  const mk = async (location: string, id: string, title: string, transcript: string, archived = false) => {
+    await sql(`insert into studio.studio_records(location_id,id,kind,title,payload) values($1,$2::uuid,'reference',$3,$4::jsonb)`, location, id, title, JSON.stringify({ transcript, ...(archived ? { archived: true } : {}) }));
+    await sql(`insert into studio.studio_knowledge_sources values($1,$2::uuid,'{}',1,1) on conflict do nothing`, location, id);
+  };
+  const finding = async (location: string, src: string, n: number, status: string, q: string, version = 1) => {
+    const ins = `e1a90000-0000-4000-8000-00000000f${String(n).padStart(3, "0")}`, ev = `e1a90000-0000-4000-8000-00000000e${String(n).padStart(3, "0")}`;
+    await sql(`insert into studio.studio_knowledge_insights(location_id,id,source_id,status,statement,payload) values($1,$2::uuid,$3::uuid,$4,$5,'{}')`, location, ins, src, status, `Statement ${n}: ${q.slice(0, 40)}`);
+    await sql(`insert into studio.studio_knowledge_evidence(location_id,id,insight_id,source_id,payload) values($1,$2::uuid,$3::uuid,$4::uuid,$5::jsonb)`, location, ev, ins, src,
+      JSON.stringify({ origin: "hosted_extraction", source_version: version, quote: q, evidence_type: "speech", start_sec: 12 }));
+    return ev;
+  };
+  await mk(loc, S2, "Hook psychology talk", quote);
+  const good = await finding(loc, S2, 31, "approved", quote);
+  await finding(loc, S2, 32, "approved", "STALE-EVIDENCE hooks quote", 0);          // evidence for an older version of the source
+  await finding(loc, S2, 33, "pending", "PENDING-SECRET hooks not yet approved");
+  await mk(loc, S3, "Archived hooks video", "x", true);
+  await finding(loc, S3, 34, "approved", "ARCHIVED-SECRET hooks from an archived source");
+  await db.call("studio_create_substo_location", { p_location_id: "e1a90000-0000-4000-8000-000000000003", p_name: "Agent third", p_clerk_user_id: "third-user" });
+  await mk("e1a90000-0000-4000-8000-000000000003", SO, "Other tenant hooks", "y");
+  await finding("e1a90000-0000-4000-8000-000000000003", SO, 35, "approved", "OTHER-TENANT-SECRET hooks quote");
+
+  const t = crypto.randomUUID();
+  await send(t, "Use my other sources: what do they say about hooks and cost?");
+  const view = await drive(t, snapshot => {
+    if (snapshot.observations.length === 0) return step({ step: "tool", reply: null, tool: { name: "search_knowledge", query: "cost already feels", sourceId: null, offset: null, stage: null, skill: null } });
+    const items = snapshot.observations[0].result.items;
+    assert.deepEqual(items.map((i: any) => i.id), [`k:${good}`], "only approved, current evidence of live sources in this Location");
+    assert.equal(items[0].sourceId, S2);
+    assert.ok(items[0].text.includes(`Exact saved quote: “${quote}”`));
+    assert.match(items[0].text, /another saved source/);
+    assert.ok(!JSON.stringify(snapshot).match(/SECRET|STALE-EVIDENCE/), "nothing from archived, pending, stale or other-tenant Knowledge reaches the model");
+    return step({ reply: "Another talk says hooks work when they name a cost the viewer already feels.",
+      proposals: [{ stage: "Hook", text: "You already pay for this every shoot day. Here is the fix.", rationale: "Applies the cost-first idea from the other talk.", evidenceIds: [`k:${good}`], verify: ["Studio removes that cost"] }],
+      research: { query: "cost first video hooks examples", reason: "Only one saved source covers hooks so far." } });
+  }, 2);
+  const proposal = view.turn.result!.proposals[0];
+  assert.match(proposal.evidence[0].quote, /Exact saved quote: “Hooks that name a cost the viewer already feels hold attention longer\.”/);
+  assert.equal(proposal.evidence[0].sourceId, S2);
+  assert.match(view.turn.activity[0], /Searched approved Knowledge across the Library for “cost already feels” · 1 finding/);
+  assert.deepEqual(view.turn.result!.research, { query: "cost first video hooks examples", reason: "Only one saved source covers hooks so far." });
+  const rec = await latestRecord();
+  const stageText = (rec.payload.creation.stages.Hook?.text as string) ?? "";
+  await agent.applyAgentProposal(loc, policy.readAgentApplyCommand({ recordId: draft, version: rec.version, turnId: t, index: 0, baseText: stageText }));
+  assert.equal((await latestRecord()).payload.creation.stages.Hook.text, "You already pay for this every shoot day. Here is the fix.");
+  // The same read is a typed error under an older contract (the validator, not the prompt, is the fence): covered in studio-agent-assertions.sql.
+});
+
+test("a selection edit patches exactly the selected span, is never measured as a whole script, and stale or repeated-phrase cases are refused", async () => {
+  const { executeCreationCommand } = await import("./creation");
+  const stage = async () => (await latestRecord()).payload.creation.stages.Script as { text: string; targetSeconds?: number };
+  const body = "[Opening]\nSame line here. Same line here.\n  Indented line stays.\n[Payoff]\nEnd.";
+  // A saved script written for 6:00 and an active 90 second target in the chat.
+  const six = crypto.randomUUID();
+  await send(six, "Write the script, about 6 minutes");
+  const a = await drive(six, () => step({ reply: "Six.", proposals: [{ stage: "Script", text: script(900), rationale: "Six.", evidenceIds: [], verify: [] }] }), 1);
+  const r0 = await latestRecord();
+  await agent.applyAgentProposal(loc, policy.readAgentApplyCommand({ recordId: draft, version: a.record!.version, turnId: six, index: 0, baseText: (r0.payload.script as string) ?? "" }));
+  await executeCreationCommand(loc, { action: "save", recordId: draft, version: (await latestRecord()).version, stage: "Script", text: body });
+  assert.equal((await stage()).targetSeconds, 360);
+  const ninety = crypto.randomUUID();
+  await send(ninety, "Keep it about 90 seconds overall");
+  await drive(ninety, () => step({ reply: "Noted." }), 1);
+
+  const first = body.indexOf("Same line here."), second = body.indexOf("Same line here.", first + 1);
+  const sel = { stage: "Script" as const, action: "tighten" as const, start: second, end: second + "Same line here.".length, text: "Same line here." };
+  const sendSel = (turnId: string, selection: unknown, message = "Tighten this part of the Script.") => agent.sendAgentMessage(loc, policy.readAgentSendCommand({
+    recordId: draft, turnId, version: 1, sourceId: null, sourceVersion: null, message, selection, provider: "subscription", confirmSubscription: true }));
+  // Sending is fenced: the span must still hold the words, and the Mac/route must be on contract 4.
+  await assert.rejects(sendSel(crypto.randomUUID(), { ...sel, start: first + 1, end: first + 1 + sel.text.length }), /That text changed/);
+  await sql(`update studio.studio_devices set report=jsonb_set(report,'{studioAgentVersion}','3') where created_by=$1`, user);
+  await assert.rejects(sendSel(crypto.randomUUID(), sel), /Update and restart the Studio companion/);
+  await sql(`update studio.studio_devices set report=jsonb_set(report,'{studioAgentVersion}','4') where created_by=$1`, user);
+
+  const t = crypto.randomUUID();
+  await sendSel(t, sel);
+  const view = await drive(t, snapshot => {
+    assert.equal(snapshot.contract, 4);
+    assert.deepEqual(snapshot.selection, { stage: "Script", action: "tighten", start: second, end: second + 15, text: "Same line here." });
+    assert.equal(snapshot.length.targetSeconds, 90);
+    return step({ reply: "A tighter line.", proposals: [{ stage: "Script", text: "Same.", rationale: "Shorter.", evidenceIds: [], verify: [], replaces: "Same line here." }] });
+  }, 1);
+  const p = view.turn.result!.proposals[0];
+  assert.equal(p.length, undefined, "a fragment is not measured against the whole script's runtime");
+  assert.equal((await settled(t)).rounds.length, 1, "no automatic length correction on a fragment");
+  assert.deepEqual(view.turn.selection && [view.turn.selection.start, view.turn.selection.end], [second, second + 15]);
+  // A whole-stage proposal can never answer a selection (validator), and an edit of other words makes this one stale.
+  const before = await stage();
+  const applied = await agent.applyAgentProposal(loc, policy.readAgentApplyCommand({ recordId: draft, version: (await latestRecord()).version, turnId: t, index: 0, baseText: before.text }));
+  const after = await stage();
+  assert.equal(after.text, body.slice(0, second) + "Same." + body.slice(second + 15));          // only the second occurrence changed; everything else is byte-identical
+  assert.equal(after.text.slice(0, second), body.slice(0, second));
+  assert.equal(after.targetSeconds, 360);                                                       // the script keeps the label of the request it was written for
+  assert.equal((await latestRecord()).payload.script, after.text);                              // canonical field agrees
+  const undone = await executeCreationCommand(loc, { action: "undo", recordId: draft, version: applied.record.version, stage: "Script" }) as { record: { state: any } };
+  assert.deepEqual([undone.record.state.stages.Script.text, undone.record.state.stages.Script.targetSeconds], [body, 360]);
+  // Whitespace around the selection is preserved.
+  const ws = body.indexOf("  Indented line stays.");
+  const t2 = crypto.randomUUID();
+  await sendSel(t2, { stage: "Script", action: "rewrite", start: ws, end: ws + "  Indented line stays.".length, text: "  Indented line stays." }, "Rewrite this part.");
+  await drive(t2, () => step({ reply: "Done.", proposals: [{ stage: "Script", text: "Indented line.", rationale: "Rewrite.", evidenceIds: [], verify: [], replaces: "Indented line stays." }] }), 1);
+  const r2 = await latestRecord();
+  await agent.applyAgentProposal(loc, policy.readAgentApplyCommand({ recordId: draft, version: r2.version, turnId: t2, index: 0, baseText: r2.payload.creation.stages.Script.text }));
+  assert.equal((await stage()).text, body.replace("  Indented line stays.", "  Indented line."));
+  // Stale: the saved words were edited after the proposal was written.
+  const t3 = crypto.randomUUID();
+  const cur = (await stage()).text, at = cur.indexOf("End.");
+  await sendSel(t3, { stage: "Script", action: "expand", start: at, end: at + 4, text: "End." }, "Expand this.");
+  await drive(t3, () => step({ reply: "Longer.", proposals: [{ stage: "Script", text: "And that is the end.", rationale: "Longer.", evidenceIds: [], verify: [], replaces: "End." }] }), 1);
+  const edited = cur.replace("End.", "Finish.");
+  await executeCreationCommand(loc, { action: "save", recordId: draft, version: (await latestRecord()).version, stage: "Script", text: edited });
+  await assert.rejects(agent.applyAgentProposal(loc, policy.readAgentApplyCommand({ recordId: draft, version: (await latestRecord()).version, turnId: t3, index: 0, baseText: edited })), /selected text changed/);
+  await assert.rejects(agent.applyAgentProposal(loc, policy.readAgentApplyCommand({ recordId: draft, version: (await latestRecord()).version, turnId: t3, index: 0, baseText: cur })), /changed since this proposal/);
+  assert.equal((await stage()).text, edited, "a refused patch changes nothing");
+});
+
+test("audience observations are the owner's own words, bounded, reach the model as context (never evidence) and can be removed", async () => {
+  const { executeCreationCommand } = await import("./creation");
+  const policyMod = await import("./creation-policy");
+  const add = (text: string) => executeCreationCommand(loc, policyMod.readCreationCommand({ action: "audience_add", recordId: draft, version: 0, kind: "question", origin: "comments", text })).catch(() => undefined);
+  let version = (await latestRecord()).version;
+  const added = await executeCreationCommand(loc, policyMod.readCreationCommand({ action: "audience_add", recordId: draft, version, kind: "question", origin: "comments", text: "People ask if this works without expensive gear" })) as { record: { version: number; state: any } };
+  assert.equal(added.record.state.audience.length, 1);
+  assert.throws(() => policyMod.readCreationCommand({ action: "audience_add", recordId: draft, version, kind: "scraped", origin: "comments", text: "x" }), /kind of observation/);
+  assert.throws(() => policyMod.readCreationCommand({ action: "audience_add", recordId: draft, version, kind: "note", origin: "comments", text: "x".repeat(281) }));
+  const t = crypto.randomUUID();
+  await send(t, "Write a hook that answers what people keep asking");
+  const view = await drive(t, snapshot => {
+    assert.deepEqual(snapshot.audience, [{ kind: "question", text: "People ask if this works without expensive gear", origin: "comments" }]);
+    return step({ reply: "Here is a hook in their own plain words." });
+  }, 1);
+  assert.equal(view.turn.status, "done");
+  const id = added.record.state.audience[0].id;
+  version = (await latestRecord()).version;
+  const removed = await executeCreationCommand(loc, policyMod.readCreationCommand({ action: "audience_remove", recordId: draft, version, signalId: id })) as { record: { state: any } };
+  assert.deepEqual(removed.record.state.audience, []);
+  for (let i = 0; i < 8; i++) { version = (await latestRecord()).version; await executeCreationCommand(loc, policyMod.readCreationCommand({ action: "audience_add", recordId: draft, version, kind: "phrase", origin: "faq", text: `phrase ${i}` })); }
+  await assert.rejects(executeCreationCommand(loc, policyMod.readCreationCommand({ action: "audience_add", recordId: draft, version: (await latestRecord()).version, kind: "note", origin: "other", text: "ninth" })), /Keep up to 8/);
+  void add;
+});
+
+test("a public comment sample is read-only: official API key only, no author data, nothing stored, scoped to this Location, honest when unavailable", async () => {
+  const YT = "e1a90000-0000-4000-8000-0000000000b9";
+  await sql(`insert into studio.studio_records(location_id,id,kind,title,payload) values($1,$2::uuid,'reference','A YouTube video','{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ"}')`, loc, YT);
+  const { sampleAudienceComments } = await import("./audience-comments");
+  const calls: string[] = [];
+  const fake = (async (input: RequestInfo | URL) => {
+    calls.push(String(input));
+    return new Response(JSON.stringify({ items: [
+      { snippet: { topLevelComment: { id: "Ugx_one_comment_id", snippet: { textDisplay: "How do you film this alone?", authorDisplayName: "SOMEONE", authorChannelId: { value: "UCxxxxxxxxxxxxxxxxxxxxxx" } } } } },
+      { snippet: { topLevelComment: { id: "Ugx_two_comment_id", snippet: { textDisplay: "Honestly the opening is the whole video", authorDisplayName: "SOMEONE ELSE" } } } }] }), { status: 200 });
+  }) as typeof fetch;
+  delete process.env.YOUTUBE_DATA_API_KEY;
+  assert.deepEqual(await sampleAudienceComments(loc, YT, fake), { status: "unavailable", reason: "YouTube comment sampling isn't configured on this server. You can still add your own audience observations." });
+  assert.equal(calls.length, 0);
+  process.env.YOUTUBE_DATA_API_KEY = "test-key";
+  const ok = await sampleAudienceComments(loc, YT, fake);
+  assert.equal(ok.status, "ok");
+  if (ok.status === "ok") {
+    assert.equal(ok.size, 2);
+    assert.equal(ok.order, "relevance");
+    assert.match(ok.comments[0].href, /^https:\/\/www\.youtube\.com\/watch\?v=dQw4w9WgXcQ&lc=Ugx_one_comment_id$/);
+    assert.ok(!JSON.stringify(ok).match(/SOMEONE|UCxxxx|author/i), "no author names or channel ids are returned");
+  }
+  const url = new URL(calls[0]);
+  assert.deepEqual([url.pathname, url.searchParams.get("videoId"), url.searchParams.get("order"), url.searchParams.get("textFormat"), url.searchParams.get("maxResults"), url.searchParams.get("part")], ["/youtube/v3/commentThreads", "dQw4w9WgXcQ", "relevance", "plainText", "20", "snippet"]);
+  assert.equal(url.searchParams.get("fields"), "items(snippet(topLevelComment(id,snippet(textDisplay))))");   // the request itself asks for no author fields
+  assert.ok(!/author|channel/i.test(url.search), "no author or channel field is requested");
+  assert.equal(url.searchParams.get("key"), "test-key");
+  // Nothing is persisted: no comment text in any record, job or review.
+  assert.equal((await sql(`select count(*)::int as n from studio.studio_records where payload::text like '%film this alone%'`))[0].n, 0);
+  const disabled = (async () => new Response(JSON.stringify({ error: { errors: [{ reason: "commentsDisabled" }] } }), { status: 403 })) as unknown as typeof fetch;
+  assert.deepEqual(await sampleAudienceComments(loc, YT, disabled), { status: "unavailable", reason: "Comments are turned off for this video." });
+  // A source that is not a saved YouTube video, or one from another Location, never reaches the API.
+  const before = calls.length;
+  assert.equal((await sampleAudienceComments(loc, source, fake)).status, "unavailable");
+  actingAs = { ...access, userId: "other-user", locationId: "e1a90000-0000-4000-8000-000000000002" };
+  await assert.rejects(sampleAudienceComments("e1a90000-0000-4000-8000-000000000002", YT, fake), /Source unavailable/);
+  actingAs = access;
+  assert.equal(calls.length, before);
+  delete process.env.YOUTUBE_DATA_API_KEY;
 });

@@ -19,7 +19,7 @@ export const GET = withStudioRoute(async (request, { params }) => {
     from studio.studio_devices where location_id=${access.locationId} and app=${access.app} and created_by=${access.userId} and revoked_at is null order by seen_at desc nulls last limit 20`);
   const workflow = new URL(request.url).searchParams.get("workflow");
   const devices = rows.map(d => {
-    if (workflow === "studio_agent" && ![2, 3].includes(Number(d.report?.studioAgentVersion)))
+    if (workflow === "studio_agent" && ![2, 3, 4].includes(Number(d.report?.studioAgentVersion)))
       return { ready: false, reason: "Update and restart the Studio companion for the creation assistant (length targets and long scripts)." };
     if (workflow === "staged_creation" && d.report?.stagedCreationVersion !== 1)
       return { ready: false, reason: "Update and restart the Studio companion for staged creation." };

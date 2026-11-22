@@ -2,6 +2,7 @@ import { StudioCommandError } from "./command-error";
 import { CREATION_STAGES, type CreationStage } from "./creation-policy";
 import { AGENT_SCRIPT_LIMIT_V1, agentInstructionsV1 } from "./agent-policy-v1";
 import { agentInstructionsV2 } from "./agent-policy-v2";
+import { agentInstructionsV3 } from "./agent-policy-v3";
 import { MAX_SCRIPT_CHARS, MAX_SCRIPT_WORDS, MAX_SINGLE_SCRIPT_SECONDS, SPEAKING_WPM } from "./script-length";
 import { hasStudioTextConsent, readStudioTextProvider } from "./text-provider";
 
@@ -14,12 +15,16 @@ import { hasStudioTextConsent, readStudioTextProvider } from "./text-provider";
 export const AGENT_PROMPT_V1 = "studio.agent.v1";
 export const AGENT_PROMPT_V2 = "studio.agent.v2";
 /** v3: creative-priority and evidence rules, aim at the middle of the length band. Same result schema and limits as v2. */
-export const AGENT_PROMPT = "studio.agent.v3";
+export const AGENT_PROMPT_V3 = "studio.agent.v3";
+/** v4: cross-library Knowledge search, research suggestions, audience signals, selection patches and beat budgets. */
+export const AGENT_PROMPT = "studio.agent.v4";
 /** Companion capability (`studioAgentVersion`) a job of each prompt needs. A v2 job is never sent to a companion that only reports 1. */
-export const AGENT_CAPABILITY = 3;
+export const AGENT_CAPABILITY = 4;
 export const AGENT_MAX_ROUNDS = 4;
 export const AGENT_MESSAGE_LIMIT = 2000;
-export const AGENT_TOOLS = ["search_source", "read_source", "list_findings", "read_stage", "search_library", "load_skill"] as const;
+export const AGENT_TOOLS = ["search_source", "read_source", "list_findings", "read_stage", "search_library", "load_skill", "search_knowledge"] as const;
+/** Tools a round may call under each contract; v1-v3 never knew search_knowledge. */
+export const agentToolsFor = (version: string): readonly AgentToolName[] => version === AGENT_PROMPT ? AGENT_TOOLS : AGENT_TOOLS.filter(name => name !== "search_knowledge");
 export type AgentToolName = typeof AGENT_TOOLS[number];
 export const AGENT_DECISION_KEYS = ["publisher", "viewer", "goal", "angle", "style", "avoid", "format", "length"] as const;
 export type AgentDecisionKey = typeof AGENT_DECISION_KEYS[number];
@@ -36,19 +41,25 @@ export type AgentItem = { id: string; label: string; text: string; sourceId?: st
 export type AgentObservation = { items: AgentItem[]; note?: string; error?: string; untrusted: true;
   /** Set by the server when a reply missed the requested length and the model is asked once more with the measured gap. */
   lengthRevision?: true; summary?: string };
-export type AgentProposal = { stage: CreationStage; text: string; rationale: string; evidenceIds: string[]; verify: string[] };
+/** `replaces` (v4): the exact selected text a selection patch replaces; the proposal text is then only the replacement. */
+export type AgentProposal = { stage: CreationStage; text: string; rationale: string; evidenceIds: string[]; verify: string[]; replaces?: string | null };
+/** A typed research suggestion the owner can act on with one click; the agent never runs the search itself. */
+export type AgentResearch = { query: string; reason: string };
 export type AgentDecision = { key: AgentDecisionKey; value: string; basis: string };
 export type AgentResult =
   | { step: "tool"; tool: AgentToolCall; reply: null; choices: []; proposals: []; decisions: []; plan: [] }
-  | { step: "reply"; tool: null; reply: string; choices: string[]; proposals: AgentProposal[]; decisions: AgentDecision[]; plan: string[] };
-export type AgentFinal = { reply: string; choices: string[]; proposals: AgentProposal[]; decisions: AgentDecision[]; plan: string[] };
+  | { step: "reply"; tool: null; reply: string; choices: string[]; proposals: AgentProposal[]; decisions: AgentDecision[]; plan: string[]; research?: AgentResearch | null };
+export type AgentFinal = { reply: string; choices: string[]; proposals: AgentProposal[]; decisions: AgentDecision[]; plan: string[]; research?: AgentResearch | null };
 export type AgentSourceInfo = { id: string; version: number; title: string; url: string; transcriptChars: number; descriptionChars: number; approvedFindings: number };
 export type AgentSnapshot = {
   mode: "studio_agent"; focus: string; operation: { turnId: string; round: number; maxRounds: number; mustReply: boolean };
   message: string; conversation: Array<{ owner: string; assistant: string; proposed: string[] }>; decisions: Array<{ key: string; value: string }>; plan: string[];
   /** 3 for rounds stamped with the creative-priority contract; absent on v1 and v2 snapshots. */
   contract?: number;
-  length?: { targetSeconds: number; targetWords: number; minWords: number; maxWords: number; beyondSupported: boolean } | null;
+  /** v4: the owner's own audience observations (never evidence) and the text selection this turn is about. */
+  audience?: Array<{ kind: string; text: string; origin: string }>;
+  selection?: { stage: CreationStage; action: "expand" | "tighten" | "rewrite"; text: string } | null;
+  length?: { targetSeconds: number; targetWords: number; minWords: number; maxWords: number; beyondSupported: boolean; beats?: { Opening: number; Development: number; Payoff: number } } | null;
   scriptLimits?: { maxWords: number; maxChars: number; maxSeconds: number; wordsPerMinute: number };
   draft: { stages: Record<string, { text: string; approved: boolean; truncated: boolean; chars?: number; spokenWords?: number; estimatedSeconds?: number }>; legacyDirection: Record<string, string> | null; brief: string };
   /** The approved script template pinned to this draft, if any: structure only. */
@@ -63,7 +74,7 @@ export function isAgentSnapshot(value: unknown): value is AgentSnapshot {
 /** Identity of the conversation a page shows. Server props that change this key must reset chat, route and polling state. */
 export const agentSessionKey = (draftId: string | null | undefined, freshNonce?: string | null) => draftId ? `draft:${draftId}` : `fresh:${freshNonce ?? ""}`;
 export function agentStageLimit(stage: CreationStage, version: string = AGENT_PROMPT) { return stage === "Title" ? 180 : stage === "Script" ? (version === AGENT_PROMPT_V1 ? AGENT_SCRIPT_LIMIT_V1 : MAX_SCRIPT_CHARS) : 1200; }
-export const agentInstructionsFor = (version: string) => version === AGENT_PROMPT_V1 ? agentInstructionsV1 : version === AGENT_PROMPT_V2 ? agentInstructionsV2 : agentInstructions;
+export const agentInstructionsFor = (version: string) => version === AGENT_PROMPT_V1 ? agentInstructionsV1 : version === AGENT_PROMPT_V2 ? agentInstructionsV2 : version === AGENT_PROMPT_V3 ? agentInstructionsV3 : agentInstructions;
 
 export function readAgentSendCommand(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new StudioCommandError("Invalid message.");
@@ -80,10 +91,20 @@ export function readAgentSendCommand(value: unknown) {
   if (typeof input.message !== "string" || input.message.includes("\0") || !input.message.trim() || input.message.length > AGENT_MESSAGE_LIMIT) {
     throw new StudioCommandError(`Write between 1 and ${AGENT_MESSAGE_LIMIT} characters.`);
   }
-  return { recordId, turnId, version, sourceId, sourceVersion: sourceId ? sourceVersion as number : null, message: input.message.trim(), provider,
+  let selection: AgentSelection | null = null;
+  if (input.selection != null) {
+    const sel = input.selection as Record<string, unknown>;
+    if (typeof sel !== "object" || Array.isArray(sel) || !CREATION_STAGES.includes(sel.stage as CreationStage) || !["expand", "tighten", "rewrite"].includes(sel.action as string)
+      || typeof sel.start !== "number" || typeof sel.end !== "number" || !Number.isInteger(sel.start) || !Number.isInteger(sel.end) || sel.start < 0 || sel.end <= sel.start || sel.end > 999_999
+      || typeof sel.text !== "string" || !sel.text.trim() || sel.text.length > 1800 || sel.text.includes("\0") || sel.end - sel.start !== sel.text.length) throw new StudioCommandError("Select the exact words again.");
+    selection = { stage: sel.stage as CreationStage, action: sel.action as AgentSelection["action"], start: sel.start, end: sel.end, text: sel.text };
+  }
+  return { recordId, turnId, version, sourceId, sourceVersion: sourceId ? sourceVersion as number : null, message: input.message.trim(), provider, selection,
     confirmPaid: provider === "openai", confirmSubscription: provider === "subscription", confirmRoute: provider === "location_order" };
 }
 
+/** The exact span of a saved stage the owner selected for Expand, Tighten or Rewrite. Offsets locate it; the text must still match when applied. */
+export type AgentSelection = { stage: CreationStage; action: "expand" | "tighten" | "rewrite"; start: number; end: number; text: string };
 export type AgentApplyCommand = { recordId: string; version: number; turnId: string; index: number; baseText: string };
 export function readAgentApplyCommand(value: unknown): AgentApplyCommand {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new StudioCommandError("Invalid proposal.");
@@ -103,18 +124,19 @@ export function readAgentResult(value: unknown, snapshot: AgentSnapshot, version
     return item as Record<string, unknown>;
   }
   const text = (item: unknown, max: number) => typeof item === "string" && item.trim() && item.length <= max && !item.includes("\0") ? item.trim() : fail();
-  const r = object(value, ["step", "tool", "reply", "choices", "proposals", "decisions", "plan"]);
+  const v4 = version === AGENT_PROMPT;
+  const r = object(value, v4 ? ["step", "tool", "reply", "choices", "proposals", "decisions", "plan", "research"] : ["step", "tool", "reply", "choices", "proposals", "decisions", "plan"]);
   if (!Array.isArray(r.choices) || !Array.isArray(r.proposals) || !Array.isArray(r.decisions) || !Array.isArray(r.plan)) return fail();
   if (r.step === "tool") {
     if (snapshot.operation.mustReply || r.reply !== null || r.choices.length || r.proposals.length || r.decisions.length || r.plan.length) return fail();
     const tool = object(r.tool, ["name", "query", "sourceId", "offset", "stage", "skill"]);
     if (tool.skill !== null && !AGENT_SKILLS.includes(tool.skill as AgentSkillName)) return fail();
-    if (!AGENT_TOOLS.includes(tool.name as AgentToolName)) return fail();
+    if (!agentToolsFor(version).includes(tool.name as AgentToolName)) return fail();
     if (tool.query !== null) text(tool.query, 120);
     if (tool.sourceId !== null && (typeof tool.sourceId !== "string" || !UUID.test(tool.sourceId))) return fail();
     if (tool.offset !== null && (typeof tool.offset !== "number" || !Number.isInteger(tool.offset) || tool.offset < 0 || tool.offset > 9_999_999)) return fail();
     if (tool.stage !== null && !CREATION_STAGES.includes(tool.stage as CreationStage)) return fail();
-    return { step: "tool", reply: null, choices: [], proposals: [], decisions: [], plan: [], tool: { name: tool.name as AgentToolName,
+    return { step: "tool", reply: null, choices: [], proposals: [], decisions: [], plan: [], ...(v4 ? { research: null } : {}), tool: { name: tool.name as AgentToolName,
       query: tool.query === null ? null : (tool.query as string).trim(), sourceId: tool.sourceId === null ? null : (tool.sourceId as string).toLowerCase(),
       offset: tool.offset as number | null, stage: tool.stage as CreationStage | null, skill: tool.skill as AgentSkillName | null } };
   }
@@ -124,11 +146,18 @@ export function readAgentResult(value: unknown, snapshot: AgentSnapshot, version
   const choices = r.choices.map(c => text(c, 90));
   if (new Set(choices).size !== choices.length) return fail();
   const proposals = r.proposals.map(raw => {
-    const p = object(raw, ["stage", "text", "rationale", "evidenceIds", "verify"]);
+    const p = object(raw, v4 ? ["stage", "text", "rationale", "evidenceIds", "verify", "replaces"] : ["stage", "text", "rationale", "evidenceIds", "verify"]);
     if (!CREATION_STAGES.includes(p.stage as CreationStage) || !Array.isArray(p.evidenceIds) || p.evidenceIds.length > 4 || !Array.isArray(p.verify) || p.verify.length > 3) return fail();
     const stage = p.stage as CreationStage;
+    const replaces = v4 && p.replaces !== null ? text(p.replaces, 1800) : null;
+    // A selection patch replaces exactly the text the owner selected, in the stage they selected it in, and nothing else.
+    if (v4) {
+      const count = (r.proposals as unknown[]).length;
+      if (snapshot.selection) { if (replaces === null || replaces !== snapshot.selection.text.trim() || snapshot.selection.stage !== stage || count !== 1) return fail(); }
+      else if (replaces !== null) return fail();
+    }
     return { stage, text: text(p.text, agentStageLimit(stage, version)), rationale: text(p.rationale, 300),
-      evidenceIds: p.evidenceIds.map(id => typeof id === "string" && cited.has(id) ? id : fail()), verify: p.verify.map(v => text(v, 200)) };
+      evidenceIds: p.evidenceIds.map(id => typeof id === "string" && cited.has(id) ? id : fail()), verify: p.verify.map(v => text(v, 200)), ...(v4 ? { replaces } : {}) };
   });
   const decisions = r.decisions.map(raw => {
     const d = object(raw, ["key", "value", "basis"]);
@@ -139,7 +168,12 @@ export function readAgentResult(value: unknown, snapshot: AgentSnapshot, version
     return { key: d.key as AgentDecisionKey, value: text(d.value, 300), basis };
   });
   const plan = r.plan.map(item => text(item, 120));
-  const result: AgentResult = { step: "reply", tool: null, reply: text(r.reply, 1800), choices, proposals, decisions, plan };
+  let research: AgentResearch | null | undefined;
+  if (v4) {
+    if (r.research === null) research = null;
+    else { const q = object(r.research, ["query", "reason"]); research = { query: text(q.query, 120), reason: text(q.reason, 200) }; if (research.query.length < 3) return fail(); }
+  }
+  const result: AgentResult = { step: "reply", tool: null, reply: text(r.reply, 1800), choices, proposals, decisions, plan, ...(v4 ? { research } : {}) };
   if (new TextEncoder().encode(JSON.stringify(result)).byteLength > 21000) return fail();
   return result;
 }
@@ -147,7 +181,8 @@ export function readAgentResult(value: unknown, snapshot: AgentSnapshot, version
 const string = { type: "string" };
 const nullable = (schema: Record<string, unknown>) => ({ ...schema, type: [schema.type, "null"] });
 const objectSchema = (properties: Record<string, unknown>) => ({ type: "object", additionalProperties: false, required: Object.keys(properties), properties });
-export const agentSchema = objectSchema({
+/** The result schema of v1-v3 (frozen: older companions and queued rounds use it unchanged). */
+export const agentSchemaLegacy = objectSchema({
   step: { type: "string", enum: ["tool", "reply"] },
   tool: { type: ["object", "null"], additionalProperties: false, required: ["name", "query", "sourceId", "offset", "stage", "skill"], properties: {
     name: { type: "string", enum: [...AGENT_TOOLS] }, query: nullable(string), sourceId: nullable(string), offset: nullable({ type: "integer" }),
@@ -168,7 +203,29 @@ REMOVING THINGS: you have no destructive tool. If the owner asks to delete or re
 NEXT STEPS: when the owner asks what to do next, answer from the actual draft state, decisions and plan: name the single most useful next action, why, and one alternative; set plan to the next steps; if saved findings could sharpen it, list_findings and reuse two or more distinct findings with their exact quotes as evidence, attributing them to the speaker.
 CREATIVE PRIORITY: the owner's current message and the purpose they have stated (snapshot.decisions: publisher, viewer, goal, angle; then the Business profile offer and summary when the publisher is the workspace's own brand) decide the creative material. Earlier drafts, proposals, scripts and examples are history, not a brief: do not carry their scenarios, props, names or product examples into new work unless the owner asks to keep them. Follow explicit structural asks literally (for example "two opening approaches" means two clearly different openings inside the script, labelled). When a decision says the workspace's brand is the publisher, build the promotion from the profile's real offer and let the framing the owner asked for show up in the script; never invent capabilities. Make a reasonable inference when it does not change the direction; ask one question only when two readings would produce materially different videos.
 EVIDENCE: cite an observation item only when its text itself states the claim you attach it to. A compliment, a mood, a general opinion or an unrelated remark is not evidence for a payoff, a result or a recommendation; if nothing you read supports a claim, put it in verify instead of citing. In a next-step explanation, say what the cited text actually says and do not stretch it.
+RESEARCH TOOLS (added): search_knowledge {query} searches the approved Knowledge of EVERY live saved source in the Library and returns exact saved quotes with their source titles; use it when the owner asks for other sources, wider or deeper evidence, or a counter-view. A finding from another source supports only a claim attributed to its speaker (say whose video it came from); it is evidence about what that person said, never a fact about the owner's product, and never the owner's own voice. Cite it by observation id like any other read.
+RESEARCH SUGGESTION: when better evidence is not saved yet, set research {query, reason}: a short, readable YouTube search phrase and one sentence on why. Say plainly that nothing from those videos has been saved or read yet: the owner must pick, save and transcribe a video and approve findings before you can cite it. You cannot run the search, and you never claim to have searched YouTube. Otherwise research is null.
+AUDIENCE SIGNALS: snapshot.audience, when present, holds the owner's OWN observations (questions, objections, plain words) from comments, interviews or FAQs. Use their questions, objections and everyday wording to shape hooks and explanations. They are not evidence about the product or the world, they are not representative of any group, and you never state them as facts about "the audience"; do not paste them as script lines unless the owner asks.
+CREATIVE MOVES: when the owner asks to Explore alternatives, give two or three genuinely different options (a different concept, audience lens or point of view), each with its own distinct spoken opening line, not rewordings of one idea. Deepen adds an explanation, a counterexample, a concrete example or filmable proof to the weakest part. Tighten removes redundancy and keeps the promise, the evidence and the payoff. When the owner is not sure what to do, name the single most useful next action and do it.
+BEATS: write every Script in three labelled beats, a cue line [Opening], [Development] and [Payoff] before each (cues are not spoken), and stay near snapshot.length.beats, whose budgets add up to the target; the server measures each beat against its budget.
+SELECTION PATCH: if snapshot.selection is present, the owner selected exactly that text in their saved stage and chose expand, tighten or rewrite. Return exactly ONE proposal for that stage whose text is ONLY the replacement for the selected text and whose replaces is the selected text verbatim; never rewrite text outside it, never return a whole script. Without a selection, replaces is always null. Both research and replaces are always present in the JSON.
 TEMPLATE: if snapshot.template is present the owner pinned that approved script template to this draft. Use its beats as structure when drafting a Hook, Payoff or Script, adapting them to the chosen direction; it is guidance for shape, never facts, and the owner can ask you to depart from it.
 OUTPUT: reply is plain conversational text (1,800 characters max, no headings, no internal reasoning, never mention tools or rounds). proposals (0–3) are concrete texts the owner can apply to a stage: stage, text (Title 180, Hook/Concept/Angle/Payoff/Shoot plan 1,200, Script up to ${MAX_SCRIPT_CHARS} characters), rationale (one short user-facing sentence), evidenceIds (ids of observation items with cite true that support a claim about the source; [] when none), verify (up to 3 factual claims about the product, results or the world that the owner must confirm; [] when none). Do not paste a proposal's text into the reply; talk about it. Nothing is applied until the owner chooses it; never say you saved, applied or published anything. When the owner wants a script or shoot plan, produce a Script and/or Shoot plan proposal from the accepted draft; keep promises, payoff and any approved stage text consistent.
 plan (0–4 short next steps, each ≤120 characters) is the visible work plan shown to the owner: set it when the work has several steps, update it when feedback changes direction, mark nothing as done that is not, and use [] when a plan adds nothing. It is a statement of next steps, not your reasoning.
 decisions (0–4) record only choices the owner stated in THIS message: key publisher, viewer, goal or angle for direction; style, avoid, format or length for creative preferences. basis is an exact short phrase (≤120 characters) copied from the owner's message; never record something they did not say. Creative preferences are taste, not facts: never turn them into claims about the source or product. Attribute what the speaker said in a source to that speaker, cite it only through observation ids, and flag anything unverifiable in verify.`;
+
+const toolSchema = (names: readonly string[]) => ({ type: ["object", "null"], additionalProperties: false, required: ["name", "query", "sourceId", "offset", "stage", "skill"], properties: {
+  name: { type: "string", enum: [...names] }, query: nullable(string), sourceId: nullable(string), offset: nullable({ type: "integer" }),
+  stage: { type: ["string", "null"], enum: [...CREATION_STAGES, null] }, skill: { type: ["string", "null"], enum: [...AGENT_SKILLS, null] } } });
+/** v4 result schema: v3 plus research suggestions, selection patches and the search_knowledge tool. */
+export const agentSchema = objectSchema({
+  step: { type: "string", enum: ["tool", "reply"] },
+  tool: toolSchema(AGENT_TOOLS),
+  reply: nullable(string),
+  choices: { type: "array", items: string },
+  proposals: { type: "array", items: objectSchema({ stage: { type: "string", enum: [...CREATION_STAGES] }, text: string, rationale: string,
+    evidenceIds: { type: "array", items: string }, verify: { type: "array", items: string }, replaces: nullable(string) }) },
+  plan: { type: "array", items: string },
+  decisions: { type: "array", items: objectSchema({ key: { type: "string", enum: [...AGENT_DECISION_KEYS] }, value: string, basis: string }) },
+  research: { type: ["object", "null"], additionalProperties: false, required: ["query", "reason"], properties: { query: string, reason: string } },
+});

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatClock, lengthFit, MAX_SINGLE_SCRIPT_SECONDS, parseDurationRequest, scriptStats, targetWords } from "./script-length";
+import { beatBudgets, formatClock, lengthFit, MAX_SINGLE_SCRIPT_SECONDS, parseDurationRequest, scriptStats, sectionStats, targetWords } from "./script-length";
 
 test("natural speech sets, revises and clears an approximate duration", () => {
   const sec = (text: string) => { const r = parseDurationRequest(text); return r?.kind === "set" ? r.seconds : r; };
@@ -60,4 +60,18 @@ test("m:ss runtimes: requested in context, never source timestamps, clock times 
   assert.equal(sec("the earlier 6 minute script was great, now do 90 seconds"), 90);
   assert.equal(sec("Make it about 90 seconds"), 90);
   assert.equal(sec("a 3–4 minute video"), 210);
+});
+
+test("sections are measured only when the script labels its beats, with budgets that add up to the target", () => {
+  const b = beatBudgets(90);
+  assert.deepEqual(b, { Opening: 34, Development: 146, Payoff: 45 });
+  assert.equal(b.Opening + b.Development + b.Payoff, 225);
+  assert.equal(sectionStats("Just some words with no labelled beats at all.", 90), null);
+  assert.equal(sectionStats("[Opening]\nOnly one labelled beat here.", 90), null);
+  const text = `[Opening]\n${"a ".repeat(34)}\n[Development]\n${"b ".repeat(100)}\n[Payoff]\n${"c ".repeat(46)}`;
+  const s = sectionStats(text, 90)!;
+  assert.deepEqual(s.map(x => [x.beat, x.spokenWords, x.budgetWords, x.state]), [["Opening", 34, 34, "match"], ["Development", 100, 146, "short"], ["Payoff", 46, 45, "match"]]);
+  assert.equal(s[1].percent, 32);
+  assert.equal(sectionStats(text, null)!.every(x => x.budgetWords === null && x.state === null), true);
+  assert.equal(sectionStats("[Hook: cold open]\none two\n[Body]\nthree four five\n[Close]\nsix", 60)!.length, 3);   // synonyms map onto the three beats
 });

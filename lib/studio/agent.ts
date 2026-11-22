@@ -7,22 +7,24 @@ import { StudioDbError } from "./db";
 import { resolveStudioTextCommand } from "./text-route";
 import { studioDb } from "./studio-db";
 import { applyStagePatch, expose, loadRecord, loadSource, requireCreationWriter, save, type StoredRecord } from "./creation";
-import { stageDraft, type CreationStage, type CreationState } from "./creation-policy";
-import { AGENT_MAX_ROUNDS, isAgentSnapshot, readAgentResult, type AgentApplyCommand, type AgentFinal, type AgentItem, type AgentObservation, type AgentProposal, type AgentSnapshot, type AgentToolCall, type readAgentSendCommand } from "./agent-policy";
+import { stageDraft, stageTextLimit, type CreationStage, type CreationState } from "./creation-policy";
+import { AGENT_MAX_ROUNDS, AGENT_PROMPT, isAgentSnapshot, readAgentResult, type AgentApplyCommand, type AgentFinal, type AgentSelection, type AgentResearch, type AgentItem, type AgentObservation, type AgentProposal, type AgentSnapshot, type AgentToolCall, type readAgentSendCommand } from "./agent-policy";
 import { runAgentTool } from "./agent-tools";
 import { SPEAKING_WPM, formatClock, lengthFit, parseDurationRequest, scriptStats, aimWords, type LengthFit } from "./script-length";
 import { agentRoundRequestId } from "./agent-request";
 
 type TurnRow = { id: string; location_id: string; record_id: string; seq: number; message: string; provider: string; status: "running" | "done" | "failed";
-  rounds: Array<{ round: number; reviewId: string; tool: AgentToolCall | null; observation: AgentObservation | null }>; result: AgentFinal | null; error: string | null; created_by_clerk_user_id: string; created_at: string; target_seconds: number | null };
+  rounds: Array<{ round: number; reviewId: string; tool: AgentToolCall | null; observation: AgentObservation | null }>; result: AgentFinal | null; error: string | null; created_by_clerk_user_id: string; created_at: string; target_seconds: number | null; selection: AgentSelection | null };
 export type AgentTurnView = {
   id: string; seq: number; message: string; provider: "location_order" | "subscription" | "openai"; status: "running" | "done" | "failed"; error: string | null;
   /** Real activity only: what the assistant actually read, in order. */
   activity: string[]; waiting: "queued" | "running" | null; route: string | null;
   /** Approximate runtime the owner asked for as of this message, in seconds. */
   target: number | null;
+  /** The saved text span this message was about (Expand / Tighten / Rewrite). */
+  selection: AgentSelection | null;
   result: (Omit<AgentFinal, "proposals"> & { proposals: Array<AgentProposal & { length?: { spokenWords: number; cueWords: number; estimatedSeconds: number; targetSeconds: number | null; fit: LengthFit | null }; evidence: Array<{ id: string; label: string; quote: string; sourceId: string | null; at: number | null }> }> }) | null;
-  inputs: { reads: Array<{ tool: string; items: string[] }>; context: string[] };
+  inputs: { reads: Array<{ tool: string; items: string[] }>; checks: string[]; context: string[] };
 };
 
 const q = (value: string) => `“${value.length > 60 ? value.slice(0, 57) + "…" : value}”`;
@@ -36,12 +38,13 @@ export function describeAgentStep(tool: AgentToolCall, observation: AgentObserva
     case "read_stage": return `Read the current ${tool.stage ?? "stage"}`;
     case "search_library": return `Searched saved sources by title${tool.query ? ` for ${q(tool.query)}` : ""}`;
     case "load_skill": return `Loaded the ${(tool.skill ?? "").replaceAll("_", " ")} procedure`;
+    case "search_knowledge": return `Searched approved Knowledge across the Library${tool.query ? ` for ${q(tool.query)}` : ""} · ${n} finding${n === 1 ? "" : "s"}`;
   }
 }
 
 async function loadTurn(access: StudioAccess, id: string) {
   return studioDb.one<TurnRow>(Prisma.sql`
-    SELECT id,location_id,record_id,seq,message,provider,status,rounds,result,error,created_by_clerk_user_id,created_at,target_seconds
+    SELECT id,location_id,record_id,seq,message,provider,status,rounds,result,error,created_by_clerk_user_id,created_at,target_seconds,selection
     FROM studio.studio_agent_turns WHERE id=${id}::uuid AND location_id=${access.locationId} AND created_by_clerk_user_id=${access.userId} AND actor_app=${access.app}`);
 }
 
@@ -62,12 +65,14 @@ async function views(access: StudioAccess, turns: TurnRow[], pending: Map<string
     const run = last ? model.get(last.reviewId) : undefined;
     return { id: turn.id, seq: turn.seq, message: turn.message, provider: turn.provider as AgentTurnView["provider"], status: turn.status, error: turn.error,
       activity: turn.rounds.filter(r => r.tool || r.observation?.summary).map(r => r.tool ? describeAgentStep(r.tool, r.observation) : r.observation!.summary!),
-      target: turn.target_seconds,
+      target: turn.target_seconds, selection: turn.selection ?? null,
       waiting: turn.status === "running" ? pending.get(turn.id)?.waiting ?? "queued" : null,
       route: run ? `${run.execution_provider === "subscription" ? "Your Mac subscription" : "Location OpenAI key (paid)"} · ${run.model.replace(/^mac_/, "")}` : null,
-      result: turn.result && { ...turn.result, plan: turn.result.plan ?? [], proposals: turn.result.proposals.map(p => ({ ...p, ...(p.stage === "Script" ? { length: measure(p.text, turn.target_seconds) } : {}),
+      result: turn.result && { ...turn.result, plan: turn.result.plan ?? [], proposals: turn.result.proposals.map(p => ({ ...p, ...(p.stage === "Script" && !p.replaces ? { length: measure(p.text, turn.target_seconds) } : {}),
         evidence: p.evidenceIds.flatMap(id => { const item = items.get(id); return item ? [{ id, label: item.label, quote: item.text, sourceId: item.sourceId ?? null, at: item.at ?? null }] : []; }) })) },
       inputs: { reads: turn.rounds.filter(r => r.tool).map(r => ({ tool: describeAgentStep(r.tool!, r.observation), items: (r.observation?.items ?? []).map(i => i.label) })),
+        // Length checks and kept-original outcomes are separate from reads: they say what the server measured, not what the model looked at.
+        checks: turn.rounds.filter(r => !r.tool && r.observation?.summary).map(r => r.observation!.summary!),
         context: ["Your message", "Earlier choices and the last six exchanges", "The current draft stages", "Linked source list (text only through reads)", "Business profile as voice context, not as the publisher"] } };
   });
 }
@@ -76,7 +81,7 @@ async function views(access: StudioAccess, turns: TurnRow[], pending: Map<string
 export async function getAgentConversation(locationId: string, recordId: string) {
   const access = await requireCreationWriter(locationId);
   const rows = await studioDb.rows<TurnRow>(Prisma.sql`
-    SELECT id,location_id,record_id,seq,message,provider,status,rounds,result,error,created_by_clerk_user_id,created_at,target_seconds FROM (
+    SELECT id,location_id,record_id,seq,message,provider,status,rounds,result,error,created_by_clerk_user_id,created_at,target_seconds,selection FROM (
       SELECT * FROM studio.studio_agent_turns WHERE location_id=${access.locationId} AND record_id=${recordId}::uuid
         AND actor_app=${access.app} AND created_by_clerk_user_id=${access.userId} ORDER BY seq DESC LIMIT 40) t ORDER BY seq`);
   const turns = await views(access, rows);
@@ -120,13 +125,20 @@ export async function sendAgentMessage(locationId: string, command: ReturnType<t
     row = await loadRecord(access, command.recordId);
     if (!row) throw new StudioCommandError("Creation draft unavailable.", 404);
   }
+  if (command.selection) {
+    // A selection edit is fenced twice: the span must still hold exactly the selected words, and the account's Mac (or hosted route) must run contract 4.
+    const sel = command.selection;
+    if (stageDraft(expose(row).state, sel.stage).text.slice(sel.start, sel.end) !== sel.text) throw new StudioCommandError("That text changed. Select the words again.", 409);
+    const contract = await studioDb.call<number | null>("studio_agent_contract", { p_location: access.locationId, p_app: access.app, p_actor: access.userId });
+    if (contract !== 4) throw new StudioCommandError("Update and restart the Studio companion on your Mac to edit a selection from here.");
+  }
   // The duration comes from the owner's own words, read here; -1 keeps the previous target, 0 clears it.
   const request = parseDurationRequest(command.message);
   const target = request?.kind === "set" ? request.seconds : request?.kind === "clear" ? 0 : -1;
   let begun: { turnId: string; seq: number };
   try {
     begun = await studioDb.call("studio_agent_begin_turn", { p_location: access.locationId, p_app: access.app, p_actor: access.userId,
-      p_record: row.id, p_turn: command.turnId, p_message: command.message, p_provider: command.provider, p_target: target });
+      p_record: row.id, p_turn: command.turnId, p_message: command.message, p_provider: command.provider, p_target: target, p_selection: command.selection });
   } catch (error) {
     if (error instanceof StudioDbError && error.code === "P2015") throw new StudioCommandError("The assistant is still answering your last message.", 409);
     throw error;
@@ -203,7 +215,7 @@ async function advanceStep(locationId: string, turnId: string): Promise<AgentTur
     const after = gap(step.proposals.find(p => p.stage === "Script")?.text);
     if (before !== null && (after === null || after >= before)) return keepOriginal("Asked once for a closer length; the new version was no closer, so the first version is kept", round, revision.reviewId);
   }
-  if (step.step === "reply" && turn.target_seconds && round <= 3 && !revision) {
+  if (step.step === "reply" && turn.target_seconds && round <= 3 && !revision && !turn.selection && !step.proposals.some(p => p.replaces)) {
     // One bounded correction: a Script outside the +/-15% range is measured and sent back once, never shown as a pass. Up to round 3, so the
     // corrected reply still has a round of its own (the last round must reply).
     const script = step.proposals.find(p => p.stage === "Script");
@@ -220,7 +232,7 @@ async function advanceStep(locationId: string, turnId: string): Promise<AgentTur
     if (!record) return fail("This draft is no longer available.");
     const state = expose(record).state;
     const repeat = turn.rounds.some(r => r.tool && JSON.stringify(r.tool) === JSON.stringify(step.tool));
-    observation = repeat ? { items: [], error: "Already read in this message.", untrusted: true }
+    observation = step.tool.name === "search_knowledge" && review.prompt_version !== AGENT_PROMPT ? { items: [], error: "That tool is not available in this conversation.", untrusted: true } : repeat ? { items: [], error: "Already read in this message.", untrusted: true }
       : await runAgentTool(access, turn.record_id, step.tool, stage => stageDraft(state, stage as CreationStage).text).catch(() => ({ items: [], error: "That read failed. Continue without it.", untrusted: true as const }));
   }
   const recorded = await studioDb.call<TurnRow>("studio_agent_record_step", { p_location: access.locationId, p_app: access.app, p_actor: access.userId,
@@ -247,13 +259,26 @@ export async function applyAgentProposal(locationId: string, command: AgentApply
   const { state } = expose(row);
   const current = stageDraft(state, proposal.stage);
   if (current.text !== command.baseText) throw new StudioCommandError(`The ${proposal.stage} changed since this proposal. Ask for a fresh one.`, 409);
-  // The request that produced this text travels with it, so a later ask never relabels a saved script. Only Script carries a runtime.
+  const selection = turn.selection;
+  let text = proposal.text;
+  if (selection) {
+    // A message about a selection can only be answered by a patch of exactly that span; never by a whole stage.
+    if (!proposal.replaces || selection.stage !== proposal.stage) throw new StudioCommandError("That proposal does not replace your selection. Ask again.", 409);
+    // The span is located by its saved offsets (so repeated phrases are unambiguous) and must still hold exactly the words that were selected.
+    if (current.text.slice(selection.start, selection.end) !== selection.text) throw new StudioCommandError("The selected text changed. Select it again and ask for a fresh edit.", 409);
+    const lead = /^\s*/.exec(selection.text)![0], trail = /\s*$/.exec(selection.text)![0];
+    text = current.text.slice(0, selection.start) + lead + proposal.text + trail + current.text.slice(selection.end);
+    if (text.length > stageTextLimit(proposal.stage)) throw new StudioCommandError(`This edit would make the ${proposal.stage} longer than its limit. Ask for a tighter version.`);
+  }
+  // The request that produced this text travels with it, so a later ask never relabels a saved script. Only Script carries a runtime;
+  // a patch keeps the label of the script it edits (the measured length is always shown beside it).
   const requested = proposal.stage === "Script" && turn.target_seconds ? turn.target_seconds : undefined;
   const { targetSeconds: _drop, ...rest } = current;
-  const next = { ...rest, text: proposal.text, approved: true, ...(requested ? { targetSeconds: requested } : {}),
+  const carried = selection ? current.targetSeconds : requested;
+  const next = { ...rest, text, approved: true, ...(carried ? { targetSeconds: carried } : {}),
     previous: { text: current.text, approved: current.approved, ...(current.targetSeconds ? { targetSeconds: current.targetSeconds } : {}) } };
   state.stages = { ...state.stages, [proposal.stage]: next };
-  state.history = [{ stage: proposal.stage, note: `Used a proposal from the conversation: ${proposal.rationale}`.slice(0, 400), at: new Date().toISOString() }, ...state.history].slice(0, 40);
+  state.history = [{ stage: proposal.stage, note: `${selection ? `Edited a selection (${selection.action})` : "Used a proposal from the conversation"}: ${proposal.rationale}`.slice(0, 400), at: new Date().toISOString() }, ...state.history].slice(0, 40);
   const patch: Record<string, unknown> = { creation: state };
   const { title } = applyStagePatch(row as StoredRecord, current, next, proposal.stage, patch);
   return save(access, row.id, row.version, title, patch);

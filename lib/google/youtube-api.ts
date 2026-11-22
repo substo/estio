@@ -45,6 +45,7 @@ export function createYoutubeApi(auth: YoutubeAuth, fetcher: typeof fetch = fetc
     let response: Response;
     try { response = await fetcher(url, { headers: auth.accessToken ? { Authorization: `Bearer ${auth.accessToken}` } : {}, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(15_000) }); }
     catch { throw new YoutubeError("youtube_unavailable", "YouTube could not be reached. Try again shortly."); }
+    if (response.status === 403 && /commentsDisabled/.test(await response.clone().text().catch(() => ""))) throw new YoutubeError("comments_disabled", "Comments are turned off for this video.");
     if (!response.ok) throw new YoutubeError(response.status === 401 ? "google_reconnect" : response.status === 403 || response.status === 429 ? "youtube_quota_or_permission" : "youtube_unavailable",
       response.status === 403 || response.status === 429 ? "YouTube refused this request. Check API access and quota, or try later." : "YouTube is unavailable or needs renewed consent.");
     const body = await response.json();
@@ -91,6 +92,17 @@ export function createYoutubeApi(auth: YoutubeAuth, fetcher: typeof fetch = fetc
       const ids = [...new Set(body.items.map(i => i?.id?.videoId).filter((id): id is string => typeof id === "string" && /^[A-Za-z0-9_-]{11}$/.test(id)))];
       const byId = new Map((await videos(ids, options?.includeStatistics)).map(video => [video.id, video]));
       return { videos: ids.flatMap(id => byId.get(id) ?? []), nextPageToken: body.nextPageToken ?? null };
+    },
+    /** One page of public top-level comments for a video, plain text, relevance order (official commentThreads.list, 1 quota unit). Read-only; the caller must not store the text. */
+    async comments(videoId: string, limit = 20) {
+      if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) throw new YoutubeError("youtube_invalid_video", "This video link is not valid.");
+      const body = await get("commentThreads", { part: "snippet", videoId, order: "relevance", textFormat: "plainText", maxResults: String(Math.min(Math.max(limit, 1), 50)),
+        // A partial response: Google returns only the comment id and text, never author names or channel ids.
+        fields: "items(snippet(topLevelComment(id,snippet(textDisplay))))" });
+      return body.items.flatMap(item => {
+        const id = item?.snippet?.topLevelComment?.id, text = item?.snippet?.topLevelComment?.snippet?.textDisplay;
+        return typeof id === "string" && /^[A-Za-z0-9_-]{10,80}$/.test(id) && typeof text === "string" && text.trim() ? [{ id, text: text.trim().slice(0, 500) }] : [];
+      });
     },
     videos,
   };

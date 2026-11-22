@@ -7,6 +7,8 @@ export type AgentToolData = {
   stageText(stage: string): string;
   findings(sourceId: string | null, limit: number): Promise<Array<{ evidenceId: string; statement: string; quote: string; start: number | null; sourceId: string; title: string }>>;
   library(limit: number): Promise<Array<{ id: string; title: string; description: string }>>;
+  /** Approved, current Knowledge across every live saved source in the Location whose statement, quote or source title contains any pattern. */
+  knowledge(patterns: string[], limit: number): Promise<Array<{ evidenceId: string; statement: string; quote: string; start: number | null; sourceId: string; title: string }>>;
 };
 const OBSERVATION_BYTES = 4400;
 const WINDOW = 420;
@@ -67,6 +69,7 @@ const fail = (error: string): AgentObservation => ({ items: [], error, untrusted
 /** Dispatch one model-chosen call. Unknown tools, unlinked sources and bad arguments become an explicit error observation, never an action. */
 export async function runAgentToolOn(data: AgentToolData, call: AgentToolCall): Promise<AgentObservation> {
   if (!AGENT_TOOLS.includes(call.name)) return fail("That tool is not available.");
+  // search_knowledge is v4-only; the server never executes it for a round stamped under an older contract (see agent.ts).
   const pick = (id: string | null) => {
     if (id) return data.sources.find(source => source.id === id) ?? null;
     return data.sources.length === 1 ? data.sources[0] : null;
@@ -110,6 +113,23 @@ export async function runAgentToolOn(data: AgentToolData, call: AgentToolCall): 
       const window = text.slice(from, from + 2800);
       return fit({ items: [{ id: `stage:${call.stage}:${from}`, label: `Current ${call.stage} · characters ${from}–${from + window.length} of ${text.length}`, text: window, cite: false }], untrusted: true,
         ...(from + window.length < text.length ? { note: `More text follows: read_stage again with offset ${from + window.length}.` } : {}) });
+    }
+    case "search_knowledge": {
+      const wanted = terms(call.query);
+      if (!wanted.length) return fail("Give a short phrase to search saved Knowledge.");
+      const rows = await data.knowledge(wanted.map(term => `%${term}%`), 60);
+      const linked = new Set(data.sources.map(source => source.id));
+      const score = (row: { statement: string; quote: string; title: string }) => wanted.reduce((sum, term) => sum + (`${row.statement} ${row.quote}`.toLowerCase().includes(term) ? 2 : row.title.toLowerCase().includes(term) ? 1 : 0), 0);
+      const perSource = new Map<string, number>();
+      const items: AgentItem[] = [];
+      for (const row of [...rows].sort((a, b) => score(b) - score(a))) {
+        // Breadth over depth: at most two findings per source, six in total.
+        if (items.length >= 6 || (perSource.get(row.sourceId) ?? 0) >= 2) continue;
+        perSource.set(row.sourceId, (perSource.get(row.sourceId) ?? 0) + 1);
+        items.push({ id: `k:${row.evidenceId}`, label: `${row.title} — ${row.statement}`, sourceId: row.sourceId, at: row.start, cite: true,
+          text: `From “${row.title}”${linked.has(row.sourceId) ? " (linked to this draft)" : " (another saved source)"}\nApproved takeaway: ${row.statement}\nExact saved quote: “${row.quote}”` });
+      }
+      return fit({ items, untrusted: true, note: items.length ? "Approved Knowledge from saved sources: evidence of what each speaker said, not facts about the owner's product." : "No approved Knowledge matched. Nothing from related videos has been saved or read yet." });
     }
     case "load_skill": {
       const skill = call.skill ? AGENT_SKILL_REGISTRY[call.skill] : null;

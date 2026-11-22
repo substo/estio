@@ -1,17 +1,20 @@
 "use client";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import Link from "next/link";
 import { Check, ListChecks, Trash2, Undo2 } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { formatClock, lengthFit, scriptStats, targetWords } from "@/lib/studio/script-length";
+import { formatClock, lengthFit, scriptStats, sectionStats, targetWords } from "@/lib/studio/script-length";
+import type { AgentSelection } from "@/lib/studio/agent-policy";
 import { Button } from "@/components/ui/button";
-import { CREATION_STAGES, stageDraft, type CreationRecord, type CreationStage } from "@/lib/studio/creation-policy";
+import { AUDIENCE_KINDS, AUDIENCE_LIMIT, AUDIENCE_ORIGINS, AUDIENCE_TEXT_LIMIT, CREATION_STAGES, stageDraft, type AudienceSignal, type CreationRecord, type CreationStage } from "@/lib/studio/creation-policy";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
 
-type Draft = { recordId: string; record: CreationRecord | null; setRecord: (record: CreationRecord) => void; plan: string[]; setPlan: (plan: string[]) => void; target: number | null; setTarget: (seconds: number | null) => void };
+type Draft = { recordId: string; record: CreationRecord | null; setRecord: (record: CreationRecord) => void; plan: string[]; setPlan: (plan: string[]) => void; target: number | null; setTarget: (seconds: number | null) => void;
+  /** The saved source this draft was started from (comment sampling), and the chat's send function so the Draft panel can ask for an edit. */
+  sourceId: string | null; sendRef: MutableRefObject<((message: string, selection?: AgentSelection) => void) | null> };
 const Context = createContext<Draft | null>(null);
 /** Shares the saved draft and the persisted work plan between the chat and the draft panel. */
-export function AgentDraftProvider({ recordId, sessionKey, initialRecord, initialPlan, initialTarget = null, children }: { recordId: string | null; sessionKey: string; initialRecord: CreationRecord | null; initialPlan: string[]; initialTarget?: number | null; children: React.ReactNode }) {
+export function AgentDraftProvider({ recordId, sessionKey, initialRecord, initialPlan, initialTarget = null, sourceId = null, children }: { sourceId?: string | null; recordId: string | null; sessionKey: string; initialRecord: CreationRecord | null; initialPlan: string[]; initialTarget?: number | null; children: React.ReactNode }) {
   type Session = { key: string; record: CreationRecord | null; plan: string[]; target: number | null; generated: string };
   const fresh = (): Session => ({ key: sessionKey, record: initialRecord, plan: initialPlan, target: initialTarget, generated: crypto.randomUUID() });
   const [state, setState] = useState<Session>(fresh);
@@ -30,8 +33,9 @@ export function AgentDraftProvider({ recordId, sessionKey, initialRecord, initia
   const setRecord = useCallback((record: CreationRecord) => setState(current => ({ ...current, record })), []);
   const setPlan = useCallback((plan: string[]) => setState(current => ({ ...current, plan })), []);
   const setTarget = useCallback((target: number | null) => setState(current => ({ ...current, target })), []);
+  const sendRef = useRef<((message: string, selection?: AgentSelection) => void) | null>(null);
   const id = recordId ?? session.generated;
-  const value = useMemo(() => ({ recordId: id, record: session.record, setRecord, plan: session.plan, setPlan, target: session.target, setTarget }), [id, session, setRecord, setPlan, setTarget]);
+  const value = useMemo(() => ({ recordId: id, record: session.record, setRecord, plan: session.plan, setPlan, target: session.target, setTarget, sourceId, sendRef }), [id, session, setRecord, setPlan, setTarget, sourceId]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 export function useAgentDraft() {
@@ -42,7 +46,9 @@ export function useAgentDraft() {
 
 /** What the conversation has produced so far. Every change here was an explicit owner choice; nothing is a required step. */
 export function DraftPanel() {
-  const { recordId, record, setRecord, plan } = useAgentDraft();
+  const { recordId, record, setRecord, plan, sourceId, sendRef } = useAgentDraft();
+  const [picked, setPicked] = useState<AgentSelection | null>(null);
+  const [directEdit, setDirectEdit] = useState<{ selection: AgentSelection; text: string } | null>(null);
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
   const [editing, setEditing] = useState<CreationStage | null>(null);
   const [text, setText] = useState("");
@@ -51,6 +57,17 @@ export function DraftPanel() {
   const removed = record ? CREATION_STAGES.filter(stage => { const d = stageDraft(record.state, stage); return !d.text.trim() && Boolean(d.previous?.text.trim()); }) : [];
   const filled = record ? CREATION_STAGES.filter(stage => stageDraft(record.state, stage).text.trim()) : [];
 
+  /** Reads the user's selection inside one stage paragraph as exact character offsets of the saved text. */
+  function capture(element: HTMLElement, stage: CreationStage) {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed || !element.contains(selection.anchorNode) || !element.contains(selection.focusNode)) { setPicked(current => current?.stage === stage ? null : current); return; }
+    const range = selection.getRangeAt(0);
+    const before = document.createRange(); before.selectNodeContents(element); before.setEnd(range.startContainer, range.startOffset);
+    const start = before.toString().length, text = range.toString();
+    const saved = record ? stageDraft(record.state, stage).text : "";
+    if (!text.trim() || text.length > 1800 || saved.slice(start, start + text.length) !== text) { setPicked(null); return; }
+    setPicked({ stage, action: "rewrite", start, end: start + text.length, text });
+  }
   const command = useCallback(async (body: Record<string, unknown>) => {
     setBusy(true); setError("");
     try {
@@ -95,7 +112,17 @@ export function DraftPanel() {
                 <Button type="button" variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
               </div>
             </div>
-            : <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{draft.text}</p>}
+            : <p tabIndex={0} data-stage-text={stage} aria-label={`${stage} text. Select words to expand, tighten or rewrite them.`} className="whitespace-pre-wrap break-words text-sm leading-relaxed focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onMouseUp={event => capture(event.currentTarget, stage)} onKeyUp={event => capture(event.currentTarget, stage)} onTouchEnd={event => { const element = event.currentTarget; window.setTimeout(() => capture(element, stage), 50); }}>{draft.text}</p>}
+          {picked?.stage === stage && editing !== stage ? <SelectionBar selection={picked} busy={busy} onClear={() => setPicked(null)}
+            onAsk={action => { sendRef.current?.(`${action === "expand" ? "Expand" : action === "tighten" ? "Tighten" : "Rewrite"} this part of the ${stage}.`, { ...picked, action }); setPicked(null); window.getSelection()?.removeAllRanges(); }}
+            onEdit={() => { setDirectEdit({ selection: picked, text: picked.text }); setPicked(null); }} /> : null}
+          {directEdit?.selection.stage === stage ? <div className="space-y-2 rounded-md border p-2">
+            <label className="text-xs font-medium" htmlFor={`direct-${stage}`}>Edit only the selected words</label>
+            <textarea id={`direct-${stage}`} value={directEdit.text} onChange={event => setDirectEdit({ ...directEdit, text: event.target.value })} rows={3} className="block w-full rounded-md border bg-background p-2 text-sm" />
+            <div className="flex gap-2"><Button type="button" disabled={busy || !directEdit.text.trim()} onClick={async () => { const d = directEdit.selection; if (await command({ action: "replace", stage, selection: { start: d.start, end: d.end, text: d.text }, text: directEdit.text })) setDirectEdit(null); }}>Replace selection</Button>
+              <Button type="button" variant="outline" onClick={() => setDirectEdit(null)}>Cancel</Button></div>
+            <p className="text-xs text-muted-foreground">Only these words change; the rest of the {stage} stays exactly as it is, and Undo restores it.</p></div> : null}
           {stage === "Script" ? <ScriptMeasure text={draft.text} target={draft.targetSeconds ?? null} /> : null}
           {editing !== stage ? <div className="flex flex-wrap gap-2">
             <Button type="button" variant="ghost" className="min-h-9 px-2 text-xs" onClick={() => { setEditing(stage); setText(draft.text); }}>Edit</Button>
@@ -110,6 +137,7 @@ export function DraftPanel() {
           </div> : null}
         </li>;
       })}</ul>
+      <AudienceSignals record={record} sourceId={sourceId} command={command} busy={busy} />
       {record ? <p className="border-t pt-3 text-xs text-muted-foreground">To set this whole draft aside, archive it from its <Link href={`/studio/content/${record.id}`} className="text-primary hover:underline">Content record</Link> (Archived option). Archived drafts can be restored there, and Content's “Include archived” filter shows them.</p> : null}
     </div>
   </section>;
@@ -119,9 +147,76 @@ export function DraftPanel() {
 function ScriptMeasure({ text, target }: { text: string; target: number | null }) {
   const stats = scriptStats(text);
   const fit = target ? lengthFit(target, stats.seconds) : null;
-  return <p className="text-xs text-muted-foreground" data-script-measure>
+  return <><p className="text-xs text-muted-foreground" data-script-measure>
     About {formatClock(stats.seconds)} spoken · {stats.spokenWords} spoken words{stats.cueWords ? ` (+${stats.cueWords} cue words not counted)` : ""}
     {target ? <> · requested when written: about {formatClock(target)} ({targetWords(target).min}–{targetWords(target).max} words)</> : null}
     {fit ? <span className={fit.state === "match" ? " font-medium text-emerald-700" : " font-medium text-amber-700"}> · {fit.state === "match" ? "close to the request" : `${fit.percent}% ${fit.state}${fit.meaningful ? " — ask the assistant to " + (fit.state === "short" ? "expand" : "tighten") + " it" : ""}`}</span> : null}
-  </p>;
+  </p><SectionFit text={text} target={target} /></>;
+}
+
+/** Fit by section for a script written in labelled beats ([Opening], [Development], [Payoff]); nothing is shown for unlabelled text. */
+export function SectionFit({ text, target }: { text: string; target: number | null }) {
+  const sections = sectionStats(text, target);
+  if (!sections) return null;
+  return <ul className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground" data-section-fit aria-label="Fit by section">
+    {sections.map(section => <li key={section.beat}>{section.beat} {section.spokenWords}{section.budgetWords ? `/${section.budgetWords}` : ""} words
+      {section.state && section.state !== "match" ? <span className="font-medium text-amber-700"> ({section.percent}% {section.state})</span> : section.state ? <span className="text-emerald-700"> ✓</span> : null}</li>)}
+  </ul>;
+}
+
+/** Appears under a saved stage once words are selected: ask the assistant for a scoped edit, or edit just those words directly. */
+function SelectionBar({ selection, busy, onAsk, onEdit, onClear }: { selection: AgentSelection; busy: boolean; onAsk: (action: AgentSelection["action"]) => void; onEdit: () => void; onClear: () => void }) {
+  return <div role="group" aria-label="Edit the selected words" className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/60 p-1.5 text-xs">
+    <span className="px-1 text-muted-foreground">{selection.end - selection.start} characters selected</span>
+    {(["expand", "tighten", "rewrite"] as const).map(action => <Button key={action} type="button" variant="outline" className="min-h-9 px-2.5 text-xs capitalize" disabled={busy} onClick={() => onAsk(action)}>{action}</Button>)}
+    <Button type="button" variant="ghost" className="min-h-9 px-2.5 text-xs" onClick={onEdit}>Edit myself</Button>
+    <Button type="button" variant="ghost" className="min-h-9 px-2 text-xs" onClick={onClear}>Clear</Button>
+  </div>;
+}
+
+type CommentSample = { status: "ok"; size: number; fetchedAt: string; videoUrl: string; comments: Array<{ text: string; href: string }> } | { status: "unavailable"; reason: string };
+/** The owner's own audience observations. Public comments can be read here, but nothing from YouTube is saved: you write what you notice. */
+function AudienceSignals({ record, sourceId, command, busy }: { record: CreationRecord | null; sourceId: string | null; command: (body: Record<string, unknown>) => Promise<boolean>; busy: boolean }) {
+  const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
+  const [text, setText] = useState("");
+  const [kind, setKind] = useState<AudienceSignal["kind"]>("question");
+  const [origin, setOrigin] = useState<AudienceSignal["origin"]>("comments");
+  const [sample, setSample] = useState<CommentSample | null>(null);
+  const [loading, setLoading] = useState(false);
+  const signals = record?.state.audience ?? [];
+  async function readComments() {
+    if (!sourceId) return;
+    setLoading(true);
+    try {
+      const response = await fetch("/studio/assistant/comments/api", { method: "POST", headers: { "X-Studio-Tenant": tenant, "Content-Type": "application/json" }, signal: AbortSignal.timeout(30_000), body: JSON.stringify({ sourceId }) });
+      const data = await response.json();
+      setSample(response.ok ? data : { status: "unavailable", reason: data.error || "Comments could not be read right now." });
+    } catch { setSample({ status: "unavailable", reason: "Could not reach Studio. Try again." }); }
+    finally { setLoading(false); }
+  }
+  return <details className="rounded-md border p-3 text-sm" data-audience>
+    <summary className="cursor-pointer font-medium">Audience language{signals.length ? ` · ${signals.length}` : ""} <span className="font-normal text-muted-foreground">(optional)</span></summary>
+    <div className="mt-3 space-y-3">
+      <p className="text-xs text-muted-foreground">Add what you have noticed in comments, interviews or FAQs, in your own words: a question people ask, an objection, a phrase they use. The assistant uses the wording and concerns. They are your observations, not evidence and not a claim about everyone.</p>
+      {signals.length ? <ul className="space-y-1.5">{signals.map(item => <li key={item.id} className="flex items-start justify-between gap-2 rounded-md bg-muted/60 p-2">
+        <span><span className="mr-1.5 rounded-full border px-1.5 py-0.5 text-[11px] capitalize">{item.kind}</span>{item.text}<span className="ml-1 text-xs text-muted-foreground">· {item.origin}</span></span>
+        <Button type="button" variant="ghost" className="min-h-8 px-2 text-xs" disabled={busy} onClick={() => void command({ action: "audience_remove", signalId: item.id })} aria-label={`Remove observation: ${item.text.slice(0, 40)}`}>Remove</Button></li>)}</ul> : null}
+      {record && signals.length < AUDIENCE_LIMIT ? <div className="space-y-2">
+        <label className="sr-only" htmlFor="audience-text">Your observation</label>
+        <textarea id="audience-text" value={text} maxLength={AUDIENCE_TEXT_LIMIT} rows={2} onChange={event => setText(event.target.value)} placeholder="e.g. People keep asking whether this works without expensive gear" className="block w-full rounded-md border bg-background p-2 text-sm" />
+        <div className="flex flex-wrap items-center gap-2">
+          <select aria-label="Kind of observation" value={kind} onChange={event => setKind(event.target.value as AudienceSignal["kind"])} className="min-h-9 rounded-md border bg-background px-2 text-xs">{AUDIENCE_KINDS.map(k => <option key={k} value={k}>{k}</option>)}</select>
+          <select aria-label="Where you saw it" value={origin} onChange={event => setOrigin(event.target.value as AudienceSignal["origin"])} className="min-h-9 rounded-md border bg-background px-2 text-xs">{AUDIENCE_ORIGINS.map(o => <option key={o} value={o}>from {o}</option>)}</select>
+          <Button type="button" className="min-h-9" disabled={busy || !text.trim()} onClick={async () => { if (await command({ action: "audience_add", kind, origin, text })) setText(""); }}>Add</Button>
+        </div></div> : record ? <p className="text-xs text-muted-foreground">Up to {AUDIENCE_LIMIT} observations. Remove one to add another.</p> : <p className="text-xs text-muted-foreground">Send a first message to start the draft, then add observations here.</p>}
+      {sourceId ? <div className="space-y-2 border-t pt-3">
+        <Button type="button" variant="outline" className="min-h-9 text-xs" disabled={loading} onClick={() => void readComments()}>{loading ? "Reading…" : sample ? "Read a fresh sample" : "Read a sample of this video's public comments"}</Button>
+        {sample?.status === "unavailable" ? <p role="status" className="text-xs text-muted-foreground">{sample.reason}</p> : null}
+        {sample?.status === "ok" ? <div className="space-y-1.5" data-comment-sample>
+          <p className="text-xs text-muted-foreground">{sample.size} public comments, most relevant first, read from YouTube's official API on {new Date(sample.fetchedAt).toLocaleString()}. For reading only: this is not saved, not sent to the assistant and not representative. <a className="text-primary hover:underline" href={sample.videoUrl} target="_blank" rel="noopener noreferrer">Open the video</a></p>
+          <ul className="max-h-60 space-y-1.5 overflow-y-auto text-xs">{sample.comments.map((c, i) => <li key={i} className="rounded-md bg-muted/60 p-2"><span className="whitespace-pre-wrap break-words">{c.text}</span> <a className="ml-1 text-primary hover:underline" href={c.href} target="_blank" rel="noopener noreferrer">View comment</a></li>)}</ul>
+          <p className="text-xs text-muted-foreground">Then add what you notice above, in your own words.</p></div> : null}
+      </div> : null}
+    </div>
+  </details>;
 }

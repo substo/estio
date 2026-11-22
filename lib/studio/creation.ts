@@ -7,7 +7,7 @@ import { StudioCommandError } from "./command-error";
 import { StudioDbError } from "./db";
 import { requireOwnStudioCommandLocation } from "./paid-workspace";
 import { studioDb } from "./studio-db";
-import { replaceSelection, stageDraft, stageTextLimit, type CreationCommand, type CreationRecord, type CreationSource, type CreationStage, type CreationState, type LinkedDraft, type StageDraft } from "./creation-policy";
+import { AUDIENCE_LIMIT, replaceSelection, stageDraft, stageTextLimit, type CreationCommand, type CreationRecord, type CreationSource, type CreationStage, type CreationState, type LinkedDraft, type StageDraft } from "./creation-policy";
 import { CREATION_PROMPT, readCreationTextResult, type CreationRun, type CreationRunInput, type CreationSnapshot } from "./creation-text-policy";
 
 export type StoredRecord = { id: string; title: string; version: number; payload: Record<string, unknown>; script_template_version_id: string | null };
@@ -178,6 +178,14 @@ export async function executeCreationCommand(locationId: string, command: Creati
   if (command.action === "template") {
     change(command.templateId ? "Pinned an approved template version." : "Removed the template pin.");
     return save(access, recordId, version, row.title, patch, { template: command.templateId });
+  }
+  if (command.action === "audience_add" || command.action === "audience_remove") {
+    const list = state.audience ?? [];
+    if (command.action === "audience_add") {
+      if (list.length >= AUDIENCE_LIMIT) throw new StudioCommandError(`Keep up to ${AUDIENCE_LIMIT} audience observations. Remove one first.`);
+      state.audience = [...list, { id: crypto.randomUUID(), kind: command.kind, origin: command.origin, text: command.text }];
+    } else state.audience = list.filter(item => item.id !== command.signalId);
+    return save(access, recordId, version, row.title, { creation: state });
   }
   const stage = command.stage;
   const current = stageDraft(state, stage);

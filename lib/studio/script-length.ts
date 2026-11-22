@@ -90,3 +90,36 @@ export function parseDurationRequest(message: string): DurationRequest | null {
   const chosen = (requests.length ? requests : live).at(-1)!;
   return { kind: "set", seconds: chosen.seconds };
 }
+
+/**
+ * Fit by section. A Script is written in beats, each introduced by a cue line such as `[Opening]`, `[Development]` or `[Payoff]`
+ * (cues are not spoken words). Default budgets split the target 15% / 65% / 20%, which adds up to the target. Only a script that
+ * actually uses at least two beat cues gets a section breakdown; nothing is inferred from unlabelled text.
+ */
+export const BEATS = ["Opening", "Development", "Payoff"] as const;
+export type Beat = typeof BEATS[number];
+export const BEAT_SHARE: Record<Beat, number> = { Opening: 0.15, Development: 0.65, Payoff: 0.2 };
+const BEAT_NAMES: Record<string, Beat> = { opening: "Opening", hook: "Opening", intro: "Opening", development: "Development", body: "Development", middle: "Development", example: "Development", payoff: "Payoff", close: "Payoff", closing: "Payoff", ending: "Payoff", cta: "Payoff" };
+export function beatBudgets(targetSeconds: number) {
+  const total = Math.round(targetSeconds / 60 * SPEAKING_WPM);
+  const opening = Math.round(total * BEAT_SHARE.Opening), payoff = Math.round(total * BEAT_SHARE.Payoff);
+  return { Opening: opening, Development: total - opening - payoff, Payoff: payoff } satisfies Record<Beat, number>;
+}
+export function sectionStats(text: string, targetSeconds: number | null) {
+  const parts: Partial<Record<Beat, number>> = {};
+  let current: Beat | null = null, seen = 0;
+  for (const line of text.split(/\r?\n/)) {
+    const cue = /^\s*\[\s*([A-Za-z]+)\b[^\]]*\]/.exec(line);
+    const beat = cue ? BEAT_NAMES[cue[1].toLowerCase()] : undefined;
+    if (beat) { current = beat; seen++; }
+    const spoken = words(line.replace(/\[[^\]]*\]/g, " "));
+    if (current && spoken) parts[current] = (parts[current] ?? 0) + spoken;
+  }
+  if (seen < 2) return null;
+  const budgets = targetSeconds ? beatBudgets(targetSeconds) : null;
+  return BEATS.filter(beat => parts[beat] !== undefined || budgets).map(beat => {
+    const spoken = parts[beat] ?? 0, budget = budgets ? budgets[beat] : null;
+    const gap = budget ? spoken / budget - 1 : null;
+    return { beat, spokenWords: spoken, budgetWords: budget, state: gap === null ? null : Math.abs(gap) <= 0.25 ? "match" as const : gap < 0 ? "short" as const : "long" as const, percent: gap === null ? null : Math.round(Math.abs(gap) * 100) };
+  });
+}

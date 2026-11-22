@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { agentInstructions, agentSessionKey, readAgentResult, readAgentSendCommand, type AgentSnapshot, type AgentToolCall } from "./agent-policy";
+import { AGENT_PROMPT, AGENT_PROMPT_V3, agentInstructions, agentSessionKey, readAgentResult as readAgentResultAny, readAgentSendCommand, type AgentSnapshot, type AgentToolCall } from "./agent-policy";
 import { findPassages, runAgentToolOn, snapWindow, type AgentToolData } from "./agent-tool-core";
 
+/** The shape and limits of the previous contract; the v4 shape has its own test below. */
+const readAgentResult = (value: unknown, snapshot: AgentSnapshot, version: string = AGENT_PROMPT_V3) => readAgentResultAny(value, snapshot, version);
 const A = "11111111-1111-4111-8111-111111111111", B = "22222222-2222-4222-8222-222222222222";
 const call = (over: Partial<AgentToolCall>): AgentToolCall => ({ name: "search_source", query: null, sourceId: null, offset: null, stage: null, skill: null, ...over });
 const data = (over: Partial<AgentToolData> = {}): AgentToolData => ({
@@ -10,7 +12,8 @@ const data = (over: Partial<AgentToolData> = {}): AgentToolData => ({
   stageText: stage => stage === "Hook" ? "Old hook" : "",
   findings: async (sourceId) => sourceId === B ? [{ evidenceId: "e9", statement: "other", quote: "other", start: null, sourceId: B, title: "Other" }]
     : [{ evidenceId: "e1", statement: "Open with the promise", quote: "The opening sets the promise.", start: 42, sourceId: A, title: "MrBeast" }],
-  library: async () => [{ id: B, title: "Another video", description: "About openings" }], ...over });
+  library: async () => [{ id: B, title: "Another video", description: "About openings" }],
+  knowledge: async () => [], ...over });
 const snapshot = (over: Partial<AgentSnapshot> = {}, observations: AgentSnapshot["observations"] = []): AgentSnapshot => ({ mode: "studio_agent", focus: "",
   operation: { turnId: A, round: 1, maxRounds: 4, mustReply: false }, message: "Make the opener sharper, I like a punchy style", conversation: [], decisions: [], plan: [],
   draft: { stages: {}, legacyDirection: null, brief: "" }, sources: [], profile: null, observations, ideas: [], ...over });
@@ -103,7 +106,34 @@ test("long scripts are accepted up to the documented cap, one per reply, and the
   assert.match(agentInstructions, /no destructive tool/);
   assert.match(agentInstructions, /CREATIVE PRIORITY/);
   assert.match(agentInstructions, /EVIDENCE: cite an observation item only when its text itself states the claim/);
+  assert.match(agentInstructions, /search_knowledge/);
   assert.match(agentInstructions, /near snapshot\.length\.targetWords \(the middle of the band\)/);
   assert.match(agentInstructions, /Part 1 of N/);
   assert.ok(!/\$\{/.test(agentInstructions), "no unexpanded template placeholders");
+});
+
+test("v4 results: research suggestions, selection patches and cross-library evidence are validated; older contracts reject the new shape", () => {
+  const observations = [{ round: 1, tool: call({ name: "search_knowledge", query: "opening" }), result: { untrusted: true as const, items: [{ id: "k:e1", label: "L", text: "Exact saved quote", sourceId: B, cite: true }] } }];
+  const v4 = (over: Record<string, unknown> = {}, snap: Partial<AgentSnapshot> = {}) => readAgentResultAny({ ...reply({ research: null }), ...over }, snapshot(snap, observations), AGENT_PROMPT);
+  const prop = (over: Record<string, unknown> = {}) => ({ stage: "Hook", text: "New hook.", rationale: "r", evidenceIds: ["k:e1"], verify: [], replaces: null, ...over });
+  assert.equal(v4({ proposals: [prop()] }).step, "reply");                                   // cites a finding from another source
+  assert.deepEqual((v4({ research: { query: "first video opener structure", reason: "No saved source covers it yet." } }) as { research: unknown }).research, { query: "first video opener structure", reason: "No saved source covers it yet." });
+  assert.throws(() => v4({ research: { query: "x", reason: "r" } }));                         // a query must be readable
+  assert.throws(() => readAgentResultAny(reply(), snapshot(), AGENT_PROMPT));                // v4 needs the research field
+  assert.throws(() => readAgentResultAny({ ...reply({ research: null }), proposals: [{ stage: "Hook", text: "t", rationale: "r", evidenceIds: [], verify: [] }] }, snapshot(), AGENT_PROMPT));   // and replaces
+  assert.throws(() => readAgentResultAny({ ...reply({ research: null }) }, snapshot(), AGENT_PROMPT_V3));   // the old contract has no research field
+  const tool = { step: "tool", tool: { name: "search_knowledge", query: "opening", sourceId: null, offset: null, stage: null, skill: null }, reply: null, choices: [], proposals: [], decisions: [], plan: [], research: null };
+  assert.equal(readAgentResultAny(tool, snapshot(), AGENT_PROMPT).step, "tool");
+  assert.throws(() => readAgentResultAny({ ...tool, research: undefined, ...{} } as never, snapshot(), AGENT_PROMPT_V3));   // search_knowledge does not exist before v4
+  delete (tool as Record<string, unknown>).research;
+  assert.throws(() => readAgentResultAny(tool, snapshot(), AGENT_PROMPT_V3));
+  // A selection patch replaces exactly the selected text, alone, in the selected stage.
+  const selection = { stage: "Script" as const, action: "tighten" as const, text: "a long wandering sentence" };
+  const patch = (over: Record<string, unknown> = {}) => ({ stage: "Script", text: "a short sentence", rationale: "Tighter.", evidenceIds: [], verify: [], replaces: "a long wandering sentence", ...over });
+  assert.equal(v4({ proposals: [patch()] }, { selection }).step, "reply");
+  assert.throws(() => v4({ proposals: [patch({ replaces: "something else" })] }, { selection }));      // not the selected words
+  assert.throws(() => v4({ proposals: [patch({ stage: "Hook" })] }, { selection }));                  // wrong stage
+  assert.throws(() => v4({ proposals: [patch(), patch()] }, { selection }));                          // alone
+  assert.throws(() => v4({ proposals: [prop()] }, { selection }));                                    // a whole stage is not an answer to a selection
+  assert.throws(() => v4({ proposals: [patch()] }));                                                  // no selection, no patch
 });

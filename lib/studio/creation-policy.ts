@@ -20,7 +20,14 @@ export type Selection = { start: number; end: number; text: string };
 /** `targetSeconds` is the approximate runtime the owner had requested when this text was generated and applied (immutable provenance,
  * carried through manual edits, restored by Undo). Absent on text that was written before targets existed or without one. */
 export type StageDraft = { text: string; approved: boolean; shortlist: string[]; targetSeconds?: number; previous?: { text: string; approved: boolean; targetSeconds?: number } };
+/** The owner's own observation about their audience (from comments, interviews or FAQs), written in their words. Never evidence and never
+ * raw API comment text: it is context for wording, not a claim about any group. */
+export const AUDIENCE_KINDS = ["question", "objection", "phrase", "note"] as const;
+export const AUDIENCE_ORIGINS = ["comments", "interview", "faq", "other"] as const;
+export const AUDIENCE_LIMIT = 8, AUDIENCE_TEXT_LIMIT = 280;
+export type AudienceSignal = { id: string; kind: typeof AUDIENCE_KINDS[number]; origin: typeof AUDIENCE_ORIGINS[number]; text: string };
 export type CreationState = {
+  audience?: AudienceSignal[];
   schema: 1; brief: string; direction: ConfirmedDirection; source: CreationSource | null;
   stages: Partial<Record<CreationStage, StageDraft>>;
   history: Array<{ stage?: CreationStage; note: string; quote?: string; at: string; reviewId?: string }>;
@@ -96,6 +103,8 @@ export type CreationCommand =
   | ({ action: "comment"; stage: CreationStage; text: string; selection: Selection | null } & Versioned)
   | ({ action: "undo"; stage: CreationStage } & Versioned)
   | ({ action: "clear"; stage: CreationStage } & Versioned)
+  | ({ action: "audience_add"; kind: AudienceSignal["kind"]; origin: AudienceSignal["origin"]; text: string } & Versioned)
+  | ({ action: "audience_remove"; signalId: string } & Versioned)
   | ({ action: "apply"; stage: CreationStage; reviewId: string; candidate: number | null } & Versioned)
   | ({ action: "generate"; requestId: string; provider: ReturnType<typeof readStudioTextProvider>; confirmPaid: boolean; confirmSubscription: boolean } & Versioned & GenerationInput);
 
@@ -136,6 +145,11 @@ export function readCreationCommand(value: unknown): CreationCommand {
     return { ...base, action, brief, direction, sourceId, sourceVersion: sourceId ? integer(b.sourceVersion, 1) : null, templateId: nullableId(b.templateId) };
   }
   if (action === "template") return { ...base, action, templateId: nullableId(b.templateId) };
+  if (action === "audience_add") {
+    if (!AUDIENCE_KINDS.includes(b.kind as AudienceSignal["kind"]) || !AUDIENCE_ORIGINS.includes(b.origin as AudienceSignal["origin"])) throw new StudioCommandError("Choose what kind of observation this is.");
+    return { ...base, action, kind: b.kind as AudienceSignal["kind"], origin: b.origin as AudienceSignal["origin"], text: text(b.text, AUDIENCE_TEXT_LIMIT, true).trim() };
+  }
+  if (action === "audience_remove") return { ...base, action, signalId: id(b.signalId) };
   if (!CREATION_STAGES.includes(b.stage as CreationStage)) throw new StudioCommandError("Choose a creation stage.");
   const stage = b.stage as CreationStage;
   const target = { ...base, stage };

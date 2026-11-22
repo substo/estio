@@ -131,4 +131,28 @@ BEGIN
     OR studio.studio_pick_text_device(loc,'substo',actor,'script_brief','{}','{"mode":"studio_agent"}'::jsonb,'codex',device) IS NULL THEN
     RAISE EXCEPTION 'A version-3 companion must run contract-3 and stored v1 rounds';
   END IF;
+  -- Contract 4 (research, audience, selection patches) pins to version 4; v3 rounds cannot call the new tool.
+  IF studio.studio_pick_text_device(loc,'substo',actor,'script_brief','{}','{"mode":"studio_agent","scriptLimits":{},"contract":4}'::jsonb,'codex',device) IS NOT NULL THEN
+    RAISE EXCEPTION 'A version-3 companion received a contract-4 round';
+  END IF;
+  UPDATE studio.studio_devices SET report=report||'{"studioAgentVersion":4}' WHERE id=device;
+  snapshot:=studio.studio_build_selected_text_snapshot(loc,jsonb_build_array(jsonb_build_object('id',pinned,'version',(pinned_saved->>'version')::bigint,
+    'agent',jsonb_build_object('turnId',(SELECT id FROM studio.studio_agent_turns WHERE record_id=pinned),'round',1))),'','script_brief');
+  IF snapshot->>'contract'<>'4' OR NOT snapshot ? 'audience' OR NOT snapshot ? 'selection' THEN RAISE EXCEPTION 'Contract 4 snapshot is incomplete: %',snapshot; END IF;
+  IF studio.studio_pick_text_device(loc,'substo',actor,'script_brief','{}','{"mode":"studio_agent","scriptLimits":{},"contract":4}'::jsonb,'codex',device) IS NULL
+    OR studio.studio_pick_text_device(loc,'substo',actor,'script_brief','{}','{"mode":"studio_agent","scriptLimits":{},"contract":3}'::jsonb,'codex',device) IS NULL THEN
+    RAISE EXCEPTION 'A version-4 companion must run contract-4 and contract-3 rounds';
+  END IF;
+  DECLARE tool_step jsonb:='{"step":"tool","tool":{"name":"search_knowledge","query":"hooks","sourceId":null,"offset":null,"stage":null,"skill":null},"reply":null,"choices":[],"proposals":[],"decisions":[],"plan":[]}';
+  BEGIN
+    BEGIN
+      PERFORM studio.studio_validate_text_run_result('script_brief',tool_step,'{"mode":"studio_agent","contract":3,"scriptLimits":{},"message":"x","operation":{"mustReply":false},"observations":[]}'::jsonb);
+      RAISE EXCEPTION 'search_knowledge accepted under contract 3';
+    EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
+    BEGIN
+      PERFORM studio.studio_validate_text_run_result('script_brief',tool_step,'{"mode":"studio_agent","contract":4,"scriptLimits":{},"message":"x","operation":{"mustReply":false},"observations":[]}'::jsonb);
+      RAISE EXCEPTION 'A contract-4 result without the research field was accepted';
+    EXCEPTION WHEN invalid_parameter_value THEN NULL; END;
+    PERFORM studio.studio_validate_text_run_result('script_brief',tool_step||'{"research":null}'::jsonb,'{"mode":"studio_agent","contract":4,"scriptLimits":{},"message":"x","operation":{"mustReply":false},"observations":[]}'::jsonb);
+  END;
 END $$;

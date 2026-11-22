@@ -12,9 +12,9 @@ import type { CreationRecord } from "@/lib/studio/creation-policy";
 const record: CreationRecord = { id: "r1", version: 3, templateId: null, state: { schema: 1, brief: "", source: null, history: [],
   direction: { choice: "conversation", publisher: "", viewer: "", goal: "", angle: "", rationale: "" },
   stages: { Hook: { text: "Old hook text", approved: true, shortlist: [], previous: { text: "", approved: false } } } } };
-const base: Omit<AgentTurnView, "id" | "status" | "result"> = { provider: "location_order", target: null, seq: 1, message: "Make the opener sharper", error: null, activity: [], waiting: null, route: null, inputs: { reads: [], context: ["Your message"] } };
+const base: Omit<AgentTurnView, "id" | "status" | "result"> = { provider: "location_order", target: null, selection: null, seq: 1, message: "Make the opener sharper", error: null, activity: [], waiting: null, route: null, inputs: { reads: [], checks: [], context: ["Your message"] } };
 const done: AgentTurnView = { ...base, id: "t1", status: "done", route: "Your Mac subscription · codex", activity: ["Searched the saved source for “opening” · 2 passages"],
-  inputs: { reads: [{ tool: "Searched the saved source for “opening” · 2 passages", items: ["MrBeast · characters 0–420"] }], context: ["Your message"] },
+  inputs: { reads: [{ tool: "Searched the saved source for “opening” · 2 passages", items: ["MrBeast · characters 0–420"] }], checks: [], context: ["Your message"] },
   result: { reply: "Is this promoting Substo or a customer's video?", choices: ["Promote Substo to new creators", "A customer's video"], decisions: [{ key: "style", value: "punchy", basis: "sharper" }], plan: ["Pick the publisher"],
     proposals: [{ stage: "Hook", text: "Two openings, one promise.", rationale: "Uses the opener finding.", verify: ["Studio shows both openings"], evidenceIds: ["f:1"],
       evidence: [{ id: "f:1", label: "L", quote: "The opening sets the promise.", sourceId: "s1", at: 42 }] }] } };
@@ -28,7 +28,7 @@ test("opening is a conversation with one composer and no form fields", () => {
   const html = render([]);
   assert.match(html, /MrBeast on openings/);
   assert.match(html, /Start for me/);
-  assert.equal((html.match(/<textarea/g) ?? []).length, 1);
+  assert.equal((html.match(/data-assistant-field/g) ?? []).length, 1);                 // one composer (the optional audience note lives in the Draft panel)
   assert.ok(!/<form|<input|role="tab"/.test(html));
 });
 

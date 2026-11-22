@@ -37,6 +37,19 @@ export async function agentToolData(access: StudioAccess, recordId: string, stag
         ORDER BY i.id,e.id LIMIT ${limit}`);
       return rows.map(r => ({ evidenceId: r.evidence_id, statement: r.statement, quote: r.quote, start: r.start === null ? null : Number(r.start), sourceId: r.source_id, title: r.title }));
     },
+    async knowledge(patterns, limit) {
+      if (!patterns.length) return [];
+      const rows = await studioDb.rows<{ evidence_id: string; statement: string; quote: string; start: string | null; source_id: string; title: string }>(Prisma.sql`
+        SELECT e.id::text AS evidence_id,left(i.statement,300) AS statement,e.payload->>'quote' AS quote,e.payload->>'start_sec' AS start,s.id AS source_id,left(s.title,160) AS title
+        FROM studio.studio_knowledge_insights i JOIN studio.studio_records s ON s.location_id=i.location_id AND s.id=i.source_id AND s.kind='reference' AND NOT s.archived
+        JOIN studio.studio_knowledge_evidence e ON e.location_id=i.location_id AND e.insight_id=i.id AND e.source_id=s.id
+        WHERE i.location_id=${access.locationId} AND i.status='approved'
+          AND e.payload->>'source_version'=s.version::text AND e.payload->>'evidence_type' IN ('speech','ocr','text')
+          AND char_length(btrim(e.payload->>'quote')) BETWEEN 1 AND 450
+          AND lower(i.statement||' '||(e.payload->>'quote')||' '||s.title) LIKE ANY(${patterns}::text[])
+        ORDER BY s.updated_at DESC,i.id,e.id LIMIT ${limit}`);
+      return rows.map(r => ({ evidenceId: r.evidence_id, statement: r.statement, quote: r.quote, start: r.start === null ? null : Number(r.start), sourceId: r.source_id, title: r.title }));
+    },
     async library(limit) {
       return studioDb.rows<{ id: string; title: string; description: string }>(Prisma.sql`
         SELECT id,left(title,160) AS title,left(coalesce(payload->>'description',payload->>'sourceDescription',''),160) AS description

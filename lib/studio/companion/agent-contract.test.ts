@@ -6,7 +6,8 @@ import { createLocalTextAdapter, type LocalProvider } from "./providers";
 import { defaultDeviceConfig, safeDeviceCapabilities } from "../devices-policy";
 import { agentInstructionsV1 } from "../agent-policy-v1";
 import { agentInstructionsV2 } from "../agent-policy-v2";
-import { AGENT_PROMPT, AGENT_PROMPT_V1, AGENT_PROMPT_V2, agentInstructions } from "../agent-policy";
+import { agentInstructionsV3 } from "../agent-policy-v3";
+import { AGENT_PROMPT, AGENT_PROMPT_V1, AGENT_PROMPT_V2, AGENT_PROMPT_V3, agentInstructions } from "../agent-policy";
 import { scriptBriefSpecFor } from "../worker/script-brief";
 
 // Old vs new companion contract for the conversational agent, through the real native adapter with a fake CLI process.
@@ -19,8 +20,9 @@ const v1Snapshot = { mode: "studio_agent", focus: "", operation: { turnId: id, r
   draft: { stages: {}, legacyDirection: null, brief: "" }, sources: [], profile: null, observations: [], ideas: [] };
 const v2Snapshot = { ...v1Snapshot, length: { targetSeconds: 360, targetWords: 900, minWords: 765, maxWords: 1035, beyondSupported: false }, scriptLimits: { maxWords: 1200, maxChars: 9000, maxSeconds: 480, wordsPerMinute: 150 } };
 const v3Snapshot = { ...v2Snapshot, contract: 3 };
-const script = (chars: number) => ({ step: "reply", tool: null, reply: "Here is the script.", choices: [], decisions: [], plan: [],
-  proposals: [{ stage: "Script", text: "word ".repeat(Math.floor(chars / 5)), rationale: "Six minutes.", evidenceIds: [], verify: [] }] });
+const v4Snapshot = { ...v2Snapshot, contract: 4, audience: [], selection: null };
+const script = (chars: number, v4 = false) => ({ step: "reply", tool: null, reply: "Here is the script.", choices: [], decisions: [], plan: [], ...(v4 ? { research: null } : {}),
+  proposals: [{ stage: "Script", text: "word ".repeat(Math.floor(chars / 5)), rationale: "Six minutes.", evidenceIds: [], verify: [], ...(v4 ? { replaces: null } : {}) }] });
 const jobFor = (promptVersion: string, snapshot: unknown) => ({ id, location_id: "tenant", kind: "studio.text_run", payload: { reviewId: id, workflow: "script_brief", promptVersion, snapshot, provider: "codex", model: "test-model", configVersion: 2 },
   lease_token: id, attempts: 1, max_attempts: 1 } as never);
 
@@ -35,16 +37,29 @@ function companion(reply: unknown, seen: { prompt?: string } = {}) {
   return createSubscriptionTextRunHandler({ adapter: (_: LocalProvider) => adapter, usage, enabled: () => true, config: () => config, configVersion: () => 2 });
 }
 
-test("the new companion runs a v3 round and accepts a realistic multi-minute script through the native adapter", async () => {
+test("the new companion runs a v4 round and accepts a realistic multi-minute script through the native adapter", async () => {
   const seen: { prompt?: string } = {};
-  const big = script(6000);                                                           // far over the old 4,000-character limit, about 1,200 characters per minute
-  const result = await companion(big, seen)(jobFor(AGENT_PROMPT, v3Snapshot), context);
+  const big = script(6000, true);                                                           // far over the old 4,000-character limit, about 1,200 characters per minute
+  const result = await companion(big, seen)(jobFor(AGENT_PROMPT, v4Snapshot), context);
   assert.ok((result.output as typeof big).proposals[0].text.length > 5990);
   assert.match(seen.prompt!, /150 words per minute/);                                // the CLI is given the v2 instructions
   assert.match(seen.prompt!, /snapshot\.length/);
   assert.match(seen.prompt!, /Part 1 of N/);
-  assert.match(seen.prompt!, /CREATIVE PRIORITY/);                                   // v3 guidance reaches the CLI
+  assert.match(seen.prompt!, /CREATIVE PRIORITY/);                                   // the creative rules reach the CLI
+  assert.match(seen.prompt!, /search_knowledge/);                                    // and the v4 research tool
+  assert.match(seen.prompt!, /SELECTION PATCH/);
   assert.ok(seen.prompt!.includes(agentInstructions));
+});
+
+test("rounds stored under v3 keep their frozen prompt, schema and validator on the new companion", async () => {
+  assert.equal(createHash("sha256").update(agentInstructionsV3).digest("hex"), "280159fa560e8341d2b0efc0f8c056bb6ed491c73ef1ff8b7d5858b22ec91c01");   // byte-identical to the live v3 prompt
+  const seen: { prompt?: string } = {};
+  await companion(script(5000), seen)(jobFor(AGENT_PROMPT_V3, v3Snapshot), context);
+  assert.ok(seen.prompt!.includes(agentInstructionsV3));
+  assert.ok(!/search_knowledge|SELECTION PATCH/.test(seen.prompt!), "v3 rounds do not silently get v4 tools");
+  await assert.rejects(companion(script(5000, true))(jobFor(AGENT_PROMPT_V3, v3Snapshot), context), /Automatic replay stopped/);   // a v4-shaped reply is not valid under v3
+  assert.equal(scriptBriefSpecFor(v3Snapshot).promptVersion, AGENT_PROMPT_V3);
+  assert.equal(scriptBriefSpecFor(v4Snapshot).promptVersion, AGENT_PROMPT);
 });
 
 test("rounds stored under v2 keep its frozen prompt (no v3 guidance) and its validator on the new companion", async () => {
@@ -55,7 +70,6 @@ test("rounds stored under v2 keep its frozen prompt (no v3 guidance) and its val
   assert.ok(seen.prompt!.includes(agentInstructionsV2));
   assert.ok(!/CREATIVE PRIORITY/.test(seen.prompt!), "v2 rounds do not silently get the v3 rules");
   assert.equal(scriptBriefSpecFor(v2Snapshot, AGENT_PROMPT_V2).promptVersion, AGENT_PROMPT_V2);
-  assert.equal(scriptBriefSpecFor(v3Snapshot).promptVersion, AGENT_PROMPT);
   assert.equal(scriptBriefSpecFor(v2Snapshot).promptVersion, AGENT_PROMPT_V2);
 });
 
@@ -73,14 +87,15 @@ test("rounds stored under the first contract keep its exact prompt and 4,000-cha
 test("a job stamped with a contract the process does not implement stops before any model call (what an older companion does with a v3 round)", async () => {
   let called = false;
   const spy = createSubscriptionTextRunHandler({ adapter: () => { called = true; throw new Error("must not run"); }, usage, enabled: () => true, config: () => config, configVersion: () => 2 });
-  await assert.rejects(spy(jobFor("studio.agent.v4", v3Snapshot), context), (e: Error & { code?: string }) => e.code === "text_run_version_unsupported");
+  await assert.rejects(spy(jobFor("studio.agent.v9", v4Snapshot), context), (e: Error & { code?: string }) => e.code === "text_run_version_unsupported");
   assert.equal(called, false);
 });
 
-test("the heartbeat capability whitelist reports version 1, 2 or 3 and nothing else, so SQL pins on a real value", () => {
+test("the heartbeat capability whitelist reports version 1 to 4 and nothing else, so SQL pins on a real value", () => {
   assert.equal(safeDeviceCapabilities({ studioAgentVersion: 2 }).studioAgentVersion, 2);
   assert.equal(safeDeviceCapabilities({ studioAgentVersion: 1 }).studioAgentVersion, 1);
   assert.equal(safeDeviceCapabilities({ studioAgentVersion: 3 }).studioAgentVersion, 3);
-  assert.equal(safeDeviceCapabilities({ studioAgentVersion: 4 }).studioAgentVersion, undefined);
+  assert.equal(safeDeviceCapabilities({ studioAgentVersion: 4 }).studioAgentVersion, 4);
+  assert.equal(safeDeviceCapabilities({ studioAgentVersion: 5 }).studioAgentVersion, undefined);
   assert.equal(safeDeviceCapabilities({ studioAgentVersion: "2" }).studioAgentVersion, undefined);
 });
