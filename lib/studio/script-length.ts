@@ -44,24 +44,49 @@ const UNIT = String.raw`(seconds?|secs?|s|minutes?|mins?|m)\b`;
 const NUMBER = String.raw`(\d+(?:\.\d+)?|${Object.keys(NUMBER_WORDS).join("|")})`;
 const toNumber = (raw: string) => NUMBER_WORDS[raw.toLowerCase()] ?? Number(raw);
 const toSeconds = (value: number, unit: string) => Math.round(/^m/i.test(unit) && !/^s/i.test(unit) ? value * 60 : value);
-const CONTEXT = /\b(video|script|long|length|duration|runtime|run time|minutes?|mins?|seconds?|secs?|about|around|roughly|approx|aim|target|under|within|make it|keep it|trim|cut|shorter|longer)\b/i;
+const CONTEXT = /\b(video|script|long|length|duration|runtime|run time|minutes?|mins?|seconds?|secs?|about|around|roughly|approx|aim|target|under|within|make it|keep it|trim|cut|shorter|longer|revision|version)\b/i;
+
+type Candidate = { index: number; end: number; seconds: number; clock: boolean };
+/** Words before a duration that describe an earlier script, not a request ("after a 6-minute script, ..."). */
+const DESCRIPTIVE = /\b(?:after|following|from|given|since|once|earlier|previous(?:ly)?|original(?:ly)?|last|old|existing|current|saved|first)\b[^,.;!?]{0,30}$/i;
+/** Words before a duration the owner is correcting away from ("not 6 minutes", "instead of 6 minutes"). */
+const NEGATED = /\b(?:not|instead of|rather than|no longer|than)\s+(?:a|an|the|about|around|roughly)?\s*$/i;
+/** m:ss is a requested runtime only in a clearly requesting context; source timestamps, clock times and ratios are not. */
+const CLOCK_BEFORE = /(?:\b(?:make|keep|get|bring|cut|trim|shorten|expand|stretch|tighten|lengthen)\s+(?:it|the\s+(?:script|video|revision|version|cut|take|draft))?(?:\s+(?:down\s+|up\s+|back\s+))?(?:to|at|under|within)?\s*(?:about|around|roughly|approx(?:imately)?|exactly|just)?\s*$|\b(?:give\s+me|want|wanted|need|needed|asked\s+for|said|should\s+be|needs\s+to\s+be|must\s+be|has\s+to\s+be|to\s+be|aim(?:ing)?\s+(?:for|at)|target(?:ing)?|runtime|length|duration|no\s+longer\s+than|at\s+most|under|within|about|approx(?:imately)?|roughly|exactly)\s*(?:of|is|was|:)?\s*(?:an?\s+|the\s+)?(?:about\s+|around\s+|roughly\s+)?$|\b(?:actually|now|instead|rather|make\s+that|change\s+(?:it\s+)?to|switch\s+to|go\s+(?:with|for)|let'?s\s+(?:do|say|make\s+it)|no\s+wait,?)\s*(?:an?\s+)?$|\b(?:an?|the)\s+$)/i;
+const CLOCK_AFTER_OK = /^\s*(?:video|script|revision|version|cut|take|draft|runtime|long|length|total|spoken|edit|rewrite|one)\b/i;
+const CLOCK_AFTER_NO = /^\s*(?:in(?:to)?\b|mark|timestamp|pm\b|am\b|p\.m|a\.m|ratio|aspect|o'clock)/i;
+const CLOCK_BEFORE_NO = /(?:\b(?:at|from|until|till|by|between)|@)\s*(?:the\s+)?$/i;
 
 /**
- * Reads an approximate duration out of the owner's own words ("about 90 seconds", "a 3–4 minute video", "make it 2 minutes").
- * Deterministic and server-side: the model cannot invent or change the target. Returns null when the message states none.
+ * Reads an approximate duration out of the owner's own words ("about 90 seconds", "a 3-4 minute video", "give me a 1:30 revision").
+ * Deterministic and server-side: the model cannot invent or change the target. The latest explicit request wins over an earlier
+ * descriptive or negated duration. Returns null when the message states none.
  */
 export function parseDurationRequest(message: string): DurationRequest | null {
   const text = message.replace(/\s+/g, " ");
   if (/\b(no (?:time|length|duration) (?:limit|target|constraint)|any length|forget the (?:length|duration)|drop the (?:length|duration) target|don'?t (?:worry about|care about) (?:the )?(?:length|duration))\b/i.test(text)) return { kind: "clear" };
-  if (!CONTEXT.test(text)) return null;
-  const clamp = (seconds: number) => seconds >= MIN_TARGET_SECONDS && seconds <= MAX_TARGET_SECONDS ? { kind: "set" as const, seconds } : null;
-  if (/\bhalf (?:a|an) minute\b/i.test(text)) return clamp(30);
-  if (/\b(?:a|one) minute and a half\b/i.test(text)) return clamp(90);
-  const range = new RegExp(String.raw`\b${NUMBER}\s*(?:-|–|—|to)\s*${NUMBER}\s*${UNIT}`, "i").exec(text);
-  if (range) {
-    const a = toSeconds(toNumber(range[1]), range[3]), b = toSeconds(toNumber(range[2]), range[3]);
-    return clamp(Math.round((a + b) / 2));
+  const found: Candidate[] = [];
+  const add = (index: number, length: number, seconds: number, clock = false) => {
+    if (seconds >= MIN_TARGET_SECONDS && seconds <= MAX_TARGET_SECONDS && !found.some(c => index < c.end && index + length > c.index)) found.push({ index, end: index + length, seconds, clock });
+  };
+  for (const m of text.matchAll(/\bhalf (?:a|an) minute\b/gi)) add(m.index!, m[0].length, 30);
+  for (const m of text.matchAll(/\b(?:a|one) minute and a half\b/gi)) add(m.index!, m[0].length, 90);
+  for (const m of text.matchAll(new RegExp(String.raw`\b${NUMBER}\s*(?:-|–|—|to)\s*${NUMBER}\s*${UNIT}`, "gi")))
+    add(m.index!, m[0].length, Math.round((toSeconds(toNumber(m[1]), m[3]) + toSeconds(toNumber(m[2]), m[3])) / 2));
+  for (const m of text.matchAll(new RegExp(String.raw`\b${NUMBER}[\s-]*${UNIT}`, "gi"))) add(m.index!, m[0].length, toSeconds(toNumber(m[1]), m[2]));
+  const named = CONTEXT.test(text);
+  // m:ss with strict seconds 00-59, not part of h:mm:ss.
+  for (const m of text.matchAll(/(?<![\d:])(\d{1,2}):([0-5]\d)(?![\d:])/g)) {
+    const before = text.slice(Math.max(0, m.index! - 70), m.index!), after = text.slice(m.index! + m[0].length, m.index! + m[0].length + 24);
+    if (CLOCK_AFTER_NO.test(after) || (CLOCK_BEFORE_NO.test(before) && !CLOCK_AFTER_OK.test(after))) continue;
+    if (CLOCK_BEFORE.test(before) || CLOCK_AFTER_OK.test(after)) add(m.index!, m[0].length, Number(m[1]) * 60 + Number(m[2]), true);
   }
-  const single = new RegExp(String.raw`\b${NUMBER}[\s-]*${UNIT}`, "i").exec(text);
-  return single ? clamp(toSeconds(toNumber(single[1]), single[2])) : null;
+  if (!found.length || (!named && !found.some(c => c.clock))) return null;
+  found.sort((a, b) => a.index - b.index);
+  const live = found.filter(c => !NEGATED.test(text.slice(Math.max(0, c.index - 30), c.index)));
+  if (!live.length) return null;
+  // With several durations the latest explicit request wins; an earlier description of an existing script does not.
+  const requests = live.length > 1 ? live.filter(c => !DESCRIPTIVE.test(text.slice(Math.max(0, c.index - 40), c.index))) : live;
+  const chosen = (requests.length ? requests : live).at(-1)!;
+  return { kind: "set", seconds: chosen.seconds };
 }

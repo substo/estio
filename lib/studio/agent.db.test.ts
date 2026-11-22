@@ -399,3 +399,103 @@ test("Create starts fresh exactly once; Resume prefers a draft with real work ov
   assert.equal(await agent.latestSourceDraft(loc.replace(/1$/, "2"), source), null);         // another Location never sees these drafts
   actingAs = access;
 });
+
+test("a 1:30 request persists as 90 seconds, is measured against 90 (not the saved 6:00) and only an explicit apply relabels the script", async () => {
+  const stageOf = async () => (await latestRecord()).payload.creation.stages.Script as { text: string; targetSeconds?: number };
+  const six = crypto.randomUUID();
+  await send(six, "Write the script, about 6 minutes");
+  const a = await drive(six, () => step({ reply: "Six minutes.", proposals: [{ stage: "Script", text: script(900), rationale: "Six.", evidenceIds: [], verify: [] }] }), 1);
+  const base = ((await latestRecord()).payload.script as string) ?? "";
+  await agent.applyAgentProposal(loc, policy.readAgentApplyCommand({ recordId: draft, version: a.record!.version, turnId: six, index: 0, baseText: base }));
+  const saved = await stageOf();
+  assert.equal(saved.targetSeconds, 360);
+  // The live regression: a displayed m:ss target in a later message.
+  const t = crypto.randomUUID();
+  await send(t, "after a 6-minute script, make the revision 1:30");
+  assert.equal((await settled(t)).target_seconds, 90);
+  const view = await drive(t, snapshot => {
+    assert.equal(snapshot.length.targetSeconds, 90);
+    return step({ reply: "A 1:30 revision.", proposals: [{ stage: "Script", text: script(250), rationale: "Shorter.", evidenceIds: [], verify: [] }] });
+  }, 1);
+  assert.equal(view.turn.target, 90);
+  assert.equal((await agent.getAgentConversation(loc, draft)).target, 90);                   // after a reload it is still 90, not 360
+  const m = view.turn.result!.proposals[0].length!;
+  assert.deepEqual([m.targetSeconds, m.estimatedSeconds, m.fit!.state], [90, 100, "match"]);   // 250 spoken words is about 1:40, within 15% of 1:30
+  assert.equal((await settled(t)).rounds.length, 1);                                          // a match needs no correction round
+  assert.deepEqual([(await stageOf()).text, (await stageOf()).targetSeconds], [saved.text, 360]);   // no apply: the saved script is untouched and still labelled 6:00
+  const rec = await latestRecord();
+  await agent.applyAgentProposal(loc, policy.readAgentApplyCommand({ recordId: draft, version: rec.version, turnId: t, index: 0, baseText: rec.payload.script }));
+  assert.equal((await stageOf()).targetSeconds, 90);
+  // Timestamps from the source are not requests.
+  const ts = crypto.randomUUID();
+  await send(ts, "What does he say at 1:30 in the video?");
+  assert.equal((await settled(ts)).target_seconds, 90);                                       // unchanged
+  await drive(ts, () => step({ reply: "Around then he sets the promise." }), 1);
+});
+
+test("one bounded length correction: any miss beyond ±15%, after evidence reads too, keeps the valid first reply as a fallback", async () => {
+  const proposal = (words: number) => step({ reply: "Here it is.", proposals: [{ stage: "Script", text: script(words), rationale: "Six minutes.", evidenceIds: [], verify: [] }] });
+  const tool = (name: string) => step({ step: "tool", reply: null, tool: { name, query: name === "search_source" ? "opening promise" : null, sourceId: null, offset: null, stage: null, skill: null } });
+  const wordsOf = (text: string) => text.replace(/\[[^\]]*\]/g, " ").trim().split(/\s+/).length;
+  // a) 746 words is 17% short of 6:00. It is now corrected once, and the closer version is shown.
+  const a = crypto.randomUUID();
+  await send(a, "Write the script, about 6 minutes");
+  const viewA = await drive(a, snapshot => snapshot.observations.length === 0 ? proposal(746) : (assert.match(snapshot.observations[0].result.note, /746 spoken words \(about 4:58\).*about 6:00 \(837-963 spoken words/), proposal(880)), 2);
+  assert.equal(viewA.turn.status, "done");
+  assert.equal(wordsOf(viewA.turn.result!.proposals[0].text), 880);
+  assert.equal(viewA.turn.result!.proposals[0].length!.fit!.state, "match");
+  assert.match(viewA.turn.activity[0], /Checked the script length: about 4:58 against 6:00 requested\. Asked for a fuller version/);
+  assert.equal((await settled(a)).rounds.length, 2);
+  // b) The correction is no closer: the first version is kept and the audit says so.
+  const b = crypto.randomUUID();
+  await send(b, "Write the script, about 6 minutes again");
+  const viewB = await drive(b, snapshot => snapshot.observations.length === 0 ? proposal(746) : proposal(300), 2);
+  assert.equal(viewB.turn.status, "done");
+  assert.equal(wordsOf(viewB.turn.result!.proposals[0].text), 746);
+  assert.match(viewB.turn.activity.join("|"), /the new version was no closer, so the first version is kept/);
+  assert.equal((await settled(b)).rounds.length, 2);
+  // c) The correction round fails (uncertain): the valid first reply is kept instead of failing the whole message.
+  const c = crypto.randomUUID();
+  await send(c, "Write the script, about 6 minutes once more");
+  await agent.advanceAgentTurn(loc, c);
+  await model(() => proposal(746));
+  await agent.advanceAgentTurn(loc, c);                                                      // revision recorded, round 2 queued
+  const [claim] = await sql(`select studio.studio_text_device_command($1,'substo','claim','{"workerId":"agent-int","limit":1,"leaseSeconds":60,"textReady":true}'::jsonb) as c`, token);
+  const job = claim.c[0];
+  await sql(`select studio.studio_text_device_command($1,'substo','fail',$2::jsonb)`, token, JSON.stringify({ workerId: "agent-int", jobId: job.id, leaseToken: job.lease_token, failure: { code: "text_execution_uncertain", message: "stopped", retryable: false } }));
+  const viewC = await agent.advanceAgentTurn(loc, c);
+  assert.equal(viewC!.turn.status, "done");
+  assert.equal(wordsOf(viewC!.turn.result!.proposals[0].text), 746);
+  assert.match(viewC!.turn.activity.join("|"), /the correction did not complete; kept the first version/);
+  // d) The correction cannot be queued (Mac unavailable): the first reply is kept, never lost.
+  const d = crypto.randomUUID();
+  await send(d, "Write the script, about 6 minutes, last try");
+  await agent.advanceAgentTurn(loc, d);
+  await model(() => proposal(746));
+  await sql(`update studio.studio_devices set processing_enabled=false where created_by=$1`, user);
+  const viewD = await agent.advanceAgentTurn(loc, d);
+  await sql(`update studio.studio_devices set processing_enabled=true where created_by=$1`, user);
+  assert.equal(viewD!.turn.status, "done");
+  assert.match(viewD!.turn.activity.join("|"), /the correction could not be started; kept the first version/);
+  assert.equal(wordsOf(viewD!.turn.result!.proposals[0].text), 746);
+  // e) After two evidence reads the correction still fits in round 4 (which must reply), with both reads kept in context.
+  const e = crypto.randomUUID();
+  await send(e, "Write the script, about 6 minutes, using the findings");
+  const viewE = await drive(e, snapshot => {
+    const n = snapshot.observations.length;
+    if (n === 0) return tool("search_source");
+    if (n === 1) return tool("list_findings");
+    if (n === 2) return proposal(746);
+    assert.equal(snapshot.operation.mustReply, true);
+    assert.equal(snapshot.observations.length, 3);
+    assert.equal(snapshot.observations[0].tool.name, "search_source");
+    assert.equal(snapshot.observations[1].tool.name, "list_findings");
+    assert.equal(snapshot.observations[2].tool, null);
+    assert.ok(Buffer.byteLength(JSON.stringify(snapshot)) < 23000);
+    return proposal(880);
+  }, 4);
+  assert.equal(viewE.turn.status, "done");
+  assert.equal((await settled(e)).rounds.length, 4);                                          // never more than four rounds, one correction
+  assert.equal(wordsOf(viewE.turn.result!.proposals[0].text), 880);
+  assert.equal((await sql(`select count(*)::int as n from studio.studio_idea_reviews where snapshot#>>'{operation,turnId}'=$1`, e))[0].n, 4);
+});

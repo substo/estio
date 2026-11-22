@@ -10,7 +10,7 @@ import { applyStagePatch, expose, loadRecord, loadSource, requireCreationWriter,
 import { stageDraft, type CreationStage, type CreationState } from "./creation-policy";
 import { AGENT_MAX_ROUNDS, isAgentSnapshot, readAgentResult, type AgentApplyCommand, type AgentFinal, type AgentItem, type AgentObservation, type AgentProposal, type AgentSnapshot, type AgentToolCall, type readAgentSendCommand } from "./agent-policy";
 import { runAgentTool } from "./agent-tools";
-import { formatClock, lengthFit, parseDurationRequest, scriptStats, aimWords, type LengthFit } from "./script-length";
+import { SPEAKING_WPM, formatClock, lengthFit, parseDurationRequest, scriptStats, aimWords, type LengthFit } from "./script-length";
 import { agentRoundRequestId } from "./agent-request";
 
 type TurnRow = { id: string; location_id: string; record_id: string; seq: number; message: string; provider: string; status: "running" | "done" | "failed";
@@ -61,7 +61,7 @@ async function views(access: StudioAccess, turns: TurnRow[], pending: Map<string
     const last = turn.rounds.at(-1);
     const run = last ? model.get(last.reviewId) : undefined;
     return { id: turn.id, seq: turn.seq, message: turn.message, provider: turn.provider as AgentTurnView["provider"], status: turn.status, error: turn.error,
-      activity: turn.rounds.filter(r => r.tool || r.observation?.lengthRevision).map(r => r.tool ? describeAgentStep(r.tool, r.observation) : r.observation!.summary ?? "Checked the script length"),
+      activity: turn.rounds.filter(r => r.tool || r.observation?.summary).map(r => r.tool ? describeAgentStep(r.tool, r.observation) : r.observation!.summary!),
       target: turn.target_seconds,
       waiting: turn.status === "running" ? pending.get(turn.id)?.waiting ?? "queued" : null,
       route: run ? `${run.execution_provider === "subscription" ? "Your Mac subscription" : "Location OpenAI key (paid)"} · ${run.model.replace(/^mac_/, "")}` : null,
@@ -164,29 +164,55 @@ async function advanceStep(locationId: string, turnId: string): Promise<AgentTur
     JOIN studio.studio_jobs j ON j.location_id=r.location_id AND j.id=r.job_id
     WHERE r.location_id=${access.locationId} AND r.request_id=${agentRoundRequestId(turn.id, round)}::uuid AND r.created_by_clerk_user_id=${access.userId}`);
   const fail = async (message: string) => done(await failTurn(access, turn.id, message));
+  // At most one length correction per message. If it was sent, the earlier valid reply is kept as the fallback.
+  const revision = turn.rounds.find(r => r.observation?.lengthRevision);
+  const keepOriginal = async (summary: string, atRound: number, reviewId: string) => {
+    try { return await done(await studioDb.call<TurnRow>("studio_agent_keep_original", { p_location: access.locationId, p_app: access.app, p_actor: access.userId,
+      p_turn: turn.id, p_round: atRound, p_review: reviewId, p_summary: summary })); }
+    catch { return fail("The corrected version could not be completed. Nothing was changed; send your message again."); }
+  };
   if (!review) {
     try { await enqueueRound(access, turn, round); } catch (error) {
+      if (revision) return keepOriginal("Asked once for a closer length, but the correction could not be started; kept the first version", round, revision.reviewId);
       return fail(error instanceof StudioCommandError ? error.message : "The next step could not be queued. Nothing was changed; send your message again.");
     }
     return done(turn, "queued");
   }
   if (review.result === null) {
-    if (["failed", "cancelled", "dead"].includes(review.status)) return fail(review.error?.trim().slice(0, 280) || "The model run stopped before answering. Nothing was changed. Send your message again if you still want it.");
+    if (["failed", "cancelled", "dead"].includes(review.status)) {
+      if (revision) return keepOriginal("Asked once for a closer length, but the correction did not complete; kept the first version", round, revision.reviewId);
+      return fail(review.error?.trim().slice(0, 280) || "The model run stopped before answering. Nothing was changed. Send your message again if you still want it.");
+    }
     return done(turn, review.status === "running" ? "running" : "queued");
   }
-  if (!isAgentSnapshot(review.snapshot)) return fail("The assistant result could not be read. Nothing was changed.");
+  if (!isAgentSnapshot(review.snapshot)) return revision ? keepOriginal("The correction could not be read; kept the first version", round, revision.reviewId) : fail("The assistant result could not be read. Nothing was changed.");
   let step;
-  try { step = readAgentResult(review.result, review.snapshot as AgentSnapshot, review.prompt_version); } catch { return fail("The assistant returned an unreadable result. Nothing was changed."); }
+  try { step = readAgentResult(review.result, review.snapshot as AgentSnapshot, review.prompt_version); }
+  catch { return revision ? keepOriginal("The correction could not be read; kept the first version", round, revision.reviewId) : fail("The assistant returned an unreadable result. Nothing was changed."); }
+  const gap = (text: string | undefined) => text && turn.target_seconds ? Math.abs(scriptStats(text).seconds / turn.target_seconds - 1) : null;
   let observation: AgentObservation | null = null;
-  if (step.step === "reply" && turn.target_seconds && turn.rounds.length <= 1 && !turn.rounds.some(r => r.observation?.lengthRevision)) {
-    // One bounded revision: a Script that misses the request by a meaningful margin is measured and sent back, never shown as a pass.
+  if (step.step === "reply" && revision) {
+    // The correction is accepted only when its Script is closer to the request than the first version; otherwise the first is kept.
+    const originalRun = await studioDb.one<{ result: unknown; snapshot: unknown; prompt_version: string }>(Prisma.sql`
+      SELECT result,snapshot,prompt_version FROM studio.studio_idea_reviews WHERE id=${revision.reviewId}::uuid AND location_id=${access.locationId}`);
+    let before: number | null = null;
+    try {
+      const first = originalRun && isAgentSnapshot(originalRun.snapshot) ? readAgentResult(originalRun.result, originalRun.snapshot as AgentSnapshot, originalRun.prompt_version) : null;
+      before = first && first.step === "reply" ? gap(first.proposals.find(p => p.stage === "Script")?.text) : null;
+    } catch { before = null; }
+    const after = gap(step.proposals.find(p => p.stage === "Script")?.text);
+    if (before !== null && (after === null || after >= before)) return keepOriginal("Asked once for a closer length; the new version was no closer, so the first version is kept", round, revision.reviewId);
+  }
+  if (step.step === "reply" && turn.target_seconds && round <= 3 && !revision) {
+    // One bounded correction: a Script outside the +/-15% range is measured and sent back once, never shown as a pass. Up to round 3, so the
+    // corrected reply still has a round of its own (the last round must reply).
     const script = step.proposals.find(p => p.stage === "Script");
     const stats = script && scriptStats(script.text), fit = stats && lengthFit(turn.target_seconds, stats.seconds);
-    if (script && stats && fit?.meaningful && !fit.beyondSupported) {
+    if (script && stats && fit && fit.state !== "match" && !fit.beyondSupported) {
       const range = aimWords(turn.target_seconds);
       observation = { items: [], untrusted: true, lengthRevision: true,
         summary: `Checked the script length: about ${formatClock(stats.seconds)} against ${formatClock(turn.target_seconds)} requested. Asked for a ${fit.state === "short" ? "fuller" : "tighter"} version`,
-        note: `Length check by the server: your Script has ${stats.spokenWords} spoken words (about ${formatClock(stats.seconds)}) but the owner asked for about ${formatClock(turn.target_seconds)} (${range.min}-${range.max} spoken words at ${150} words per minute). Return the Script again with ${range.min}-${range.max} spoken words. ${fit.state === "short" ? "Add substance from the draft, the decisions and the evidence, not filler." : "Tighten without cutting the promise or the payoff."} Bracketed cues are not counted.` };
+        note: `Length check by the server: your Script has ${stats.spokenWords} spoken words (about ${formatClock(stats.seconds)}) but the owner asked for about ${formatClock(turn.target_seconds)} (${range.min}-${range.max} spoken words at ${SPEAKING_WPM} words per minute). Return the Script again with ${range.min}-${range.max} spoken words. ${fit.state === "short" ? "Add substance from the draft, the decisions and the evidence, not filler." : "Tighten without cutting the promise or the payoff."} Bracketed cues are not counted.` };
     }
   }
   if (step.step === "tool") {
@@ -201,6 +227,8 @@ async function advanceStep(locationId: string, turnId: string): Promise<AgentTur
     p_turn: turn.id, p_round: round, p_review: review.id, p_observation: observation });
   if (recorded.status === "running" && recorded.rounds.length < AGENT_MAX_ROUNDS) {
     try { await enqueueRound(access, recorded, recorded.rounds.length + 1); } catch (error) {
+      // A correction that cannot be queued (for example the snapshot would exceed its bound) must not lose the valid first reply.
+      if (observation?.lengthRevision) return keepOriginal("Asked once for a closer length, but the correction could not be started; kept the first version", recorded.rounds.length + 1, review.id);
       return fail(error instanceof StudioCommandError ? error.message : "The next step could not be queued. Nothing was changed; send your message again.");
     }
   }

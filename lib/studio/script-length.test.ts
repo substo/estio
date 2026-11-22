@@ -31,3 +31,33 @@ test("only spoken copy counts; cues are separate; fit never calls a mismatch a p
   assert.equal(formatClock(90), "1:30");
   assert.equal(MAX_SINGLE_SCRIPT_SECONDS, 480);
 });
+
+test("m:ss runtimes: requested in context, never source timestamps, clock times or ratios; the latest explicit request wins", () => {
+  const sec = (text: string) => { const r = parseDurationRequest(text); return r?.kind === "set" ? r.seconds : r; };
+  // Requests
+  assert.equal(sec("give me a 1:30 revision"), 90);
+  assert.equal(sec("after a 6-minute script, make the revision 1:30"), 90);
+  assert.equal(sec("Actually make it 1:30"), 90);
+  assert.equal(sec("No, I asked for 1:30, not 6 minutes"), 90);
+  assert.equal(sec("bring it down to 2:15"), 135);
+  assert.equal(sec("I want a 3:00 video"), 180);
+  assert.equal(sec("a 1:30 cut please"), 90);
+  assert.equal(sec("make it 6 minutes, actually 1:30"), 90);                          // the later correction wins
+  assert.equal(sec("make it 1:30, no wait, 2 minutes"), 120);
+  // Not requests: source timestamps, clock times, ratios, invalid seconds
+  assert.equal(sec("what does he say at 1:30?"), null);
+  assert.equal(sec("use the quote from 1:30 to 2:10 in the hook"), null);
+  assert.equal(sec("around 1:30 he explains the promise"), null);
+  assert.equal(sec("the part at 1:30 in the video is great"), null);
+  assert.equal(sec("book the shoot at 3:30 pm"), null);
+  assert.equal(sec("tomorrow at 10:30"), null);
+  assert.equal(sec("use a 16:09 ratio"), null);
+  assert.equal(sec("make it 1:75"), null);                                           // seconds must be 00-59
+  assert.equal(sec("watch from 1:02:30"), null);                                      // h:mm:ss is a timestamp
+  assert.equal(sec("make it 0:05"), null);                                            // below the supported minimum
+  // Earlier formats and descriptive durations
+  assert.equal(sec("after a 6-minute script, thanks"), 360);                          // a sole duration is still a request
+  assert.equal(sec("the earlier 6 minute script was great, now do 90 seconds"), 90);
+  assert.equal(sec("Make it about 90 seconds"), 90);
+  assert.equal(sec("a 3–4 minute video"), 210);
+});

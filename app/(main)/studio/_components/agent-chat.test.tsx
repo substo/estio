@@ -68,3 +68,23 @@ test("a fresh entry offers Resume versus Start new inline, without attaching to 
   assert.ok(!/already started a draft/.test(resumed));
   assert.match(resumed, /Start a new draft/);
 });
+
+test("a proposal for an existing Script says it replaces it (undoable); long quotes preview on whole words with the full quote one click away", () => {
+  const long = "The opening sets the promise for the viewer and then every later moment pays that promise off before the practice section begins, which is why the structure works for first-time creators making their own videos and measuring what holds attention across both openings.";
+  const withScript: CreationRecord = { ...record, state: { ...record.state, stages: { ...record.state.stages, Script: { text: "Saved six minute script", approved: true, shortlist: [], targetSeconds: 360 } } } };
+  const turn: AgentTurnView = { ...done, result: { ...done.result!, proposals: [{ stage: "Script", text: "A different script", rationale: "r", verify: [], evidenceIds: ["f:1"],
+    evidence: [{ id: "f:1", label: "L", quote: long, sourceId: "s1", at: 42 }] }] } };
+  const html = render([turn], [], {}, withScript);
+  assert.match(html, />Replace saved Script</);
+  assert.match(html, /This replaces your saved Script\. <strong>Undo last change<\/strong>/);
+  assert.ok(!/>Use as Script</.test(html));
+  assert.match(html, /Show full quote/);
+  assert.ok(html.includes(`“${long}”`), "the full saved quote is present unaltered");
+  const preview = /“([^“”]*…)”/.exec(html)![1];
+  assert.ok(long.startsWith(preview.slice(0, -1)), "the preview is an exact prefix");
+  assert.ok(/\s/.test(long[preview.length - 1] ?? " ") || long[preview.length - 1] === undefined || /\W/.test(long[preview.length - 1]), "the preview ends before a word boundary, not inside a word");
+  // No saved Script: the plain wording, no replace warning.
+  const plain = render([turn], [], {}, record);
+  assert.match(plain, />Use as Script</);
+  assert.ok(!/This replaces your saved Script/.test(plain));
+});

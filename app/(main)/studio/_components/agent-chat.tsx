@@ -14,6 +14,8 @@ import { useAgentDraft } from "./agent-workspace";
 import { useDictation } from "./use-dictation";
 
 const API = "/studio/assistant/agent/api";
+/** A preview of a saved quote that ends on a whole word; the full, unaltered quote stays available beside it. */
+const quotePreview = (quote: string) => { const cut = quote.slice(0, 220), space = cut.lastIndexOf(" "); return `${(space > 150 ? cut.slice(0, space) : cut).trimEnd()}…`; };
 const clock = (seconds: number) => new Date(seconds * 1000).toISOString().slice(seconds >= 3600 ? 11 : 14, 19);
 export type AgentSource = { id: string; version: number; title: string; hasText: boolean };
 export type AgentResume = { id: string; title: string; turns: number; updatedAt: string; href: string };
@@ -153,7 +155,9 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
         {turn.result ? <div className="mr-6 space-y-3 rounded-lg bg-muted p-3">
           <p className="whitespace-pre-wrap break-words">{turn.result.reply}</p>
           {turn.result.proposals.map((proposal, index) => {
-            const inDraft = record ? stageDraft(record.state, proposal.stage).text === proposal.text : false;
+            const savedText = record ? stageDraft(record.state, proposal.stage).text : "";
+            const inDraft = savedText === proposal.text && Boolean(savedText);
+            const replaces = proposal.stage === "Script" && savedText.trim().length > 0 && !inDraft;
             return <div key={index} className="space-y-2 rounded-md border bg-background p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Proposed {proposal.stage}</p>
               <p className="whitespace-pre-wrap break-words text-sm">{proposal.text}</p>
@@ -166,10 +170,11 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
                   onClick={() => void send(`${proposal.length!.fit!.state === "short" ? "Expand" : "Tighten"} the script to about ${proposal.length!.targetSeconds! <= 180 ? `${proposal.length!.targetSeconds} seconds` : `${Math.round(proposal.length!.targetSeconds! / 6) / 10} minutes`}`)}>{proposal.length.fit.state === "short" ? "Expand it" : "Tighten it"} to about {formatClock(proposal.length.targetSeconds)}</Button> : null}
               </div> : null}
               {proposal.evidence.length ? <ul className="space-y-1 border-l-2 pl-3 text-xs text-muted-foreground">{proposal.evidence.map(item => <li key={item.id}>
-                {item.quote.length > 220 ? <details className="inline"><summary className="inline cursor-pointer">“{item.quote.slice(0, 217)}…”</summary><span className="block whitespace-pre-wrap">“{item.quote}”</span></details> : <>“{item.quote}”</>}{item.at != null ? <span className="ml-1 tabular-nums">· {clock(item.at)}</span> : null}
+                {item.quote.length > 220 ? <>“{quotePreview(item.quote)}” <details className="mt-0.5"><summary className="cursor-pointer text-primary">Show full quote</summary><span className="mt-1 block whitespace-pre-wrap">“{item.quote}”</span></details></> : <>“{item.quote}”</>}{item.at != null ? <span className="ml-1 tabular-nums">· {clock(item.at)}</span> : null}
                 {item.sourceId ? <Link href={`/studio/library/${item.sourceId}`} className="ml-2 inline-flex items-center gap-0.5 text-primary hover:underline">Source<ExternalLink aria-hidden="true" className="h-3 w-3" /></Link> : null}</li>)}</ul> : null}
               {proposal.verify.length ? <ul className="list-disc space-y-0.5 pl-5 text-xs text-amber-700 dark:text-amber-400">{proposal.verify.map((item, i) => <li key={i}>Check before filming: {item}</li>)}</ul> : null}
-              <Button type="button" className="min-h-10" disabled={inDraft || applying === `${turn.id}:${index}`} onClick={() => void use(turn, index)}>{inDraft ? "In your draft" : `Use as ${proposal.stage}`}</Button>
+              {replaces ? <p className="text-xs text-muted-foreground">This replaces your saved {proposal.stage}. <strong>Undo last change</strong> in the Draft panel restores it.</p> : null}
+              <Button type="button" className="min-h-10" disabled={inDraft || applying === `${turn.id}:${index}`} onClick={() => void use(turn, index)}>{inDraft ? "In your draft" : replaces ? `Replace saved ${proposal.stage}` : `Use as ${proposal.stage}`}</Button>
             </div>;
           })}
           {turn.result.decisions.length ? <p className="text-xs text-muted-foreground">Noted: {turn.result.decisions.map(d => `${d.key} — ${d.value}`).join("; ")}</p> : null}
