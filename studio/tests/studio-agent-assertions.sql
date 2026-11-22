@@ -118,4 +118,17 @@ BEGIN
     'ideas',jsonb_build_array(jsonb_build_object('id',pinned,'version',(pinned_saved->>'version')::bigint,'agent',jsonb_build_object('turnId',(SELECT id FROM studio.studio_agent_turns WHERE record_id=pinned),'round',1)))));
   SELECT r.snapshot INTO snapshot FROM studio.studio_idea_reviews r WHERE id=(queued->>'reviewId')::uuid;
   IF snapshot#>>'{template,name}'<>'Promise then payoff' OR snapshot#>>'{template,beats,0,name}'<>'Promise' THEN RAISE EXCEPTION 'Pinned template missing from agent snapshot: %',snapshot; END IF;
+  -- The creative-priority contract (3) is stamped only when the account's agent-capable Mac is not stuck on 2, and pins to version 3.
+  IF snapshot ? 'contract' THEN RAISE EXCEPTION 'Contract 3 stamped while the only Mac reports 2'; END IF;
+  IF studio.studio_pick_text_device(loc,'substo',actor,'script_brief','{}','{"mode":"studio_agent","scriptLimits":{},"contract":3}'::jsonb,'codex',device) IS NOT NULL THEN
+    RAISE EXCEPTION 'A version-2 companion received a contract-3 round';
+  END IF;
+  UPDATE studio.studio_devices SET report=report||'{"studioAgentVersion":3}' WHERE id=device;
+  snapshot:=studio.studio_build_selected_text_snapshot(loc,jsonb_build_array(jsonb_build_object('id',pinned,'version',(pinned_saved->>'version')::bigint,
+    'agent',jsonb_build_object('turnId',(SELECT id FROM studio.studio_agent_turns WHERE record_id=pinned),'round',1))),'','script_brief');
+  IF snapshot->>'contract'<>'3' OR snapshot#>>'{length}' IS NOT NULL THEN RAISE EXCEPTION 'Contract 3 not stamped for a version-3 Mac: %',snapshot; END IF;
+  IF studio.studio_pick_text_device(loc,'substo',actor,'script_brief','{}','{"mode":"studio_agent","scriptLimits":{},"contract":3}'::jsonb,'codex',device) IS NULL
+    OR studio.studio_pick_text_device(loc,'substo',actor,'script_brief','{}','{"mode":"studio_agent"}'::jsonb,'codex',device) IS NULL THEN
+    RAISE EXCEPTION 'A version-3 companion must run contract-3 and stored v1 rounds';
+  END IF;
 END $$;

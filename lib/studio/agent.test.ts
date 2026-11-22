@@ -63,7 +63,8 @@ import { scriptBriefSpecFor } from "./worker/script-brief";
 import { agentRoundRequestId } from "./agent-request";
 test("agent rounds coexist with older snapshots, carry the runtime guide and have stable request ids", () => {
   assert.equal(scriptBriefSpecFor({ mode: "studio_agent" }).promptVersion, "studio.agent.v1");               // no scriptLimits: stored under the first contract
-  assert.equal(scriptBriefSpecFor({ mode: "studio_agent", scriptLimits: {} }).promptVersion, "studio.agent.v2");
+  assert.equal(scriptBriefSpecFor({ mode: "studio_agent", scriptLimits: {} }).promptVersion, "studio.agent.v2");   // duration contract without the v3 flag
+  assert.equal(scriptBriefSpecFor({ mode: "studio_agent", scriptLimits: {}, contract: 3 }).promptVersion, "studio.agent.v3");
   assert.equal(scriptBriefSpecFor({ mode: "staged_creation" }).promptVersion, "studio.creation.v1");
   assert.equal(scriptBriefSpecFor({ ideas: [] }).promptVersion, "studio.script-brief.v2");
   assert.match(aiWorkflowInstructions("studio_agent"), /no browsing, video watching, shell/);
@@ -100,6 +101,9 @@ test("long scripts are accepted up to the documented cap, one per reply, and the
   assert.match(agentInstructions, /150 words per minute/);
   assert.match(agentInstructions, /1200 spoken words \(8 minutes\) and 9000 characters/);
   assert.match(agentInstructions, /no destructive tool/);
+  assert.match(agentInstructions, /CREATIVE PRIORITY/);
+  assert.match(agentInstructions, /EVIDENCE: cite an observation item only when its text itself states the claim/);
+  assert.match(agentInstructions, /near snapshot\.length\.targetWords \(the middle of the band\)/);
   assert.match(agentInstructions, /Part 1 of N/);
   assert.ok(!/\$\{/.test(agentInstructions), "no unexpanded template placeholders");
 });

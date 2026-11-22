@@ -22,6 +22,9 @@ export function scriptStats(text: string) {
   return { spokenWords: spoken, cueWords, seconds: Math.round(spoken / SPEAKING_WPM * 60) };
 }
 export const targetWords = (seconds: number) => ({ target: Math.round(seconds / 60 * SPEAKING_WPM), min: Math.round(seconds / 60 * SPEAKING_WPM * (1 - FIT_TOLERANCE)), max: Math.round(seconds / 60 * SPEAKING_WPM * (1 + FIT_TOLERANCE)) });
+/** The band the model is asked to land in: ±7% around the middle, so an answer near its lower edge is still inside the ±15% acceptance range. */
+export const AIM_TOLERANCE = 0.07;
+export const aimWords = (seconds: number) => ({ target: Math.round(seconds / 60 * SPEAKING_WPM), min: Math.round(seconds / 60 * SPEAKING_WPM * (1 - AIM_TOLERANCE)), max: Math.round(seconds / 60 * SPEAKING_WPM * (1 + AIM_TOLERANCE)) });
 export function formatClock(seconds: number) {
   const s = Math.max(0, Math.round(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;

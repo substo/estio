@@ -188,7 +188,7 @@ export async function executeCreationCommand(locationId: string, command: Creati
   function update(text: string, approved: boolean) {
     if (text === current.text && approved === current.approved) return;
     if (text.length > stageTextLimit(stage)) throw new StudioCommandError(`Shorten this stage to ${stageTextLimit(stage)} characters before saving.`);
-    next = { ...current, text, approved, previous: { text: current.text, approved: current.approved } };
+    next = { ...current, text, approved, previous: { text: current.text, approved: current.approved, ...(current.targetSeconds ? { targetSeconds: current.targetSeconds } : {}) } };
   }
   if (command.action === "save" || command.action === "use") {
     update(command.text, command.action === "use");
@@ -208,11 +208,11 @@ export async function executeCreationCommand(locationId: string, command: Creati
   } else if (command.action === "clear") {
     if (!current.text.trim()) throw new StudioCommandError(`This ${stage} is already empty.`, 409);
     // Kept as the stage's previous value, so the existing Undo restores it; the canonical script field is emptied with it.
-    next = { text: "", approved: false, shortlist: current.shortlist, previous: { text: current.text, approved: current.approved } };
+    next = { text: "", approved: false, shortlist: current.shortlist, previous: { text: current.text, approved: current.approved, ...(current.targetSeconds ? { targetSeconds: current.targetSeconds } : {}) } };
     note = `Removed the saved ${stage}. Undo restores it.`;
   } else if (command.action === "undo") {
     if (!current.previous) throw new StudioCommandError("No stage edit to undo.");
-    next = { text: current.previous.text, approved: current.previous.approved, shortlist: current.shortlist };
+    next = { text: current.previous.text, approved: current.previous.approved, shortlist: current.shortlist, ...(current.previous.targetSeconds ? { targetSeconds: current.previous.targetSeconds } : {}) };
     note = "Undid the last edit to this stage.";
   } else {
     const run = await loadRun(access, command.reviewId);

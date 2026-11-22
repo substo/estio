@@ -17,7 +17,9 @@ export type LinkedDraft = { id: string; version: number; title: string };
 export type DraftContextChoice = Pick<LinkedDraft, "id" | "version"> & { purpose: "compare" | "revise" };
 export type NextRunContext = { includeReferences: boolean; linkedDraft: DraftContextChoice | null };
 export type Selection = { start: number; end: number; text: string };
-export type StageDraft = { text: string; approved: boolean; shortlist: string[]; previous?: { text: string; approved: boolean } };
+/** `targetSeconds` is the approximate runtime the owner had requested when this text was generated and applied (immutable provenance,
+ * carried through manual edits, restored by Undo). Absent on text that was written before targets existed or without one. */
+export type StageDraft = { text: string; approved: boolean; shortlist: string[]; targetSeconds?: number; previous?: { text: string; approved: boolean; targetSeconds?: number } };
 export type CreationState = {
   schema: 1; brief: string; direction: ConfirmedDirection; source: CreationSource | null;
   stages: Partial<Record<CreationStage, StageDraft>>;

@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Check, ListChecks, Trash2, Undo2 } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -12,22 +12,26 @@ type Draft = { recordId: string; record: CreationRecord | null; setRecord: (reco
 const Context = createContext<Draft | null>(null);
 /** Shares the saved draft and the persisted work plan between the chat and the draft panel. */
 export function AgentDraftProvider({ recordId, sessionKey, initialRecord, initialPlan, initialTarget = null, children }: { recordId: string | null; sessionKey: string; initialRecord: CreationRecord | null; initialPlan: string[]; initialTarget?: number | null; children: React.ReactNode }) {
-  const [record, setRecord] = useState(initialRecord);
-  const [target, setTarget] = useState(initialTarget);
-  const [plan, setPlan] = useState(initialPlan);
-  // A fresh conversation gets one browser-held draft id for the whole session; it only changes when the session does.
-  const [generated, setGenerated] = useState(() => crypto.randomUUID());
-  const lastSession = useRef(sessionKey);
+  type Session = { key: string; record: CreationRecord | null; plan: string[]; target: number | null; generated: string };
+  const fresh = (): Session => ({ key: sessionKey, record: initialRecord, plan: initialPlan, target: initialTarget, generated: crypto.randomUUID() });
+  const [state, setState] = useState<Session>(fresh);
+  // The session identity is applied during render, before any child sees it: a chat remounted for a new session must start from that
+  // session's record and draft id, never the previous conversation's (an effect would run after the child's first render).
+  let session = state;
+  if (state.key !== sessionKey) { session = fresh(); setState(session); }
   const planKey = initialPlan.join("\n");
   useEffect(() => {
-    if (lastSession.current !== sessionKey) { lastSession.current = sessionKey; setGenerated(crypto.randomUUID()); setRecord(initialRecord); setPlan(initialPlan); setTarget(initialTarget); return; }
     // Same session: adopt newer server state (for example after a refresh) but never reset to older state.
-    setRecord(current => !initialRecord ? current : !current || initialRecord.id !== current.id || initialRecord.version > current.version ? initialRecord : current);
-    setPlan(current => planKey && planKey !== current.join("\n") ? initialPlan : current);
+    setState(current => current.key !== sessionKey ? current : { ...current,
+      record: !initialRecord ? current.record : !current.record || initialRecord.id !== current.record.id || initialRecord.version > current.record.version ? initialRecord : current.record,
+      plan: planKey && planKey !== current.plan.join("\n") ? initialPlan : current.plan });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionKey, initialRecord?.id, initialRecord?.version, planKey]);
-  const id = recordId ?? generated;
-  const value = useMemo(() => ({ recordId: id, record, setRecord, plan, setPlan, target, setTarget }), [id, record, plan, target]);
+  const setRecord = useCallback((record: CreationRecord) => setState(current => ({ ...current, record })), []);
+  const setPlan = useCallback((plan: string[]) => setState(current => ({ ...current, plan })), []);
+  const setTarget = useCallback((target: number | null) => setState(current => ({ ...current, target })), []);
+  const id = recordId ?? session.generated;
+  const value = useMemo(() => ({ recordId: id, record: session.record, setRecord, plan: session.plan, setPlan, target: session.target, setTarget }), [id, session, setRecord, setPlan, setTarget]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 export function useAgentDraft() {
@@ -38,7 +42,7 @@ export function useAgentDraft() {
 
 /** What the conversation has produced so far. Every change here was an explicit owner choice; nothing is a required step. */
 export function DraftPanel() {
-  const { recordId, record, setRecord, plan, target } = useAgentDraft();
+  const { recordId, record, setRecord, plan } = useAgentDraft();
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
   const [editing, setEditing] = useState<CreationStage | null>(null);
   const [text, setText] = useState("");
@@ -92,7 +96,7 @@ export function DraftPanel() {
               </div>
             </div>
             : <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{draft.text}</p>}
-          {stage === "Script" ? <ScriptMeasure text={draft.text} target={target} /> : null}
+          {stage === "Script" ? <ScriptMeasure text={draft.text} target={draft.targetSeconds ?? null} /> : null}
           {editing !== stage ? <div className="flex flex-wrap gap-2">
             <Button type="button" variant="ghost" className="min-h-9 px-2 text-xs" onClick={() => { setEditing(stage); setText(draft.text); }}>Edit</Button>
             {draft.previous ? <Button type="button" variant="ghost" className="min-h-9 px-2 text-xs" disabled={busy} onClick={() => void command({ action: "undo", stage })}><Undo2 aria-hidden="true" className="mr-1 h-3.5 w-3.5" />Undo last change</Button> : null}
@@ -117,7 +121,7 @@ function ScriptMeasure({ text, target }: { text: string; target: number | null }
   const fit = target ? lengthFit(target, stats.seconds) : null;
   return <p className="text-xs text-muted-foreground" data-script-measure>
     About {formatClock(stats.seconds)} spoken · {stats.spokenWords} spoken words{stats.cueWords ? ` (+${stats.cueWords} cue words not counted)` : ""}
-    {target ? <> · requested about {formatClock(target)} ({targetWords(target).min}–{targetWords(target).max} words)</> : null}
+    {target ? <> · requested when written: about {formatClock(target)} ({targetWords(target).min}–{targetWords(target).max} words)</> : null}
     {fit ? <span className={fit.state === "match" ? " font-medium text-emerald-700" : " font-medium text-amber-700"}> · {fit.state === "match" ? "close to the request" : `${fit.percent}% ${fit.state}${fit.meaningful ? " — ask the assistant to " + (fit.state === "short" ? "expand" : "tighten") + " it" : ""}`}</span> : null}
   </p>;
 }

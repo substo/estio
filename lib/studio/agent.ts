@@ -10,7 +10,7 @@ import { applyStagePatch, expose, loadRecord, loadSource, requireCreationWriter,
 import { stageDraft, type CreationStage, type CreationState } from "./creation-policy";
 import { AGENT_MAX_ROUNDS, isAgentSnapshot, readAgentResult, type AgentApplyCommand, type AgentFinal, type AgentItem, type AgentObservation, type AgentProposal, type AgentSnapshot, type AgentToolCall, type readAgentSendCommand } from "./agent-policy";
 import { runAgentTool } from "./agent-tools";
-import { formatClock, lengthFit, parseDurationRequest, scriptStats, targetWords, type LengthFit } from "./script-length";
+import { formatClock, lengthFit, parseDurationRequest, scriptStats, aimWords, type LengthFit } from "./script-length";
 import { agentRoundRequestId } from "./agent-request";
 
 type TurnRow = { id: string; location_id: string; record_id: string; seq: number; message: string; provider: string; status: "running" | "done" | "failed";
@@ -183,7 +183,7 @@ async function advanceStep(locationId: string, turnId: string): Promise<AgentTur
     const script = step.proposals.find(p => p.stage === "Script");
     const stats = script && scriptStats(script.text), fit = stats && lengthFit(turn.target_seconds, stats.seconds);
     if (script && stats && fit?.meaningful && !fit.beyondSupported) {
-      const range = targetWords(turn.target_seconds);
+      const range = aimWords(turn.target_seconds);
       observation = { items: [], untrusted: true, lengthRevision: true,
         summary: `Checked the script length: about ${formatClock(stats.seconds)} against ${formatClock(turn.target_seconds)} requested. Asked for a ${fit.state === "short" ? "fuller" : "tighter"} version`,
         note: `Length check by the server: your Script has ${stats.spokenWords} spoken words (about ${formatClock(stats.seconds)}) but the owner asked for about ${formatClock(turn.target_seconds)} (${range.min}-${range.max} spoken words at ${150} words per minute). Return the Script again with ${range.min}-${range.max} spoken words. ${fit.state === "short" ? "Add substance from the draft, the decisions and the evidence, not filler." : "Tighten without cutting the promise or the payoff."} Bracketed cues are not counted.` };
@@ -219,7 +219,11 @@ export async function applyAgentProposal(locationId: string, command: AgentApply
   const { state } = expose(row);
   const current = stageDraft(state, proposal.stage);
   if (current.text !== command.baseText) throw new StudioCommandError(`The ${proposal.stage} changed since this proposal. Ask for a fresh one.`, 409);
-  const next = { ...current, text: proposal.text, approved: true, previous: { text: current.text, approved: current.approved } };
+  // The request that produced this text travels with it, so a later ask never relabels a saved script. Only Script carries a runtime.
+  const requested = proposal.stage === "Script" && turn.target_seconds ? turn.target_seconds : undefined;
+  const { targetSeconds: _drop, ...rest } = current;
+  const next = { ...rest, text: proposal.text, approved: true, ...(requested ? { targetSeconds: requested } : {}),
+    previous: { text: current.text, approved: current.approved, ...(current.targetSeconds ? { targetSeconds: current.targetSeconds } : {}) } };
   state.stages = { ...state.stages, [proposal.stage]: next };
   state.history = [{ stage: proposal.stage, note: `Used a proposal from the conversation: ${proposal.rationale}`.slice(0, 400), at: new Date().toISOString() }, ...state.history].slice(0, 40);
   const patch: Record<string, unknown> = { creation: state };
@@ -246,7 +250,14 @@ export async function latestSourceDraft(locationId: string, sourceId: string) {
         AND t.actor_app=${access.app} AND t.created_by_clerk_user_id=${access.userId} AND t.status='done') AS turns
     FROM studio.studio_records c JOIN studio.studio_record_links l ON l.location_id=c.location_id AND l.source_id=c.id
     WHERE c.location_id=${access.locationId} AND c.kind='content' AND NOT c.archived AND c.payload#>>'{creation,schema}'='1'
-      AND l.target_id=${sourceId}::uuid ORDER BY c.updated_at DESC,c.id LIMIT 1`);
+      AND l.target_id=${sourceId}::uuid
+    -- Prefer a draft with real work (a saved stage or script, or a completed exchange of this account); a draft that only has failed
+    -- or empty attempts is offered only when nothing better exists. The other drafts stay reachable from the source's Script tab.
+    ORDER BY (EXISTS(SELECT 1 FROM studio.studio_agent_turns t WHERE t.location_id=c.location_id AND t.record_id=c.id
+        AND t.actor_app=${access.app} AND t.created_by_clerk_user_id=${access.userId} AND t.status='done')
+      OR EXISTS(SELECT 1 FROM jsonb_each(coalesce(c.payload#>'{creation,stages}','{}'::jsonb)) st WHERE nullif(btrim(st.value->>'text'),'') IS NOT NULL)
+      OR nullif(btrim(c.payload->>'script'),'') IS NOT NULL) DESC,
+      c.updated_at DESC,c.id LIMIT 1`);
   return row ? { id: row.id, title: row.title, turns: row.turns, updatedAt: new Date(row.updated_at).toISOString() } : null;
 }
 

@@ -65,7 +65,7 @@ before(async () => {
       perform studio.studio_device_pairing_action(w,'substo',actor,'approve',code,gen_random_uuid());
       r:=studio.studio_device_pair_poll('substo',(r->>'pairingId')::uuid,h,hash);d:=(r->>'deviceId')::uuid;
       update studio.studio_devices set processing_enabled=true,desired_config='{"features":{"text":true},"textProvider":"codex","textModel":null}',config_version=2,applied_config_version=2,config_status='applied',seen_at=clock_timestamp(),
-        report='{"handlers":["studio.text_run"],"studioAgentVersion":2,"codex":{"ready":true,"authenticated":true,"loginMethod":"chatgpt"},"capacity":{"codex":true}}' where id=d; return d; end $$`);
+        report='{"handlers":["studio.text_run"],"studioAgentVersion":3,"codex":{"ready":true,"authenticated":true,"loginMethod":"chatgpt"},"capacity":{"codex":true}}' where id=d; return d; end $$`);
   await sql(`select public.test_pair_device($1,$2,'AGENTBBB',$3)`, loc, user, token);
   await db.call("studio_create_substo_location", { p_location_id: "e1a90000-0000-4000-8000-000000000002", p_name: "Agent other", p_clerk_user_id: "other-user" });
   agent = await import("./agent");
@@ -79,6 +79,7 @@ test("source entry → real saved-source read → reply → reload → out-of-or
   assert.equal(started.recordId, draft);
   assert.deepEqual(Object.keys((await sql(`select payload->'creation'->'direction' as d from studio.studio_records where id=$1::uuid`, draft))[0].d).sort(), ["angle", "choice", "goal", "publisher", "rationale", "viewer"]);
   assert.equal((await sql(`select payload#>>'{creation,direction,goal}' as g from studio.studio_records where id=$1::uuid`, draft))[0].g, "");
+  assert.equal((await sql(`select prompt_version from studio.studio_idea_reviews where snapshot#>>'{operation,turnId}'=$1 order by created_at limit 1`, t1))[0].prompt_version, "studio.agent.v3");   // a version-3 Mac gets the current contract
   await assert.rejects(send(crypto.randomUUID(), "second while running"), /still answering/);
 
   // 2. The model chooses a tool; the server reads the SAVED transcript and the model then answers citing what it read.
@@ -172,7 +173,8 @@ test("the duration target comes from the owner's words, persists across reload, 
   await send(t1, "Let's make it about 90 seconds");
   assert.equal((await settled(t1)).target_seconds, 90);
   const first = await drive(t1, snapshot => {
-    assert.deepEqual(snapshot.length, { targetSeconds: 90, targetWords: 225, minWords: 191, maxWords: 259, beyondSupported: false });
+    assert.deepEqual(snapshot.length, { targetSeconds: 90, targetWords: 225, minWords: 209, maxWords: 241, beyondSupported: false });   // the band is centred: the model aims at the middle
+    assert.equal(snapshot.contract, 3);
     assert.deepEqual(snapshot.scriptLimits, { maxWords: 1200, maxChars: 9000, maxSeconds: 480, wordsPerMinute: 150 });
     return step({ reply: "Noted, I'll aim for about a minute and a half." });
   }, 1);
@@ -238,7 +240,7 @@ test("a reply that meaningfully misses the requested length is measured and sent
   await send(t, "Make it about 60 seconds");
   const view = await drive(t, snapshot => {
     if (snapshot.observations.length === 0) return step({ reply: "Here you go.", proposals: [{ stage: "Script", text: script(400), rationale: "A script.", evidenceIds: [], verify: [] }] });
-    assert.match(snapshot.observations[0].result.note, /400 spoken words \(about 2:40\).*about 1:00 \(128-173 spoken words/);
+    assert.match(snapshot.observations[0].result.note, /400 spoken words \(about 2:40\).*about 1:00 \(140-161 spoken words/);
     assert.equal(snapshot.observations[0].tool, null);
     return step({ reply: "Tightened.", proposals: [{ stage: "Script", text: script(150), rationale: "Fits.", evidenceIds: [], verify: [] }] });
   }, 2);
@@ -322,4 +324,78 @@ test("'What should I do next?' reuses two distinct approved findings with their 
   assert.deepEqual(view.turn.result!.plan, ["Film opening A (promise)", "Film opening B (payoff)", "Compare both"]);
   const saved = (await sql(`select transcript from (select payload->>'transcript' as transcript from studio.studio_records where id=$1::uuid) x`, source))[0].transcript as string;
   for (const e of proposal.evidence) assert.ok(saved.includes(e.quote.split("“")[1].replace(/”$/, "")), "the cited quote is exactly the saved transcript text");
+});
+
+test("an applied script keeps the target it was requested with; later asks never relabel it, and Undo/Remove restore text and target exactly", async () => {
+  const { executeCreationCommand } = await import("./creation");
+  const policyMod = await import("./creation-policy");
+  const stageOf = async () => (await latestRecord()).payload.creation.stages.Script as { text: string; targetSeconds?: number; previous?: { text: string; targetSeconds?: number } };
+  // Start from a known saved script that was written for a 6 minute request.
+  const six = crypto.randomUUID();
+  await send(six, "Write the script, about 6 minutes");
+  const a = await drive(six, () => step({ reply: "Six minutes.", proposals: [{ stage: "Script", text: script(900), rationale: "Six minutes.", evidenceIds: [], verify: [] }] }), 1);
+  const base = ((await latestRecord()).payload.script as string) ?? "";
+  await agent.applyAgentProposal(loc, policy.readAgentApplyCommand({ recordId: draft, version: a.record!.version, turnId: six, index: 0, baseText: base }));
+  const saved = await stageOf();
+  assert.equal(saved.targetSeconds, 360);
+  // A later, unapplied 90 second ask changes the composer target only.
+  const ninety = crypto.randomUUID();
+  await send(ninety, "Try a shorter one, about 90 seconds");
+  const b = await drive(ninety, () => step({ reply: "Here is a 90 second take.", proposals: [{ stage: "Script", text: script(225), rationale: "Short.", evidenceIds: [], verify: [] }] }), 1);
+  assert.equal(b.turn.target, 90);
+  assert.equal((await stageOf()).targetSeconds, 360, "the saved script is still labelled with the target it was written for");
+  assert.equal((await stageOf()).text, saved.text);
+  // Applying the 90 second proposal replaces text and target together; Undo restores the 6 minute text with its own target.
+  const rec = await latestRecord();
+  await agent.applyAgentProposal(loc, policy.readAgentApplyCommand({ recordId: draft, version: rec.version, turnId: ninety, index: 0, baseText: rec.payload.script }));
+  assert.equal((await stageOf()).targetSeconds, 90);
+  const undone = await executeCreationCommand(loc, { action: "undo", recordId: draft, version: (await latestRecord()).version, stage: "Script" }) as { record: { state: any } };
+  assert.deepEqual([undone.record.state.stages.Script.text, undone.record.state.stages.Script.targetSeconds], [saved.text, 360]);
+  // A manual edit keeps the request provenance (documented: the target is what the script was written for) and Undo returns the exact earlier pair.
+  const edited = await executeCreationCommand(loc, { action: "save", recordId: draft, version: (await latestRecord()).version, stage: "Script", text: saved.text + " Edited." }) as { record: { state: any } };
+  assert.equal(edited.record.state.stages.Script.targetSeconds, 360);
+  const back = await executeCreationCommand(loc, { action: "undo", recordId: draft, version: (await latestRecord()).version, stage: "Script" }) as { record: { state: any } };
+  assert.deepEqual([back.record.state.stages.Script.text, back.record.state.stages.Script.targetSeconds], [saved.text, 360]);
+  // Remove then Undo: exact hash and target return.
+  const clear = (version: number) => executeCreationCommand(loc, policyMod.readCreationCommand({ action: "clear", recordId: draft, version, stage: "Script", confirmClear: true })) as Promise<{ record: { state: any } }>;
+  const cleared = await clear((await latestRecord()).version);
+  assert.equal(cleared.record.state.stages.Script.targetSeconds, undefined);
+  const restored = await executeCreationCommand(loc, { action: "undo", recordId: draft, version: (await latestRecord()).version, stage: "Script" }) as { record: { state: any } };
+  assert.deepEqual([restored.record.state.stages.Script.text, restored.record.state.stages.Script.targetSeconds], [saved.text, 360]);
+  assert.equal((await latestRecord()).payload.script, saved.text);
+  // A script with no recorded target (older scripts, manual) is never given one.
+  const none = crypto.randomUUID();
+  await send(none, "No length limit, write the script");
+  const c = await drive(none, () => step({ reply: "Done.", proposals: [{ stage: "Script", text: script(300), rationale: "Any length.", evidenceIds: [], verify: [] }] }), 1);
+  const r2 = await latestRecord();
+  await agent.applyAgentProposal(loc, policy.readAgentApplyCommand({ recordId: draft, version: r2.version, turnId: none, index: 0, baseText: r2.payload.script }));
+  assert.equal((await stageOf()).targetSeconds, undefined);
+  assert.equal(c.turn.target, null);
+});
+
+test("Create starts fresh exactly once; Resume prefers a draft with real work over a newer failed-only one, scoped to this account and Location", async () => {
+  const before = (await sql(`select count(*)::int as n from studio.studio_records c join studio.studio_record_links l on l.location_id=c.location_id and l.source_id=c.id where c.kind='content' and l.target_id=$1::uuid`, source))[0].n;
+  // The first send of a fresh session carries a new record id, version 0 and the source: one new draft, even if repeated (same turn id).
+  const fresh = crypto.randomUUID(), freshTurn = crypto.randomUUID();
+  const send0 = () => agent.sendAgentMessage(loc, policy.readAgentSendCommand({ recordId: fresh, turnId: freshTurn, version: 0, sourceId: source, sourceVersion: 1, message: "A brand new draft", provider: "subscription", confirmSubscription: true }));
+  await send0();
+  await send0();                                                                              // retry of the same request is idempotent
+  const after = (await sql(`select count(*)::int as n from studio.studio_records c join studio.studio_record_links l on l.location_id=c.location_id and l.source_id=c.id where c.kind='content' and l.target_id=$1::uuid`, source))[0].n;
+  assert.equal(after, before + 1);
+  // That draft only has a failed attempt (no saved stage, nothing completed).
+  const [claim] = await sql(`select studio.studio_text_device_command($1,'substo','claim','{"workerId":"agent-int","limit":1,"leaseSeconds":60,"textReady":true}'::jsonb) as c`, token);
+  const job = claim.c[0];
+  await sql(`select studio.studio_text_device_command($1,'substo','fail',$2::jsonb)`, token, JSON.stringify({ workerId: "agent-int", jobId: job.id, leaseToken: job.lease_token, failure: { code: "text_execution_uncertain", message: "stopped", retryable: false } }));
+  assert.equal((await agent.advanceAgentTurn(loc, freshTurn))!.turn.status, "failed");
+  await sql(`update studio.studio_records set updated_at=now()+interval '1 hour' where id=$1::uuid`, fresh);   // newest by time
+  const resume = await agent.latestSourceDraft(loc, source);
+  assert.equal(resume?.id, draft, "the draft with saved work and completed exchanges wins over the newer failed-only one");
+  // If nothing meaningful exists, the latest draft is still offered: simulate by checking another account sees no completed exchanges but shared saved stages still count.
+  await sql(`update studio.studio_records set payload=jsonb_set(payload,'{script}','""'::jsonb) where id=$1::uuid`, draft);
+  const stripped = (await sql(`select payload#>'{creation,stages}' as stages from studio.studio_records where id=$1::uuid`, draft))[0].stages;
+  assert.ok(Object.keys(stripped).length > 0);
+  assert.equal((await agent.latestSourceDraft(loc, source))?.id, draft);                      // saved stages or this account's completed turns still make it meaningful
+  actingAs = { ...access, userId: "other-user", locationId: "e1a90000-0000-4000-8000-000000000002" };
+  assert.equal(await agent.latestSourceDraft(loc.replace(/1$/, "2"), source), null);         // another Location never sees these drafts
+  actingAs = access;
 });
