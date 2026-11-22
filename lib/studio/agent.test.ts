@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { agentSessionKey, readAgentResult, readAgentSendCommand, type AgentSnapshot, type AgentToolCall } from "./agent-policy";
+import { agentInstructions, agentSessionKey, readAgentResult, readAgentSendCommand, type AgentSnapshot, type AgentToolCall } from "./agent-policy";
 import { findPassages, runAgentToolOn, snapWindow, type AgentToolData } from "./agent-tool-core";
 
 const A = "11111111-1111-4111-8111-111111111111", B = "22222222-2222-4222-8222-222222222222";
@@ -89,4 +89,16 @@ test("conversation identity: a draft id or an explicit fresh nonce, never a per-
   assert.notEqual(agentSessionKey(null), agentSessionKey(null, "x1"));       // explicit new differs from the default fresh view
   assert.notEqual(agentSessionKey(null, "x1"), agentSessionKey(null, "x2")); // each explicit "Start a new draft" is its own session
   assert.equal(agentSessionKey(undefined, undefined), agentSessionKey(null, ""));
+});
+
+test("long scripts are accepted up to the documented cap, one per reply, and the instructions state the pacing contract", () => {
+  const script = (chars: number) => ({ stage: "Script", text: "w ".repeat(chars / 2), rationale: "r", evidenceIds: [], verify: [] });
+  assert.equal(readAgentResult(reply({ proposals: [script(8998)] }), snapshot()).step, "reply");   // was 4,000 before
+  assert.throws(() => readAgentResult(reply({ proposals: [script(9002)] }), snapshot()));
+  assert.throws(() => readAgentResult(reply({ proposals: [script(2000), script(2000)] }), snapshot()));
+  assert.match(agentInstructions, /150 words per minute/);
+  assert.match(agentInstructions, /1200 spoken words \(8 minutes\) and 9000 characters/);
+  assert.match(agentInstructions, /no destructive tool/);
+  assert.match(agentInstructions, /Part 1 of N/);
+  assert.ok(!/\$\{/.test(agentInstructions), "no unexpanded template placeholders");
 });

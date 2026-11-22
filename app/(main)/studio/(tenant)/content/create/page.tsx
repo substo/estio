@@ -21,7 +21,7 @@ export default async function CreateWithStudio({ params, searchParams }: {
   const data = await getCreationPage(locationId, draft);
   if (!data) notFound();
   if (draft && data.source) redirect(`/studio/library/${data.source.id}?mode=create&draft=${draft}`);
-  const conversation = data.record ? await getAgentConversation(locationId, data.record.id) : { turns: [], plan: [] };
+  const conversation = data.record ? await getAgentConversation(locationId, data.record.id) : { turns: [], plan: [], target: null };
   return <main className="mx-auto w-full min-w-0 max-w-6xl space-y-5 px-4 py-6 sm:px-8 sm:py-9">
     <header className="space-y-3">
       <nav aria-label="Breadcrumb" className="flex flex-wrap gap-x-4 text-sm">
@@ -30,6 +30,6 @@ export default async function CreateWithStudio({ params, searchParams }: {
       </nav>
       <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight sm:text-3xl"><Sparkles aria-hidden="true" className="size-5 text-primary" /> Create with Studio</h1>
     </header>
-    <AgentPage locationId={locationId} recordId={draft ?? null} sessionKey={agentSessionKey(draft, fresh)} newDraftHref={`/studio/content/create?new=${randomUUID().slice(0, 8)}`} record={data.record} turns={conversation.turns} plan={conversation.plan} scope={await agentRouteScope(locationId)} />
+    <AgentPage locationId={locationId} recordId={draft ?? null} sessionKey={agentSessionKey(draft, fresh)} newDraftHref={`/studio/content/create?new=${randomUUID().slice(0, 8)}`} record={data.record} turns={conversation.turns} plan={conversation.plan} target={conversation.target} scope={await agentRouteScope(locationId)} />
   </main>;
 }

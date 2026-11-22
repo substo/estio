@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import type { AgentTurnView } from "@/lib/studio/agent";
 import { AGENT_MESSAGE_LIMIT } from "@/lib/studio/agent-policy";
 import { stageDraft } from "@/lib/studio/creation-policy";
+import { formatClock, parseDurationRequest, targetWords } from "@/lib/studio/script-length";
 import { studioTextConsent, type StudioTextProvider } from "@/lib/studio/text-provider";
 import { StudioTextProviderChoice } from "./text-provider-choice";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
@@ -29,7 +30,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   resume?: AgentResume | null; scope: string;
 }) {
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
-  const { recordId, record, setRecord, setPlan } = useAgentDraft();
+  const { recordId, record, setRecord, setPlan, target, setTarget } = useAgentDraft();
   const [turns, setTurns] = useState(initialTurns);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -76,6 +77,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
             setError(""); upsert(data.turn);
             if (data.record) setRecord(data.record);
             if (data.turn.result?.plan) setPlan(data.turn.result.plan);
+            setTarget(data.turn.target ?? null);
             if (data.turn.status !== "running") return;
             if (data.turn.activity.length !== seen) { seen = data.turn.activity.length; delay = 150; }
           }
@@ -98,9 +100,9 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
         version: created.current ? 1 : 0, sourceId: created.current ? null : source?.id ?? null, sourceVersion: created.current ? null : source?.version ?? null, message, ...studioTextConsent(provider, true) }) });
       const data = await response.json();
       if (!response.ok) { if (response.status < 500) pendingKey.current = null; setError(data.error || "The message could not be sent."); return; }
-      created.current = true; pendingKey.current = null; setText(""); try { if (provider !== "openai") localStorage.setItem(ROUTE_KEY(scope), JSON.stringify(provider)); } catch { /* optional */ }
+      created.current = true; pendingKey.current = null; setText(""); { const asked = parseDurationRequest(message); if (asked) setTarget(asked.kind === "set" ? asked.seconds : null); } try { if (provider !== "openai") localStorage.setItem(ROUTE_KEY(scope), JSON.stringify(provider)); } catch { /* optional */ }
       const url = new URL(window.location.href); url.searchParams.set("draft", recordId); url.searchParams.delete("new"); window.history.replaceState(null, "", url);
-      upsert({ id: data.turnId, seq: turns.length + 1, message, provider, status: "running", error: null, activity: [], waiting: "queued", route: null, result: null, inputs: { reads: [], context: [] } });
+      upsert({ id: data.turnId, seq: turns.length + 1, message, provider, target: (() => { const asked = parseDurationRequest(message); return asked?.kind === "set" ? asked.seconds : asked?.kind === "clear" ? null : target; })(), status: "running", error: null, activity: [], waiting: "queued", route: null, result: null, inputs: { reads: [], context: [] } });
     } catch { setError("The outcome is unconfirmed. Press Send again to check this same message."); }
     finally { setSending(false); }
   }
@@ -156,6 +158,13 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Proposed {proposal.stage}</p>
               <p className="whitespace-pre-wrap break-words text-sm">{proposal.text}</p>
               <p className="text-xs text-muted-foreground">{proposal.rationale}</p>
+              {proposal.length ? <div className="space-y-1.5 text-xs" data-length-check>
+                <p className="text-muted-foreground">Estimated about {formatClock(proposal.length.estimatedSeconds)} spoken · {proposal.length.spokenWords} spoken words{proposal.length.cueWords ? ` (+${proposal.length.cueWords} cue words not counted)` : ""}{proposal.length.targetSeconds ? ` · requested about ${formatClock(proposal.length.targetSeconds)}` : ""}</p>
+                {proposal.length.fit ? <p className={proposal.length.fit.state === "match" ? "font-medium text-emerald-700" : "font-medium text-amber-700"}>{proposal.length.fit.beyondSupported ? "That runtime is longer than one script can hold, so this is a part; ask for the next part when you are ready."
+                  : proposal.length.fit.state === "match" ? "Close to the request." : `${proposal.length.fit.percent}% ${proposal.length.fit.state} of the request${proposal.length.fit.meaningful ? " — it did not reach the length you asked for." : "."}`}</p> : null}
+                {proposal.length.fit && proposal.length.fit.state !== "match" && !proposal.length.fit.beyondSupported && proposal.length.targetSeconds ? <Button type="button" variant="outline" className="min-h-9 text-xs" disabled={sending || Boolean(running)}
+                  onClick={() => void send(`${proposal.length!.fit!.state === "short" ? "Expand" : "Tighten"} the script to about ${proposal.length!.targetSeconds! <= 180 ? `${proposal.length!.targetSeconds} seconds` : `${Math.round(proposal.length!.targetSeconds! / 6) / 10} minutes`}`)}>{proposal.length.fit.state === "short" ? "Expand it" : "Tighten it"} to about {formatClock(proposal.length.targetSeconds)}</Button> : null}
+              </div> : null}
               {proposal.evidence.length ? <ul className="space-y-1 border-l-2 pl-3 text-xs text-muted-foreground">{proposal.evidence.map(item => <li key={item.id}>
                 “{item.quote.length > 220 ? item.quote.slice(0, 217) + "…" : item.quote}”{item.at != null ? <span className="ml-1 tabular-nums">· {clock(item.at)}</span> : null}
                 {item.sourceId ? <Link href={`/studio/library/${item.sourceId}`} className="ml-2 inline-flex items-center gap-0.5 text-primary hover:underline">Source<ExternalLink aria-hidden="true" className="h-3 w-3" /></Link> : null}</li>)}</ul> : null}
@@ -177,6 +186,11 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
       <div ref={endRef} />
     </div>
     <div className="space-y-2 border-t p-3">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground" data-length-target>
+        <span>{target ? <>Length: about <strong className="text-foreground">{formatClock(target)}</strong> (~{targetWords(target).target} spoken words)</> : "Length: not set. Say it in words, e.g. “about 90 seconds”."}</span>
+        {[["60 sec", "about 60 seconds"], ["90 sec", "about 90 seconds"], ["3 min", "about 3 minutes"]].map(([label, phrase]) => <button key={label} type="button" disabled={Boolean(running)} className="min-h-8 rounded-full border px-2.5 hover:bg-accent disabled:opacity-50"
+          onClick={() => { setText(previous => `${previous.trim() ? previous.trim() + " " : ""}Make it ${phrase}.`.slice(0, AGENT_MESSAGE_LIMIT)); field.current?.focus(); }}>{label}</button>)}
+      </div>
       <label htmlFor={`${fieldId}-msg`} className="sr-only">Message</label>
       <textarea ref={field} id={`${fieldId}-msg`} data-assistant-field value={text} rows={2} maxLength={AGENT_MESSAGE_LIMIT} disabled={Boolean(running)}
         placeholder={running ? "Working on your last message…" : source ? "What do you want to make? Or give feedback." : "What do you want to make? Or give feedback."}

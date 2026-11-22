@@ -104,7 +104,12 @@ export async function runAgentToolOn(data: AgentToolData, call: AgentToolCall): 
     case "read_stage": {
       if (!call.stage) return fail("Choose a stage to read.");
       const text = data.stageText(call.stage);
-      return fit({ items: [{ id: `stage:${call.stage}`, label: `Current ${call.stage}`, text: text ? text.slice(0, 3000) : "This stage is empty.", cite: false }], untrusted: true });
+      if (!text) return fit({ items: [{ id: `stage:${call.stage}`, label: `Current ${call.stage}`, text: "This stage is empty.", cite: false }], untrusted: true });
+      // Long scripts are read in windows: pass the offset of the next window to continue.
+      const from = Math.min(call.offset ?? 0, Math.max(0, text.length - 1));
+      const window = text.slice(from, from + 2800);
+      return fit({ items: [{ id: `stage:${call.stage}:${from}`, label: `Current ${call.stage} · characters ${from}–${from + window.length} of ${text.length}`, text: window, cite: false }], untrusted: true,
+        ...(from + window.length < text.length ? { note: `More text follows: read_stage again with offset ${from + window.length}.` } : {}) });
     }
     case "load_skill": {
       const skill = call.skill ? AGENT_SKILL_REGISTRY[call.skill] : null;

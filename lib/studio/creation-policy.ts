@@ -93,6 +93,7 @@ export type CreationCommand =
   | ({ action: "replace"; stage: CreationStage; selection: Selection; text: string } & Versioned)
   | ({ action: "comment"; stage: CreationStage; text: string; selection: Selection | null } & Versioned)
   | ({ action: "undo"; stage: CreationStage } & Versioned)
+  | ({ action: "clear"; stage: CreationStage } & Versioned)
   | ({ action: "apply"; stage: CreationStage; reviewId: string; candidate: number | null } & Versioned)
   | ({ action: "generate"; requestId: string; provider: ReturnType<typeof readStudioTextProvider>; confirmPaid: boolean; confirmSubscription: boolean } & Versioned & GenerationInput);
 
@@ -137,6 +138,11 @@ export function readCreationCommand(value: unknown): CreationCommand {
   const stage = b.stage as CreationStage;
   const target = { ...base, stage };
   if (action === "undo") return { ...target, action };
+  // Removing saved text is explicit: the request itself must carry the owner's confirmation.
+  if (action === "clear") {
+    if (b.confirmClear !== true) throw new StudioCommandError("Confirm removing this text first.");
+    return { ...target, action };
+  }
   if (action === "save" || action === "use" || action === "shortlist") return { ...target, action, text: text(b.text, stageTextLimit(stage), action !== "save") };
   if (action === "replace") return { ...target, action, selection: selection(b.selection), text: text(b.text, SELECTION_LIMIT) };
   if (action === "comment") return { ...target, action, selection: b.selection === null ? null : selection(b.selection), text: text(b.text, 1200, true).trim() };

@@ -10,15 +10,18 @@ import { applyStagePatch, expose, loadRecord, loadSource, requireCreationWriter,
 import { stageDraft, type CreationStage, type CreationState } from "./creation-policy";
 import { AGENT_MAX_ROUNDS, isAgentSnapshot, readAgentResult, type AgentApplyCommand, type AgentFinal, type AgentItem, type AgentObservation, type AgentProposal, type AgentSnapshot, type AgentToolCall, type readAgentSendCommand } from "./agent-policy";
 import { runAgentTool } from "./agent-tools";
+import { formatClock, lengthFit, parseDurationRequest, scriptStats, targetWords, type LengthFit } from "./script-length";
 import { agentRoundRequestId } from "./agent-request";
 
 type TurnRow = { id: string; location_id: string; record_id: string; seq: number; message: string; provider: string; status: "running" | "done" | "failed";
-  rounds: Array<{ round: number; reviewId: string; tool: AgentToolCall | null; observation: AgentObservation | null }>; result: AgentFinal | null; error: string | null; created_by_clerk_user_id: string; created_at: string };
+  rounds: Array<{ round: number; reviewId: string; tool: AgentToolCall | null; observation: AgentObservation | null }>; result: AgentFinal | null; error: string | null; created_by_clerk_user_id: string; created_at: string; target_seconds: number | null };
 export type AgentTurnView = {
   id: string; seq: number; message: string; provider: "location_order" | "subscription" | "openai"; status: "running" | "done" | "failed"; error: string | null;
   /** Real activity only: what the assistant actually read, in order. */
   activity: string[]; waiting: "queued" | "running" | null; route: string | null;
-  result: (Omit<AgentFinal, "proposals"> & { proposals: Array<AgentProposal & { evidence: Array<{ id: string; label: string; quote: string; sourceId: string | null; at: number | null }> }> }) | null;
+  /** Approximate runtime the owner asked for as of this message, in seconds. */
+  target: number | null;
+  result: (Omit<AgentFinal, "proposals"> & { proposals: Array<AgentProposal & { length?: { spokenWords: number; cueWords: number; estimatedSeconds: number; targetSeconds: number | null; fit: LengthFit | null }; evidence: Array<{ id: string; label: string; quote: string; sourceId: string | null; at: number | null }> }> }) | null;
   inputs: { reads: Array<{ tool: string; items: string[] }>; context: string[] };
 };
 
@@ -38,8 +41,13 @@ export function describeAgentStep(tool: AgentToolCall, observation: AgentObserva
 
 async function loadTurn(access: StudioAccess, id: string) {
   return studioDb.one<TurnRow>(Prisma.sql`
-    SELECT id,location_id,record_id,seq,message,provider,status,rounds,result,error,created_by_clerk_user_id,created_at
+    SELECT id,location_id,record_id,seq,message,provider,status,rounds,result,error,created_by_clerk_user_id,created_at,target_seconds
     FROM studio.studio_agent_turns WHERE id=${id}::uuid AND location_id=${access.locationId} AND created_by_clerk_user_id=${access.userId} AND actor_app=${access.app}`);
+}
+
+function measure(text: string, target: number | null) {
+  const stats = scriptStats(text);
+  return { spokenWords: stats.spokenWords, cueWords: stats.cueWords, estimatedSeconds: stats.seconds, targetSeconds: target, fit: target ? lengthFit(target, stats.seconds) : null };
 }
 
 async function views(access: StudioAccess, turns: TurnRow[], pending: Map<string, { waiting: "queued" | "running" | null }> = new Map()): Promise<AgentTurnView[]> {
@@ -53,10 +61,11 @@ async function views(access: StudioAccess, turns: TurnRow[], pending: Map<string
     const last = turn.rounds.at(-1);
     const run = last ? model.get(last.reviewId) : undefined;
     return { id: turn.id, seq: turn.seq, message: turn.message, provider: turn.provider as AgentTurnView["provider"], status: turn.status, error: turn.error,
-      activity: turn.rounds.filter(r => r.tool).map(r => describeAgentStep(r.tool!, r.observation)),
+      activity: turn.rounds.filter(r => r.tool || r.observation?.lengthRevision).map(r => r.tool ? describeAgentStep(r.tool, r.observation) : r.observation!.summary ?? "Checked the script length"),
+      target: turn.target_seconds,
       waiting: turn.status === "running" ? pending.get(turn.id)?.waiting ?? "queued" : null,
       route: run ? `${run.execution_provider === "subscription" ? "Your Mac subscription" : "Location OpenAI key (paid)"} · ${run.model.replace(/^mac_/, "")}` : null,
-      result: turn.result && { ...turn.result, plan: turn.result.plan ?? [], proposals: turn.result.proposals.map(p => ({ ...p,
+      result: turn.result && { ...turn.result, plan: turn.result.plan ?? [], proposals: turn.result.proposals.map(p => ({ ...p, ...(p.stage === "Script" ? { length: measure(p.text, turn.target_seconds) } : {}),
         evidence: p.evidenceIds.flatMap(id => { const item = items.get(id); return item ? [{ id, label: item.label, quote: item.text, sourceId: item.sourceId ?? null, at: item.at ?? null }] : []; }) })) },
       inputs: { reads: turn.rounds.filter(r => r.tool).map(r => ({ tool: describeAgentStep(r.tool!, r.observation), items: (r.observation?.items ?? []).map(i => i.label) })),
         context: ["Your message", "Earlier choices and the last six exchanges", "The current draft stages", "Linked source list (text only through reads)", "Business profile as voice context, not as the publisher"] } };
@@ -67,12 +76,12 @@ async function views(access: StudioAccess, turns: TurnRow[], pending: Map<string
 export async function getAgentConversation(locationId: string, recordId: string) {
   const access = await requireCreationWriter(locationId);
   const rows = await studioDb.rows<TurnRow>(Prisma.sql`
-    SELECT id,location_id,record_id,seq,message,provider,status,rounds,result,error,created_by_clerk_user_id,created_at FROM (
+    SELECT id,location_id,record_id,seq,message,provider,status,rounds,result,error,created_by_clerk_user_id,created_at,target_seconds FROM (
       SELECT * FROM studio.studio_agent_turns WHERE location_id=${access.locationId} AND record_id=${recordId}::uuid
         AND actor_app=${access.app} AND created_by_clerk_user_id=${access.userId} ORDER BY seq DESC LIMIT 40) t ORDER BY seq`);
   const turns = await views(access, rows);
   const plan = [...turns].reverse().find(t => t.result)?.result?.plan ?? [];
-  return { turns, plan };
+  return { turns, plan, target: turns.at(-1)?.target ?? null };
 }
 
 async function enqueueRound(access: StudioAccess, turn: TurnRow, round: number) {
@@ -111,10 +120,13 @@ export async function sendAgentMessage(locationId: string, command: ReturnType<t
     row = await loadRecord(access, command.recordId);
     if (!row) throw new StudioCommandError("Creation draft unavailable.", 404);
   }
+  // The duration comes from the owner's own words, read here; -1 keeps the previous target, 0 clears it.
+  const request = parseDurationRequest(command.message);
+  const target = request?.kind === "set" ? request.seconds : request?.kind === "clear" ? 0 : -1;
   let begun: { turnId: string; seq: number };
   try {
     begun = await studioDb.call("studio_agent_begin_turn", { p_location: access.locationId, p_app: access.app, p_actor: access.userId,
-      p_record: row.id, p_turn: command.turnId, p_message: command.message, p_provider: command.provider });
+      p_record: row.id, p_turn: command.turnId, p_message: command.message, p_provider: command.provider, p_target: target });
   } catch (error) {
     if (error instanceof StudioDbError && error.code === "P2015") throw new StudioCommandError("The assistant is still answering your last message.", 409);
     throw error;
@@ -166,6 +178,17 @@ async function advanceStep(locationId: string, turnId: string): Promise<AgentTur
   let step;
   try { step = readAgentResult(review.result, review.snapshot as AgentSnapshot); } catch { return fail("The assistant returned an unreadable result. Nothing was changed."); }
   let observation: AgentObservation | null = null;
+  if (step.step === "reply" && turn.target_seconds && turn.rounds.length <= 1 && !turn.rounds.some(r => r.observation?.lengthRevision)) {
+    // One bounded revision: a Script that misses the request by a meaningful margin is measured and sent back, never shown as a pass.
+    const script = step.proposals.find(p => p.stage === "Script");
+    const stats = script && scriptStats(script.text), fit = stats && lengthFit(turn.target_seconds, stats.seconds);
+    if (script && stats && fit?.meaningful && !fit.beyondSupported) {
+      const range = targetWords(turn.target_seconds);
+      observation = { items: [], untrusted: true, lengthRevision: true,
+        summary: `Checked the script length: about ${formatClock(stats.seconds)} against ${formatClock(turn.target_seconds)} requested. Asked for a ${fit.state === "short" ? "fuller" : "tighter"} version`,
+        note: `Length check by the server: your Script has ${stats.spokenWords} spoken words (about ${formatClock(stats.seconds)}) but the owner asked for about ${formatClock(turn.target_seconds)} (${range.min}-${range.max} spoken words at ${150} words per minute). Return the Script again with ${range.min}-${range.max} spoken words. ${fit.state === "short" ? "Add substance from the draft, the decisions and the evidence, not filler." : "Tighten without cutting the promise or the payoff."} Bracketed cues are not counted.` };
+    }
+  }
   if (step.step === "tool") {
     const record = await loadRecord(access, turn.record_id);
     if (!record) return fail("This draft is no longer available.");

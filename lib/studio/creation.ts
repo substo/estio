@@ -118,6 +118,7 @@ export function applyStagePatch(row: StoredRecord, current: StageDraft, next: St
     patch.script = next.text;
     patch.approved = false;
     if (next.text.trim() && row.payload.stage === "idea") patch.stage = "script";
+    if (!next.text.trim() && row.payload.stage === "script") patch.stage = "idea";
   }
   return { title };
 }
@@ -204,6 +205,11 @@ export async function executeCreationCommand(locationId: string, command: Creati
     if (command.selection) replaceSelection(current.text, command.selection, command.selection.text);
     change(command.text, { stage, quote: command.selection?.text });
     return save(access, recordId, version, row.title, patch);
+  } else if (command.action === "clear") {
+    if (!current.text.trim()) throw new StudioCommandError(`This ${stage} is already empty.`, 409);
+    // Kept as the stage's previous value, so the existing Undo restores it; the canonical script field is emptied with it.
+    next = { text: "", approved: false, shortlist: current.shortlist, previous: { text: current.text, approved: current.approved } };
+    note = `Removed the saved ${stage}. Undo restores it.`;
   } else if (command.action === "undo") {
     if (!current.previous) throw new StudioCommandError("No stage edit to undo.");
     next = { text: current.previous.text, approved: current.previous.approved, shortlist: current.shortlist };

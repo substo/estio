@@ -55,7 +55,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     const draftId = requestedDraft;
     const data = await getCreationPage(locationId, draftId, recordId) ?? (draftId ? await getCreationPage(locationId, undefined, recordId) : null);
     if (!data) return null;
-    const conversation = data.record ? await getAgentConversation(locationId, data.record.id) : { turns: [], plan: [] };
+    const conversation = data.record ? await getAgentConversation(locationId, data.record.id) : { turns: [], plan: [], target: null };
     const resume = !draftId && !query.new ? await latestSourceDraft(locationId, recordId) : null;
     return { ...data, conversation, resume, scope: await agentRouteScope(locationId) };
   };
@@ -147,7 +147,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     { id: "more", label: "Files", panel: moreLinks },
   ];
 
-  return <SourceWorkspaceProvider startInCreation={Boolean(creation) && query.mode === "create"} draftId={creation?.record?.id}><AgentDraftProvider recordId={creation?.record?.id ?? null} sessionKey={sessionKey} initialRecord={creation?.record ?? null} initialPlan={creation?.conversation.plan ?? []}><main className="mx-auto w-full min-w-0 max-w-7xl space-y-3 p-4 pb-24 md:p-6 lg:pb-6">
+  return <SourceWorkspaceProvider startInCreation={Boolean(creation) && query.mode === "create"} draftId={creation?.record?.id}><AgentDraftProvider recordId={creation?.record?.id ?? null} sessionKey={sessionKey} initialRecord={creation?.record ?? null} initialPlan={creation?.conversation.plan ?? []} initialTarget={creation?.conversation.target ?? null}><main className="mx-auto w-full min-w-0 max-w-7xl space-y-3 p-4 pb-24 md:p-6 lg:pb-6">
     {breadcrumb}
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
       <SourceWorkArea creation={creation && <DraftPanel />}
