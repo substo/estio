@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readAgentResult, readAgentSendCommand, type AgentSnapshot, type AgentToolCall } from "./agent-policy";
+import { agentSessionKey, readAgentResult, readAgentSendCommand, type AgentSnapshot, type AgentToolCall } from "./agent-policy";
 import { findPassages, runAgentToolOn, snapWindow, type AgentToolData } from "./agent-tool-core";
 
 const A = "11111111-1111-4111-8111-111111111111", B = "22222222-2222-4222-8222-222222222222";
@@ -81,4 +81,12 @@ test("displayed excerpts start and end on whole words yet stay exact substrings 
   const read = await runAgentToolOn(data({ sources: [{ id: A, title: "S", version: 1, text }] }), call({ name: "read_source", sourceId: A, offset: 8 }));
   assert.equal(read.items[0].id, `${A.slice(0, 8)}:11`);
   assert.ok(text.startsWith(read.items[0].text, 11));
+});
+
+test("conversation identity: a draft id or an explicit fresh nonce, never a per-render value", () => {
+  assert.equal(agentSessionKey(A), agentSessionKey(A, "ignored"));
+  assert.notEqual(agentSessionKey(A), agentSessionKey(B));
+  assert.notEqual(agentSessionKey(null), agentSessionKey(null, "x1"));       // explicit new differs from the default fresh view
+  assert.notEqual(agentSessionKey(null, "x1"), agentSessionKey(null, "x2")); // each explicit "Start a new draft" is its own session
+  assert.equal(agentSessionKey(undefined, undefined), agentSessionKey(null, ""));
 });

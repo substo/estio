@@ -1,4 +1,5 @@
 import { AgentDraftProvider, DraftPanel } from "../../../_components/agent-workspace";
+import { agentSessionKey } from "@/lib/studio/agent-policy";
 import { agentRouteScope, getAgentConversation, latestSourceDraft } from "@/lib/studio/agent";
 import { getCreationPage } from "@/lib/studio/creation";
 import { randomUUID } from "node:crypto";
@@ -55,7 +56,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     const data = await getCreationPage(locationId, draftId, recordId) ?? (draftId ? await getCreationPage(locationId, undefined, recordId) : null);
     if (!data) return null;
     const conversation = data.record ? await getAgentConversation(locationId, data.record.id) : { turns: [], plan: [] };
-    const resume = !draftId && query.new !== "1" ? await latestSourceDraft(locationId, recordId) : null;
+    const resume = !draftId && !query.new ? await latestSourceDraft(locationId, recordId) : null;
     return { ...data, conversation, resume, scope: await agentRouteScope(locationId) };
   };
   const [pendingUploads, latestOutline, videoStatus, knowledgeInputs, creation] = await Promise.all([
@@ -70,6 +71,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     ? await getKnowledgeOutline(locationId, requestedReview).catch(() => null) : null;
   const outline = requestedOutline?.sourceId === recordId ? requestedOutline
     : latestOutline ? await getKnowledgeOutline(locationId, latestOutline.id).catch(() => null) : null;
+  const sessionKey = agentSessionKey(creation?.record?.id, query.new);
   const hasTranscript = Boolean(value('transcript').trim());
   const contentLinks = links.filter(link => link.kind === "content");
   const otherLinks = links.filter(link => link.kind !== "content");
@@ -145,7 +147,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     { id: "more", label: "Files", panel: moreLinks },
   ];
 
-  return <SourceWorkspaceProvider startInCreation={Boolean(creation) && query.mode === "create"} draftId={creation?.record?.id}><AgentDraftProvider recordId={creation?.record?.id ?? randomUUID()} initialRecord={creation?.record ?? null} initialPlan={creation?.conversation.plan ?? []}><main className="mx-auto w-full min-w-0 max-w-7xl space-y-3 p-4 pb-24 md:p-6 lg:pb-6">
+  return <SourceWorkspaceProvider startInCreation={Boolean(creation) && query.mode === "create"} draftId={creation?.record?.id}><AgentDraftProvider recordId={creation?.record?.id ?? null} sessionKey={sessionKey} initialRecord={creation?.record ?? null} initialPlan={creation?.conversation.plan ?? []}><main className="mx-auto w-full min-w-0 max-w-7xl space-y-3 p-4 pb-24 md:p-6 lg:pb-6">
     {breadcrumb}
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
       <SourceWorkArea creation={creation && <DraftPanel />}
@@ -160,7 +162,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
         </div>
         <SourceTabs tabs={tabs} />
       </div>} />
-      <SourceAssistant canCreate={Boolean(creation)} locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} canRelated={active} archived={record.archived} knowledgeInputs={knowledgeInputs?.inputs ?? []} canTemplate={Boolean(youtube) && hasTranscript} agent={creation ? { source: { id: recordId, version: record.version, title: record.title, hasText: hasTranscript || Boolean(value('description').trim()) }, turns: creation.conversation.turns, newDraftHref: `/studio/library/${recordId}?mode=create&new=1`, scope: creation.scope, resume: creation.resume ? { id: creation.resume.id, title: creation.resume.title, turns: creation.resume.turns, updatedAt: creation.resume.updatedAt, href: `/studio/library/${recordId}?mode=create&draft=${creation.resume.id}` } : null } : undefined} />
+      <SourceAssistant canCreate={Boolean(creation)} locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} canRelated={active} archived={record.archived} knowledgeInputs={knowledgeInputs?.inputs ?? []} canTemplate={Boolean(youtube) && hasTranscript} agent={creation ? { source: { id: recordId, version: record.version, title: record.title, hasText: hasTranscript || Boolean(value('description').trim()) }, turns: creation.conversation.turns, newDraftHref: `/studio/library/${recordId}?mode=create&new=${randomUUID().slice(0, 8)}`, sessionKey, scope: creation.scope, resume: creation.resume ? { id: creation.resume.id, title: creation.resume.title, turns: creation.resume.turns, updatedAt: creation.resume.updatedAt, href: `/studio/library/${recordId}?mode=create&draft=${creation.resume.id}` } : null } : undefined} />
     </div>
   </main></AgentDraftProvider></SourceWorkspaceProvider>;
 }

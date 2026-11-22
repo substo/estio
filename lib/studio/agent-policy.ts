@@ -45,6 +45,8 @@ export type AgentSnapshot = {
 export function isAgentSnapshot(value: unknown): value is AgentSnapshot {
   return Boolean(value && typeof value === "object" && (value as { mode?: unknown }).mode === "studio_agent");
 }
+/** Identity of the conversation a page shows. Server props that change this key must reset chat, route and polling state. */
+export const agentSessionKey = (draftId: string | null | undefined, freshNonce?: string | null) => draftId ? `draft:${draftId}` : `fresh:${freshNonce ?? ""}`;
 export function agentStageLimit(stage: CreationStage) { return stage === "Title" ? 180 : stage === "Script" ? 4000 : 1200; }
 
 export function readAgentSendCommand(value: unknown) {

@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, ListChecks, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,11 +9,22 @@ import { useStudioTenantHeaders } from "./studio-tenant-context";
 type Draft = { recordId: string; record: CreationRecord | null; setRecord: (record: CreationRecord) => void; plan: string[]; setPlan: (plan: string[]) => void };
 const Context = createContext<Draft | null>(null);
 /** Shares the saved draft and the persisted work plan between the chat and the draft panel. */
-export function AgentDraftProvider({ recordId, initialRecord, initialPlan, children }: { recordId: string; initialRecord: CreationRecord | null; initialPlan: string[]; children: React.ReactNode }) {
+export function AgentDraftProvider({ recordId, sessionKey, initialRecord, initialPlan, children }: { recordId: string | null; sessionKey: string; initialRecord: CreationRecord | null; initialPlan: string[]; children: React.ReactNode }) {
   const [record, setRecord] = useState(initialRecord);
   const [plan, setPlan] = useState(initialPlan);
-  useEffect(() => { setRecord(initialRecord); setPlan(initialPlan); }, [initialRecord, initialPlan]);
-  const value = useMemo(() => ({ recordId, record, setRecord, plan, setPlan }), [recordId, record, plan]);
+  // A fresh conversation gets one browser-held draft id for the whole session; it only changes when the session does.
+  const [generated, setGenerated] = useState(() => crypto.randomUUID());
+  const lastSession = useRef(sessionKey);
+  const planKey = initialPlan.join("\n");
+  useEffect(() => {
+    if (lastSession.current !== sessionKey) { lastSession.current = sessionKey; setGenerated(crypto.randomUUID()); setRecord(initialRecord); setPlan(initialPlan); return; }
+    // Same session: adopt newer server state (for example after a refresh) but never reset to older state.
+    setRecord(current => !initialRecord ? current : !current || initialRecord.id !== current.id || initialRecord.version > current.version ? initialRecord : current);
+    setPlan(current => planKey && planKey !== current.join("\n") ? initialPlan : current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionKey, initialRecord?.id, initialRecord?.version, planKey]);
+  const id = recordId ?? generated;
+  const value = useMemo(() => ({ recordId: id, record, setRecord, plan, setPlan }), [id, record, plan]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 export function useAgentDraft() {

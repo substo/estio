@@ -48,7 +48,8 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   useEffect(() => {
     const kept = initialTurns.at(-1)?.provider ?? null;
     const next = kept ?? readRoute(scope);
-    if (next && next !== provider) onProvider(next);
+    // The session starts on its own route, never inheriting one from a previously shown conversation.
+    if ((next ?? "location_order") !== provider) onProvider(next ?? "location_order");
     if (kept === "openai") setRouteNote("Paid route kept from your last message in this draft. Change it below before sending if you prefer.");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -129,7 +130,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
       {resume && !resumeDismissed && turns.length === 0 && !record ? <div className="mr-6 space-y-2 rounded-lg border border-primary/40 bg-background p-3" role="group" aria-label="Earlier draft from this source">
         <p><strong>You already started a draft from this source:</strong> {resume.title}. {resume.turns ? `${resume.turns} earlier ${resume.turns === 1 ? "exchange" : "exchanges"}. ` : ""}Last changed {new Date(resume.updatedAt).toLocaleDateString()}.</p>
         <div className="flex flex-wrap gap-2"><Button asChild className="min-h-10"><Link href={resume.href}>Resume that draft</Link></Button>
-          <Button type="button" variant="outline" className="min-h-10" onClick={() => { setResumeDismissed(true); field.current?.focus(); }}>Start new</Button></div>
+          <Button type="button" variant="outline" className="min-h-10" onClick={() => { setResumeDismissed(true); const url = new URL(window.location.href); url.searchParams.set("new", "1"); window.history.replaceState(null, "", url); field.current?.focus(); }}>Start new</Button></div>
         <p className="text-xs text-muted-foreground">Starting new never changes the earlier draft.</p>
       </div> : null}
       <div className="mr-6 space-y-2 rounded-lg bg-muted p-3">

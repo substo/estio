@@ -19,7 +19,7 @@ const done: AgentTurnView = { ...base, id: "t1", status: "done", route: "Your Ma
     proposals: [{ stage: "Hook", text: "Two openings, one promise.", rationale: "Uses the opener finding.", verify: ["Studio shows both openings"], evidenceIds: ["f:1"],
       evidence: [{ id: "f:1", label: "L", quote: "The opening sets the promise.", sourceId: "s1", at: 42 }] }] } };
 const render = (turns: AgentTurnView[], plan: string[] = [], extra: Partial<React.ComponentProps<typeof AgentChat>> = {}, initialRecord: CreationRecord | null = record) => renderToStaticMarkup(
-  <StudioTenantProvider locationId="loc"><AgentDraftProvider recordId="r1" initialRecord={initialRecord} initialPlan={plan}>
+  <StudioTenantProvider locationId="loc"><AgentDraftProvider recordId="r1" sessionKey="t" initialRecord={initialRecord} initialPlan={plan}>
     <AgentChat locationId="loc" source={{ id: "s1", version: 1, title: "MrBeast on openings", hasText: true }} initialTurns={turns} provider="location_order" onProvider={() => {}} scope="test" {...extra} />
     <DraftPanel />
   </AgentDraftProvider></StudioTenantProvider>);
