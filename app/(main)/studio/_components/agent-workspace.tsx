@@ -231,6 +231,7 @@ function AudienceSignals({ record, sourceId, command, busy }: { record: Creation
             <p role="status" className="text-xs text-muted-foreground">{brief.analyzed.toLocaleString()} comments read. Only observations you add are saved.</p>
             <Button type="button" variant="ghost" className="min-h-8 text-xs" onClick={() => setBrief(null)}>Close brief</Button>
           </div>
+          {brief.discarded ? <p className="text-xs text-muted-foreground">Skipped {brief.discarded.toLocaleString()} suggestions with unmatched excerpts.</p> : null}
           {brief.signals.length === 0 ? <p className="text-xs text-muted-foreground">This brief has no supported suggestions.</p> : null}
           <ul className="space-y-2">{brief.signals.map((item, index) => <li key={index} className="space-y-1 rounded-md bg-muted/60 p-2 break-words">
             <p className="text-xs font-medium capitalize">{item.beat} · {item.action}</p>

@@ -1,6 +1,6 @@
 # Local audience research for Studio
 
-Use a comment collection you have permission to process, such as an export supplied by the creator. The tool reads files on the Mac and asks an installed local Ollama model to look for useful patterns. A YouTube sign-in is for viewing. YouTube's terms require permission for automated access. [YouTube Terms of Service](https://www.youtube.com/t/terms)
+Use a comment collection you have permission to process, such as an export supplied by the creator. The tool reads files on the Mac and asks an installed local Ollama model to look for useful patterns. A YouTube sign-in is for viewing. YouTube's terms generally restrict automated access without permission. Google's account export includes comments written by the account holder. It does not export the audience discussion under arbitrary videos. [YouTube Terms of Service](https://www.youtube.com/t/terms) · [Google Data Portability schema](https://developers.google.com/data-portability/schema-reference/youtube)
 
 ## Prepare and preview
 
@@ -26,7 +26,7 @@ python3 scripts/studio-audience-brief.py creator-comments.json other-video.csv \
   --topic "Help first-time creators test two openings for the same video"
 ```
 
-The model sees your topic, anonymized source IDs, local comment IDs and normalized comment text. Every usable row goes through one extraction batch. Smaller consolidation rounds combine the results into up to eight editorial suggestions. The model can cite only IDs it received. This check verifies source references. Review the excerpts to decide whether each suggestion fits.
+The model sees your topic, anonymized source IDs, local comment IDs and normalized comment text. Every usable row goes through one extraction batch. Smaller consolidation rounds combine the results into up to eight editorial suggestions. Each round has an input budget and gives each batch a turn before considering additional suggestions. The model must pair each comment ID with a literal excerpt. The tool verifies that the exact excerpt appears in that comment and discards suggestions with no matching citation. Coverage reports discarded citations and suggestions when they occur. Review the excerpts to decide whether each suggestion fits.
 
 The JSON file contains coverage and evidence with the source filename and row number. The Markdown file is the brief for Studio. Both are created with owner-only permissions. The script refuses to overwrite existing output.
 
