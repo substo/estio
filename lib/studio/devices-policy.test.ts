@@ -155,3 +155,14 @@ test("other result kinds are routed as before (diagnostic still works, a diagnos
   assert.deepEqual((readDeviceCommand("complete", completeBody({ ok: true, workerId: "mac", checkedAt: "2026-11-19T10:00:00.000Z" })) as { result: unknown }).result, { ok: true, workerId: "mac", checkedAt: "2026-11-19T10:00:00.000Z" });
   assert.throws(() => readDeviceCommand("complete", completeBody({ ok: true, trace: {} })), /Invalid command/);
 });
+
+import { readPreviewResult } from "./devices-policy";
+test("voice preview: bounded audio result, previewReady claim flag, capability passthrough", () => {
+  const audio = "QUJD".repeat(200);
+  assert.deepEqual(readPreviewResult({ preview: { audioBase64: audio, speaker: "ryan", bytes: 100, seconds: 3.2 } }).preview.speaker, "ryan");
+  assert.throws(() => readPreviewResult({ preview: { audioBase64: "short", speaker: "ryan" } }));
+  assert.throws(() => readPreviewResult({ preview: { audioBase64: "A".repeat(24004), speaker: "ryan" } }));
+  assert.throws(() => readPreviewResult({ preview: { audioBase64: audio, speaker: "../x" } }));
+  assert.throws(() => readPreviewResult({ preview: { audioBase64: audio, speaker: "ryan", extra: 1 } }));
+  assert.deepEqual(safeDeviceCapabilities({ voicePreview: { ready: true, junk: 1 } }).voicePreview, { ready: true });
+});

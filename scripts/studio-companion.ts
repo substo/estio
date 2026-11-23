@@ -31,7 +31,8 @@ import { fileURLToPath } from "node:url";
 import { createExportApi, createVideoAssembleHandler } from "../lib/studio/companion/video-assemble";
 import { discoverAssemblyTools, type AssemblyTools } from "../lib/studio/companion/video-assemble-tools";
 import { assembleVideo } from "../lib/studio/video-assembly/assemble";
-import { localTtsReady } from "../lib/studio/video-assembly/tts";
+import { localTtsReady, synthesizeLocal } from "../lib/studio/video-assembly/tts";
+import { createVoicePreviewHandler } from "../lib/studio/companion/voice-preview";
 import { ModelManager } from "../lib/studio/companion/model-manager";
 import { createPlaywrightYoutubeBrowser, createYoutubeSearchHandler, findChrome, openYoutubeLogin, youtubeBrowserProfile } from "../lib/studio/companion/youtube-search";
 
@@ -112,7 +113,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
         .catch(() => log({ event: "model_reconcile_failed" }));
     };
     await models.refresh().catch(() => {});
-    const capabilities = () => ({ instanceId, modelStates: models.states(), platform: os.platform(), arch: os.arch(), version, knowledgeOutlineVersion: 2, knowledgeCurationVersion: 1, stagedCreationVersion: 1, studioAgentVersion: 4, videoTemplateVersion: 1, sourceAssistVersion: 1, textRouteVersion: TEXT_ROUTE_VERSION, deviceAiRouteVersion: 1, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble"], videoAssembly: { ready: assemblyReady(), missing: assembly.missing }, youtubeSearch: { ready: youtubeReady(), signedIn: youtubeSignedIn, rank: researchReady() }, ...providers, ...discovery, video: videoTools.report,
+    const capabilities = () => ({ instanceId, modelStates: models.states(), platform: os.platform(), arch: os.arch(), version, knowledgeOutlineVersion: 2, knowledgeCurationVersion: 1, stagedCreationVersion: 1, studioAgentVersion: 4, videoTemplateVersion: 1, sourceAssistVersion: 1, textRouteVersion: TEXT_ROUTE_VERSION, deviceAiRouteVersion: 1, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble"], videoAssembly: { ready: assemblyReady(), missing: assembly.missing }, voicePreview: { ready: previewReady() }, youtubeSearch: { ready: youtubeReady(), signedIn: youtubeSignedIn, rank: researchReady() }, ...providers, ...discovery, video: videoTools.report,
       nativeSubscriptionVersion: 1, nativeRetryAt: nativeRetryAt(), capacity: capacity(), usage: tracker.snapshot(), processingBlocked: gate().reasons.filter(reason => reason in DEVICE_BLOCK_REASONS) });
     const researchReady = () => gate().processing && Object.values(capacity()).some(Boolean);
 
@@ -120,7 +121,11 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     let assembly: AssemblyTools = { ready: false, missing: ["substo", "ffprobe", "Claude sign-in"] };
     const refreshAssembly = async () => { assembly = await discoverAssemblyTools(providers.claude.ready && providers.claude.authenticated, undefined, controller.signal); };
     await refreshAssembly();
-    setInterval(() => { if (!controller.signal.aborted) void refreshAssembly(); }, 60_000).unref();
+    let localVoiceInstalled = false;
+    const refreshLocalVoice = async () => { localVoiceInstalled = await localTtsReady().catch(() => false); };
+    await refreshLocalVoice();
+    const previewReady = () => localVoiceInstalled && gate().processing;
+    setInterval(() => { if (!controller.signal.aborted) { void refreshAssembly(); void refreshLocalVoice(); } }, 60_000).unref();
     const assemblyReady = () => assembly.ready && gate().processing;
     const videoReady = () => settings.config.features.transcription && gate().processing && videoTools.report.ready;
 
@@ -139,7 +144,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
         .finally(() => active.delete(cmd.provider));
       active.set(cmd.provider, task);
     };
-    const inner = createDeviceStudioQueue(credentials, { capabilities, textReady: () => settings.config.features.text && gate().processing, summaryReady: () => settings.config.features.text && gate().processing, researchReady: () => gate().processing, videoReady, youtubeReady, assembleReady: assemblyReady, configAck: () => settings.pendingAck,
+    const inner = createDeviceStudioQueue(credentials, { capabilities, textReady: () => settings.config.features.text && gate().processing, summaryReady: () => settings.config.features.text && gate().processing, researchReady: () => gate().processing, videoReady, youtubeReady, assembleReady: assemblyReady, previewReady, configAck: () => settings.pendingAck,
       onHeartbeat: (state, sentAck) => {
         if (settings.update(state, sentAck)) { log({ event: "config_applied", version: settings.appliedVersion, status: settings.pendingAck?.status }); pulse(); void reconcileModels(); }
         if (state && !once) for (const cmd of state.commands) runCommand(cmd);
@@ -181,7 +186,8 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     };
     const videoAssemble = createVideoAssembleHandler({ enabled: () => gate().processing, tools: async signal => { await refreshAssembly(); return assembly; }, localSpeechReady: () => localTtsReady(), api: createExportApi(credentials),
       workRoot: join(os.homedir(), "Library", "Application Support", "Estio", "StudioCompanion", "video-assembly"), editorDocs: fileURLToPath(new URL("../video-editor/docs", import.meta.url)), assemble: assembleVideo });
-    const handlers: Record<string, StudioJobHandler> = { "studio.video_assemble": withShutdown(videoAssemble), "studio.video_transcribe": withShutdown(video), "studio.youtube_search": withShutdown(youtubeSearch), "studio.text_run": withShutdown(textRun), "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
+    const voicePreview = createVoicePreviewHandler({ enabled: () => gate().processing, ready: () => localTtsReady(), synth: (speaker, text, signal) => synthesizeLocal({ text, voice: speaker, signal }) });
+    const handlers: Record<string, StudioJobHandler> = { "studio.voice_preview": withShutdown(voicePreview), "studio.video_assemble": withShutdown(videoAssemble), "studio.video_transcribe": withShutdown(video), "studio.youtube_search": withShutdown(youtubeSearch), "studio.text_run": withShutdown(textRun), "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
     const report = { instanceId, handlers: Object.keys(handlers) };
     if (once) {
       const startedAt = new Date();
