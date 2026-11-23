@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { StudioJobError } from "../worker/handlers";
 import { readDeviceCommand } from "../devices-policy";
+import { openEditorLine, threadReplyLine, videoAssemblyStatusLine, videoLoopCodeReason, videoLoopMessages } from "../video-assembly-policy";
 import { buildEditBrief } from "../video-assembly/brief";
 import { agentSummary } from "../video-assembly/agent";
 import { createOpenEditorHandler, createVideoEditHandler } from "./video-loop";
@@ -95,4 +96,17 @@ test("server boundary accepts the new result shapes and refuses a path or extras
   assert.throws(() => readDeviceCommand("complete", { ...base, result: { editor: { projectName: "/Users/x" } } }));
   assert.ok(readDeviceCommand("complete", { ...base, result: { assembly: { projectKept: true, projectName: "Launch-33333333", summary: "ok" } } }));
   assert.throws(() => readDeviceCommand("complete", { ...base, result: { assembly: { projectKept: "yes" } } }));
+});
+
+test("status lines: narration progress first, its failure only when newer, loop messages and codes map", () => {
+  const view = { jobId: "j", status: "succeeded" as const, message: null, summary: "Done.", createdAt: "2026-11-23T10:00:00Z" };
+  assert.match(videoAssemblyStatusLine(view, null, { status: "running", done: 3, total: 6, message: null, jobId: null, createdAt: "2026-11-23T11:00:00Z" })!, /3 of 6/);
+  assert.equal(videoAssemblyStatusLine(view, null, { status: "failed", done: 1, total: 6, message: "Key rejected.", jobId: null, createdAt: "2026-11-23T11:00:00Z" }), "Key rejected.");
+  assert.match(videoAssemblyStatusLine(view, null, { status: "failed", done: 1, total: 6, message: "Key rejected.", jobId: null, createdAt: "2026-11-23T09:00:00Z" })!, /Done/);
+  assert.equal(videoAssemblyStatusLine(null, null, null), null);
+  assert.equal(threadReplyLine({ id: "m", instruction: "x", createdAt: "", status: "running", reply: null }), "Working on it. This can take several minutes.");
+  assert.equal(threadReplyLine({ id: "m", instruction: "x", createdAt: "", status: "succeeded", reply: "Shortened." }), "Shortened.");
+  assert.match(threadReplyLine({ id: "m", instruction: "x", createdAt: "", status: "failed", reply: null }), /could not finish/);
+  assert.equal(openEditorLine(null), null); assert.equal(openEditorLine({ jobId: "j", status: "succeeded", message: null }), "Opened on your Mac.");
+  for (const code of ["VE001", "VE002", "VE003", "VE004", "VE011", "VE012", "VE013", "VE014", "42501"]) assert.ok(videoLoopMessages[videoLoopCodeReason[code]], code);
 });
