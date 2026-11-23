@@ -11,6 +11,31 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(dirname "${SCRIPT_DIR}")"
 
+install_disk_maintenance() (
+    set -e
+    if [ "$(id -u)" -ne 0 ] || [ ! -x /usr/bin/lsof ] || [ ! -x /usr/bin/flock ]; then
+        echo "Disk maintenance requires root, /usr/bin/lsof and /usr/bin/flock." >&2
+        exit 1
+    fi
+    mkdir -p /usr/local/lib/estio
+    local_script=$(mktemp /usr/local/lib/estio/.disk-maintenance.XXXXXX)
+    cron_file=''
+    trap 'rm -f -- "$local_script" "${cron_file:-}"' EXIT
+    cron_file=$(mktemp /etc/cron.d/.estio-disk-maintenance.XXXXXX)
+    install -m 0644 "${SCRIPT_DIR}/ops/server-disk-maintenance.py" "$local_script"
+    printf '%s\n' \
+        '*/5 * * * * root /usr/bin/flock -n /run/estio-disk-maintenance.lock /usr/bin/python3 /usr/local/lib/estio/server-disk-maintenance.py' \
+        > "$cron_file"
+    chmod 0644 "$cron_file"
+    mv -fT -- "$local_script" /usr/local/lib/estio/server-disk-maintenance.py
+    mv -fT -- "$cron_file" /etc/cron.d/estio-disk-maintenance
+)
+
+if [ "${1:-}" = "--disk-maintenance-only" ]; then
+    install_disk_maintenance
+    exit
+fi
+
 echo "📅 Installing Estio Cron Jobs..."
 
 # Make scripts executable
@@ -184,6 +209,10 @@ fi
 (crontab -l 2>/dev/null \
     | grep -v -E "api/cron/whatsapp-reconciliation|api/cron/contact-sync|api/cron/scheduled-tasks") \
     | crontab -
+
+if [ "$(id -u)" -eq 0 ]; then
+    install_disk_maintenance
+fi
 
 echo "✅ Cron jobs installed!"
 echo ""

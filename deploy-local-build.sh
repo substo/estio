@@ -104,21 +104,31 @@ assert_release_input() {
 assert_release_input
 ./scripts/backup.sh
 
-# Fail fast, before the local build, if the server cannot hold this release.
-ssh $SSH_OPTS $SERVER /bin/bash -s << DISKCHECK
+# Check the root filesystem again just before replacing the inactive slot.
+check_server_disk() {
+    ssh $SSH_OPTS $SERVER /bin/bash -s -- "$1" <<'DISKCHECK'
     set -euo pipefail
-    NPM_CACHE_KB=\$(du -sk /root/.npm/_cacache 2>/dev/null | cut -f1 || echo 0)
-    if [ "\${NPM_CACHE_KB:-0}" -gt 3145728 ]; then
-        echo "🧹 npm cache exceeds 3 GiB; cleaning..."
-        npm cache clean --force >/dev/null 2>&1 || true
+    if [ "$1" = "--trim-cache" ]; then
+        NPM_CACHE_KB=$(du -sk /root/.npm/_cacache 2>/dev/null | cut -f1 || echo 0)
+        if [ "${NPM_CACHE_KB:-0}" -gt 3145728 ]; then
+            echo "🧹 npm cache exceeds 3 GiB; cleaning..."
+            npm cache clean --force >/dev/null 2>&1 || true
+        fi
     fi
-    AVAIL_KB=\$(df -Pk / | awk 'NR==2 {print \$4}')
-    if [ \$AVAIL_KB -lt 3145728 ]; then
+    AVAIL_KB=$(df -Pk / | awk 'NR==2 {print $4}')
+    if [[ ! "$AVAIL_KB" =~ ^[0-9]+$ ]]; then
+        echo "Could not measure free space on the server root disk." >&2
+        exit 1
+    fi
+    if [ "$AVAIL_KB" -lt 3145728 ]; then
         echo "❌ Less than 3 GiB free on the server root disk. Free disk space before deploying."
         df -h /
         exit 1
     fi
 DISKCHECK
+}
+
+check_server_disk --trim-cache
 
 echo "🔎 Ensuring local Redis dependency is available..."
 ssh $SSH_OPTS $SERVER /bin/bash -s << ENDSSH
@@ -323,6 +333,8 @@ else
     printf '%s\n' "$BUILD_SOURCE_HASH" > .next/estio-source.sha256
 fi
 rm -f .env.production.local
+
+check_server_disk --check-only
 
 # Recheck canonical/live ancestry and exact build inputs before slot deletion.
 assert_release_input
