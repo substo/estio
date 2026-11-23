@@ -25,6 +25,8 @@ const payload = z.object({
   voiceDownloads: z.array(z.object({ name: z.string().max(255), url: z.string().url().max(4000), byteSize: z.number().int().positive() })).max(200).default([]),
 }).passthrough();
 
+/** TEMPORARY: the deployed server predates the edit-loop migration and rejects these two result fields. Set to true once release 52ee4ff9+ is live. */
+const SERVER_HAS_PROJECT_FIELDS = false;
 export interface ExportLease { jobId: string; workerId: string; leaseToken: string }
 export interface ExportApi {
   reserve(lease: ExportLease, sha256: string, byteSize: number): Promise<{ uploadId: string; state: string; uploadUrl?: string }>;
@@ -171,7 +173,7 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
       await deps.projects.set(p.recordId, { dir: projectDir, file: result.projectFile }).catch(() => {});
       const uploadId = await saveExport(deps.api, lease, exported, context.signal);
       const mb = (exported.size / 1_000_000).toFixed(1);
-      return { assembly: { exportName: exported.name.slice(0, 200), bytes: exported.size, beats: result.beats, clips: result.clips.length, voiced: result.voiceFiles.length, uploadId, exportSaved: true, projectKept: true, projectName: projectFolderName(title, p.recordId),
+      return { assembly: { exportName: exported.name.slice(0, 200), bytes: exported.size, beats: result.beats, clips: result.clips.length, voiced: result.voiceFiles.length, uploadId, exportSaved: true, ...(SERVER_HAS_PROJECT_FIELDS ? { projectKept: true, projectName: projectFolderName(title, p.recordId) } : {}),
         summary: `${result.beats} beats, ${result.clips.length} clip${result.clips.length === 1 ? "" : "s"}${result.voiceFiles.length ? ", generated voiceover" : ""}, ${mb} MB. Kept on your Mac; ask the agent below to change it or open it in the editor.` } };
     } finally { await rm(work, { recursive: true, force: true }).catch(() => {}); }
   };
