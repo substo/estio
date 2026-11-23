@@ -19,7 +19,13 @@ async function send(fetcher: Fetch, url: string, init: RequestInit, failure: str
   catch { throw new VoiceProviderError("unavailable", `${failure} The provider could not be reached. Try again shortly.`); }
   if (response.status === 401) throw new VoiceProviderError("invalid_key", "The provider rejected this key. Replace it in AI settings.");
   if (response.status === 404) throw new VoiceProviderError("not_found", "The voice no longer exists at the provider.");
-  if (!response.ok) throw new VoiceProviderError(response.status >= 500 ? "unavailable" : "rejected", `${failure} The provider declined the request (${response.status}).`);
+  if (!response.ok) {
+    // The provider's own reason is what tells the owner what to change (sample too short, wrong format, plan limit). Plain text only, bounded, no echo of keys or URLs.
+    const body = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const detail = body && typeof body === "object" ? (typeof body.detail === "string" ? body.detail : (body.detail && typeof body.detail === "object" ? (body.detail as Record<string, unknown>).message : undefined) ?? body.message ?? (typeof body.error === "string" ? body.error : undefined)) : undefined;
+    const reason = typeof detail === "string" ? detail.replace(/[\u0000-\u001f]/g, " ").replace(/sk[-_][A-Za-z0-9_-]{8,}/g, "[key]").trim().slice(0, 240) : "";
+    throw new VoiceProviderError(response.status >= 500 ? "unavailable" : "rejected", `${failure} The provider declined the request (${response.status})${reason ? `: ${reason}` : ""}.`);
+  }
   return response;
 }
 const json = async (response: Response) => { try { return await response.json() as Record<string, unknown>; } catch { return {}; } };
