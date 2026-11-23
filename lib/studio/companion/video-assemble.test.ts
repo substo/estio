@@ -18,7 +18,7 @@ async function deps(over: Partial<VideoAssembleDeps> = {}) {
   const root = await mkdtemp(join(tmpdir(), "va-"));
   const calls: string[] = [];
   const api: ExportApi = { reserve: async () => { calls.push("reserve"); return { uploadId: upload, state: "reserved", uploadUrl: "https://r2.example/put" }; }, put: async () => { calls.push("put"); }, verify: async () => { calls.push("verify"); } };
-  const value: VideoAssembleDeps = { enabled: () => true, tools: async () => ({ ready: true, missing: [] }), elevenLabsKey: async () => "key", workRoot: root, editorDocs: "/docs", api,
+  const value: VideoAssembleDeps = { enabled: () => true, tools: async () => ({ ready: true, missing: [] }), speechReady: async () => true, workRoot: root, editorDocs: "/docs", api,
     fetcher: (async () => new Response("data")) as typeof fetch,
     assemble: async o => { await mkdir(join(o.projectDir, "exports"), { recursive: true }); await writeFile(join(o.projectDir, "exports", "Video r2.mp4"), Buffer.alloc(2000, 1));
       assert.deepEqual(await readdir(o.clipsDir), ["shot.mov"]); return { projectDir: o.projectDir, beats: 1, clips: ["shot.mov"], voiceFiles: ["voice-01.mp3"], timings: [0], brief: "" }; },
@@ -36,12 +36,12 @@ test("handler downloads footage, assembles, uploads through the lease-fenced exp
   assert.deepEqual(readAssemblyResult(result), result);
   assert.deepEqual(await readdir(root), [], "per-job folder removed");
 });
-test("gates: processing off, missing tools, missing ElevenLabs key only when voiceover, bad payload, missing links", async () => {
+test("gates: processing off, missing tools, missing voice engine only when voiceover, bad payload, missing links", async () => {
   const code = async (over: Partial<VideoAssembleDeps>, j = job()) => (await createVideoAssembleHandler((await deps(over)).value)(j as never, ctx()).catch(e => e)) as StudioJobError;
   assert.equal((await code({ enabled: () => false })).code, "local_policy");
   const tools = await code({ tools: async () => ({ ready: false, missing: ["substo"] }) }); assert.equal(tools.code, "video_assembly_tools_missing"); assert.equal(tools.retryable, true); assert.match(tools.message, /substo/);
-  assert.equal((await code({ elevenLabsKey: async () => null })).code, "elevenlabs_key_missing");
-  const noVoice = await createVideoAssembleHandler((await deps({ elevenLabsKey: async () => null })).value)(job({}, { voiceover: false, music: false, portrait: false }) as never, ctx());
+  assert.equal((await code({ speechReady: async () => false })).code, "voice_engine_missing");
+  const noVoice = await createVideoAssembleHandler((await deps({ speechReady: async () => false })).value)(job({}, { voiceover: false, music: false, portrait: false }) as never, ctx());
   assert.ok((noVoice as { assembly: unknown }).assembly);
   assert.equal((await code({}, { ...job(), payload: { recordId: "x" } })).code, "invalid_job_payload");
   assert.equal((await code({}, job({ downloads: [] }))).code, "footage_unavailable");

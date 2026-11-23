@@ -45,7 +45,8 @@ export interface VideoAssembleDeps {
   enabled: () => boolean;
   /** substo + ffprobe present, and the subscription CLI that drives the editor is signed in. */
   tools: (signal: AbortSignal) => Promise<{ ready: boolean; missing: string[] }>;
-  elevenLabsKey: () => Promise<string | null>;
+  /** A voice engine is usable (Fish or ElevenLabs key in the keys file, or on-device Qwen3-TTS). */
+  speechReady: () => Promise<boolean>;
   workRoot: string; editorDocs: string; model?: string;
   api: ExportApi;
   assemble: (options: AssembleOptions) => Promise<AssembleResult>;
@@ -63,7 +64,7 @@ async function download(url: string, file: string, expected: number, signal: Abo
 }
 async function sha256(file: string) { const hash = createHash("sha256"); await pipeline(createReadStream(file), hash); return hash.digest("hex"); }
 
-/** Mac-only script-to-video. Subscription editing agent, ElevenLabs voiceover only when asked, no hosted or paid fallback, no replay after the agent started. */
+/** Mac-only script-to-video. Subscription editing agent, voiceover (Fish, ElevenLabs or on-device) only when asked, no hosted or paid fallback, no replay after the agent started. */
 export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHandler {
   return async (job, context) => {
     const parsed = payload.safeParse(job.payload);
@@ -72,7 +73,7 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
     if (!deps.enabled()) throw new StudioJobError("local_policy", "Turn on Mac processing in Setup and keep it On.", true, 300);
     const tools = await deps.tools(context.signal);
     if (!tools.ready) throw new StudioJobError("video_assembly_tools_missing", `This Mac is missing ${tools.missing.join(", ")}. Install it, then make the video again.`, true, 600);
-    if (p.options.voiceover && !await deps.elevenLabsKey()) throw new StudioJobError("elevenlabs_key_missing", "Add your ElevenLabs key to this Mac's Keychain (service elevenlabs), then make the video again.", false);
+    if (p.options.voiceover && !await deps.speechReady()) throw new StudioJobError("voice_engine_missing", "Add a Fish Audio or ElevenLabs key to ~/.config/estio/studio-video.env (or set up on-device voice), then make the video again.", false);
     if (!p.downloads.length && p.media.length) throw new StudioJobError("footage_unavailable", "Studio could not provide the footage links. Make the video again.", false);
 
     const work = join(deps.workRoot, job.id), clipsDir = join(work, "footage"), projectDir = join(work, "project");

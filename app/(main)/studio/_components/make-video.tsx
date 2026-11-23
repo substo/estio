@@ -13,7 +13,7 @@ export function MakeVideo({ locationId, recordId, status, active }: { locationId
         <summary className="min-h-11 cursor-pointer font-medium leading-[2.75rem]">Make video from this script</summary>
         <form action={action} className="mt-3 space-y-3">
           <p className="text-muted-foreground">Your Mac cuts the footage uploaded below to the saved script, adds captions, titles and sound, and saves the edit back here. No paid fallback.</p>
-          <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="voiceover" /> Generate the voiceover (ElevenLabs, uses your key)</label>
+          <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="voiceover" /> Generate the voiceover (Fish Audio or ElevenLabs, uses your key)</label>
           <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="music" /> Add a music bed</label>
           <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="portrait" /> Vertical (9:16)</label>
           <button type="submit" disabled={pending || active} className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-accent disabled:opacity-60">{pending ? "Sending…" : "Make video"}</button>

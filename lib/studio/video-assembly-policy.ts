@@ -12,7 +12,7 @@ export const videoAssemblyMessages: Record<VideoAssemblyReason, string> = {
   footage_too_large: "The footage on this piece is larger than 20 GB. Remove some and try again.",
   no_mac: "Pair a Mac in Setup to make videos. Nothing was sent to a paid service.",
   processing_off: "Turn Mac processing on in Setup to make videos.",
-  mac_not_ready: "Your Mac needs the Substo Video editor, ffprobe and the Claude subscription sign-in (and an ElevenLabs key for voiceover). Check Setup, then try again.",
+  mac_not_ready: "Your Mac needs the Substo Video editor, ffprobe and the Claude subscription sign-in (and a Fish Audio or ElevenLabs key, or on-device voice, for voiceover). Check Setup, then try again.",
   companion_outdated: "Update the Studio companion on your Mac (it does not make videos yet).",
   no_authority: "Only a Business admin with a paired Mac can make videos.",
 };
