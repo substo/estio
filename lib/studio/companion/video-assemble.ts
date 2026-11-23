@@ -42,9 +42,9 @@ export function createExportApi(credentials: DeviceCredentials, options: DeviceC
     async put(url, file, byteSize, signal) {
       const target = new URL(url);
       if (target.protocol !== "https:") throw new Error("video_upload_refused");
-      // A plain https PUT piping the file: no fetch/web-stream bridge (it crashed the process), exact content-length, bounded time.
+      // The presigned URL signs content-type, content-length and if-none-match, so all three must be sent. A plain https PUT piping the file: no fetch/web-stream bridge (it crashed the process), exact content-length, bounded time.
       const status = await new Promise<number>((resolve, reject) => {
-        const req = httpsRequest(target, { method: "PUT", headers: { "content-type": "video/mp4", "content-length": String(byteSize) }, signal: AbortSignal.any([signal, AbortSignal.timeout(60 * 60_000)]) },
+        const req = httpsRequest(target, { method: "PUT", headers: { "content-type": "video/mp4", "content-length": String(byteSize), "if-none-match": "*" }, signal: AbortSignal.any([signal, AbortSignal.timeout(60 * 60_000)]) },
           res => { res.resume(); res.on("end", () => resolve(res.statusCode ?? 0)); res.on("error", reject); });
         req.on("error", reject);
         const source = createReadStream(file); source.on("error", reject); source.pipe(req);
