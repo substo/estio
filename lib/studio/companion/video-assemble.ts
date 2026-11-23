@@ -57,6 +57,8 @@ export interface VideoAssembleDeps {
   /** Scratch space for downloads; removed after every job. The project itself lives in projectsRoot and is kept. */
   workRoot: string; projectsRoot: string; projects: ProjectStore; editorDocs: string; model?: string;
   api: ExportApi;
+  /** Offline timed speech for each footage file (Parakeet); omitted or null leaves the agent without a transcript. */
+  transcribeFootage?: (file: string, signal?: AbortSignal) => Promise<{ start: number; end: number; text: string }[] | null>;
   assemble: (options: AssembleOptions) => Promise<AssembleResult>;
   fetcher?: typeof fetch;
 }
@@ -145,7 +147,7 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
       const projectFile = await nextProjectFile(projectDir), startedAt = Date.now();
       let result: AssembleResult;
       try {
-        result = await deps.assemble({ script: p.script, clipsDir, projectDir, projectFile, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape",
+        result = await deps.assemble({ transcribeFootage: deps.transcribeFootage, script: p.script, clipsDir, projectDir, projectFile, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape",
           voiceover: p.options.voiceover, music: p.options.music, model: deps.model, signal: context.signal,
           voice: !p.options.voiceover ? undefined : p.voice?.engine === "local" ? { engine: "local", speaker: p.voice.speaker, model: p.voice.model } : p.voice?.engine === "hosted" ? { engine: "prerendered", files: narration } : undefined });
       } catch (error) {

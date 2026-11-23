@@ -4,6 +4,8 @@ export interface BriefInput {
   /** The .substo file in the current folder; every command names it (a folder may hold several versions). */ projectFile: string;
   editorDocs: string; orientation: "landscape" | "portrait";
   beats: Beat[]; voiceFiles: string[]; timings: number[]; clips: string[]; hasVoiceover: boolean; music: boolean;
+  /** Timed speech in each footage file (file time, seconds), made on this Mac when the editor cannot transcribe. */
+  footageTranscripts?: { file: string; lines: string }[];
 }
 
 /** The instruction handed to the editing agent. Everything it may do goes through the `substo` command, so edits land in the editor's undo history. */
@@ -16,6 +18,7 @@ ${i.hasVoiceover ? "Generated voiceover files (one per beat, in this folder) are
 
 Script beats:
 ${beats}
+${i.footageTranscripts?.length ? `\nFootage transcripts (seconds in the file; the editor cannot transcribe on this Mac, so use these times for cuts, search and captions, not substo transcribe):\n${i.footageTranscripts.map(t => `[${t.file}]\n${t.lines}`).join("\n")}` : ""}
 
 Do this, in order:
 1. \`substo media\` and \`substo timeline --summary\` to learn what exists.

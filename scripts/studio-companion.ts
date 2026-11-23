@@ -25,6 +25,7 @@ import { createLibrarySummaryHandler } from "../lib/studio/companion/library-sum
 import { createOnboardingResearchHandler } from "../lib/studio/companion/onboarding-research";
 import { DEVICE_BLOCK_REASONS } from "../lib/studio/devices-policy";
 import { discoverVideoTools, type VideoTools } from "../lib/studio/companion/video-tools";
+import { createFootageTranscriber } from "../lib/studio/companion/footage-transcript";
 import { createVideoTranscribeHandler } from "../lib/studio/companion/video-transcribe";
 import { createVideoDeviceApi } from "../lib/studio/companion/video-api";
 import { fileURLToPath } from "node:url";
@@ -182,7 +183,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
       youtubeSignedIn = result.signedIn; return result;
     };
     const projects = createProjectStore();
-    const videoAssemble = createVideoAssembleHandler({ enabled: () => gate().processing, tools: async signal => { await refreshAssembly(); return assembly; }, localSpeechReady: () => localTtsReady(), api: createExportApi(credentials),
+    const videoAssemble = createVideoAssembleHandler({ transcribeFootage: createFootageTranscriber({ tools: async () => { videoTools = await discoverVideoTools(); return videoTools; }, scriptsDir: fileURLToPath(new URL("./studio-video", import.meta.url)) }), enabled: () => gate().processing, tools: async signal => { await refreshAssembly(); return assembly; }, localSpeechReady: () => localTtsReady(), api: createExportApi(credentials),
       workRoot: join(os.homedir(), "Library", "Application Support", "Estio", "StudioCompanion", "video-assembly"), projectsRoot: projectsRoot(), projects, editorDocs: fileURLToPath(new URL("../video-editor/docs", import.meta.url)), assemble: assembleVideo });
     const loopDeps = { enabled: () => gate().processing, tools: async () => { await refreshAssembly(); return assembly; }, projects, editorDocs: fileURLToPath(new URL("../video-editor/docs", import.meta.url)) };
     const videoEdit = createVideoEditHandler({ ...loopDeps, api: createExportApi(credentials) });

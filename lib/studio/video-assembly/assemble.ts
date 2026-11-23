@@ -56,7 +56,14 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
   if (!o.dryRun) for (const f of voiceFiles) { timings.push(Number(at.toFixed(2))); at += await durationOf(join(o.projectDir, f), run, o.projectDir) + BEAT_GAP; }
   const cwd = o.projectDir, env = agentEnv();
   if (!o.dryRun) await run({ command: "substo", args: ["new", projectFile, ...(o.orientation === "portrait" ? ["--portrait"] : [])], cwd, env, timeoutMs: 120_000, maxOutputBytes: 64 * 1024, signal: o.signal });
-  const brief = buildBrief({ projectFile, editorDocs: o.editorDocs, orientation: o.orientation ?? "landscape", beats, voiceFiles, timings, clips, hasVoiceover: Boolean(o.voiceover), music: o.music ?? false });
+  const footageTranscripts: { file: string; lines: string }[] = [];
+  if (o.transcribeFootage && !o.dryRun) for (const f of clips) {
+    if (!/\.(mp4|mov|m4v|mkv|webm|mp3|wav|m4a)$/i.test(f)) continue;
+    log(`Transcribing ${f}`);
+    const segments = await o.transcribeFootage(join(o.projectDir, f), o.signal).catch(() => null);
+    if (segments?.length) footageTranscripts.push({ file: f, lines: segments.map(x => `${x.start.toFixed(1)}-${x.end.toFixed(1)} ${x.text}`).join("\n").slice(0, 6000) });
+  }
+  const brief = buildBrief({ footageTranscripts, projectFile, editorDocs: o.editorDocs, orientation: o.orientation ?? "landscape", beats, voiceFiles, timings, clips, hasVoiceover: Boolean(o.voiceover), music: o.music ?? false });
   if (o.dryRun) return { projectDir: o.projectDir, projectFile, beats: beats.length, clips, voiceFiles, timings, brief };
   log("Editing with the agent");
   const agentOutput = await runEditingAgent({ cwd, brief, editorDocs: o.editorDocs, model: o.model, run, signal: o.signal });
