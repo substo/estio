@@ -12,6 +12,7 @@ import {
 import { DeviceStatus } from "./device-status";
 import type { StudioDeviceCommandSummary, StudioDeviceSummary } from "@/lib/studio/devices";
 import { DeviceSetupForm } from "./device-setup-form";
+import { LocalModels } from "./local-models";
 import { buttonClass, endpoint, inputClass, primaryButtonClass, providerReport, record, type Provider } from "./shared";
 import { computerTasks, type ComputerTask } from "@/lib/studio/computer-readiness-policy";
 import { videoSetupCommand, videoSetupGuide, videoToolLabels, VIDEO_TOOL_NAMES, type VideoToolName } from "@/lib/studio/video-transcription-policy";
@@ -266,6 +267,7 @@ function DeviceCard({ device, canManage }: { device: StudioDeviceSummary; canMan
         <p className="text-muted-foreground">The CLI sign-in runs on this Mac and keeps credentials there.</p>
         {(["codex", "claude"] as const).map(provider => <ProviderConnection key={provider} device={device} provider={provider} canManage={canManage} />)}
       </div>
+      <div id={`models-${device.id}`} className="scroll-mt-4"><LocalModels device={device} canManage={canManage} /></div>
       <div id={`setup-${device.id}`} className="scroll-mt-4"><DeviceSetupForm device={device} canManage={canManage} /></div>
       <div id={`diagnostics-${device.id}`} className="scroll-mt-4 space-y-3">
         <Capabilities device={device} /><Hardware device={device} />
@@ -310,7 +312,7 @@ function PairingApproval({ code, businessName, canManage, computersHref }: { cod
       : lookup.error ? <p role="alert" className="text-destructive">{lookup.error}</p>
       : pairing ? pairing.status !== "pending" ? <p className="text-muted-foreground">{pairing.status === "approved" || pairing.status === "consumed" ? "This computer is already approved." : `This code is ${pairing.status}. Run pairing on the Mac again.`}</p> : <>
         <p>{pairing.name}{pairing.platform ? ` · ${pairing.platform}` : ""} · expires {when(pairing.expiresAt)}</p>
-        <p className="text-muted-foreground">Approving lets this Mac connect to {businessName} only.</p>
+        <p className="text-muted-foreground">Approving lets this Mac connect to {businessName} only. Once it reports in, you choose which tasks it runs itself (voices, transcription) and install models under Local models.</p>
         <label className="flex items-start gap-2"><input type="checkbox" className="mt-1" checked={processing} onChange={event => setProcessing(event.target.checked)} disabled={decide.pending} />
           <span>Also turn processing on: this Mac may run Business research and Library summaries on its own Codex or Claude subscription. You can turn it off at any time.</span></label>
         <div className="flex flex-wrap gap-2">

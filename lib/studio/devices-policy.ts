@@ -3,6 +3,7 @@ import { relatedResultSchema } from "./related-search-policy";
 import { readFramesReserve, readFramesVerify, readTranscriptChunk, readVideoResult, VIDEO_TOOL_NAMES } from "./video-transcription-policy";
 import { NATIVE_REJECTION_BACKOFF_MS, reportedSubscriptionLimit } from "./subscription-readiness";
 import { usageSpec } from "../build/contract";
+import { readDesiredModels, readReportedModels } from "./local-models";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const modelPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
 export const deviceOperations = ["heartbeat", "claim", "extend", "complete", "fail", "command", "video_transcript_chunk", "video_frames_reserve", "video_frames_verify", "video_export_reserve", "video_export_verify"] as const;
@@ -166,6 +167,7 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
     const r = v.runtimes as Record<string, unknown>;
     result.runtimes = compact(Object.fromEntries(["ollama", "lmstudio", "mlx", "whispercpp", "python", "ffmpeg"].map(key => [key, safeText(r[key], /^[A-Za-z0-9._+ -]{1,60}$/)])));
   }
+  if (Array.isArray(v.modelStates)) { const states = readReportedModels(v.modelStates); if (states.length) result.modelStates = states; }
   if (Array.isArray(v.localModels)) result.localModels = v.localModels.filter(x => typeof x === "string" && modelPattern.test(x)).slice(0, 100);
   for (const provider of ["codex", "claude"]) {
     const raw = v[provider]; if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
@@ -325,6 +327,8 @@ export interface StudioDeviceConfig {
   languages: string[]; translationTargets: string[];
   preference: "quality" | "balanced" | "speed";
   textProvider: "codex" | "claude" | null; textModel: string | null;
+  /** Catalog ids (lib/studio/local-models.ts) this Mac should have installed. Absent until the owner first chooses. */
+  models?: string[];
   resources: {
     modelBudgetGb: number; minFreeDiskGb: number; allowOnBattery: boolean; maxConcurrentJobs: 1; launchAtLogin: boolean;
     workingHours: null | { start: string; end: string; timeZone: string };
@@ -360,7 +364,10 @@ function numberIn(value: unknown, min: number, max: number): number {
 /** Throws StudioCommandError on any unknown key or out-of-range value; returns a normalized copy. */
 export function readDeviceConfig(value: unknown): StudioDeviceConfig {
   const v = object(value);
-  exactKeys(v, ["features", "languages", "translationTargets", "preference", "textProvider", "textModel", "resources"]);
+  valid(Object.keys(v).every(key => ["features", "languages", "translationTargets", "preference", "textProvider", "textModel", "resources", "models"].includes(key))
+    && ["features", "languages", "translationTargets", "preference", "textProvider", "textModel", "resources"].every(key => key in v));
+  const models = v.models === undefined ? undefined : readDesiredModels(v.models);
+  valid(v.models === undefined || models !== null);
   const features = object(v.features); exactKeys(features, ["transcription", "text"]);
   valid(typeof features.transcription === "boolean" && typeof features.text === "boolean");
   valid(["quality", "balanced", "speed"].includes(String(v.preference)));
@@ -380,6 +387,7 @@ export function readDeviceConfig(value: unknown): StudioDeviceConfig {
     languages: languageList(v.languages, 1), translationTargets: languageList(v.translationTargets, 0),
     preference: v.preference as StudioDeviceConfig["preference"],
     textProvider: v.textProvider as StudioDeviceConfig["textProvider"], textModel: v.textModel as string | null,
+    ...(models ? { models } : {}),
     resources: { modelBudgetGb: numberIn(r.modelBudgetGb, 1, 500), minFreeDiskGb: numberIn(r.minFreeDiskGb, 5, 500),
       allowOnBattery: r.allowOnBattery as boolean, maxConcurrentJobs: 1, launchAtLogin: r.launchAtLogin as boolean, workingHours },
   };

@@ -14,3 +14,13 @@ Owner decisions: nothing provider- or voice-specific lives in `.env`; our own Lo
 
 - **Voices (A+B+C):** keys in Settings -> AI, voice library + clone flow, server-side narration, Make-video voice picker, remove env reading.
 - **Local models (D+E):** catalog, detection, install/remove commands, Settings UI, first-run prompt.
+
+## Local models: as built (feature/studio-local-models)
+
+- **Catalog:** `lib/studio/local-models.ts` (version 1): Qwen3-TTS 0.6B 4-bit (voice, speakers serena/vivian/uncle_fu/ryan/aiden/ono_anna/sohee/eric/dylan) and Parakeet TDT 0.6B v3 (transcription weights), each with a pinned Hugging Face revision, size, RAM/disk floors, licence and the weight files that must exist. Licence/language fields are from the model cards as understood at the time and still need a human review.
+- **Channel:** no SQL. The desired list is `models` in the existing versioned device config (`save_config`, acknowledged by the Mac), validated against catalog ids by `readDeviceConfig`. Removing an id from the list cancels an install or removes a model this app installed. Older saved configs have no `models` key and stay valid.
+- **Mac:** `lib/studio/companion/model-manager.ts`. Detection checks that weight files resolve and are large enough (a folder or partial download is not "installed"). Install = create the isolated venv, pip install the runtime package, `snapshot_download(repo, revision)` with fixed argv, verify, record in `models.json`. Models already on the Mac are reported as "found" and are never deleted by this app. One download at a time; refused when memory/disk cannot hold the model; waits for AC power unless Setup allows battery. Progress is a heartbeat per 10%.
+- **Report:** `modelStates` in the heartbeat capabilities, whitelisted by `safeDeviceCapabilities`.
+- **UI:** Settings -> Connected computer -> Local models (list, fit warnings, install/cancel/remove) and a first-run prompt (which tasks should this Mac run itself, install recommended / not now) shown once the Mac has reported and no choice has been saved. The pairing approval text points to it; the Mac cannot report hardware until after approval, so recommendations are made right after pairing.
+- **Voice path:** `synthesizeLocal`/`localTtsReady` in `lib/studio/video-assembly/tts.ts` now read the model, speaker and installed-check from the catalog.
+- **Not here:** parakeet-mlx runtime install (the transcription installer owns it; the catalog entry fetches weights only), text models via Ollama/LM Studio (detection exists, no install), provider keys and the voices table (voices fork).
