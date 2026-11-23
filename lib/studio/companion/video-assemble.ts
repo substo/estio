@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, openAsBlob } from "node:fs";
-import { mkdir, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -153,7 +153,12 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
         throw new StudioJobError("video_assembly_failed", "The Mac could not finish editing this video. It was not retried.", false);
       }
       const exported = await latestExport(projectDir, startedAt);
-      if (!exported) throw new StudioJobError("video_not_exported", "The editor finished without exporting a video. Make the video again.", false);
+      if (!exported) {
+        // Keep what the agent said next to the project (local only) and recognise the subscription's own usage limit.
+        await writeFile(join(projectDir, "agent-log.txt"), (result.agentOutput ?? "").slice(0, 20_000)).catch(() => {});
+        if (/usage limit|rate limit|limit reached|resets? at/i.test(result.agentOutput ?? "")) throw new StudioJobError("agent_rate_limited", "Your Claude subscription hit its usage limit while editing. Try again after it resets.", false);
+        throw new StudioJobError("video_not_exported", "The editor finished without exporting a video. Make the video again.", false, undefined, "agent_log_saved");
+      }
       // The edit is kept from here on, whether or not the upload below succeeds.
       await deps.projects.set(p.recordId, { dir: projectDir, file: result.projectFile }).catch(() => {});
       const uploadId = await saveExport(deps.api, lease, exported, context.signal);
