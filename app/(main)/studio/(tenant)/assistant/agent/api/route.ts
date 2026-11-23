@@ -3,7 +3,7 @@ import { studioCommandResponse } from "@/lib/studio/command-http";
 import { studioRouteParams, withStudioRoute } from "@/lib/studio/route-context";
 import { StudioCommandError } from "@/lib/studio/command-error";
 import { recordLinkId } from "@/lib/studio/record-link-policy";
-import { advanceAgentTurn, applyAgentProposal, readAgentTurn, sendAgentMessage } from "@/lib/studio/agent";
+import { advanceAgentTurn, applyAgentProposal, getAgentEvidenceChoices, readAgentTurn, sendAgentMessage } from "@/lib/studio/agent";
 import { readAgentApplyCommand, readAgentSendCommand } from "@/lib/studio/agent-policy";
 
 export const dynamic = "force-dynamic";
@@ -33,10 +33,16 @@ export const POST = withStudioRoute(async (request, { params }) => {
 /** Read-only status. Advancing a turn (tool read, next model call) is the origin-checked POST `advance` action. */
 export const GET = withStudioRoute(async (request, { params }) => {
   const { locationId } = await studioRouteParams(params, request);
-  const id = new URL(request.url).searchParams.get("turnId") ?? "";
+  const query = new URL(request.url).searchParams;
+  const id = query.get("turnId") ?? "";
   const reply = (body: unknown, status: number) => Response.json(body, { status, headers: { "Cache-Control": "private, no-store" } });
-  if (!recordLinkId(id)) return reply({ error: "Message unavailable." }, 404);
   try {
+    if (query.has("evidenceRecord") || query.has("evidenceSource")) {
+      const record = query.get("evidenceRecord"), source = query.get("evidenceSource");
+      if (Boolean(record) === Boolean(source) || !recordLinkId(record ?? source ?? "")) return reply({ error: "Draft or source unavailable." }, 404);
+      return reply({ choices: await getAgentEvidenceChoices(locationId, record, source) }, 200);
+    }
+    if (!recordLinkId(id)) return reply({ error: "Message unavailable." }, 404);
     const turn = await readAgentTurn(locationId, id);
     return turn ? reply({ turn }, 200) : reply({ error: "Message unavailable." }, 404);
   } catch (error) {

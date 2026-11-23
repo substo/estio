@@ -13,6 +13,7 @@ import { useStudioTenantHeaders } from "./studio-tenant-context";
 import { SectionFit, useAgentDraft } from "./agent-workspace";
 import { OPEN_TAB_EVENT } from "./source-tabs";
 import { useOptionalSourceWorkspace } from "./source-workspace";
+import { AgentEvidenceChoice, type EvidenceMode } from "./agent-evidence-choice";
 import { useDictation } from "./use-dictation";
 
 const API = "/studio/assistant/agent/api";
@@ -41,7 +42,9 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   const [error, setError] = useState("");
   const [applying, setApplying] = useState<string | null>(null);
   const created = useRef(initialTurns.length > 0 || Boolean(record));
-  const pendingKey = useRef<{ message: string; turnId: string } | null>(null);
+  const pendingKey = useRef<{ input: string; turnId: string } | null>(null);
+  const [evidenceMode, setEvidenceMode] = useState<EvidenceMode>("automatic");
+  const [evidenceIds, setEvidenceIds] = useState<string[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const fieldId = useId();
@@ -96,15 +99,18 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   async function send(raw: string, selection?: AgentSelection) {
     const message = raw.trim();
     if (!message || sending || running) return;
-    // The same text keeps the same request id, so a lost response can be retried without a second model call.
-    if (pendingKey.current?.message !== message) pendingKey.current = { message, turnId: crypto.randomUUID() };
+    if (evidenceMode === "selected" && !evidenceIds.length) { setError("Choose at least one passage or change the source evidence mode."); return; }
+    const chosen = evidenceMode === "automatic" ? null : evidenceMode === "none" ? [] : evidenceIds;
+    // A retry keeps its id only when the message, route, span and evidence choice are identical.
+    const input = JSON.stringify([message, provider, selection ?? null, chosen]);
+    if (pendingKey.current?.input !== input) pendingKey.current = { input, turnId: crypto.randomUUID() };
     setSending(true); setError(""); dictation.stop();
     try {
       const response = await fetch(API, { method: "POST", headers, signal: AbortSignal.timeout(30_000), body: JSON.stringify({ action: "send", recordId, turnId: pendingKey.current.turnId,
-        version: created.current ? 1 : 0, sourceId: created.current ? null : source?.id ?? null, sourceVersion: created.current ? null : source?.version ?? null, message, ...(selection ? { selection } : {}), ...studioTextConsent(provider, true) }) });
+        version: created.current ? 1 : 0, sourceId: created.current ? null : source?.id ?? null, sourceVersion: created.current ? null : source?.version ?? null, message, ...(chosen === null ? {} : { evidenceIds: chosen }), ...(selection ? { selection } : {}), ...studioTextConsent(provider, true) }) });
       const data = await response.json();
       if (!response.ok) { if (response.status < 500) pendingKey.current = null; setError(data.error || "The message could not be sent."); return; }
-      created.current = true; pendingKey.current = null; setText(""); { const asked = parseDurationRequest(message); if (asked) setTarget(asked.kind === "set" ? asked.seconds : null); } try { if (provider !== "openai") localStorage.setItem(ROUTE_KEY(scope), JSON.stringify(provider)); } catch { /* optional */ }
+      created.current = true; pendingKey.current = null; setText(""); setEvidenceMode("automatic"); setEvidenceIds([]); { const asked = parseDurationRequest(message); if (asked) setTarget(asked.kind === "set" ? asked.seconds : null); } try { if (provider !== "openai") localStorage.setItem(ROUTE_KEY(scope), JSON.stringify(provider)); } catch { /* optional */ }
       const url = new URL(window.location.href); url.searchParams.set("draft", recordId); url.searchParams.delete("new"); window.history.replaceState(null, "", url);
       upsert({ id: data.turnId, seq: turns.length + 1, message, provider, selection: selection ?? null, target: (() => { const asked = parseDurationRequest(message); return asked?.kind === "set" ? asked.seconds : asked?.kind === "clear" ? null : target; })(), status: "running", error: null, activity: [], waiting: "queued", route: null, result: null, inputs: { reads: [], checks: [], context: [] } });
     } catch { setError("The outcome is unconfirmed. Press Send again to check this same message."); }
@@ -244,6 +250,8 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
         {[["60 sec", "about 60 seconds"], ["90 sec", "about 90 seconds"], ["3 min", "about 3 minutes"]].map(([label, phrase]) => <button key={label} type="button" disabled={Boolean(running)} className="min-h-8 rounded-full border px-2.5 hover:bg-accent disabled:opacity-50"
           onClick={() => { setText(previous => `${previous.trim() ? previous.trim() + " " : ""}Make it ${phrase}.`.slice(0, AGENT_MESSAGE_LIMIT)); field.current?.focus(); }}>{label}</button>)}
       </div>
+      <AgentEvidenceChoice key={record?.id ?? source?.id ?? "fresh"} recordId={record?.id ?? (initialTurns.length ? recordId : null)} sourceId={source?.id ?? null}
+        tenant={tenant} mode={evidenceMode} selected={evidenceIds} onMode={setEvidenceMode} onSelected={setEvidenceIds} disabled={sending || Boolean(running)} />
       <label htmlFor={`${fieldId}-msg`} className="sr-only">Message</label>
       <textarea ref={field} id={`${fieldId}-msg`} data-assistant-field value={text} rows={2} maxLength={AGENT_MESSAGE_LIMIT} disabled={Boolean(running)}
         placeholder={running ? "Working on your last message…" : source ? "What do you want to make? Or give feedback." : "What do you want to make? Or give feedback."}
@@ -251,7 +259,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
         onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing || event.keyCode === 229) return; event.preventDefault(); if (!event.repeat) void send(text); }}
         className="block w-full resize-none rounded-md border bg-background p-2 text-sm" />
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" className="min-h-10" disabled={sending || Boolean(running) || !text.trim()} onClick={() => void send(text)}>{sending ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : <Send aria-hidden="true" className="mr-2 h-4 w-4" />}Send</Button>
+        <Button type="button" className="min-h-10" disabled={sending || Boolean(running) || !text.trim() || evidenceMode === "selected" && evidenceIds.length === 0} onClick={() => void send(text)}>{sending ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : <Send aria-hidden="true" className="mr-2 h-4 w-4" />}Send</Button>
         {dictation.supported ? <Button type="button" variant="outline" size="icon" className="h-10 w-10" onClick={dictation.toggle} aria-pressed={dictation.listening} aria-label={dictation.listening ? "Stop dictation" : "Dictate"}>{dictation.listening ? <MicOff aria-hidden="true" className="h-4 w-4" /> : <Mic aria-hidden="true" className="h-4 w-4" />}</Button> : null}
         {newDraftHref && (turns.length || record) ? <Button asChild variant="ghost" className="min-h-9 px-2 text-xs"><Link href={newDraftHref}>Start a new draft</Link></Button> : null}
       </div>
