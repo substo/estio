@@ -36,7 +36,7 @@ export function VoiceProviderKeys({ locationId, hints, canManage }: { locationId
     <details>
       <summary className="min-h-11 cursor-pointer text-sm font-medium leading-[2.75rem]">Voice providers (narration for videos){hints.fish || hints.elevenlabs ? " · connected" : ""}</summary>
       <div className="mt-3 space-y-5">
-        <p className="text-sm text-muted-foreground">Connect your own Fish Audio or ElevenLabs account to generate narration and clone voices. Choose and manage voices in <Link className="text-primary hover:underline" href="/studio/voices">Studio → Voices</Link>.</p>
+        <p className="text-sm text-muted-foreground">Connect your own Fish Audio or ElevenLabs account to generate narration and clone voices. Choose and manage voices in <Link className="text-primary hover:underline" href="/settings/voices">Settings → Voices</Link>.</p>
         {canManage ? (["fish", "elevenlabs"] as const).map(p => <VoiceKeyForm key={p} locationId={locationId} provider={p} keyHint={hints[p]} />)
           : <p className="text-sm text-muted-foreground">Only a workspace admin can change voice provider keys.</p>}
       </div>

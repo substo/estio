@@ -6,6 +6,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/account/connections", label: "My connections", description: "Social accounts and permissions for your profile.", firstPartyOnly: true, scope: "account" },
   { href: "/settings/general", label: "General", description: "Business profile and name." },
   { href: "/settings/ai", label: "AI", description: "Connections, models, fallback order, and usage limits.", firstPartyOnly: true },
+  { href: "/settings/voices", label: "Voices", description: "Narration voices: choose, record, clone, design and preview.", firstPartyOnly: true },
   { href: "/settings/computer", label: "Devices", description: "Manage paired computers and mobile devices.", firstPartyOnly: true },
   { href: "/settings/team", label: "Team", description: "Members, roles, and invitations.", adminOnlyIn: "estio" },
   { href: "/settings/notifications", label: "Notifications", description: "Task reminders, quiet hours, and browser push." },

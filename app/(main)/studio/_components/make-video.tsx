@@ -27,7 +27,7 @@ export function MakeVideo({ locationId, recordId, status, active, voices }: { lo
                   {voices.map(v => <option key={v.id} value={v.id}>{v.name} — {providerLabels[v.provider]}{v.kind === "clone" ? " (cloned)" : ""}{v.isDefault ? " · default" : ""}</option>)}
                 </select></label>
               <p className="text-xs text-muted-foreground">{chosen?.provider === "local" ? "Generated on your Mac. Free, slower." : hostedVoiceNote}</p>
-            </> : <p className="text-muted-foreground">No voices yet. <Link className="text-primary hover:underline" href="/studio/voices">Set up voices</Link> first.</p>}
+            </> : <p className="text-muted-foreground">No voices yet. <Link className="text-primary hover:underline" href="/settings/voices?from=studio">Set up voices</Link> first.</p>}
           </div> : null}
           <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="music" /> Add a music bed</label>
           <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="portrait" /> Vertical (9:16)</label>

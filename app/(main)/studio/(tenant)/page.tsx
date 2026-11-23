@@ -17,7 +17,6 @@ const areas = [
   { href: "/studio/content", label: "Content pipeline", hint: "Ideas to review" },
   { href: "/studio/knowledge", label: "Knowledge", hint: "Cited findings" },
   { href: "/studio/schedules", label: "Schedules", hint: "Recurring drafts" },
-  { href: "/studio/voices", label: "Voices", hint: "Narration voices and clones" },
 ];
 
 export default async function StudioWorkspacePage({ params }: { params: Promise<{}> }) {
