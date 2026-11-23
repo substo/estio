@@ -43,7 +43,7 @@ export function parseEnvFile(text: string): Record<string, string> {
 export async function loadVideoKeys(env: NodeJS.ProcessEnv = process.env, file = keysFile()): Promise<Record<string, string>> {
   const fromFile = await readFile(file, "utf8").then(parseEnvFile, () => ({} as Record<string, string>));
   const merged: Record<string, string> = { ...fromFile };
-  for (const k of ["STUDIO_TTS_PROVIDER", "FISH_API_KEY", "FISH_VOICE_ID", "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID", "STUDIO_FISH_MODEL", "STUDIO_LOCAL_TTS_MODEL"]) if (env[k]?.trim()) merged[k] = env[k]!.trim();
+  for (const k of ["STUDIO_TTS_PROVIDER", "FISH_API_KEY", "FISH_VOICE_ID", "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID", "STUDIO_FISH_MODEL", "STUDIO_LOCAL_TTS_MODEL", "STUDIO_LOCAL_TTS_VOICE"]) if (env[k]?.trim()) merged[k] = env[k]!.trim();
   return merged;
 }
 /** ElevenLabs key: the keys file / environment, else the Keychain service `elevenlabs` the editor already uses. */
@@ -83,11 +83,11 @@ export async function synthesizeFish({ text, apiKey, voiceId, model = fishModel,
   return checkAudio(Buffer.from(await response.arrayBuffer()), "fish_empty_audio");
 }
 /** On-device Qwen3-TTS through mlx-audio in the companion's own venv. No network after the model is cached. */
-export async function synthesizeLocal({ text, model = localModel, python = venvPython(), signal }: { text: string; model?: string; python?: string; signal?: AbortSignal }): Promise<Buffer> {
-  if (!modelPattern.test(model)) throw new Error("invalid_model"); checkText(text);
+export async function synthesizeLocal({ text, model = localModel, voice = "ryan", python = venvPython(), signal }: { text: string; model?: string; voice?: string; python?: string; signal?: AbortSignal }): Promise<Buffer> {
+  if (!modelPattern.test(model) || !/^[a-z_]{2,20}$/.test(voice)) throw new Error("invalid_model"); checkText(text);
   const dir = await mkdtemp(join(tmpdir(), "studio-tts-"));
   try {
-    await execFileAsync(python, ["-m", "mlx_audio.tts.generate", "--model", model, "--text", text, "--output_path", dir, "--file_prefix", "speech", "--audio_format", "mp3", "--lang_code", "a"], { timeout: 10 * 60_000, signal, maxBuffer: 1 << 20 });
+    await execFileAsync(python, ["-m", "mlx_audio.tts.generate", "--model", model, "--voice", voice, "--text", text, "--output_path", dir, "--file_prefix", "speech", "--audio_format", "mp3", "--lang_code", "a"], { timeout: 10 * 60_000, signal, maxBuffer: 1 << 20 });
     const file = (await readdir(dir)).find(f => f.startsWith("speech") && f.endsWith(".mp3"));
     if (!file) throw new Error("local_tts_no_output");
     return checkAudio(await readFile(join(dir, file)), "local_tts_empty_audio");
@@ -101,7 +101,7 @@ export async function resolveSpeech(env: NodeJS.ProcessEnv = process.env, file =
   const options: Record<TtsProvider, () => SpeechEngine | null> = {
     fish: () => k.FISH_API_KEY ? { provider: "fish", label: "Fish Audio", speak: (text, signal) => synthesizeFish({ text, apiKey: k.FISH_API_KEY, voiceId: k.FISH_VOICE_ID, model: k.STUDIO_FISH_MODEL, fetchImpl, signal }) } : null,
     elevenlabs: () => eleven ? { provider: "elevenlabs", label: "ElevenLabs", speak: (text, signal) => synthesizeSpeech({ text, apiKey: eleven, voiceId: k.ELEVENLABS_VOICE_ID, fetchImpl, signal }) } : null,
-    local: () => ({ provider: "local", label: "On-device Qwen3-TTS", speak: (text, signal) => synthesizeLocal({ text, model: k.STUDIO_LOCAL_TTS_MODEL, signal }) }),
+    local: () => ({ provider: "local", label: "On-device Qwen3-TTS", speak: (text, signal) => synthesizeLocal({ text, model: k.STUDIO_LOCAL_TTS_MODEL, voice: k.STUDIO_LOCAL_TTS_VOICE, signal }) }),
   };
   const wanted = k.STUDIO_TTS_PROVIDER as TtsProvider | undefined;
   if (wanted) return Object.hasOwn(options, wanted) ? options[wanted]() : null;
