@@ -105,7 +105,10 @@ export function splitByAvailability<T extends LibraryVoice>(voices: T[], a: Avai
 }
 
 /** Voice Design prompt: structured fields first, as ElevenLabs recommends, then free text. Avoids the word "accent" for delivery. */
-export interface DesignFields { gender: string; age: string; accent: string; tone: string; pace: string; notes: string }
+export interface DesignFields { gender: string; age: string; accent: string; tone: string; pace: string; notes: string;
+  /** Optional line the candidates read (ElevenLabs accepts 100 to 1,000 characters); empty lets the provider write one. */
+  previewText?: string }
+export const PREVIEW_TEXT_MIN = 100, PREVIEW_TEXT_MAX = 1000;
 export const DESIGN_MIN = 20, DESIGN_MAX = 1000;
 export function buildDesignPrompt(f: DesignFields): string {
   const clean = (x: string) => x.replace(/[\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim();
@@ -122,7 +125,5 @@ export const SAMPLE_PASSAGES = [
   "There are three things to remember. First, keep it simple. Second, show, don't tell. And third, always give people a reason to keep watching until the very end.",
   "Honestly, I was surprised how well it worked! Numbers like four hundred and twenty, or the twelfth of March, should sound natural. Thanks for watching, and I'll see you in the next one.",
 ] as const;
-export const RECORDING_TIPS = ["Use a quiet room and keep the same distance from the mic.", "Speak naturally, as you would to a friend. Don't read in a flat voice.", "Record all three passages without changing microphone or room."];
 /** Spoken before the sample: bound to the voice name so the consent recording cannot be reused for another voice. */
 export const consentSpeech = (voiceName: string) => `I, speaking now, give permission to create a voice called ${voiceName.trim().slice(0, 60)} from this recording, for use in my workspace's videos.`;
-export const MIN_RECORDING_SECONDS = 30;

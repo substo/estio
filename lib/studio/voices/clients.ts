@@ -58,15 +58,23 @@ export async function listProviderVoices(provider: HostedVoiceProvider, key: str
 }
 
 /** Instant clone from one sample. The sample is forwarded and never stored by Studio. Returns the provider's voice id. */
-export async function cloneProviderVoice(provider: HostedVoiceProvider, key: string, input: { name: string; sample: Blob; filename: string; language?: string | null }, fetcher: Fetch = fetch): Promise<string> {
+export async function cloneProviderVoice(provider: HostedVoiceProvider, key: string, input: { name: string; sample: Blob; filename: string; language?: string | null; transcript?: string | null; description?: string | null; cleanAudio?: boolean }, fetcher: Fetch = fetch): Promise<string> {
   const form = new FormData();
   if (provider === "fish") {
     form.set("type", "tts"); form.set("title", input.name); form.set("train_mode", "fast"); form.set("visibility", "private"); form.append("voices", input.sample, input.filename);
+    // Fish: one transcript per sample improves the clone; enhance_audio_quality cleans a noisy recording.
+    if (input.transcript) form.append("texts", input.transcript);
+    if (input.description) form.set("description", input.description);
+    if (input.cleanAudio) form.set("enhance_audio_quality", "true");
     const id = (await json(await send(fetcher, `${FISH}/model`, { method: "POST", headers: fishHeaders(key), body: form, signal: AbortSignal.timeout(180_000) }, "Could not clone the voice.")))._id;
     if (typeof id !== "string" || !idPattern.test(id)) throw new VoiceProviderError("rejected", "The provider did not return a voice id.");
     return id;
   }
   form.set("name", input.name); form.append("files", input.sample, input.filename);
+  // ElevenLabs: optional description and background-noise removal (default off; the docs say clean audio matters more).
+  if (input.description) form.set("description", input.description);
+  if (input.cleanAudio) form.set("remove_background_noise", "true");
+  if (input.language) form.set("labels", JSON.stringify({ language: input.language }));
   const id = (await json(await send(fetcher, `${ELEVEN}/v1/voices/add`, { method: "POST", headers: elevenHeaders(key), body: form, signal: AbortSignal.timeout(180_000) }, "Could not clone the voice."))).voice_id;
   if (typeof id !== "string" || !idPattern.test(id)) throw new VoiceProviderError("rejected", "The provider did not return a voice id.");
   return id;
@@ -93,10 +101,11 @@ export async function synthesizeHosted(provider: HostedVoiceProvider, key: strin
 export interface DesignPreview { generatedVoiceId: string; audioBase64: string }
 const base64 = /^[A-Za-z0-9+/=]{100,400000}$/;
 /** ElevenLabs Voice Design: a text description in, a few candidate voices out (each with a short audio preview). Nothing is saved until one is chosen. */
-export async function designProviderVoice(key: string, description: string, fetcher: Fetch = fetch): Promise<DesignPreview[]> {
+export async function designProviderVoice(key: string, description: string, fetcher: Fetch = fetch, previewText?: string): Promise<DesignPreview[]> {
   if (description.length < 20 || description.length > 1000) throw new VoiceProviderError("rejected", "Describe the voice in 20 to 1,000 characters.");
+  if (previewText && (previewText.length < 100 || previewText.length > 1000)) throw new VoiceProviderError("rejected", "The preview text must be 100 to 1,000 characters, or leave it empty.");
   const body = await json(await send(fetcher, `${ELEVEN}/v1/text-to-voice/design`, { method: "POST", headers: { ...elevenHeaders(key), "content-type": "application/json" },
-    body: JSON.stringify({ voice_description: description, auto_generate_text: true }), signal: AbortSignal.timeout(120_000) }, "Could not design the voice."));
+    body: JSON.stringify(previewText ? { voice_description: description, text: previewText } : { voice_description: description, auto_generate_text: true }), signal: AbortSignal.timeout(120_000) }, "Could not design the voice."));
   const previews = Array.isArray(body.previews) ? body.previews : [];
   const out = previews.flatMap((p: Record<string, unknown>) => typeof p.generated_voice_id === "string" && idPattern.test(p.generated_voice_id) && typeof p.audio_base_64 === "string" && base64.test(p.audio_base_64)
     ? [{ generatedVoiceId: p.generated_voice_id, audioBase64: p.audio_base_64 }] : []).slice(0, 3);

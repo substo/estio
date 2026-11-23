@@ -13,7 +13,7 @@ import { cloneProviderVoice, deleteProviderVoice, designProviderVoice, listProvi
 import { getStudioDevices } from "../devices";
 import { readReportedModels } from "../local-models";
 import { Prisma } from "@prisma/client";
-import { LOCAL_SPEAKER_CATALOG, buildDesignPrompt, consentSpeech, designError, normalizeTag, type Availability, type DesignFields, type LocalState } from "./library";
+import { LOCAL_SPEAKER_CATALOG, PREVIEW_TEXT_MAX, PREVIEW_TEXT_MIN, buildDesignPrompt, consentSpeech, designError, normalizeTag, type Availability, type DesignFields, type LocalState } from "./library";
 import { getVoiceKeySummary, requireVoiceManager, resolveVoiceKey, VoiceSettingsError } from "./keys";
 import { CLONE_CONSENT_STATEMENT, LOCAL_SPEAKERS, isHostedProvider, providerLabels, type CloneInput, type HostedVoiceProvider, type VoiceRow } from "./policy";
 
@@ -56,7 +56,7 @@ export async function cloneVoice(locationId: string, input: CloneInput, sample: 
   const bytes = Buffer.from(await sample.arrayBuffer());
   const sha = createHash("sha256").update(bytes).digest("hex");
   let providerVoiceId: string;
-  try { providerVoiceId = await cloneProviderVoice(input.provider, key, { name: input.name, sample: new Blob([bytes], { type: sample.type }), filename: sample.name.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80) || "sample.mp3", language: input.language }); }
+  try { providerVoiceId = await cloneProviderVoice(input.provider, key, { name: input.name, sample: new Blob([bytes], { type: sample.type }), filename: sample.name.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80) || "sample.mp3", language: input.language, transcript: input.transcript, description: input.description, cleanAudio: input.cleanAudio }); }
   catch (error) { throw new VoiceSettingsError(providerMessage(error) ?? "Could not clone the voice. Try again."); }
   try {
     return await call<{ id: string }>("studio_record_voice_clone", access, { p_provider: input.provider, p_provider_voice_id: providerVoiceId, p_name: input.name, p_language: input.language, p_persona: input.persona,
@@ -148,8 +148,10 @@ export async function designVoicePreviews(locationId: string, fields: DesignFiel
   const access = await requireVoiceManager(locationId);
   const prompt = buildDesignPrompt(fields);
   const bad = designError(prompt); if (bad) throw new VoiceSettingsError(bad);
+  const text = fields.previewText?.trim();
+  if (text && (text.length < PREVIEW_TEXT_MIN || text.length > PREVIEW_TEXT_MAX)) throw new VoiceSettingsError(`The preview text must be ${PREVIEW_TEXT_MIN} to ${PREVIEW_TEXT_MAX} characters, or leave it empty.`);
   const key = await needKey(access.locationId, "elevenlabs");
-  try { return { prompt, previews: await designProviderVoice(key, prompt) }; }
+  try { return { prompt, previews: await designProviderVoice(key, prompt, fetch, fields.previewText?.trim() || undefined) }; }
   catch (error) { throw new VoiceSettingsError(providerMessage(error) ?? "Could not design the voice. Try again."); }
 }
 export async function saveDesignedVoice(locationId: string, input: { name: string; fields: DesignFields; generatedVoiceId: string; persona?: string | null }): Promise<{ id: string }> {

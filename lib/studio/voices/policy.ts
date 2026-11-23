@@ -1,3 +1,4 @@
+import { checkSampleLength, wavSeconds } from "./clone-sample";
 /** Voice providers a Location can connect with its own key, plus the on-device engine. Pure rules shared by the server, UI and tests. */
 export const HOSTED_VOICE_PROVIDERS = ["fish", "elevenlabs"] as const;
 export type HostedVoiceProvider = typeof HOSTED_VOICE_PROVIDERS[number];
@@ -23,7 +24,9 @@ export const MAX_SAMPLE_BYTES = 12 * 1024 * 1024;
 export const MIN_SAMPLE_BYTES = 20 * 1024;
 export const SAMPLE_TYPES = ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/webm", "audio/ogg", "audio/flac"];
 
-export interface CloneInput { provider: HostedVoiceProvider; name: string; language: string | null; persona: string | null; attested: boolean; consentRecorded?: boolean }
+export interface CloneInput { provider: HostedVoiceProvider; name: string; language: string | null; persona: string | null; attested: boolean; consentRecorded?: boolean;
+  /** The exact words spoken in the sample, when known (the recorder knows them). Fish uses it as the sample text; it improves the clone. */
+  transcript?: string | null; description?: string | null; cleanAudio?: boolean }
 export function readCloneForm(form: FormData): { input: CloneInput; sample: File } {
   const provider = String(form.get("provider") ?? "");
   if (!isHostedProvider(provider)) throw new Error("Choose Fish Audio or ElevenLabs.");
@@ -40,7 +43,9 @@ export function readCloneForm(form: FormData): { input: CloneInput; sample: File
   if (sample.size < MIN_SAMPLE_BYTES) throw new Error("The sample is too short. Use at least 10 seconds of clear speech.");
   if (sample.size > MAX_SAMPLE_BYTES) throw new Error("The sample is larger than 12 MB. Use a shorter clip.");
   if (!SAMPLE_TYPES.includes(sample.type)) throw new Error("Use an MP3, WAV, M4A, AAC, OGG, WebM or FLAC sample.");
-  return { input: { provider, name, language: language || null, persona: persona || null, attested: true, consentRecorded }, sample };
+  const transcript = String(form.get("transcript") ?? "").replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, 1500);
+  const description = String(form.get("description") ?? "").replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, 300);
+  return { input: { provider, name, language: language || null, persona: persona || null, attested: true, consentRecorded, transcript: transcript || null, description: description || null, cleanAudio: form.get("cleanAudio") === "on" }, sample };
 }
 
 export interface VoiceRow { id: string; provider: VoiceProvider; providerVoiceId: string; name: string; kind: "preset" | "clone" | "designed"; language: string | null; persona: string | null; isDefault: boolean; description?: string | null; tags?: string[] }
@@ -51,3 +56,11 @@ export function pickDefaultVoice(voices: VoiceRow[], usable: (p: VoiceProvider) 
 }
 /** Narration is billed by the provider to the Location's own account; say so next to any hosted choice. */
 export const hostedVoiceNote = "Hosted voices are billed to your own provider account.";
+
+/** A plain PCM WAV (what the recorder makes) carries its length in the header: refuse a too-short or too-long sample before any paid provider call. Other formats are checked in the browser. */
+export async function assertSampleLength(provider: HostedVoiceProvider, sample: File): Promise<void> {
+  const seconds = sample.type.includes("wav") ? wavSeconds(new Uint8Array(await sample.arrayBuffer())) : null;
+  if (seconds === null) return;
+  const verdict = checkSampleLength(provider, seconds);
+  if (verdict.level === "error") throw new Error(`The sample: ${verdict.message}`);
+}

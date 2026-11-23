@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { cloneProviderVoice, deleteProviderVoice, listProviderVoices, synthesizeHosted, verifyVoiceKey, VoiceProviderError } from "./clients";
-import { pickDefaultVoice, readCloneForm, readVoiceKey, type VoiceRow } from "./policy";
+import { assertSampleLength, pickDefaultVoice, readCloneForm, readVoiceKey, type VoiceRow } from "./policy";
 
 const calls: { url: string; init: RequestInit }[] = [];
 const respond = (body: unknown, status = 200) => (async (url: string, init: RequestInit) => { calls.push({ url: String(url), init }); return new Response(typeof body === "string" || body instanceof Buffer ? body : JSON.stringify(body), { status }); }) as unknown as typeof fetch;
@@ -85,4 +85,42 @@ test("voice design returns bounded previews and saving uses the documented field
   assert.equal(await saveDesignedVoice("k", { name: "Host", description: "A young woman with a British accent.", generatedVoiceId: "gen_abc123" }, fetcher), "voice_xyz789");
   assert.deepEqual(calls[1].body, { voice_name: "Host", voice_description: "A young woman with a British accent.", generated_voice_id: "gen_abc123" });
   await assert.rejects(designProviderVoice("k", "too short", fetcher), /20 to 1,000/);
+});
+
+test("a recorded WAV that is too short is refused before any provider call, with the provider's own minimum", async () => {
+  const { encodeWav16 } = await import("./clone-sample");
+  const short = new File([encodeWav16(new Float32Array(24_000 * 5), 24_000)], "r.wav", { type: "audio/wav" });
+  await assert.rejects(assertSampleLength("elevenlabs", short), /at least 20 seconds/);
+  await assert.rejects(assertSampleLength("fish", short), /at least 15 seconds/);
+  const ok = new File([encodeWav16(new Float32Array(24_000 * 40), 24_000)], "r.wav", { type: "audio/wav" });
+  await assertSampleLength("fish", ok);
+  await assertSampleLength("elevenlabs", new File([new Uint8Array(40000)], "s.mp3", { type: "audio/mpeg" }));   // unknown length is checked in the browser
+});
+test("clone fields: Fish gets texts/enhance, ElevenLabs gets description/noise removal/labels", async () => {
+  const { cloneProviderVoice } = await import("./clients");
+  const seen: Array<{ url: string; form: FormData }> = [];
+  const fetcher = (async (url: string, init: RequestInit) => { seen.push({ url, form: init.body as FormData }); return new Response(JSON.stringify({ _id: "abcdef1234567890", voice_id: "abcdef1234567890" })); }) as unknown as typeof fetch;
+  const sample = new Blob([new Uint8Array(2000)], { type: "audio/wav" });
+  await cloneProviderVoice("fish", "k".repeat(24), { name: "N", sample, filename: "r.wav", transcript: "hello there", description: "d", cleanAudio: true }, fetcher);
+  assert.equal(seen[0].form.get("texts"), "hello there"); assert.equal(seen[0].form.get("enhance_audio_quality"), "true"); assert.equal(seen[0].form.get("train_mode"), "fast");
+  await cloneProviderVoice("elevenlabs", "k".repeat(24), { name: "N", sample, filename: "r.wav", description: "d", cleanAudio: true, language: "en" }, fetcher);
+  assert.equal(seen[1].form.get("remove_background_noise"), "true"); assert.equal(seen[1].form.get("description"), "d"); assert.equal(seen[1].form.get("labels"), '{"language":"en"}');
+  assert.equal(seen[1].form.get("enhance_audio_quality"), null);
+});
+test("a provider's own reason reaches the owner, trimmed and bounded", async () => {
+  const { cloneProviderVoice } = await import("./clients");
+  const fetcher = (async () => new Response(JSON.stringify({ detail: { status: "invalid_audio", message: "The sample is too short to clone a voice from.\u0000" } }), { status: 400 })) as unknown as typeof fetch;
+  await assert.rejects(cloneProviderVoice("elevenlabs", "k".repeat(24), { name: "N", sample: new Blob([new Uint8Array(2000)]), filename: "r.wav" }, fetcher), /declined the request \(400\): The sample is too short/);
+});
+
+test("voice design: custom preview text replaces auto text; bounds are enforced", async () => {
+  const { designProviderVoice } = await import("./clients");
+  const bodies: Array<Record<string, unknown>> = [];
+  const preview = { generated_voice_id: "gen1234567890", audio_base_64: "A".repeat(200) };
+  const fetcher = (async (_u: string, init: RequestInit) => { bodies.push(JSON.parse(String(init.body))); return new Response(JSON.stringify({ previews: [preview] })); }) as unknown as typeof fetch;
+  await designProviderVoice("k".repeat(24), "A warm middle-aged woman with a calm, steady delivery.", fetcher);
+  assert.equal(bodies[0].auto_generate_text, true); assert.equal(bodies[0].text, undefined);
+  await designProviderVoice("k".repeat(24), "A warm middle-aged woman with a calm, steady delivery.", fetcher, "x".repeat(120));
+  assert.equal(bodies[1].text, "x".repeat(120)); assert.equal(bodies[1].auto_generate_text, undefined);
+  await assert.rejects(designProviderVoice("k".repeat(24), "A warm middle-aged woman with a calm, steady delivery.", fetcher, "too short"), /100 to 1,000/);
 });
