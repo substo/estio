@@ -95,8 +95,9 @@ export async function previewVoice(locationId: string, voiceId: string): Promise
 
 export interface Narration { uploadIds: string[]; beats: number; characters: number }
 /** Hosted narration for a content piece: one MP3 per script paragraph, generated here with the Location's key, saved as private media. The Mac only downloads the files. */
-export async function renderNarration(locationId: string, recordId: string, voice: VoiceRow, script: string, deps: { synth?: typeof synthesizeHosted } = {}): Promise<Narration> {
-  const access = await requireVoiceManager(locationId);
+export async function renderNarration(locationId: string, recordId: string, voice: VoiceRow, script: string, deps: { synth?: typeof synthesizeHosted; access?: { locationId: string; app: "estio" | "substo"; userId: string }; onBeat?: (done: number, total: number) => Promise<void> | void } = {}): Promise<Narration> {
+  // A caller that already proved the requester (the click that started a background render) passes the access along: no request context exists later.
+  const access = deps.access ?? await requireVoiceManager(locationId);
   if (!isHostedProvider(voice.provider)) throw new VoiceSettingsError("This voice is generated on the Mac.");
   const beats = parseScript(script);
   if (!beats.length) throw new VoiceSettingsError("The script has no spoken paragraphs.");
@@ -120,6 +121,7 @@ export async function renderNarration(locationId: string, recordId: string, voic
       await call("studio_save_narration", access, { p_record_id: recordId, p_upload_id: id, p_filename: `Narration ${stamp} ${String(beat.index).padStart(2, "0")}.mp3`,
         p_byte_size: audio.length, p_sha256: createHash("sha256").update(audio).digest("hex"), p_bucket: store.bucket });
       uploadIds.push(id);
+      await deps.onBeat?.(uploadIds.length, beats.length);
     }
   } finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
   return { uploadIds, beats: beats.length, characters: beats.reduce((n, b) => n + b.narration.length, 0) };

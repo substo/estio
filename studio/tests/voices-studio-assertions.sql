@@ -1,7 +1,4 @@
 -- Real SQL against an isolated PostgreSQL cluster. No credentials, network or providers.
--- Test-only stand-in for the edit-loop migration that grants the device kind (this slice never touches allowed_kinds).
-alter table studio.studio_devices drop constraint studio_devices_allowed_kinds_check;
-alter table studio.studio_devices add constraint studio_devices_allowed_kinds_check check ('studio.diagnostic'=any(allowed_kinds) and allowed_kinds <@ array['studio.diagnostic','studio.library_summary','studio.onboarding_research','studio.text_run','studio.video_transcribe','studio.youtube_search','studio.video_assemble','studio.voice_preview']::text[]);
 create function pg_temp.pair(w text,actor text,code text,hash text,preview boolean default true) returns uuid language plpgsql as $$
 declare r jsonb; h text:=encode(sha256(convert_to(code,'UTF8')),'hex'); d uuid;
 begin
@@ -9,7 +6,6 @@ begin
  perform studio.studio_device_pairing_action(w,'substo',actor,'approve',code,gen_random_uuid());
  r:=studio.studio_device_pair_poll('substo',(r->>'pairingId')::uuid,h,hash);d:=(r->>'deviceId')::uuid;
  update studio.studio_devices set processing_enabled=true,seen_at=clock_timestamp(),report=jsonb_build_object('handlers',jsonb_build_array('studio.voice_preview'),'voicePreview',jsonb_build_object('ready',preview)) where id=d;
- update studio.studio_devices set allowed_kinds=allowed_kinds||array['studio.voice_preview'] where id=d;
  return d;
 end $$;
 create function pg_temp.claim(hash text,ready boolean default true) returns jsonb language sql as $$

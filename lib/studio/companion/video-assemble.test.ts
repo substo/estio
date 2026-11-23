@@ -19,23 +19,28 @@ async function deps(over: Partial<VideoAssembleDeps> = {}) {
   const root = await mkdtemp(join(tmpdir(), "va-"));
   const calls: string[] = [];
   const api: ExportApi = { reserve: async () => { calls.push("reserve"); return { uploadId: upload, state: "reserved", uploadUrl: "https://r2.example/put" }; }, put: async () => { calls.push("put"); }, verify: async () => { calls.push("verify"); } };
-  const value: VideoAssembleDeps = { enabled: () => true, tools: async () => ({ ready: true, missing: [] }), localSpeechReady: async () => true, workRoot: root, editorDocs: "/docs", api,
+  const kept = new Map<string, { dir: string; file: string }>();
+  const projects = { get: async (id: string) => kept.has(id) ? { ...kept.get(id)!, updatedAt: "" } : null, set: async (id: string, p: { dir: string; file: string }) => { kept.set(id, p); } };
+  const value: VideoAssembleDeps = { enabled: () => true, tools: async () => ({ ready: true, missing: [] }), localSpeechReady: async () => true, workRoot: root, projectsRoot: join(root, "Projects"), projects, editorDocs: "/docs", api,
     fetcher: (async () => new Response("data")) as typeof fetch,
     assemble: async o => { await mkdir(join(o.projectDir, "exports"), { recursive: true }); await writeFile(join(o.projectDir, "exports", "Video r2.mp4"), Buffer.alloc(2000, 1));
-      assert.deepEqual(await readdir(o.clipsDir), ["shot.mov"]); return { projectDir: o.projectDir, beats: 1, clips: ["shot.mov"], voiceFiles: ["voice-01.mp3"], timings: [0], brief: "" }; },
+      assert.deepEqual(await readdir(o.clipsDir), ["shot.mov"]); return { projectDir: o.projectDir, projectFile: "Video.substo", beats: 1, clips: ["shot.mov"], voiceFiles: ["voice-01.mp3"], timings: [0], brief: "" }; },
     ...over };
-  return { value, calls, root };
+  return { value, calls, root, kept };
 }
 
 test("handler downloads footage, assembles, uploads through the lease-fenced export path and returns bounded facts", async () => {
-  const { value, calls, root } = await deps();
+  const { value, calls, root, kept } = await deps();
   const result = await createVideoAssembleHandler(value)(job() as never, ctx());
   assert.deepEqual(calls, ["reserve", "put", "verify"]);
   const a = (result as { assembly: Record<string, unknown> }).assembly;
   assert.equal(a.uploadId, upload); assert.equal(a.bytes, 2000); assert.equal(a.exportSaved, true);
   assert.doesNotMatch(String(a.summary), /\/|Users/);
   assert.deepEqual(readAssemblyResult(result), result);
-  assert.deepEqual(await readdir(root), [], "per-job folder removed");
+  assert.deepEqual((await readdir(root)).sort(), ["Projects"], "per-job scratch removed, the project folder kept");
+  assert.equal(a.projectKept, true); assert.match(String(a.projectName), /-33333333$/);
+  assert.equal(kept.get(record)?.file, "Video.substo"); assert.ok(kept.get(record)?.dir.startsWith(join(root, "Projects") + "/"));
+  assert.ok((await readdir(join(kept.get(record)!.dir, "exports"))).includes("Video r2.mp4"), "export kept with the project");
 });
 test("gates: processing off, missing tools, voice choice and install only when voiceover, bad payload, missing links", async () => {
   const code = async (over: Partial<VideoAssembleDeps>, j = job()) => (await createVideoAssembleHandler((await deps(over)).value)(j as never, ctx()).catch(e => e)) as StudioJobError;
@@ -50,7 +55,7 @@ test("gates: processing off, missing tools, voice choice and install only when v
   assert.equal((await code({}, job({ downloads: [] }))).code, "footage_unavailable");
 });
 test("no export, or a failed editor, is a definitive failure that is not retried", async () => {
-  const none = (await createVideoAssembleHandler((await deps({ assemble: async o => ({ projectDir: o.projectDir, beats: 1, clips: [], voiceFiles: [], timings: [], brief: "" }) })).value)(job() as never, ctx()).catch(e => e)) as StudioJobError;
+  const none = (await createVideoAssembleHandler((await deps({ assemble: async o => ({ projectDir: o.projectDir, projectFile: "Video.substo", beats: 1, clips: [], voiceFiles: [], timings: [], brief: "" }) })).value)(job() as never, ctx()).catch(e => e)) as StudioJobError;
   assert.equal(none.code, "video_not_exported"); assert.equal(none.retryable, false);
   const boom = (await createVideoAssembleHandler((await deps({ assemble: async () => { throw new Error("secret /Users/x path"); } })).value)(job() as never, ctx()).catch(e => e)) as StudioJobError;
   assert.equal(boom.code, "video_assembly_failed"); assert.doesNotMatch(boom.message, /secret|Users/);

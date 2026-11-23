@@ -14,11 +14,12 @@ export type DeviceProvider = "codex" | "claude";
 /** A device counts as running while its last heartbeat is this recent (same window as hosted workers). */
 export const DEVICE_ONLINE_SECONDS = 90;
 /** Work a paired computer may run. Mac checks are always allowed; the others are granted while processing is On. */
-export const DEVICE_WORK_KINDS = ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble", "studio.voice_preview"] as const;
+export const DEVICE_WORK_KINDS = ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble", "studio.video_edit", "studio.open_editor", "studio.voice_preview"] as const;
 export type DeviceWorkKind = typeof DEVICE_WORK_KINDS[number];
 export const ONBOARDING_RESEARCH_KIND: DeviceWorkKind = "studio.onboarding_research";
 export const deviceWorkLabels: Record<DeviceWorkKind, string> = {
-  "studio.text_run": "Knowledge, idea reviews and script briefs", "studio.diagnostic": "Mac checks", "studio.library_summary": "Library summaries", "studio.onboarding_research": "Business research", "studio.video_transcribe": "Video transcription (YouTube audio, captions, slides)", "studio.youtube_search": "Related YouTube search in your Mac's browser", "studio.video_assemble": "Script to edited video", "studio.voice_preview": "On-device voice previews"
+  "studio.text_run": "Knowledge, idea reviews and script briefs", "studio.diagnostic": "Mac checks", "studio.library_summary": "Library summaries", "studio.onboarding_research": "Business research", "studio.video_transcribe": "Video transcription (YouTube audio, captions, slides)", "studio.youtube_search": "Related YouTube search in your Mac's browser", "studio.video_assemble": "Script to edited video",
+  "studio.video_edit": "Agent edits to a made video", "studio.open_editor": "Open the edit in Substo Video", "studio.voice_preview": "Voice previews",
 };
 /** Local reasons a running companion is holding processing back (reported in its heartbeat). */
 export const DEVICE_BLOCK_REASONS = {
@@ -248,11 +249,13 @@ function readConfigAck(value: unknown) {
 export function readAssemblyResult(value: unknown) {
   const v = object(value); valid(Object.keys(v).length === 1);
   const a = object(v.assembly);
-  valid(Object.keys(a).every(k => ["exportName", "bytes", "seconds", "beats", "clips", "voiced", "uploadId", "summary", "exportSaved"].includes(k)));
+  valid(Object.keys(a).every(k => ["exportName", "bytes", "seconds", "beats", "clips", "voiced", "uploadId", "summary", "exportSaved", "projectKept", "projectName"].includes(k)));
   valid(a.exportName === undefined || typeof a.exportName === "string" && a.exportName.length <= 200);
   for (const k of ["bytes", "seconds", "beats", "clips", "voiced"]) valid(a[k] === undefined || typeof a[k] === "number" && Number.isFinite(a[k]) && Number(a[k]) >= 0 && Number(a[k]) <= 1e12);
   valid(a.uploadId === undefined || typeof a.uploadId === "string" && uuid.test(a.uploadId));
   valid(a.exportSaved === undefined || typeof a.exportSaved === "boolean");
+  valid(a.projectKept === undefined || typeof a.projectKept === "boolean");
+  valid(a.projectName === undefined || typeof a.projectName === "string" && a.projectName.length <= 200 && !a.projectName.includes("/"));
   valid(a.summary === undefined || typeof a.summary === "string" && a.summary.length <= 2000);
   return { assembly: a };
 }
@@ -265,6 +268,15 @@ export function readPreviewResult(value: unknown) {
   valid(typeof a.speaker === "string" && /^[A-Za-z0-9_-]{2,64}$/.test(a.speaker));
   for (const k of ["bytes", "seconds"]) valid(a[k] === undefined || typeof a[k] === "number" && Number.isFinite(a[k]) && Number(a[k]) >= 0 && Number(a[k]) <= 1e6);
   return { preview: a };
+}
+/** Opening the kept project in Substo Video: a boolean and the folder's name, never a path. */
+export function readEditorResult(value: unknown) {
+  const v = object(value); valid(Object.keys(v).length === 1);
+  const e = object(v.editor);
+  valid(Object.keys(e).every(k => ["opened", "projectName"].includes(k)));
+  valid(e.opened === undefined || typeof e.opened === "boolean");
+  valid(e.projectName === undefined || typeof e.projectName === "string" && e.projectName.length <= 200 && !e.projectName.includes("/"));
+  return { editor: e };
 }
 export function readExportReserve(v: Record<string, unknown>) {
   valid(typeof v.sha256 === "string" && /^[0-9a-f]{64}$/.test(v.sha256));
@@ -306,7 +318,7 @@ export function readDeviceCommand(operation: DeviceOperation, value: unknown): R
   if (operation === "video_frames_verify") return { ...out, ...readFramesVerify(v) };
   if (operation === "video_export_reserve") return { ...out, ...readExportReserve(v) };
   if (operation === "video_export_verify") return out;
-  if (operation === "complete") { out.result = v.result && typeof v.result === "object" && "preview" in v.result ? readPreviewResult(v.result) : v.result && typeof v.result === "object" && "assembly" in v.result ? readAssemblyResult(v.result) : v.result && typeof v.result === "object" && "videos" in v.result ? readDeviceYoutubeSearchResult(v.result) : v.result && typeof v.result === "object" && "outcome" in v.result ? readVideoResult(v.result) : v.result && typeof v.result === "object" && "output" in v.result && typeof v.result.output === "object" ? readDeviceTextResult(v.result) : v.result && typeof v.result === "object" && "research" in v.result ? readDeviceResearchResult(v.result) : readDeviceDiagnosticResult(v.result); }
+  if (operation === "complete") { out.result = v.result && typeof v.result === "object" && "preview" in v.result ? readPreviewResult(v.result) : v.result && typeof v.result === "object" && "assembly" in v.result ? readAssemblyResult(v.result) : v.result && typeof v.result === "object" && "editor" in v.result ? readEditorResult(v.result) : v.result && typeof v.result === "object" && "videos" in v.result ? readDeviceYoutubeSearchResult(v.result) : v.result && typeof v.result === "object" && "outcome" in v.result ? readVideoResult(v.result) : v.result && typeof v.result === "object" && "output" in v.result && typeof v.result.output === "object" ? readDeviceTextResult(v.result) : v.result && typeof v.result === "object" && "research" in v.result ? readDeviceResearchResult(v.result) : readDeviceDiagnosticResult(v.result); }
   if (operation === "complete" && v.routeActual !== undefined) {
     const actual = object(v.routeActual);
     valid(isProvider(actual.provider) && typeof actual.model === "string" && modelPattern.test(actual.model));

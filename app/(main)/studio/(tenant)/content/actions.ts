@@ -7,6 +7,7 @@ import { readContentDraft } from "@/lib/studio/content-policy";
 import { createStudioSourceIdea, saveStudioContentRecord } from "@/lib/studio/content";
 import { StudioRestError } from "@/lib/studio/rest";
 import { StudioCommandError } from "@/lib/studio/command-error";
+import { requestVideoEdit, requestOpenEditor } from "@/lib/studio/video-loop";
 import { requestVideoAssembly } from "@/lib/studio/video-assembly";
 import { readVideoAssemblyOptions } from "@/lib/studio/video-assembly-policy";
 import { readScriptTemplateSelection } from "@/lib/studio/script-template-policy";
@@ -45,13 +46,37 @@ export async function createSourceIdeaAction(locationId: string, sourceId: strin
   redirect(`/studio/content/${ideaId}`);
 }
 
+export async function askVideoEditAction(locationId: string, recordId: string, _previous: { error?: string; notice?: string }, form: FormData): Promise<{ error?: string; notice?: string }> {
+  if (!await getStudioAccess(locationId)) notFound();
+  try {
+    const result = await requestVideoEdit(locationId, recordId, String(form.get("instruction") ?? ""));
+    if (!result.ok) return { error: result.message };
+    revalidatePath(`/studio/content/${recordId}`);
+    return { notice: "Sent to your Mac." };
+  } catch (error) {
+    if (error instanceof StudioCommandError) return { error: error.message };
+    return { error: "Studio could not send this to your Mac. Try again." };
+  }
+}
+export async function openEditorAction(locationId: string, recordId: string, _previous: { error?: string; notice?: string }): Promise<{ error?: string; notice?: string }> {
+  if (!await getStudioAccess(locationId)) notFound();
+  try {
+    const result = await requestOpenEditor(locationId, recordId);
+    if (!result.ok) return { error: result.message };
+    revalidatePath(`/studio/content/${recordId}`);
+    return { notice: "Asking your Mac to open the editor." };
+  } catch (error) {
+    if (error instanceof StudioCommandError) return { error: error.message };
+    return { error: "Studio could not send this to your Mac. Try again." };
+  }
+}
 export async function makeVideoAction(locationId: string, recordId: string, _previous: { error?: string; notice?: string }, form: FormData): Promise<{ error?: string; notice?: string }> {
   if (!await getStudioAccess(locationId)) notFound();
   try {
     const result = await requestVideoAssembly(locationId, recordId, readVideoAssemblyOptions(form));
     if (!result.ok) return { error: result.message };
     revalidatePath(`/studio/content/${recordId}`);
-    return { notice: result.reused ? "A video is already being made for this piece." : "Sent to your Mac." };
+    return { notice: result.reused ? "A video is already being made for this piece." : result.narrating ? "Preparing the narration. This page shows the progress, and the Mac starts when it is ready." : "Sent to your Mac." };
   } catch (error) {
     if (error instanceof StudioCommandError) return { error: error.message };
     return { error: "Studio could not send this to your Mac. Try again." };

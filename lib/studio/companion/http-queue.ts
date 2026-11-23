@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { StudioQueue } from "../worker/queue";
 import { appOrigin, deviceTokenPattern, type DeviceCredentials } from "./config";
 
-const job = z.object({ id: z.string().uuid(), location_id: z.string().min(1).max(255), kind: z.enum(["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble", "studio.voice_preview"]),
+const job = z.object({ id: z.string().uuid(), location_id: z.string().min(1).max(255), kind: z.enum(["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble", "studio.video_edit", "studio.open_editor", "studio.voice_preview"]),
   payload: z.record(z.unknown()), lease_token: z.string().uuid(), lease_expires_at: z.string().datetime({ offset: true }),
   attempts: z.number().int().nonnegative(), max_attempts: z.number().int().positive(),
   /** The server-supplied Location AI order (validated where it is used, lib/studio/companion/route.ts). */

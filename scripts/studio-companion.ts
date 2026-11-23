@@ -29,6 +29,8 @@ import { createVideoTranscribeHandler } from "../lib/studio/companion/video-tran
 import { createVideoDeviceApi } from "../lib/studio/companion/video-api";
 import { fileURLToPath } from "node:url";
 import { createExportApi, createVideoAssembleHandler } from "../lib/studio/companion/video-assemble";
+import { createOpenEditorHandler, createVideoEditHandler } from "../lib/studio/companion/video-loop";
+import { createProjectStore, projectsRoot } from "../lib/studio/companion/video-projects";
 import { discoverAssemblyTools, type AssemblyTools } from "../lib/studio/companion/video-assemble-tools";
 import { assembleVideo } from "../lib/studio/video-assembly/assemble";
 import { localTtsReady, synthesizeLocal } from "../lib/studio/video-assembly/tts";
@@ -36,7 +38,7 @@ import { createVoicePreviewHandler } from "../lib/studio/companion/voice-preview
 import { ModelManager } from "../lib/studio/companion/model-manager";
 import { createPlaywrightYoutubeBrowser, createYoutubeSearchHandler, findChrome, openYoutubeLogin, youtubeBrowserProfile } from "../lib/studio/companion/youtube-search";
 
-const version = "studio-companion-15";
+const version = "studio-companion-16";
 const rediscoverMs = 10 * 60_000;
 const usage = "Usage: npm run start:studio-companion -- pair --origin <https origin> [--name 'My Mac'] | start [--once] | readiness | youtube-login\nRun in the background: bash scripts/studio-companion-launchagent.sh install";
 const messages: Record<string, string> = {
@@ -184,10 +186,14 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
       const result = await youtubeSearchInner(job, context) as { signedIn?: boolean };
       youtubeSignedIn = result.signedIn; return result;
     };
+    const projects = createProjectStore();
     const videoAssemble = createVideoAssembleHandler({ enabled: () => gate().processing, tools: async signal => { await refreshAssembly(); return assembly; }, localSpeechReady: () => localTtsReady(), api: createExportApi(credentials),
-      workRoot: join(os.homedir(), "Library", "Application Support", "Estio", "StudioCompanion", "video-assembly"), editorDocs: fileURLToPath(new URL("../video-editor/docs", import.meta.url)), assemble: assembleVideo });
+      workRoot: join(os.homedir(), "Library", "Application Support", "Estio", "StudioCompanion", "video-assembly"), projectsRoot: projectsRoot(), projects, editorDocs: fileURLToPath(new URL("../video-editor/docs", import.meta.url)), assemble: assembleVideo });
+    const loopDeps = { enabled: () => gate().processing, tools: async () => { await refreshAssembly(); return assembly; }, projects, editorDocs: fileURLToPath(new URL("../video-editor/docs", import.meta.url)) };
+    const videoEdit = createVideoEditHandler({ ...loopDeps, api: createExportApi(credentials) });
+    const openEditor = createOpenEditorHandler(loopDeps);
     const voicePreview = createVoicePreviewHandler({ enabled: () => gate().processing, ready: () => localTtsReady(), synth: (speaker, text, signal) => synthesizeLocal({ text, voice: speaker, signal }) });
-    const handlers: Record<string, StudioJobHandler> = { "studio.voice_preview": withShutdown(voicePreview), "studio.video_assemble": withShutdown(videoAssemble), "studio.video_transcribe": withShutdown(video), "studio.youtube_search": withShutdown(youtubeSearch), "studio.text_run": withShutdown(textRun), "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
+    const handlers: Record<string, StudioJobHandler> = { "studio.voice_preview": withShutdown(voicePreview), "studio.video_assemble": withShutdown(videoAssemble), "studio.video_edit": withShutdown(videoEdit), "studio.open_editor": withShutdown(openEditor), "studio.video_transcribe": withShutdown(video), "studio.youtube_search": withShutdown(youtubeSearch), "studio.text_run": withShutdown(textRun), "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
     const report = { instanceId, handlers: Object.keys(handlers) };
     if (once) {
       const startedAt = new Date();
