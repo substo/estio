@@ -4,40 +4,13 @@ import { useActionState, useMemo, useRef, useState } from "react";
 import { interpret } from "@/lib/studio/voices/assistant";
 import { facetCounts, facetLabels, filterVoices, quickFilterLabels, splitByAvailability, tagLabel, voiceStatus, type Availability, type LibraryVoice, type QuickFilter } from "@/lib/studio/voices/library";
 import { providerLabels, type VoiceProvider, type VoiceRow } from "@/lib/studio/voices/policy";
+import { usePreview } from "@/components/voices/use-voice-preview";
 import { deleteVoiceAction, refreshVoicesAction, setDefaultVoiceAction } from "./actions";
 
 type State = { error?: string; notice?: string };
 export const button = "inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-accent disabled:opacity-60";
 const chip = (on: boolean) => `inline-flex min-h-9 items-center rounded-full border px-3 text-xs font-medium ${on ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent"}`;
 const Say = ({ s }: { s: State }) => s.error ? <p role="alert" className="text-destructive">{s.error}</p> : s.notice ? <p role="status" className="text-muted-foreground">{s.notice}</p> : null;
-
-/** Play a voice sample: hosted voices stream audio back; on-device voices queue a short sample on the Mac and poll for it. */
-function usePreview(locationId: string, voiceId: string) {
-  const [state, setState] = useState<{ busy: boolean; note?: string; error?: string }>({ busy: false });
-  const audio = useRef<HTMLAudioElement>(null);
-  const play = (src: string) => { if (audio.current) { audio.current.src = src; void audio.current.play().catch(() => {}); } };
-  async function run() {
-    setState({ busy: true });
-    try {
-      const response = await fetch("/api/studio/voices/preview", { method: "POST", headers: { "Content-Type": "application/json", "X-Studio-Tenant": locationId }, body: JSON.stringify({ voiceId }) });
-      if (response.status === 202) {
-        const { jobId } = await response.json() as { jobId: string };
-        setState({ busy: true, note: "Your Mac is generating a sample…" });
-        for (let i = 0; i < 90; i++) {
-          await new Promise(r => setTimeout(r, 2000));
-          const poll = await fetch(`/api/studio/voices/preview?job=${jobId}`, { headers: { "X-Studio-Tenant": locationId } });
-          const body = await poll.json().catch(() => ({})) as { status?: string; audioBase64?: string; message?: string; error?: string };
-          if (body.status === "done" && body.audioBase64) { play(`data:audio/mpeg;base64,${body.audioBase64}`); setState({ busy: false }); return; }
-          if (body.status === "failed" || body.error) { setState({ busy: false, error: body.message ?? body.error ?? "The Mac could not generate the preview." }); return; }
-        }
-        setState({ busy: false, error: "The Mac did not answer in time. Check that the companion is running." }); return;
-      }
-      if (!response.ok) { setState({ busy: false, error: (await response.json().catch(() => ({}))).error ?? "Could not preview this voice." }); return; }
-      play(URL.createObjectURL(await response.blob())); setState({ busy: false });
-    } catch { setState({ busy: false, error: "Could not preview this voice." }); }
-  }
-  return { state, run, audio };
-}
 
 export function VoiceItem({ locationId, voice, availability, canManage }: { locationId: string; voice: VoiceRow; availability: Availability; canManage: boolean }) {
   const [def, setDef, settingDef] = useActionState(setDefaultVoiceAction.bind(null, locationId, voice.id), {} as State);

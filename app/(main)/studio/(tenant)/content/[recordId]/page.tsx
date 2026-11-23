@@ -14,7 +14,6 @@ import { VideoPanel } from "../../../_components/video-panel";
 import { getVideoLoopState } from "@/lib/studio/video-loop";
 import { getVideoAssemblyStatus } from "@/lib/studio/video-assembly";
 import { getVoiceAvailability, listVoices } from "@/lib/studio/voices/service";
-import { voiceStatus } from "@/lib/studio/voices/library";
 import { videoAssemblyStatusLine } from "@/lib/studio/video-assembly-policy";
 import { RelatedYoutubeVideos } from "../../../_components/related-youtube-videos";
 
@@ -31,7 +30,6 @@ export default async function StudioContentRecordPage({ params }: { params: Prom
     && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(inspiration.outlineId)
     && links.some(link => link.id === inspiration.sourceId) ? inspiration.outlineId : null;
   const [assembly, allVoices, availability, loop] = await Promise.all([getVideoAssemblyStatus(locationId, recordId), listVoices(locationId).catch(() => []), getVoiceAvailability(locationId), getVideoLoopState(locationId, recordId)]);
-  const voices = allVoices.filter(v => voiceStatus(v, availability).usable);
   const [pendingUploads, templates] = await Promise.all([
     listPendingStudioUploads(locationId, recordId),
     getStudioScriptTemplateChoices(locationId, record.script_template_version_id),
@@ -60,7 +58,7 @@ export default async function StudioContentRecordPage({ params }: { params: Prom
       <Link href={`/studio/records/${recordId}/links`} className="inline-block text-sm text-primary hover:underline">Manage linked records</Link>
       {links.length ? <section className="space-y-2"><h2 className="font-medium">Linked research and content</h2><ul className="space-y-2 text-sm">{links.map((linked) => <li key={linked.id}><Link className="text-primary hover:underline" href={`/studio/${linked.kind === "content" ? "content" : "library"}/${linked.id}`}>{linked.title}</Link><span className="ml-2 text-muted-foreground">{linked.kind}</span></li>)}</ul></section> : null}
       {loop ? <VideoPanel key={loop.versions[0]?.id ?? "none"} locationId={locationId} recordId={recordId} state={loop} /> : null}
-      {!record.archived && typeof record.payload.script === "string" && record.payload.script.trim() ? <MakeVideo locationId={locationId} recordId={recordId} voices={voices} status={videoAssemblyStatusLine(assembly.view, assembly.macOnline, assembly.narration)} active={assembly.view?.status === "queued" || assembly.view?.status === "running" || assembly.narration?.status === "running"} /> : null}
+      {!record.archived && typeof record.payload.script === "string" && record.payload.script.trim() ? <MakeVideo locationId={locationId} recordId={recordId} voices={allVoices} availability={availability} status={videoAssemblyStatusLine(assembly.view, assembly.macOnline, assembly.narration)} active={assembly.view?.status === "queued" || assembly.view?.status === "running" || assembly.narration?.status === "running"} /> : null}
       <StudioAttachments locationId={locationId} files={files} />
       <StudioUploads locationId={locationId} uploads={uploads} />
       <StudioUploadForm key={recordId} locationId={locationId} recordId={recordId} pendingUploads={pendingUploads} />
