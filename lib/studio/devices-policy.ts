@@ -153,6 +153,7 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
     const assembly = v.videoAssembly as Record<string, unknown>;
     result.videoAssembly = { ready: assembly.ready === true, missing: Array.isArray(assembly.missing) ? assembly.missing.filter((x, i, all) => typeof x === "string" && /^[A-Za-z0-9 ._-]{1,40}$/.test(x) && all.indexOf(x) === i).slice(0, 8) : [] };
   }
+  if (v.voicePreview && typeof v.voicePreview === "object" && !Array.isArray(v.voicePreview)) result.voicePreview = { ready: (v.voicePreview as Record<string, unknown>).ready === true };
   if (v.hardware && typeof v.hardware === "object" && !Array.isArray(v.hardware)) {
     const h = v.hardware as Record<string, unknown>;
     const power = h.power && typeof h.power === "object" && !Array.isArray(h.power) ? h.power as Record<string, unknown> : null;
@@ -258,6 +259,16 @@ export function readAssemblyResult(value: unknown) {
   valid(a.summary === undefined || typeof a.summary === "string" && a.summary.length <= 2000);
   return { assembly: a };
 }
+/** A short on-device voice sample: base64 audio inside the device body bound (32 KiB), nothing else. */
+export function readPreviewResult(value: unknown) {
+  const v = object(value); valid(Object.keys(v).length === 1);
+  const a = object(v.preview);
+  valid(Object.keys(a).every(k => ["audioBase64", "bytes", "seconds", "speaker"].includes(k)));
+  valid(typeof a.audioBase64 === "string" && a.audioBase64.length >= 400 && a.audioBase64.length <= 24000 && /^[A-Za-z0-9+/=]+$/.test(a.audioBase64));
+  valid(typeof a.speaker === "string" && /^[A-Za-z0-9_-]{2,64}$/.test(a.speaker));
+  for (const k of ["bytes", "seconds"]) valid(a[k] === undefined || typeof a[k] === "number" && Number.isFinite(a[k]) && Number(a[k]) >= 0 && Number(a[k]) <= 1e6);
+  return { preview: a };
+}
 /** Opening the kept project in Substo Video: a boolean and the folder's name, never a path. */
 export function readEditorResult(value: unknown) {
   const v = object(value); valid(Object.keys(v).length === 1);
@@ -299,7 +310,7 @@ export function readDeviceCommand(operation: DeviceOperation, value: unknown): R
     valid(Number.isInteger(v.leaseSeconds) && Number(v.leaseSeconds) >= 10 && Number(v.leaseSeconds) <= 3600);
     out.leaseSeconds = v.leaseSeconds;
   }
-  if (operation === "claim") { valid(Number.isInteger(v.limit) && Number(v.limit) >= 1 && Number(v.limit) <= 50); return { ...out, limit: v.limit, textReady: v.textReady === true, summaryReady: v.summaryReady === true, researchReady: v.researchReady === true, videoReady: v.videoReady === true, youtubeReady: v.youtubeReady === true, assembleReady: v.assembleReady === true }; }
+  if (operation === "claim") { valid(Number.isInteger(v.limit) && Number(v.limit) >= 1 && Number(v.limit) <= 50); return { ...out, limit: v.limit, textReady: v.textReady === true, summaryReady: v.summaryReady === true, researchReady: v.researchReady === true, videoReady: v.videoReady === true, youtubeReady: v.youtubeReady === true, assembleReady: v.assembleReady === true, previewReady: v.previewReady === true }; }
   valid(typeof v.jobId === "string" && uuid.test(v.jobId) && typeof v.leaseToken === "string" && uuid.test(v.leaseToken));
   Object.assign(out, { jobId: v.jobId, leaseToken: v.leaseToken });
   if (operation === "video_transcript_chunk") return { ...out, ...readTranscriptChunk(v) };
@@ -307,7 +318,7 @@ export function readDeviceCommand(operation: DeviceOperation, value: unknown): R
   if (operation === "video_frames_verify") return { ...out, ...readFramesVerify(v) };
   if (operation === "video_export_reserve") return { ...out, ...readExportReserve(v) };
   if (operation === "video_export_verify") return out;
-  if (operation === "complete") { out.result = v.result && typeof v.result === "object" && "assembly" in v.result ? readAssemblyResult(v.result) : v.result && typeof v.result === "object" && "editor" in v.result ? readEditorResult(v.result) : v.result && typeof v.result === "object" && "videos" in v.result ? readDeviceYoutubeSearchResult(v.result) : v.result && typeof v.result === "object" && "outcome" in v.result ? readVideoResult(v.result) : v.result && typeof v.result === "object" && "output" in v.result && typeof v.result.output === "object" ? readDeviceTextResult(v.result) : v.result && typeof v.result === "object" && "research" in v.result ? readDeviceResearchResult(v.result) : readDeviceDiagnosticResult(v.result); }
+  if (operation === "complete") { out.result = v.result && typeof v.result === "object" && "preview" in v.result ? readPreviewResult(v.result) : v.result && typeof v.result === "object" && "assembly" in v.result ? readAssemblyResult(v.result) : v.result && typeof v.result === "object" && "editor" in v.result ? readEditorResult(v.result) : v.result && typeof v.result === "object" && "videos" in v.result ? readDeviceYoutubeSearchResult(v.result) : v.result && typeof v.result === "object" && "outcome" in v.result ? readVideoResult(v.result) : v.result && typeof v.result === "object" && "output" in v.result && typeof v.result.output === "object" ? readDeviceTextResult(v.result) : v.result && typeof v.result === "object" && "research" in v.result ? readDeviceResearchResult(v.result) : readDeviceDiagnosticResult(v.result); }
   if (operation === "complete" && v.routeActual !== undefined) {
     const actual = object(v.routeActual);
     valid(isProvider(actual.provider) && typeof actual.model === "string" && modelPattern.test(actual.model));

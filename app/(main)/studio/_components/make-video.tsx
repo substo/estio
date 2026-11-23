@@ -26,8 +26,8 @@ export function MakeVideo({ locationId, recordId, status, active, voices }: { lo
                 <select name="voiceId" value={voiceId} onChange={e => setVoiceId(e.target.value)} className="block min-h-11 w-full rounded-md border bg-background px-3">
                   {voices.map(v => <option key={v.id} value={v.id}>{v.name} — {providerLabels[v.provider]}{v.kind === "clone" ? " (cloned)" : ""}{v.isDefault ? " · default" : ""}</option>)}
                 </select></label>
-              <p className="text-xs text-muted-foreground">{chosen?.provider === "local" ? "Generated on your Mac. Free, slower." : hostedVoiceNote}</p>
-            </> : <p className="text-muted-foreground">No voices yet. <Link className="text-primary hover:underline" href="/studio/voices">Set up voices</Link> first.</p>}
+              <p className="text-xs text-muted-foreground">{chosen?.description ? `${chosen.description} ` : ""}{chosen?.provider === "local" ? "Generated on your Mac. Free, slower." : hostedVoiceNote} <Link className="text-primary hover:underline" href="/settings/voices?from=studio">Manage voices</Link></p>
+            </> : <p className="text-muted-foreground">No voices yet. <Link className="text-primary hover:underline" href="/settings/voices?from=studio">Set up voices</Link> first.</p>}
           </div> : null}
           <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="music" /> Add a music bed</label>
           <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="portrait" /> Vertical (9:16)</label>

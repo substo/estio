@@ -78,6 +78,8 @@ export function createDeviceStudioQueue(credentials: DeviceCredentials, options:
   youtubeReady?: () => boolean;
   /** The editor, ffprobe and the Claude sign-in are present and the local gate allows processing. */
   assembleReady?: () => boolean;
+  /** The on-device voice model is installed and the local gate allows processing. */
+  previewReady?: () => boolean;
   capabilities?: () => Record<string, unknown>;
   /** Pending config acknowledgement to piggyback on the next heartbeat. */
   configAck?: () => ConfigAck | undefined;
@@ -89,7 +91,7 @@ export function createDeviceStudioQueue(credentials: DeviceCredentials, options:
   if (!deviceTokenPattern.test(token)) throw new Error("invalid_device_token");
   const call = <T>(operation: string, body: unknown, schema: z.ZodType<T>) => deviceCall(origin, token, operation, body, schema, options);
   return {
-    claim: (workerId, limit, leaseSeconds) => call("claim", { workerId, limit, leaseSeconds, textReady: options.textReady?.() === true, summaryReady: options.summaryReady?.() === true, researchReady: options.researchReady?.() === true, videoReady: options.videoReady?.() === true, youtubeReady: options.youtubeReady?.() === true, assembleReady: options.assembleReady?.() === true }, z.array(job).max(50)),
+    claim: (workerId, limit, leaseSeconds) => call("claim", { workerId, limit, leaseSeconds, textReady: options.textReady?.() === true, summaryReady: options.summaryReady?.() === true, researchReady: options.researchReady?.() === true, videoReady: options.videoReady?.() === true, youtubeReady: options.youtubeReady?.() === true, assembleReady: options.assembleReady?.() === true, previewReady: options.previewReady?.() === true }, z.array(job).max(50)),
     extend: (jobId, workerId, leaseSeconds, leaseToken) => call("extend", { jobId, workerId, leaseSeconds, leaseToken }, z.boolean()),
     complete: (jobId, workerId, { routeActual, ...result }, leaseToken) =>
       call("complete", { jobId, workerId, result, leaseToken, ...(routeActual ? { routeActual } : {}) }, z.boolean()),

@@ -14,18 +14,18 @@ export async function refreshVoicesAction(locationId: string, provider: string, 
     else if (isHostedProvider(provider)) await refreshProviderVoices(locationId, provider);
     else return { error: "Unknown provider." };
   } catch (e) { return failure(e, "Could not refresh voices. Try again."); }
-  revalidatePath("/studio/voices"); return { notice: "Voices refreshed." };
+  revalidatePath("/settings/voices"); return { notice: "Voices refreshed." };
 }
 export async function setDefaultVoiceAction(locationId: string, voiceId: string, _p: State): Promise<State> {
   if (!uuid.test(voiceId)) return { error: "Unknown voice." };
   try { await setDefaultVoice(locationId, voiceId); } catch (e) { return failure(e, "Could not set the default voice."); }
-  revalidatePath("/studio/voices"); return { notice: "Default voice set." };
+  revalidatePath("/settings/voices"); return { notice: "Default voice set." };
 }
 export async function deleteVoiceAction(locationId: string, voiceId: string, _p: State): Promise<State> {
   if (!uuid.test(voiceId)) return { error: "Unknown voice." };
   try {
     const r = await deleteVoice(locationId, voiceId);
-    revalidatePath("/studio/voices");
+    revalidatePath("/settings/voices");
     return { notice: r.providerCleanup === "failed" ? "Removed here. The provider copy could not be deleted; remove it in your provider account." : "Voice removed." };
   } catch (e) { return failure(e, "Could not remove the voice."); }
 }
