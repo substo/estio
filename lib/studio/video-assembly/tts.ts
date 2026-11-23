@@ -4,7 +4,9 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { detectModel, hubDirectory, modelVenv } from "../companion/model-manager";
 import { runNativeProcess } from "../companion/process";
+import { catalogModel } from "../local-models";
 
 const execFileAsync = promisify(execFile);
 export type TtsProvider = "fish" | "elevenlabs" | "local";
@@ -12,7 +14,9 @@ export type TtsProvider = "fish" | "elevenlabs" | "local";
 export const speechModel = "eleven_v3";
 export const defaultVoiceId = "21m00Tcm4TlvDq8ikWAM";
 export const fishModel = "s2-pro";
-export const localModel = "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit";
+/** The on-device voice model and speaker come from the reviewed catalog (lib/studio/local-models.ts); the Mac installs it from Settings -> Local models. */
+const localEntry = catalogModel("qwen3-tts-0.6b-4bit")!;
+export const localModel = localEntry.repo;
 const idPattern = /^[A-Za-z0-9_-]{6,64}$/;
 const modelPattern = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/;
 
@@ -68,8 +72,9 @@ export async function elevenLabsKey(env: NodeJS.ProcessEnv = process.env, file =
   } catch { return null; }
 }
 
-const venvPython = (home = homedir()) => join(home, "Library", "Application Support", "Estio", "StudioCompanion", "tts-venv", "bin", "python");
-export async function localTtsReady(python = venvPython()): Promise<boolean> {
+const venvPython = (home = homedir()) => join(modelVenv(home), "bin", "python");
+export async function localTtsReady(python = venvPython(), hub = hubDirectory()): Promise<boolean> {
+  if (!await detectModel(localEntry, hub)) return false;   // the runtime alone is not enough: the model must be installed
   try { await execFileAsync(python, ["-c", "import mlx_audio"], { timeout: 30_000 }); return true; } catch { return false; }
 }
 
@@ -95,7 +100,7 @@ export async function synthesizeFish({ text, apiKey, voiceId, model = fishModel,
   return checkAudio(Buffer.from(await response.arrayBuffer()), "fish_empty_audio");
 }
 /** On-device Qwen3-TTS through mlx-audio in the companion's own venv. No network after the model is cached. */
-export async function synthesizeLocal({ text, model = localModel, voice = "ryan", python = venvPython(), signal }: { text: string; model?: string; voice?: string; python?: string; signal?: AbortSignal }): Promise<Buffer> {
+export async function synthesizeLocal({ text, model = localModel, voice = localEntry.defaultVoice ?? "ryan", python = venvPython(), signal }: { text: string; model?: string; voice?: string; python?: string; signal?: AbortSignal }): Promise<Buffer> {
   if (!modelPattern.test(model) || !/^[a-z_]{2,20}$/.test(voice)) throw new Error("invalid_model"); checkText(text);
   const dir = await mkdtemp(join(tmpdir(), "studio-tts-"));
   try {

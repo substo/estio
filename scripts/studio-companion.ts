@@ -32,9 +32,10 @@ import { createExportApi, createVideoAssembleHandler } from "../lib/studio/compa
 import { discoverAssemblyTools, type AssemblyTools } from "../lib/studio/companion/video-assemble-tools";
 import { assembleVideo } from "../lib/studio/video-assembly/assemble";
 import { resolveSpeech } from "../lib/studio/video-assembly/tts";
+import { ModelManager } from "../lib/studio/companion/model-manager";
 import { createPlaywrightYoutubeBrowser, createYoutubeSearchHandler, findChrome, openYoutubeLogin, youtubeBrowserProfile } from "../lib/studio/companion/youtube-search";
 
-const version = "studio-companion-14";
+const version = "studio-companion-15";
 const rediscoverMs = 10 * 60_000;
 const usage = "Usage: npm run start:studio-companion -- pair --origin <https origin> [--name 'My Mac'] | start [--once] | readiness | youtube-login\nRun in the background: bash scripts/studio-companion-launchagent.sh install";
 const messages: Record<string, string> = {
@@ -102,7 +103,16 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
         claude: nativeSubscriptionReady("claude", providers.claude) && !nativeSubscriptionBlocked(tracker.snapshot(), "claude", retry.claude),
       };
     };
-    const capabilities = () => ({ instanceId, platform: os.platform(), arch: os.arch(), version, knowledgeOutlineVersion: 2, knowledgeCurationVersion: 1, stagedCreationVersion: 1, studioAgentVersion: 4, videoTemplateVersion: 1, sourceAssistVersion: 1, textRouteVersion: TEXT_ROUTE_VERSION, deviceAiRouteVersion: 1, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble"], videoAssembly: { ready: assemblyReady(), missing: assembly.missing }, youtubeSearch: { ready: youtubeReady(), signedIn: youtubeSignedIn, rank: researchReady() }, ...providers, ...discovery, video: videoTools.report,
+    // On-device models the owner chose in Settings -> Local models: detect, install, remove, report. One download at a time.
+    const models = new ModelManager({ onChange: () => pulse() });
+    const reconcileModels = async () => {
+      if (controller.signal.aborted || settings.appliedVersion === 0) return;
+      const hw = discovery.hardware;
+      await models.reconcile(settings.config.models ?? [], { memoryGb: hw.memoryGb, freeDiskGb: hw.freeDiskGb }, settings.config.resources.allowOnBattery || hw.power.source === "ac")
+        .catch(() => log({ event: "model_reconcile_failed" }));
+    };
+    await models.refresh().catch(() => {});
+    const capabilities = () => ({ instanceId, modelStates: models.states(), platform: os.platform(), arch: os.arch(), version, knowledgeOutlineVersion: 2, knowledgeCurationVersion: 1, stagedCreationVersion: 1, studioAgentVersion: 4, videoTemplateVersion: 1, sourceAssistVersion: 1, textRouteVersion: TEXT_ROUTE_VERSION, deviceAiRouteVersion: 1, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble"], videoAssembly: { ready: assemblyReady(), missing: assembly.missing }, youtubeSearch: { ready: youtubeReady(), signedIn: youtubeSignedIn, rank: researchReady() }, ...providers, ...discovery, video: videoTools.report,
       nativeSubscriptionVersion: 1, nativeRetryAt: nativeRetryAt(), capacity: capacity(), usage: tracker.snapshot(), processingBlocked: gate().reasons.filter(reason => reason in DEVICE_BLOCK_REASONS) });
     const researchReady = () => gate().processing && Object.values(capacity()).some(Boolean);
 
@@ -131,7 +141,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     };
     const inner = createDeviceStudioQueue(credentials, { capabilities, textReady: () => settings.config.features.text && gate().processing, summaryReady: () => settings.config.features.text && gate().processing, researchReady: () => gate().processing, videoReady, youtubeReady, assembleReady: assemblyReady, configAck: () => settings.pendingAck,
       onHeartbeat: (state, sentAck) => {
-        if (settings.update(state, sentAck)) { log({ event: "config_applied", version: settings.appliedVersion, status: settings.pendingAck?.status }); pulse(); }
+        if (settings.update(state, sentAck)) { log({ event: "config_applied", version: settings.appliedVersion, status: settings.pendingAck?.status }); pulse(); void reconcileModels(); }
         if (state && !once) for (const cmd of state.commands) runCommand(cmd);
       } });
     const sendHeartbeat: StudioQueue["heartbeat"] = async (...args) => {
@@ -188,11 +198,12 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const refresh = setInterval(() => { if (!refreshing && !controller.signal.aborted) {
       refreshing = true; void Promise.all([readiness(), discover(), discoverVideoTools(), findChrome()]).then(([p, d, v, c]) => { providers = p; discovery = d; videoTools = v; chromePath = c; }).catch(() => {}).finally(() => { refreshing = false; });
     } }, rediscoverMs);
+    const modelTick = setInterval(() => { void reconcileModels(); }, 60_000);
     const quick = setInterval(() => { if (!refreshing) void Promise.all([discoverPowerAndDisk().then(v => { discovery = { ...discovery, hardware: { ...discovery.hardware, ...v } }; }), tracker.usage()]).catch(() => {}); }, 60_000);
     try { await runStudioWorker({ queue, handlers, workerId, release: version, report, concurrency: 1,
       // Sign-in commands ride on heartbeats, so they stay at 30s; an idle Mac claims at most once a minute.
       heartbeatMs: 30_000, idlePollMaxMs: 60_000, signal: controller.signal, log }); }
-    finally { clearInterval(refresh); clearInterval(quick); await Promise.allSettled(active.values()); }
+    finally { clearInterval(refresh); clearInterval(quick); clearInterval(modelTick); await Promise.allSettled(active.values()); }
   } finally { process.off("SIGINT", shutdown); process.off("SIGTERM", shutdown); }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
