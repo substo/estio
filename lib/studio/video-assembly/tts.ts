@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { runNativeProcess } from "../companion/process";
 
@@ -15,20 +16,31 @@ export const localModel = "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit";
 const idPattern = /^[A-Za-z0-9_-]{6,64}$/;
 const modelPattern = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/;
 
-/** The one file the owner pastes keys into. Real environment variables win over it. */
-export const keysFile = (home = homedir()) => join(home, ".config", "estio", "studio-video.env");
-export const keysFileTemplate = `# Estio Studio script-to-video keys. Paste a value after the = sign. Lines starting with # are ignored.
-# Which voice engine to use: fish, elevenlabs or local. Leave empty to use the first one with a key (fish, then elevenlabs, then local).
+/** The project's own `.env`, found from any worktree or throwaway checkout by following `.git` back to the original project folder.
+ * STUDIO_ENV_FILE overrides it. Real environment variables win over the file. */
+export function projectEnvFile(start = __dirname, env: NodeJS.ProcessEnv = process.env): string {
+  if (env.STUDIO_ENV_FILE) return env.STUDIO_ENV_FILE;
+  for (let dir = start; ; dir = dirname(dir)) {
+    const git = join(dir, ".git");
+    if (existsSync(git)) {
+      if (statSync(git).isDirectory()) return join(dir, ".env");
+      const pointer = /^gitdir:\s*(.+)$/m.exec(readFileSync(git, "utf8"))?.[1]?.trim();   // worktree: <main>/.git/worktrees/<name>
+      const common = pointer && /^(.*)[\\/]\.git[\\/]worktrees[\\/]/.exec(pointer)?.[1];
+      return join(common || dir, ".env");
+    }
+    if (dirname(dir) === dir) return join(homedir(), ".env");
+  }
+}
+export const keysFile = () => projectEnvFile();
+export const keysFileTemplate = `
+# Studio script-to-video voice engines (read by the Mac companion; never sent to the web server).
+# STUDIO_TTS_PROVIDER: fish, elevenlabs or local. Empty = first with a key (fish, then elevenlabs, then on-device).
 STUDIO_TTS_PROVIDER=
-
-# Fish Audio (cheapest hosted voice). Key: fish.audio -> Dashboard -> API Keys.
+# Fish Audio key: fish.audio -> Dashboard -> API Keys. FISH_VOICE_ID (optional) is a voice id from the Fish library.
 FISH_API_KEY=
-# Optional: a voice id (reference_id) from the Fish voice library. Empty = Fish's default voice.
 FISH_VOICE_ID=
-
-# ElevenLabs (alternative). Key: elevenlabs.io -> Developers -> API Keys (needs text_to_speech permission).
+# ElevenLabs key (needs the text_to_speech permission). ELEVENLABS_VOICE_ID is optional.
 ELEVENLABS_API_KEY=
-# Optional voice id. Empty = ElevenLabs Rachel.
 ELEVENLABS_VOICE_ID=
 `;
 

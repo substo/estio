@@ -34,7 +34,7 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
   const voiceFiles: string[] = [];
   if (o.voiceover) {
     const engine = o.speak ?? await resolveSpeech();
-    if (!engine && !o.dryRun) throw new Error("No voice engine: paste a Fish Audio or ElevenLabs key into ~/.config/estio/studio-video.env, or set up on-device Qwen3-TTS.");
+    if (!engine && !o.dryRun) throw new Error("No voice engine: paste a Fish Audio or ElevenLabs key into the project .env (STUDIO video keys), or set up on-device Qwen3-TTS.");
     for (const b of beats) {
       const name = `voice-${String(b.index).padStart(2, "0")}.mp3`;
       if (!o.dryRun) { log(`Voicing beat ${b.index}/${beats.length} (${engine!.label})`); await writeFile(join(o.projectDir, name), await engine!.speak(b.narration, o.signal)); }

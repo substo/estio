@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { assembleVideo } from "./assemble";
 import { parseScript } from "./script";
-import { parseEnvFile, resolveSpeech, synthesizeFish, synthesizeSpeech } from "./tts";
+import { projectEnvFile, parseEnvFile, resolveSpeech, synthesizeFish, synthesizeSpeech } from "./tts";
 
 test("script paragraphs become beats and directions attach to the next beat", () => {
   const beats = parseScript("# Title\n\n[show the dashboard]\n\nWelcome to Estio.\nIt is simple.\n\n(cut to phone)\n\nThanks!");
@@ -68,4 +68,9 @@ test("keys file parses values, skips comments and empties; engine choice follows
   assert.equal((await resolveSpeech({}, file))?.provider, "elevenlabs");
   await writeFile(file, "STUDIO_TTS_PROVIDER=fish\n");
   assert.equal(await resolveSpeech({}, file), null);
+});
+
+test("keys come from the original project's .env, from any worktree", () => {
+  assert.equal(projectEnvFile(join(__dirname), {}).endsWith("/Estio/.env"), true);
+  assert.equal(projectEnvFile(__dirname, { STUDIO_ENV_FILE: "/x/.env" }), "/x/.env");
 });

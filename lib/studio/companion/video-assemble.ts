@@ -73,7 +73,7 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
     if (!deps.enabled()) throw new StudioJobError("local_policy", "Turn on Mac processing in Setup and keep it On.", true, 300);
     const tools = await deps.tools(context.signal);
     if (!tools.ready) throw new StudioJobError("video_assembly_tools_missing", `This Mac is missing ${tools.missing.join(", ")}. Install it, then make the video again.`, true, 600);
-    if (p.options.voiceover && !await deps.speechReady()) throw new StudioJobError("voice_engine_missing", "Add a Fish Audio or ElevenLabs key to ~/.config/estio/studio-video.env (or set up on-device voice), then make the video again.", false);
+    if (p.options.voiceover && !await deps.speechReady()) throw new StudioJobError("voice_engine_missing", "Add a Fish Audio or ElevenLabs key to the project .env (STUDIO video keys) (or set up on-device voice), then make the video again.", false);
     if (!p.downloads.length && p.media.length) throw new StudioJobError("footage_unavailable", "Studio could not provide the footage links. Make the video again.", false);
 
     const work = join(deps.workRoot, job.id), clipsDir = join(work, "footage"), projectDir = join(work, "project");
