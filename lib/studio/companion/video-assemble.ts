@@ -9,6 +9,7 @@ import { StudioJobError, type StudioJobHandler } from "../worker/handlers";
 import { deviceCall, type DeviceCallOptions } from "./http-queue";
 import type { DeviceCredentials } from "./config";
 import type { AssembleOptions, AssembleResult } from "../video-assembly/assemble";
+import { freeBytes, nextProjectFile, projectFolderName, type ProjectStore } from "./video-projects";
 
 const payload = z.object({
   recordId: z.string().uuid(), script: z.string().min(1).max(20000),
@@ -53,7 +54,8 @@ export interface VideoAssembleDeps {
   tools: (signal: AbortSignal) => Promise<{ ready: boolean; missing: string[] }>;
   /** On-device Qwen3-TTS is installed (only needed for a local voice). */
   localSpeechReady: () => Promise<boolean>;
-  workRoot: string; editorDocs: string; model?: string;
+  /** Scratch space for downloads; removed after every job. The project itself lives in projectsRoot and is kept. */
+  workRoot: string; projectsRoot: string; projects: ProjectStore; editorDocs: string; model?: string;
   api: ExportApi;
   assemble: (options: AssembleOptions) => Promise<AssembleResult>;
   fetcher?: typeof fetch;
@@ -70,6 +72,36 @@ async function download(url: string, file: string, expected: number, signal: Abo
 }
 async function sha256(file: string) { const hash = createHash("sha256"); await pipeline(createReadStream(file), hash); return hash.digest("hex"); }
 
+
+/** The newest finished export in a project folder, optionally only one made after `sinceMs`. */
+export async function latestExport(projectDir: string, sinceMs = 0): Promise<{ name: string; file: string; size: number } | null> {
+  try {
+    const files = (await readdir(join(projectDir, "exports"))).filter(f => f.toLowerCase().endsWith(".mp4"));
+    const withTimes = await Promise.all(files.map(async f => ({ f, t: (await stat(join(projectDir, "exports", f))).mtimeMs })));
+    const newest = withTimes.filter(x => x.t >= sinceMs).sort((a, b) => b.t - a.t)[0];
+    if (!newest) return null;
+    const file = join(projectDir, "exports", newest.f);
+    return { name: newest.f, file, size: (await stat(file)).size };
+  } catch { return null; }
+}
+/** Reserve, upload and verify one export through the lease-fenced device endpoints. Returns the saved upload's id. */
+export async function saveExport(api: ExportApi, lease: ExportLease, exported: { file: string; size: number }, signal: AbortSignal): Promise<string> {
+  if (exported.size < 1000 || exported.size > 5_368_709_120) throw new StudioJobError("video_export_size", "The exported video has an unusable size.", false);
+  const digest = await sha256(exported.file);
+  try {
+    const slot = await api.reserve(lease, digest, exported.size);
+    if (slot.state !== "verified") {
+      if (!slot.uploadUrl) throw new Error("no_upload_url");
+      await api.put(slot.uploadUrl, exported.file, exported.size, signal);
+      await api.verify(lease);
+    }
+    return slot.uploadId;
+  } catch (error) {
+    if (signal.aborted) throw error;
+    throw new StudioJobError("video_upload_failed", "The video was made but could not be saved to Studio. Try again.", false);
+  }
+}
+
 /** Mac-only script-to-video. Subscription editing agent, narration only when asked (server-rendered hosted voice or on-device), no hosted or paid fallback, no replay after the agent started. */
 export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHandler {
   return async (job, context) => {
@@ -84,9 +116,14 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
     if (p.options.voiceover && p.voice?.engine === "hosted" && p.voiceDownloads.length !== p.voice.uploadIds.length) throw new StudioJobError("narration_unavailable", "Studio could not provide the narration. Make the video again.", false);
     if (!p.downloads.length && p.media.length) throw new StudioJobError("footage_unavailable", "Studio could not provide the footage links. Make the video again.", false);
 
-    const work = join(deps.workRoot, job.id), clipsDir = join(work, "footage"), projectDir = join(work, "project");
+    const work = join(deps.workRoot, job.id), clipsDir = join(work, "footage");
+    const title = typeof (job.payload as { title?: unknown }).title === "string" ? String((job.payload as { title: string }).title) : "video";
+    const projectDir = join(deps.projectsRoot, projectFolderName(title, p.recordId));
     const lease: ExportLease = { jobId: job.id, workerId: context.workerId, leaseToken: job.lease_token };
     const fetcher = deps.fetcher ?? fetch;
+    // Keeping the project means keeping its media: refuse early rather than fill the disk (footage twice plus headroom for the export).
+    const need = [...p.downloads, ...p.voiceDownloads].reduce((n, d) => n + d.byteSize, 0) * 2 + 2_000_000_000;
+    if (await freeBytes(deps.projectsRoot).catch(() => Infinity) < need) throw new StudioJobError("disk_low", "This Mac does not have enough free disk space to keep this project. Free some space, then make the video again.", false);
     try {
       await mkdir(clipsDir, { recursive: true });
       const used = new Set<string>();
@@ -101,39 +138,25 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
         try { await download(item.url, join(clipsDir, name), item.byteSize, context.signal, fetcher); }
         catch (error) { if (context.signal.aborted) throw error; throw new StudioJobError("narration_download_failed", "The Mac could not download the narration. Make the video again.", false); }
       }
+      await mkdir(projectDir, { recursive: true });
+      const projectFile = await nextProjectFile(projectDir), startedAt = Date.now();
       let result: AssembleResult;
       try {
-        result = await deps.assemble({ script: p.script, clipsDir, projectDir, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape",
+        result = await deps.assemble({ script: p.script, clipsDir, projectDir, projectFile, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape",
           voiceover: p.options.voiceover, music: p.options.music, model: deps.model, signal: context.signal,
           voice: !p.options.voiceover ? undefined : p.voice?.engine === "local" ? { engine: "local", speaker: p.voice.speaker, model: p.voice.model } : p.voice?.engine === "hosted" ? { engine: "prerendered", files: narration } : undefined });
       } catch (error) {
         if (context.signal.aborted) throw error;
         throw new StudioJobError("video_assembly_failed", "The Mac could not finish editing this video. It was not retried.", false);
       }
-      let exported: string | undefined;
-      try {
-        const files = (await readdir(join(projectDir, "exports"))).filter(f => f.toLowerCase().endsWith(".mp4"));
-        const withTimes = await Promise.all(files.map(async f => ({ f, t: (await stat(join(projectDir, "exports", f))).mtimeMs })));
-        exported = withTimes.sort((a, b) => b.t - a.t)[0]?.f;
-      } catch { /* no exports folder */ }
+      const exported = await latestExport(projectDir, startedAt);
       if (!exported) throw new StudioJobError("video_not_exported", "The editor finished without exporting a video. Make the video again.", false);
-      const file = join(projectDir, "exports", exported), size = (await stat(file)).size;
-      if (size < 1000 || size > 5_368_709_120) throw new StudioJobError("video_export_size", "The exported video has an unusable size.", false);
-      const digest = await sha256(file);
-      try {
-        const slot = await deps.api.reserve(lease, digest, size);
-        if (slot.state !== "verified") {
-          if (!slot.uploadUrl) throw new Error("no_upload_url");
-          await deps.api.put(slot.uploadUrl, file, size, context.signal);
-          await deps.api.verify(lease);
-        }
-        const mb = (size / 1_000_000).toFixed(1);
-        return { assembly: { exportName: exported.slice(0, 200), bytes: size, beats: result.beats, clips: result.clips.length, voiced: result.voiceFiles.length, uploadId: slot.uploadId, exportSaved: true,
-          summary: `${result.beats} beats, ${result.clips.length} clip${result.clips.length === 1 ? "" : "s"}${result.voiceFiles.length ? ", generated voiceover" : ""}, ${mb} MB. Saved in this piece's uploads.` } };
-      } catch (error) {
-        if (context.signal.aborted) throw error;
-        throw new StudioJobError("video_upload_failed", "The video was made but could not be saved to Studio. Make it again.", false);
-      }
+      // The edit is kept from here on, whether or not the upload below succeeds.
+      await deps.projects.set(p.recordId, { dir: projectDir, file: result.projectFile }).catch(() => {});
+      const uploadId = await saveExport(deps.api, lease, exported, context.signal);
+      const mb = (exported.size / 1_000_000).toFixed(1);
+      return { assembly: { exportName: exported.name.slice(0, 200), bytes: exported.size, beats: result.beats, clips: result.clips.length, voiced: result.voiceFiles.length, uploadId, exportSaved: true, projectKept: true, projectName: projectFolderName(title, p.recordId),
+        summary: `${result.beats} beats, ${result.clips.length} clip${result.clips.length === 1 ? "" : "s"}${result.voiceFiles.length ? ", generated voiceover" : ""}, ${mb} MB. Kept on your Mac; ask the agent below to change it or open it in the editor.` } };
     } finally { await rm(work, { recursive: true, force: true }).catch(() => {}); }
   };
 }
