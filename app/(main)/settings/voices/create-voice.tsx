@@ -97,9 +97,9 @@ function CloneForm({ locationId, providers, mode }: { locationId: string; provid
 }
 
 const emptyDesign: DesignFields = { gender: "", age: "", accent: "", tone: "", pace: "", notes: "" };
-function DesignForm({ locationId }: { locationId: string }) {
+function DesignForm({ locationId, initial }: { locationId: string; initial?: Partial<DesignFields> }) {
   const router = useRouter();
-  const [fields, setFields] = useState<DesignFields>(emptyDesign); const [busy, setBusy] = useState(false); const [state, setState] = useState<State>({});
+  const [fields, setFields] = useState<DesignFields>({ ...emptyDesign, ...initial }); const [busy, setBusy] = useState(false); const [state, setState] = useState<State>({});
   const [previews, setPreviews] = useState<Array<{ generatedVoiceId: string; audioBase64: string }>>([]); const [prompt, setPrompt] = useState(""); const [name, setName] = useState("");
   const set = (k: keyof DesignFields) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setFields({ ...fields, [k]: e.target.value });
   const post = async (path: string, body: unknown) => { const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Studio-Tenant": locationId }, body: JSON.stringify(body) }); return { ok: r.ok, body: await r.json().catch(() => ({})) as Record<string, unknown> }; };
@@ -139,15 +139,21 @@ function DesignForm({ locationId }: { locationId: string }) {
 /** Disclosed: the library stays the first thing on the page. */
 export function CreateVoice({ locationId, providers }: { locationId: string; providers: HostedVoiceProvider[] }) {
   const [mode, setMode] = useState<Mode>("record");
+  const [seed, setSeed] = useState<{ key: number; fields: Partial<DesignFields> } | null>(null);
+  const details = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const on = (e: Event) => { if (!providers.includes("elevenlabs")) return; setSeed({ key: Date.now(), fields: (e as CustomEvent<Partial<DesignFields>>).detail }); setMode("design"); if (details.current) { details.current.open = true; details.current.scrollIntoView({ behavior: "smooth", block: "nearest" }); } };
+    window.addEventListener("voices:design", on); return () => window.removeEventListener("voices:design", on);
+  }, [providers]);
   if (!providers.length) return <p className="text-sm text-muted-foreground">Add a Fish Audio or ElevenLabs key in Settings → AI to record, clone or design a voice.</p>;
   const modes: Array<[Mode, string, boolean]> = [["record", "Record", true], ["upload", "Upload a sample", true], ["design", "Design from a description", providers.includes("elevenlabs")]];
-  return <details className="rounded-xl border p-4 text-sm">
+  return <details ref={details} className="rounded-xl border p-4 text-sm">
     <summary className="min-h-11 cursor-pointer font-medium leading-[2.75rem]">Create a voice</summary>
     <div className="mt-3 space-y-3">
       <div role="tablist" aria-label="How to create a voice" className="flex flex-wrap gap-2">
         {modes.filter(m => m[2]).map(([key, label]) => <button key={key} role="tab" type="button" aria-selected={mode === key} onClick={() => setMode(key)} className={`inline-flex min-h-11 items-center rounded-md border px-3 font-medium ${mode === key ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent"}`}>{label}</button>)}
       </div>
-      {mode === "design" ? <DesignForm locationId={locationId} /> : <CloneForm key={mode} locationId={locationId} providers={providers} mode={mode} />}
+      {mode === "design" ? <DesignForm key={seed?.key ?? 0} locationId={locationId} initial={seed?.fields} /> : <CloneForm key={mode} locationId={locationId} providers={providers} mode={mode} />}
     </div>
   </details>;
 }

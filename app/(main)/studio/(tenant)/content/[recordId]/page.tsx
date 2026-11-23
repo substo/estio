@@ -11,7 +11,8 @@ import { ContentRecordForm } from "../../../_components/content-record-form";
 import { getStudioScriptTemplateChoices } from "@/lib/studio/script-templates";
 import { MakeVideo } from "../../../_components/make-video";
 import { getVideoAssemblyStatus } from "@/lib/studio/video-assembly";
-import { listVoices } from "@/lib/studio/voices/service";
+import { getVoiceAvailability, listVoices } from "@/lib/studio/voices/service";
+import { voiceStatus } from "@/lib/studio/voices/library";
 import { videoAssemblyStatusLine } from "@/lib/studio/video-assembly-policy";
 import { RelatedYoutubeVideos } from "../../../_components/related-youtube-videos";
 
@@ -27,7 +28,8 @@ export default async function StudioContentRecordPage({ params }: { params: Prom
   const inspirationId = typeof inspiration?.outlineId === "string"
     && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(inspiration.outlineId)
     && links.some(link => link.id === inspiration.sourceId) ? inspiration.outlineId : null;
-  const [assembly, voices] = await Promise.all([getVideoAssemblyStatus(locationId, recordId), listVoices(locationId).catch(() => [])]);
+  const [assembly, allVoices, availability] = await Promise.all([getVideoAssemblyStatus(locationId, recordId), listVoices(locationId).catch(() => []), getVoiceAvailability(locationId)]);
+  const voices = allVoices.filter(v => voiceStatus(v, availability).usable);
   const [pendingUploads, templates] = await Promise.all([
     listPendingStudioUploads(locationId, recordId),
     getStudioScriptTemplateChoices(locationId, record.script_template_version_id),

@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useActionState, useMemo, useRef, useState } from "react";
+import { interpret } from "@/lib/studio/voices/assistant";
 import { facetCounts, facetLabels, filterVoices, quickFilterLabels, splitByAvailability, tagLabel, voiceStatus, type Availability, type LibraryVoice, type QuickFilter } from "@/lib/studio/voices/library";
 import { providerLabels, type VoiceProvider, type VoiceRow } from "@/lib/studio/voices/policy";
 import { deleteVoiceAction, refreshVoicesAction, setDefaultVoiceAction } from "./actions";
@@ -38,7 +39,7 @@ function usePreview(locationId: string, voiceId: string) {
   return { state, run, audio };
 }
 
-function VoiceItem({ locationId, voice, availability, canManage }: { locationId: string; voice: VoiceRow; availability: Availability; canManage: boolean }) {
+export function VoiceItem({ locationId, voice, availability, canManage }: { locationId: string; voice: VoiceRow; availability: Availability; canManage: boolean }) {
   const [def, setDef, settingDef] = useActionState(setDefaultVoiceAction.bind(null, locationId, voice.id), {} as State);
   const [del, remove, removing] = useActionState(deleteVoiceAction.bind(null, locationId, voice.id), {} as State);
   const preview = usePreview(locationId, voice.id);
@@ -67,6 +68,31 @@ function Refresh({ locationId, provider }: { locationId: string; provider: strin
   return <form action={action} className="inline-flex flex-wrap items-center gap-2"><button type="submit" disabled={pending} className={button}>{pending ? "Refreshing…" : `Refresh ${providerLabels[provider as VoiceProvider]}`}</button><Say s={state} /></form>;
 }
 
+/** Plain-language helper over the same tools as the page: find, compare, preview, set default, prefill the Design form. No model call, no cost. */
+function VoiceAssistant({ locationId, voices, availability, canManage, apply }: { locationId: string; voices: VoiceRow[]; availability: Availability; canManage: boolean; apply: (f: { text: string; tags: string[]; quick: QuickFilter[] }) => void }) {
+  const [input, setInput] = useState(""); const [log, setLog] = useState<Array<{ role: "you" | "assistant"; text: string; ids?: string[] }>>([]);
+  function send(e: React.FormEvent) {
+    e.preventDefault();
+    const turn = interpret(input, voices as LibraryVoice[], availability);
+    if (turn.action.kind === "filter") apply({ text: turn.action.text, tags: turn.action.tags, quick: turn.action.quick });
+    if (turn.action.kind === "design") window.dispatchEvent(new CustomEvent("voices:design", { detail: turn.action.fields }));
+    setLog(l => [...l, { role: "you", text: input }, { role: "assistant", text: turn.reply, ids: turn.voiceIds }]); setInput("");
+  }
+  return <details className="rounded-xl border p-4 text-sm">
+    <summary className="min-h-11 cursor-pointer font-medium leading-[2.75rem]">Ask about voices</summary>
+    <div className="mt-3 space-y-3">
+      <ol aria-live="polite" className="space-y-3">{log.map((m, i) => <li key={i} className={m.role === "you" ? "text-right" : ""}>
+        <p className={`inline-block whitespace-pre-line rounded-lg px-3 py-2 ${m.role === "you" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>{m.text}</p>
+        {m.ids?.length ? <ul className="mt-2 divide-y rounded-xl border text-left">{m.ids.map(id => voices.find(v => v.id === id)).filter((v): v is VoiceRow => !!v).map(v => <VoiceItem key={v.id} locationId={locationId} voice={v} availability={availability} canManage={canManage} />)}</ul> : null}
+      </li>)}</ol>
+      <form onSubmit={send} className="flex gap-2"><label className="sr-only" htmlFor="voice-assistant-input">Message</label>
+        <input id="voice-assistant-input" value={input} onChange={e => setInput(e.target.value)} placeholder="Find a warm female narrator…" maxLength={300} className="block min-h-11 w-full rounded-md border bg-background px-3" />
+        <button type="submit" className={button}>Ask</button></form>
+      {!log.length ? <p className="text-xs text-muted-foreground">Try “find a calm male narrator”, “compare Liam and Alice”, “preview Ryan”, or “design a warm young woman with a British accent”. This helper runs in your browser and never spends credits.</p> : null}
+    </div>
+  </details>;
+}
+
 export function VoiceLibrary({ locationId, voices, availability, canManage, connected }: { locationId: string; voices: VoiceRow[]; availability: Availability; canManage: boolean; connected: string[] }) {
   const [text, setText] = useState(""); const [quick, setQuick] = useState<QuickFilter[]>([]); const [tags, setTags] = useState<string[]>([]);
   const toggle = <T,>(list: T[], v: T) => list.includes(v) ? list.filter(x => x !== v) : [...list, v];
@@ -76,6 +102,7 @@ export function VoiceLibrary({ locationId, voices, availability, canManage, conn
   const active = text || quick.length || tags.length;
   const list = (items: VoiceRow[], label: string) => <ul aria-label={label} className="divide-y rounded-xl border">{items.map(v => <VoiceItem key={v.id} locationId={locationId} voice={v} availability={availability} canManage={canManage} />)}</ul>;
   return <section aria-label="Voice library" className="space-y-3">
+    <VoiceAssistant locationId={locationId} voices={voices} availability={availability} canManage={canManage} apply={f => { setText(f.text); setQuick(f.quick); setTags(f.tags); }} />
     <div className="space-y-2">
       <label className="block"><span className="sr-only">Search voices</span>
         <input type="search" value={text} onChange={e => setText(e.target.value)} placeholder="Search by name or trait: warm, deep, female, narration…" className="block min-h-11 w-full rounded-md border bg-background px-3 text-sm" /></label>
