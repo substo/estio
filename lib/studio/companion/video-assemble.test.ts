@@ -38,8 +38,7 @@ test("handler downloads footage, assembles, uploads through the lease-fenced exp
   assert.doesNotMatch(String(a.summary), /\/|Users/);
   assert.deepEqual(readAssemblyResult(result), result);
   assert.deepEqual((await readdir(root)).sort(), ["Projects"], "per-job scratch removed, the project folder kept");
-  // Temporarily omitted while the deployed server predates the edit-loop migration (SERVER_HAS_PROJECT_FIELDS).
-  assert.equal(a.projectKept, undefined);
+  assert.equal(a.projectKept, true); assert.match(String(a.projectName), /-33333333$/);
   assert.equal(kept.get(record)?.file, "Video.substo"); assert.ok(kept.get(record)?.dir.startsWith(join(root, "Projects") + "/"));
   assert.ok((await readdir(join(kept.get(record)!.dir, "exports"))).includes("Video r2.mp4"), "export kept with the project");
 });

@@ -25,8 +25,8 @@ const payload = z.object({
   voiceDownloads: z.array(z.object({ name: z.string().max(255), url: z.string().url().max(4000), byteSize: z.number().int().positive() })).max(200).default([]),
 }).passthrough();
 
-/** TEMPORARY: the deployed server predates the edit-loop migration and rejects these two result fields. Set to true once release 52ee4ff9+ is live. */
-const SERVER_HAS_PROJECT_FIELDS = false;
+/** The deployed server (edit-loop migration, 2026-11-23) accepts projectKept/projectName in the result. */
+const SERVER_HAS_PROJECT_FIELDS = true;
 export interface ExportLease { jobId: string; workerId: string; leaseToken: string }
 export interface ExportApi {
   reserve(lease: ExportLease, sha256: string, byteSize: number): Promise<{ uploadId: string; state: string; uploadUrl?: string }>;
