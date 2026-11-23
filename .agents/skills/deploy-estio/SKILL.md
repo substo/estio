@@ -50,6 +50,8 @@ PRISMA_SCHEMA_SYNC_MODE=migrate-only ./deploy-local-build.sh
 
 Use the approved schema mode if different. Do not detach the process or conceal output. The script owns backup, local build, artifact upload, dependency installation, schema sync, blue/green cutover, Caddy validation, soak checks, automatic traffic rollback on switch failure, and service checks.
 
+The server must have at least 3 GiB free both at preflight and immediately before the inactive slot is replaced. If either check fails, report the server shortfall and use the [server disk runbook](../../../documentation/server_maintenance.md) to preview cleanup under the lease. Local build-space checks are separate.
+
 If the script fails, preserve the failure output and gather read-only evidence. Do not rerun, manually switch traffic, delete a slot, change Caddy, or repair production unless the user authorizes that separate action.
 
 ## Verify and report

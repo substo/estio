@@ -47,6 +47,8 @@ Run focused checks and commit/push all release inputs, then run `PRISMA_SCHEMA_S
 
 The script rejects tracked modifications (except explicitly excluded SIMRelay), untracked/ignored uploaded inputs, missing identity, a candidate behind/divergent from canonical or production, and any changed source/environment fingerprint. Fetch/ancestry checks repeat before slot deletion, schema mutation and cutover; a live observer aborts if canonical HEAD moves. Existing prebuilt reuse requires exact build ID and input fingerprint.
 
+For a server disk-space failure, follow [server disk maintenance](server_maintenance.md) before retrying. The deploy checks available space again before replacing the inactive slot.
+
 A persistent SSH holder owns the server's `flock` before backup/upload/slot deletion/schema changes. Every remote operation, including rsync, checks that token and is supervised; losing the SSH holder terminates its process group. A drain lock prevents a successor racing rollback. Heartbeats expire; lock files are never deleted to break ownership. A hung holder is diagnosed, not blindly removed. The cutover trap restores previous Caddy/symlink/Studio worker when interrupted before a successful soak/publication.
 
 `/home/martin/.deploy-state/current-release.json` is the authoritative committed revision, build ID, source/environment fingerprint, slot, timestamp and previous identity. Only the exact serving artifact is atomically published after successful soak. Failed pre-cutover attempts and rollbacks leave the prior manifest current. A failure in optional services after successful publication still reports the actual serving release; diagnose it without pretending traffic rolled back.

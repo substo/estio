@@ -6,6 +6,8 @@ Keep the serving and rollback slots, databases, runtime dependencies, and existi
 
 ## Crash dumps and disk warnings
 
+On 2026-11-23, five Node core dumps took 10.76 GiB inside Apport’s three-day window. Removing three approved older dumps and applying the development retention policy raised free space from 1.29 to 9.90 GiB. Cron ran on schedule and Estio’s health check passed.
+
 `scripts/install-cron.sh --disk-maintenance-only` installs only the disk job into `/etc/cron.d/estio-disk-maintenance`. The regular installer includes the same job when run as root. It runs every five minutes from a fixed server path, independent of blue/green releases. Run the installer under the server maintenance lease.
 
 The job expires closed Node core dumps in `/var/lib/apport/coredump` after 24 hours and removes the oldest eligible files when their allocated size exceeds 3 GiB. It leaves open files and dumps written in the last five minutes alone. Space can exceed the budget briefly while crashes are being captured or between runs. Apport's existing cleanup still runs for other dumps.
