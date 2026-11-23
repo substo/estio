@@ -21,9 +21,10 @@ test("verify: ok is valid, scoped ElevenLabs key is valid, 401 invalid, network 
 
 test("list parses both providers defensively", async () => {
   const fish = await listProviderVoices("fish", "k", respond({ items: [{ _id: "abcdef123456", title: "Mine", languages: ["en"] }, { _id: "../bad" }, {}] }));
-  assert.deepEqual(fish, [{ providerVoiceId: "abcdef123456", name: "Mine", language: "en", kind: "clone" }]);
-  const eleven = await listProviderVoices("elevenlabs", "k", respond({ voices: [{ voice_id: "21m00Tcm4TlvDq8ikWAM", name: "Rachel", category: "premade" }, { voice_id: "cloneVoice123", name: "Me", category: "cloned" }] }));
+  assert.deepEqual(fish, [{ providerVoiceId: "abcdef123456", name: "Mine", language: "en", kind: "clone", description: null, tags: [] }]);
+  const eleven = await listProviderVoices("elevenlabs", "k", respond({ voices: [{ voice_id: "21m00Tcm4TlvDq8ikWAM", name: "Rachel", category: "premade", description: "Calm", labels: { gender: "female", use_case: "narration" } }, { voice_id: "cloneVoice123", name: "Me", category: "cloned" }] }));
   assert.deepEqual(eleven.map(v => [v.name, v.kind]), [["Rachel", "preset"], ["Me", "clone"]]);
+  assert.deepEqual(eleven[0].tags, ["gender:female", "use:narration"]); assert.equal(eleven[0].description, "Calm");
   await assert.rejects(listProviderVoices("fish", "k", respond({}, 401)), (e: unknown) => e instanceof VoiceProviderError && e.code === "invalid_key");
 });
 
@@ -69,4 +70,19 @@ test("default voice prefers the Location default among usable providers", () => 
   assert.equal(pickDefaultVoice([v("a", "fish"), v("b", "elevenlabs", true)], () => true)?.id, "b");
   assert.equal(pickDefaultVoice([v("a", "fish"), v("b", "elevenlabs", true)], p => p === "fish")?.id, "a");
   assert.equal(pickDefaultVoice([v("a", "fish")], () => false), null);
+});
+
+import { designProviderVoice, saveDesignedVoice } from "./clients";
+test("voice design returns bounded previews and saving uses the documented fields", async () => {
+  const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const audio = "QUJD".repeat(40);
+  const fetcher = (async (url: string, init: RequestInit) => { calls.push({ url, body: JSON.parse(String(init.body)) });
+    return Response.json(url.endsWith("/design") ? { previews: [{ generated_voice_id: "gen_abc123", audio_base_64: audio }, { generated_voice_id: "bad id", audio_base_64: audio }] } : { voice_id: "voice_xyz789" }); }) as unknown as typeof fetch;
+  const previews = await designProviderVoice("k", "A young woman with a British accent. Warm and upbeat.", fetcher);
+  assert.deepEqual(previews.map(p => p.generatedVoiceId), ["gen_abc123"]);
+  assert.equal(calls[0].url, "https://api.elevenlabs.io/v1/text-to-voice/design");
+  assert.equal(calls[0].body.voice_description, "A young woman with a British accent. Warm and upbeat.");
+  assert.equal(await saveDesignedVoice("k", { name: "Host", description: "A young woman with a British accent.", generatedVoiceId: "gen_abc123" }, fetcher), "voice_xyz789");
+  assert.deepEqual(calls[1].body, { voice_name: "Host", voice_description: "A young woman with a British accent.", generated_voice_id: "gen_abc123" });
+  await assert.rejects(designProviderVoice("k", "too short", fetcher), /20 to 1,000/);
 });

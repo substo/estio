@@ -1,8 +1,9 @@
 import { speechModel } from "../video-assembly/tts";
+import { elevenLabsMeta, fishMeta } from "./library";
 import type { HostedVoiceProvider } from "./policy";
 
 type Fetch = typeof fetch;
-export interface ProviderVoice { providerVoiceId: string; name: string; language: string | null; kind: "preset" | "clone" }
+export interface ProviderVoice { providerVoiceId: string; name: string; language: string | null; kind: "preset" | "clone"; description?: string | null; tags?: string[] }
 export class VoiceProviderError extends Error {
   constructor(readonly code: "invalid_key" | "unavailable" | "rejected" | "not_found", message: string) { super(message); }
 }
@@ -41,13 +42,13 @@ export async function listProviderVoices(provider: HostedVoiceProvider, key: str
     const body = await json(await send(fetcher, `${FISH}/model?self=true&page_size=100&page_number=1`, { headers: fishHeaders(key) }, "Could not list Fish voices."));
     const items = Array.isArray(body.items) ? body.items : [];
     return items.flatMap((item: Record<string, unknown>) => typeof item._id === "string" && idPattern.test(item._id)
-      ? [{ providerVoiceId: item._id, name: text(item.title, 80) || "Untitled voice", language: Array.isArray(item.languages) ? text(item.languages[0], 12) || null : null, kind: "clone" as const }] : []);
+      ? [{ providerVoiceId: item._id, name: text(item.title, 80) || "Untitled voice", language: Array.isArray(item.languages) ? text(item.languages[0], 12) || null : null, kind: "clone" as const, ...fishMeta(item) }] : []);
   }
   const body = await json(await send(fetcher, `${ELEVEN}/v1/voices`, { headers: elevenHeaders(key) }, "Could not list ElevenLabs voices."));
   const voices = Array.isArray(body.voices) ? body.voices : [];
   return voices.flatMap((v: Record<string, unknown>) => typeof v.voice_id === "string" && idPattern.test(v.voice_id)
     ? [{ providerVoiceId: v.voice_id, name: text(v.name, 80) || "Untitled voice",
-        language: text((v.labels as Record<string, unknown> | undefined)?.language, 12) || null, kind: (v.category === "cloned" || v.category === "professional" ? "clone" : "preset") as "preset" | "clone" }] : []);
+        language: text((v.labels as Record<string, unknown> | undefined)?.language, 12) || null, kind: (v.category === "cloned" || v.category === "professional" ? "clone" : "preset") as "preset" | "clone", ...elevenLabsMeta(v) }] : []);
 }
 
 /** Instant clone from one sample. The sample is forwarded and never stored by Studio. Returns the provider's voice id. */
@@ -81,4 +82,26 @@ export async function synthesizeHosted(provider: HostedVoiceProvider, key: strin
     ? await send(fetcher, `${FISH}/v1/tts`, { method: "POST", signal, headers: { ...fishHeaders(key), "content-type": "application/json", model: fishModel }, body: JSON.stringify({ text, reference_id: voiceId, format: "mp3", mp3_bitrate: 128, latency: "normal" }) }, "Could not generate the voice.")
     : await send(fetcher, `${ELEVEN}/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, { method: "POST", signal, headers: { ...elevenHeaders(key), "content-type": "application/json", accept: "audio/mpeg" }, body: JSON.stringify({ text, model_id: speechModel }) }, "Could not generate the voice.");
   return checkAudio(Buffer.from(await response.arrayBuffer()));
+}
+
+export interface DesignPreview { generatedVoiceId: string; audioBase64: string }
+const base64 = /^[A-Za-z0-9+/=]{100,400000}$/;
+/** ElevenLabs Voice Design: a text description in, a few candidate voices out (each with a short audio preview). Nothing is saved until one is chosen. */
+export async function designProviderVoice(key: string, description: string, fetcher: Fetch = fetch): Promise<DesignPreview[]> {
+  if (description.length < 20 || description.length > 1000) throw new VoiceProviderError("rejected", "Describe the voice in 20 to 1,000 characters.");
+  const body = await json(await send(fetcher, `${ELEVEN}/v1/text-to-voice/design`, { method: "POST", headers: { ...elevenHeaders(key), "content-type": "application/json" },
+    body: JSON.stringify({ voice_description: description, auto_generate_text: true }), signal: AbortSignal.timeout(120_000) }, "Could not design the voice."));
+  const previews = Array.isArray(body.previews) ? body.previews : [];
+  const out = previews.flatMap((p: Record<string, unknown>) => typeof p.generated_voice_id === "string" && idPattern.test(p.generated_voice_id) && typeof p.audio_base_64 === "string" && base64.test(p.audio_base_64)
+    ? [{ generatedVoiceId: p.generated_voice_id, audioBase64: p.audio_base_64 }] : []).slice(0, 3);
+  if (!out.length) throw new VoiceProviderError("rejected", "The provider returned no voice previews. Try a different description.");
+  return out;
+}
+/** Turn a chosen preview into a saved voice in the provider account. Returns the provider's voice id. */
+export async function saveDesignedVoice(key: string, input: { name: string; description: string; generatedVoiceId: string }, fetcher: Fetch = fetch): Promise<string> {
+  if (!idPattern.test(input.generatedVoiceId)) throw new VoiceProviderError("rejected", "Invalid preview id.");
+  const id = (await json(await send(fetcher, `${ELEVEN}/v1/text-to-voice`, { method: "POST", headers: { ...elevenHeaders(key), "content-type": "application/json" },
+    body: JSON.stringify({ voice_name: input.name, voice_description: input.description, generated_voice_id: input.generatedVoiceId }), signal: AbortSignal.timeout(60_000) }, "Could not save the voice.")))?.voice_id;
+  if (typeof id !== "string" || !idPattern.test(id)) throw new VoiceProviderError("rejected", "The provider did not return a voice id.");
+  return id;
 }
