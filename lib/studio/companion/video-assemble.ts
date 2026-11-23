@@ -10,6 +10,8 @@ import { StudioJobError, type StudioJobHandler } from "../worker/handlers";
 import { deviceCall, type DeviceCallOptions } from "./http-queue";
 import type { DeviceCredentials } from "./config";
 import type { AssembleOptions, AssembleResult } from "../video-assembly/assemble";
+import { snapshotTimeline, timelineField } from "./timeline-snapshot";
+import { runNativeProcess, type ProcessRunner } from "./process";
 import { freeBytes, nextProjectFile, projectFolderName, type ProjectStore } from "./video-projects";
 
 const payload = z.object({
@@ -65,6 +67,8 @@ export interface VideoAssembleDeps {
   /** Scratch space for downloads; removed after every job. The project itself lives in projectsRoot and is kept. */
   workRoot: string; projectsRoot: string; projects: ProjectStore; editorDocs: string; model?: string;
   api: ExportApi;
+  /** Runs the editor CLI for the timeline picture (tests inject a fake). */
+  run?: ProcessRunner;
   /** Offline timed speech for each footage file (Parakeet); omitted or null leaves the agent without a transcript. */
   transcribeFootage?: (file: string, signal?: AbortSignal) => Promise<{ start: number; end: number; text: string }[] | null>;
   assemble: (options: AssembleOptions) => Promise<AssembleResult>;
@@ -172,8 +176,9 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
       // The edit is kept from here on, whether or not the upload below succeeds.
       await deps.projects.set(p.recordId, { dir: projectDir, file: result.projectFile }).catch(() => {});
       const uploadId = await saveExport(deps.api, lease, exported, context.signal);
+      const timeline = await snapshotTimeline(result.projectFile, projectDir, deps.run, context.signal);
       const mb = (exported.size / 1_000_000).toFixed(1);
-      return { assembly: { exportName: exported.name.slice(0, 200), bytes: exported.size, beats: result.beats, clips: result.clips.length, voiced: result.voiceFiles.length, uploadId, exportSaved: true, ...(SERVER_HAS_PROJECT_FIELDS ? { projectKept: true, projectName: projectFolderName(title, p.recordId) } : {}),
+      return { assembly: { exportName: exported.name.slice(0, 200), bytes: exported.size, beats: result.beats, clips: result.clips.length, voiced: result.voiceFiles.length, uploadId, exportSaved: true, ...timelineField(timeline), ...(SERVER_HAS_PROJECT_FIELDS ? { projectKept: true, projectName: projectFolderName(title, p.recordId) } : {}),
         summary: `${result.beats} beats, ${result.clips.length} clip${result.clips.length === 1 ? "" : "s"}${result.voiceFiles.length ? ", generated voiceover" : ""}, ${mb} MB. Kept on your Mac; ask the agent below to change it or open it in the editor.` } };
     } finally { await rm(work, { recursive: true, force: true }).catch(() => {}); }
   };
