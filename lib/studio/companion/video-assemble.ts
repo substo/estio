@@ -88,17 +88,20 @@ export async function latestExport(projectDir: string, sinceMs = 0): Promise<{ n
 export async function saveExport(api: ExportApi, lease: ExportLease, exported: { file: string; size: number }, signal: AbortSignal): Promise<string> {
   if (exported.size < 1000 || exported.size > 5_368_709_120) throw new StudioJobError("video_export_size", "The exported video has an unusable size.", false);
   const digest = await sha256(exported.file);
+  let step = "reserve";
   try {
     const slot = await api.reserve(lease, digest, exported.size);
     if (slot.state !== "verified") {
       if (!slot.uploadUrl) throw new Error("no_upload_url");
-      await api.put(slot.uploadUrl, exported.file, exported.size, signal);
-      await api.verify(lease);
+      step = "put"; await api.put(slot.uploadUrl, exported.file, exported.size, signal);
+      step = "verify"; await api.verify(lease);
     }
     return slot.uploadId;
   } catch (error) {
     if (signal.aborted) throw error;
-    throw new StudioJobError("video_upload_failed", "The video was made but could not be saved to Studio. Try again.", false);
+    // Only fixed codes or the error class name are reported, never response bodies, URLs or credentials.
+    const detail = error instanceof Error ? (/^(device_[a-z0-9_]+_failed|video_[a-z_]+|no_upload_url)$/.test(error.message) ? error.message : error.name) : "unknown";
+    throw new StudioJobError("video_upload_failed", "The video was made but could not be saved to Studio. Try again.", false, undefined, `${step}:${detail}`.slice(0, 80));
   }
 }
 
