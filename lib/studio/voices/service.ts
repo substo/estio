@@ -9,8 +9,12 @@ import { StudioDbError } from "../db";
 import { createStudioR2Store, readStudioR2Config } from "../media-r2";
 import { studioDb } from "../studio-db";
 import { parseScript } from "../video-assembly/script";
-import { cloneProviderVoice, deleteProviderVoice, listProviderVoices, synthesizeHosted, VoiceProviderError } from "./clients";
-import { requireVoiceManager, resolveVoiceKey, VoiceSettingsError } from "./keys";
+import { cloneProviderVoice, deleteProviderVoice, designProviderVoice, listProviderVoices, saveDesignedVoice as saveDesignedAtProvider, synthesizeHosted, VoiceProviderError, type DesignPreview } from "./clients";
+import { getStudioDevices } from "../devices";
+import { readReportedModels } from "../local-models";
+import { Prisma } from "@prisma/client";
+import { LOCAL_SPEAKER_CATALOG, buildDesignPrompt, consentSpeech, designError, normalizeTag, type Availability, type DesignFields, type LocalState } from "./library";
+import { getVoiceKeySummary, requireVoiceManager, resolveVoiceKey, VoiceSettingsError } from "./keys";
 import { CLONE_CONSENT_STATEMENT, LOCAL_SPEAKERS, isHostedProvider, providerLabels, type CloneInput, type HostedVoiceProvider, type VoiceRow } from "./policy";
 
 const call = <T>(fn: string, access: { locationId: string; app: "estio" | "substo"; userId: string }, args: Record<string, unknown> = {}) =>
@@ -31,7 +35,7 @@ export async function listVoices(locationId: string): Promise<VoiceRow[]> {
 /** Local speakers are built in: no key, no cost. Idempotent. */
 export async function ensureLocalVoices(locationId: string) {
   const access = await requireVoiceManager(locationId);
-  await call("studio_sync_voices", access, { p_provider: "local", p_voices: LOCAL_SPEAKERS.map(s => ({ providerVoiceId: s, name: s.replace(/_/g, " ").replace(/^./, c => c.toUpperCase()), kind: "preset" })), p_prune: true });
+  await call("studio_sync_voices", access, { p_provider: "local", p_voices: LOCAL_SPEAKERS.map(s => ({ providerVoiceId: s, name: s.replace(/_/g, " ").replace(/^./, c => c.toUpperCase()), kind: "preset", language: LOCAL_SPEAKER_CATALOG[s].language, description: LOCAL_SPEAKER_CATALOG[s].description, tags: LOCAL_SPEAKER_CATALOG[s].tags })), p_prune: true });
 }
 
 /** Mirror the voices in the Location's own provider account. */
@@ -56,7 +60,7 @@ export async function cloneVoice(locationId: string, input: CloneInput, sample: 
   catch (error) { throw new VoiceSettingsError(providerMessage(error) ?? "Could not clone the voice. Try again."); }
   try {
     return await call<{ id: string }>("studio_record_voice_clone", access, { p_provider: input.provider, p_provider_voice_id: providerVoiceId, p_name: input.name, p_language: input.language, p_persona: input.persona,
-      p_statement: CLONE_CONSENT_STATEMENT, p_sample_sha256: sha });
+      p_statement: input.consentRecorded ? `${CLONE_CONSENT_STATEMENT} Recorded consent: "${consentSpeech(input.name)}"`.slice(0, 400) : CLONE_CONSENT_STATEMENT, p_sample_sha256: sha });
   } catch (error) {
     await deleteProviderVoice(input.provider, key, providerVoiceId).catch(() => {});   // never leave an unrecorded clone behind
     throw error;
@@ -119,5 +123,75 @@ export async function renderNarration(locationId: string, recordId: string, voic
     }
   } finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
   return { uploadIds, beats: beats.length, characters: beats.reduce((n, b) => n + b.narration.length, 0) };
+}
+
+const LOCAL_MODEL_ID = "qwen3-tts-0.6b-4bit";
+/** What can run right now: which provider keys exist and whether an online Mac has the on-device voice model. */
+export async function getVoiceAvailability(locationId: string): Promise<Availability> {
+  const [keys, devices] = await Promise.all([getVoiceKeySummary(locationId).catch(() => null), getStudioDevices(locationId).catch(() => null)]);
+  const online = devices?.devices.filter(d => d.online && !d.paused && d.status !== "revoked") ?? [];
+  const local: LocalState = !online.length ? "mac_offline"
+    : online.some(d => readReportedModels(d.capabilities.modelStates).some(m => m.id === LOCAL_MODEL_ID && m.state === "installed")) ? "ready" : "not_installed";
+  return { fish: Boolean(keys?.keys.fish), elevenlabs: Boolean(keys?.keys.elevenlabs), local };
+}
+
+const GENDER_TAG: Record<string, string> = { woman: "female", female: "female", man: "male", male: "male" };
+/** Tags a designed voice carries so it filters like any other voice. */
+export function designTags(f: DesignFields): string[] {
+  const g = GENDER_TAG[f.gender.trim().toLowerCase()];
+  return [g ? normalizeTag("gender", g) : null, normalizeTag("age", f.age), normalizeTag("tone", f.tone.split(/[ ,]+/)[0]), normalizeTag("accent", f.accent)].filter((t): t is string => !!t);
+}
+/** Voice Design (ElevenLabs): up to three candidate voices from a description. Nothing is saved yet; the provider bills the Location's account. */
+export async function designVoicePreviews(locationId: string, fields: DesignFields): Promise<{ prompt: string; previews: DesignPreview[] }> {
+  const access = await requireVoiceManager(locationId);
+  const prompt = buildDesignPrompt(fields);
+  const bad = designError(prompt); if (bad) throw new VoiceSettingsError(bad);
+  const key = await needKey(access.locationId, "elevenlabs");
+  try { return { prompt, previews: await designProviderVoice(key, prompt) }; }
+  catch (error) { throw new VoiceSettingsError(providerMessage(error) ?? "Could not design the voice. Try again."); }
+}
+export async function saveDesignedVoice(locationId: string, input: { name: string; fields: DesignFields; generatedVoiceId: string; persona?: string | null }): Promise<{ id: string }> {
+  const access = await requireVoiceManager(locationId);
+  const name = input.name.trim();
+  if (name.length < 1 || name.length > 80) throw new VoiceSettingsError("Give the voice a name of up to 80 characters.");
+  const prompt = buildDesignPrompt(input.fields);
+  const key = await needKey(access.locationId, "elevenlabs");
+  let providerVoiceId: string;
+  try { providerVoiceId = await saveDesignedAtProvider(key, { name, description: prompt, generatedVoiceId: input.generatedVoiceId }); }
+  catch (error) { throw new VoiceSettingsError(providerMessage(error) ?? "Could not save the voice. Try again."); }
+  try {
+    return await call<{ id: string }>("studio_record_designed_voice", access, { p_provider: "elevenlabs", p_provider_voice_id: providerVoiceId, p_name: name, p_description: prompt.slice(0, 300), p_tags: designTags(input.fields), p_language: null, p_persona: input.persona?.trim() || null });
+  } catch (error) { await deleteProviderVoice("elevenlabs", key, providerVoiceId).catch(() => {}); throw error; }
+}
+
+/** Queue a preview of a built-in speaker on the account's own Mac. The Voices page polls the job. */
+export async function requestLocalPreview(locationId: string, voiceId: string): Promise<{ jobId: string }> {
+  const access = await getStudioAccess(locationId);
+  if (!access) throw new StudioCommandError("Studio access denied.", 403);
+  try { return await call<{ jobId: string }>("studio_request_voice_preview", access, { p_voice_id: voiceId }); }
+  catch (error) {
+    const code = error instanceof StudioDbError ? error.code : undefined;
+    const msg = code && previewMessages[code];
+    if (msg) throw new StudioCommandError(msg, 409);
+    throw error;
+  }
+}
+export const previewMessages: Record<string, string> = {
+  VP001: "This voice no longer exists.", VP002: "Only on-device voices are previewed on the Mac.",
+  VP011: "Pair a Mac under Settings → Devices to preview on-device voices.", VP012: "Turn processing on for your Mac under Settings → Devices.",
+  VP013: "Your Mac is not ready: install the on-device voice model under Settings → Devices and keep the companion running.", VP014: "Update the Mac companion to preview voices.",
+};
+export type LocalPreviewState = { status: "pending" } | { status: "failed"; message: string } | { status: "done"; audioBase64: string };
+export async function readLocalPreview(locationId: string, jobId: string): Promise<LocalPreviewState> {
+  const access = await getStudioAccess(locationId);
+  if (!access) throw new StudioCommandError("Studio access denied.", 403);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) throw new StudioCommandError("Preview again.", 400);
+  const row = (await studioDb.rows<{ status: string; result: { preview?: { audioBase64?: unknown } } | null; last_error_message: string | null }>(Prisma.sql`
+    select status, result, last_error_message from studio.studio_jobs where id = ${jobId}::uuid and location_id = ${access.locationId} and kind = 'studio.voice_preview' and created_by_clerk_user_id = ${access.userId} limit 1`))[0];
+  if (!row) throw new StudioCommandError("This preview expired. Preview again.", 404);
+  if (row.status === "queued" || row.status === "running") return { status: "pending" };
+  const audio = row.result?.preview?.audioBase64;
+  if (row.status === "succeeded" && typeof audio === "string") return { status: "done", audioBase64: audio };
+  return { status: "failed", message: row.last_error_message || "The Mac could not generate the preview." };
 }
 export { StudioDbError };

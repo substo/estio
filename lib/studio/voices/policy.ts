@@ -23,7 +23,7 @@ export const MAX_SAMPLE_BYTES = 12 * 1024 * 1024;
 export const MIN_SAMPLE_BYTES = 20 * 1024;
 export const SAMPLE_TYPES = ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4", "audio/x-m4a", "audio/aac", "audio/webm", "audio/ogg", "audio/flac"];
 
-export interface CloneInput { provider: HostedVoiceProvider; name: string; language: string | null; persona: string | null; attested: boolean }
+export interface CloneInput { provider: HostedVoiceProvider; name: string; language: string | null; persona: string | null; attested: boolean; consentRecorded?: boolean }
 export function readCloneForm(form: FormData): { input: CloneInput; sample: File } {
   const provider = String(form.get("provider") ?? "");
   if (!isHostedProvider(provider)) throw new Error("Choose Fish Audio or ElevenLabs.");
@@ -34,15 +34,16 @@ export function readCloneForm(form: FormData): { input: CloneInput; sample: File
   const persona = String(form.get("persona") ?? "").trim();
   if (persona.length > 80) throw new Error("The persona label can be at most 80 characters.");
   if (form.get("attested") !== "on") throw new Error("Confirm you have the right to clone this voice.");
+  const consentRecorded = form.get("consentRecorded") === "on";
   const sample = form.get("sample");
   if (!(sample instanceof File)) throw new Error("Choose an audio sample.");
   if (sample.size < MIN_SAMPLE_BYTES) throw new Error("The sample is too short. Use at least 10 seconds of clear speech.");
   if (sample.size > MAX_SAMPLE_BYTES) throw new Error("The sample is larger than 12 MB. Use a shorter clip.");
   if (!SAMPLE_TYPES.includes(sample.type)) throw new Error("Use an MP3, WAV, M4A, AAC, OGG, WebM or FLAC sample.");
-  return { input: { provider, name, language: language || null, persona: persona || null, attested: true }, sample };
+  return { input: { provider, name, language: language || null, persona: persona || null, attested: true, consentRecorded }, sample };
 }
 
-export interface VoiceRow { id: string; provider: VoiceProvider; providerVoiceId: string; name: string; kind: "preset" | "clone"; language: string | null; persona: string | null; isDefault: boolean }
+export interface VoiceRow { id: string; provider: VoiceProvider; providerVoiceId: string; name: string; kind: "preset" | "clone" | "designed"; language: string | null; persona: string | null; isDefault: boolean; description?: string | null; tags?: string[] }
 /** The voice Make video should offer first: the Location default, else the first voice whose provider can run. */
 export function pickDefaultVoice(voices: VoiceRow[], usable: (p: VoiceProvider) => boolean): VoiceRow | null {
   const ok = voices.filter(v => usable(v.provider));
