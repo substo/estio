@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
+import { createReadStream, createWriteStream, openAsBlob } from "node:fs";
 import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { Readable } from "node:stream";
@@ -41,7 +41,7 @@ export function createExportApi(credentials: DeviceCredentials, options: DeviceC
       const target = new URL(url);
       if (target.protocol !== "https:") throw new Error("video_upload_refused");
       const response = await (options.fetcher ?? fetch)(target, { method: "PUT", redirect: "error", headers: { "content-type": "video/mp4", "content-length": String(byteSize) },
-        body: Readable.toWeb(createReadStream(file)) as unknown as BodyInit, duplex: "half", signal: AbortSignal.any([signal, AbortSignal.timeout(60 * 60_000)]) } as RequestInit);
+        body: await openAsBlob(file, { type: "video/mp4" }), signal: AbortSignal.any([signal, AbortSignal.timeout(60 * 60_000)]) } as RequestInit);
       if (!response.ok) throw new Error("video_upload_failed");
     },
   };
