@@ -44,7 +44,7 @@ begin
  if not pg_temp.fails(format($q$select studio.studio_request_video_assembly(%L,'substo','va-owner',%L,'{}')$q$,w,rec),'VA013') then raise exception 'Not-ready Mac accepted'; end if;
  update studio.studio_devices set report=report||'{"videoAssembly":{"ready":true}}' where id=d;
 
- r:=studio.studio_request_video_assembly(w,'substo','va-owner',rec,'{"voiceover":true,"music":false,"portrait":false}');
+ r:=studio.studio_request_video_assembly(w,'substo','va-owner',rec,'{"voiceover":false,"music":false,"portrait":false}');
  j:=(r->>'jobId')::uuid;
  if r->>'reused' is distinct from 'false' or (select payload#>>'{media,0,name}' from studio.studio_jobs where id=j) is distinct from 'shot.mp4'
   or (select payload->>'script' from studio.studio_jobs where id=j) is distinct from E'Welcome.\n\nThanks.' then raise exception 'Payload snapshot wrong'; end if;
