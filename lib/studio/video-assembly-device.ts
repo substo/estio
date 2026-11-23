@@ -15,13 +15,20 @@ export async function withAssemblyDownloads(jobs: unknown, store?: Pick<StudioR2
   return Promise.all(jobs.map(async job => {
     if (!job || job.kind !== "studio.video_assemble") return job;
     if (!r2) throw new StudioCommandError("Media storage is not configured.", 503);
-    const ids = ((job.payload?.media ?? []) as Array<{ uploadId?: string }>).map(m => m.uploadId).filter((id): id is string => typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id));
-    const rows = ids.length ? await studioDb.rows<{ id: string; original_filename: string; object_key: string; byte_size: string }>(Prisma.sql`
-      select u.id, u.original_filename, m.object_key, u.byte_size::text as byte_size from studio.studio_uploads u
-      join studio.studio_media_objects m on m.id = u.media_object_id and m.location_id = u.location_id
-      where u.location_id = ${job.location_id} and u.record_id = ${job.payload.recordId}::uuid and u.id = any(${ids}::uuid[]) and u.status = 'uploaded'`) : [];
-    const downloads: AssemblyDownload[] = await Promise.all(rows.map(async row => ({ name: row.original_filename, byteSize: Number(row.byte_size), url: await r2.presignWorkerRead(row.object_key, EXPORT_PRESIGN_SECONDS) })));
-    return { ...job, payload: { ...job.payload, downloads } };
+    const uuid = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v);
+    const ids = ((job.payload?.media ?? []) as Array<{ uploadId?: string }>).map(m => m.uploadId).filter(uuid);
+    const voiceIds = ((job.payload?.voice?.uploadIds ?? []) as unknown[]).filter(uuid);
+    const link = async (wanted: string[]) => {
+      const rows = wanted.length ? await studioDb.rows<{ id: string; original_filename: string; object_key: string; byte_size: string }>(Prisma.sql`
+        select u.id, u.original_filename, m.object_key, u.byte_size::text as byte_size from studio.studio_uploads u
+        join studio.studio_media_objects m on m.id = u.media_object_id and m.location_id = u.location_id
+        where u.location_id = ${job.location_id} and u.record_id = ${job.payload.recordId}::uuid and u.id = any(${wanted}::uuid[]) and u.status = 'uploaded'`) : [];
+      const byId = new Map(rows.map(r => [r.id, r]));
+      return Promise.all(wanted.flatMap(id => byId.has(id) ? [byId.get(id)!] : []).map(async row => ({ name: row.original_filename, byteSize: Number(row.byte_size), url: await r2.presignWorkerRead(row.object_key, EXPORT_PRESIGN_SECONDS) })));
+    };
+    const downloads: AssemblyDownload[] = await link(ids);
+    const voiceDownloads: AssemblyDownload[] = await link(voiceIds);   // beat order = uploadIds order
+    return { ...job, payload: { ...job.payload, downloads, voiceDownloads } };
   }));
 }
 

@@ -77,6 +77,8 @@ test("readiness reports names only and the request form maps checkboxes", async 
   assert.equal((await discoverAssemblyTools(true, (async () => ({ stdout: "", stderr: "" })) as never)).ready, true);
   const form = new FormData(); form.set("voiceover", "on"); form.set("evil", "1");
   assert.deepEqual(readVideoAssemblyOptions(form), { voiceover: true, music: false, portrait: false });
+  form.set("voiceId", "44444444-4444-4444-8444-444444444444"); assert.equal(readVideoAssemblyOptions(form).voiceId, "44444444-4444-4444-8444-444444444444");
+  form.set("voiceId", "../x"); assert.equal(readVideoAssemblyOptions(form).voiceId, undefined);
   assert.equal(videoAssemblyStatusLine({ jobId, status: "queued", message: null, summary: null, createdAt: "" }, false), "Waiting for your Mac to come online.");
 });
 

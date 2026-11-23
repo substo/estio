@@ -1,9 +1,10 @@
-export interface VideoAssemblyOptions { voiceover: boolean; music: boolean; portrait: boolean }
+export interface VideoAssemblyOptions { voiceover: boolean; music: boolean; portrait: boolean; /** Library voice for the voiceover (required when voiceover is on). */ voiceId?: string }
 /** Checkbox form fields to options. Anything else in the form is ignored. */
 export function readVideoAssemblyOptions(form: FormData): VideoAssemblyOptions {
-  return { voiceover: form.get("voiceover") === "on", music: form.get("music") === "on", portrait: form.get("portrait") === "on" };
+  const voiceover = form.get("voiceover") === "on", voiceId = String(form.get("voiceId") ?? "");
+  return { voiceover, music: form.get("music") === "on", portrait: form.get("portrait") === "on", ...(voiceover && /^[0-9a-f-]{36}$/i.test(voiceId) ? { voiceId } : {}) };
 }
-export type VideoAssemblyReason = "no_content" | "no_script" | "script_too_long" | "no_footage" | "footage_too_large" | "no_mac" | "processing_off" | "mac_not_ready" | "companion_outdated" | "no_authority";
+export type VideoAssemblyReason = "no_content" | "no_script" | "script_too_long" | "no_footage" | "footage_too_large" | "no_mac" | "processing_off" | "mac_not_ready" | "companion_outdated" | "no_authority" | "no_voice" | "narration_not_ready";
 export const videoAssemblyMessages: Record<VideoAssemblyReason, string> = {
   no_content: "This content piece was not found.",
   no_script: "Save a script on this piece first.",
@@ -12,13 +13,15 @@ export const videoAssemblyMessages: Record<VideoAssemblyReason, string> = {
   footage_too_large: "The footage on this piece is larger than 20 GB. Remove some and try again.",
   no_mac: "Pair a Mac in Setup to make videos. Nothing was sent to a paid service.",
   processing_off: "Turn Mac processing on in Setup to make videos.",
-  mac_not_ready: "Your Mac needs the Substo Video editor, ffprobe and the Claude subscription sign-in (and a Fish Audio or ElevenLabs key, or on-device voice, for voiceover). Check Setup, then try again.",
+  mac_not_ready: "Your Mac needs the Substo Video editor, ffprobe and the Claude subscription sign-in. Check Setup, then try again.",
   companion_outdated: "Update the Studio companion on your Mac (it does not make videos yet).",
   no_authority: "Only a Business admin with a paired Mac can make videos.",
+  no_voice: "Choose a voice for the voiceover in Voices, or turn voiceover off.",
+  narration_not_ready: "The narration could not be prepared. Nothing was sent to your Mac. Try again.",
 };
 export const videoAssemblyCodeReason: Record<string, VideoAssemblyReason> = {
   VA001: "no_content", VA002: "no_script", VA003: "script_too_long", VA004: "no_footage", VA005: "footage_too_large",
-  VA011: "no_mac", VA012: "processing_off", VA013: "mac_not_ready", VA014: "companion_outdated", "42501": "no_authority",
+  VA011: "no_mac", VA012: "processing_off", VA013: "mac_not_ready", VA014: "companion_outdated", VA006: "no_voice", VA007: "narration_not_ready", "42501": "no_authority",
 };
 export type VideoAssemblyJobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 export interface VideoAssemblyView { jobId: string; status: VideoAssemblyJobStatus; message: string | null; summary: string | null; createdAt: string }
