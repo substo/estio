@@ -1,7 +1,7 @@
 /**
  * Script + shot footage -> edited video, on this Mac. Voiceover (ElevenLabs v3), then an agent drives the `substo` editor:
  * cuts, captions, motion graphics, sound design, export.
- *   npm run studio:video-assemble -- --script script.txt --clips ~/Movies/shoot --project ~/Movies/Substo/Projects/my-video [--voiceover] [--music] [--portrait] [--dry-run]
+ *   npm run studio:video-assemble -- --script script.txt --clips ~/Movies/shoot --project ~/Movies/Substo/Projects/my-video [--voiceover [--voice-local ryan]] [--music] [--portrait] [--dry-run]
  */
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -16,7 +16,7 @@ async function main() {
 const result = await assembleVideo({
   script: await readFile(need("script"), "utf8"), clipsDir: need("clips"), projectDir: need("project"),
   editorDocs: resolve(__dirname, "../video-editor/docs"), orientation: flag("portrait") ? "portrait" : "landscape",
-  voiceover: flag("voiceover"), music: flag("music"), model: value("model"), dryRun: flag("dry-run"), log: line => console.error(line),
+  voiceover: flag("voiceover"), voice: flag("voiceover") ? { engine: "local" as const, speaker: value("voice-local") ?? "ryan" } : undefined, music: flag("music"), model: value("model"), dryRun: flag("dry-run"), log: line => console.error(line),
 });
 console.log(flag("dry-run") ? result.brief : result.agentOutput);
 }

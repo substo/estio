@@ -3,13 +3,16 @@ import { extname, join } from "node:path";
 import { runNativeProcess, type ProcessRunner } from "../companion/process";
 import { buildBrief } from "./brief";
 import { parseScript } from "./script";
-import { resolveSpeech, type SpeechEngine } from "./tts";
+import { localSpeech, type SpeechEngine } from "./tts";
 
 const videoExtensions = new Set([".mp4", ".mov", ".m4v", ".mkv", ".webm", ".mp3", ".wav", ".m4a"]);
 export interface AssembleOptions {
   script: string; clipsDir: string; projectDir: string; editorDocs: string;
   orientation?: "landscape" | "portrait"; voiceover?: boolean; music?: boolean; model?: string; dryRun?: boolean;
-  run?: ProcessRunner; speak?: SpeechEngine; log?: (line: string) => void; signal?: AbortSignal;
+  run?: ProcessRunner;
+  /** Who narrates when voiceover is on: the on-device engine, or narration the server already rendered with the Location's key (files in clipsDir, in beat order). */
+  voice?: { engine: "local"; speaker?: string; model?: string } | { engine: "prerendered"; files: string[] };
+  /** Test seam. */ speak?: SpeechEngine; log?: (line: string) => void; signal?: AbortSignal;
 }
 export interface AssembleResult { projectDir: string; beats: number; clips: string[]; voiceFiles: string[]; timings: number[]; brief: string; agentOutput?: string }
 const BEAT_GAP = 0.35;
@@ -20,12 +23,13 @@ async function durationOf(file: string, run: ProcessRunner, cwd: string): Promis
   return seconds;
 }
 
-/** Script + shot footage in, an edited and exported video out. Voiceover is generated (Fish Audio, ElevenLabs or on-device) unless the footage already carries the narration. */
+/** Script + shot footage in, an edited and exported video out. Voiceover is generated (rendered on the server with the Location key, or on-device) unless the footage already carries the narration. */
 export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult> {
   const log = o.log ?? (() => {}), run = o.run ?? runNativeProcess;
   const beats = parseScript(o.script);
   if (!beats.length) throw new Error("The script has no spoken paragraphs.");
-  const sources = (await readdir(o.clipsDir)).filter(f => !f.startsWith(".") && videoExtensions.has(extname(f).toLowerCase())).sort();
+  const narration = new Set(o.voice?.engine === "prerendered" ? o.voice.files : []);
+  const sources = (await readdir(o.clipsDir)).filter(f => !f.startsWith(".") && !narration.has(f) && videoExtensions.has(extname(f).toLowerCase())).sort();
   if (!sources.length && !o.voiceover) throw new Error("No footage found and voiceover is off.");
   await mkdir(o.projectDir, { recursive: true });
   const clips: string[] = [];
@@ -33,11 +37,15 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
 
   const voiceFiles: string[] = [];
   if (o.voiceover) {
-    const engine = o.speak ?? await resolveSpeech();
-    if (!engine && !o.dryRun) throw new Error("No voice engine: paste a Fish Audio or ElevenLabs key into the project .env (STUDIO video keys), or set up on-device Qwen3-TTS.");
+    if (!o.voice && !o.speak) throw new Error("Choose a voice for the voiceover.");
+    if (o.voice?.engine === "prerendered" && o.voice.files.length !== beats.length) throw new Error("The rendered narration does not match the script. Make the video again.");
+    const engine = o.speak ?? (o.voice?.engine === "local" ? localSpeech(o.voice.speaker ?? "ryan", o.voice.model) : null);
     for (const b of beats) {
       const name = `voice-${String(b.index).padStart(2, "0")}.mp3`;
-      if (!o.dryRun) { log(`Voicing beat ${b.index}/${beats.length} (${engine!.label})`); await writeFile(join(o.projectDir, name), await engine!.speak(b.narration, o.signal)); }
+      if (!o.dryRun) {
+        if (engine) { log(`Voicing beat ${b.index}/${beats.length} (${engine.label})`); await writeFile(join(o.projectDir, name), await engine.speak(b.narration, o.signal)); }
+        else await copyFile(join(o.clipsDir, (o.voice as { files: string[] }).files[b.index - 1]), join(o.projectDir, name));
+      }
       voiceFiles.push(name);
     }
   }

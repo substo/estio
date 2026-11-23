@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url";
 import { createExportApi, createVideoAssembleHandler } from "../lib/studio/companion/video-assemble";
 import { discoverAssemblyTools, type AssemblyTools } from "../lib/studio/companion/video-assemble-tools";
 import { assembleVideo } from "../lib/studio/video-assembly/assemble";
-import { resolveSpeech } from "../lib/studio/video-assembly/tts";
+import { localTtsReady } from "../lib/studio/video-assembly/tts";
 import { createPlaywrightYoutubeBrowser, createYoutubeSearchHandler, findChrome, openYoutubeLogin, youtubeBrowserProfile } from "../lib/studio/companion/youtube-search";
 
 const version = "studio-companion-14";
@@ -169,7 +169,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
       const result = await youtubeSearchInner(job, context) as { signedIn?: boolean };
       youtubeSignedIn = result.signedIn; return result;
     };
-    const videoAssemble = createVideoAssembleHandler({ enabled: () => gate().processing, tools: async signal => { await refreshAssembly(); return assembly; }, speechReady: async () => (await resolveSpeech()) !== null, api: createExportApi(credentials),
+    const videoAssemble = createVideoAssembleHandler({ enabled: () => gate().processing, tools: async signal => { await refreshAssembly(); return assembly; }, localSpeechReady: () => localTtsReady(), api: createExportApi(credentials),
       workRoot: join(os.homedir(), "Library", "Application Support", "Estio", "StudioCompanion", "video-assembly"), editorDocs: fileURLToPath(new URL("../video-editor/docs", import.meta.url)), assemble: assembleVideo });
     const handlers: Record<string, StudioJobHandler> = { "studio.video_assemble": withShutdown(videoAssemble), "studio.video_transcribe": withShutdown(video), "studio.youtube_search": withShutdown(youtubeSearch), "studio.text_run": withShutdown(textRun), "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
     const report = { instanceId, handlers: Object.keys(handlers) };

@@ -7,18 +7,19 @@ import { StudioJobError } from "../worker/handlers";
 import { readAssemblyResult, readDeviceCommand, safeDeviceCapabilities } from "../devices-policy";
 import { createVideoAssembleHandler, type ExportApi, type VideoAssembleDeps } from "./video-assemble";
 import { discoverAssemblyTools } from "./video-assemble-tools";
+import type { AssembleOptions } from "../video-assembly/assemble";
 import { readVideoAssemblyOptions, videoAssemblyStatusLine } from "../video-assembly-policy";
 
 const jobId = "11111111-1111-4111-8111-111111111111", upload = "22222222-2222-4222-8222-222222222222", record = "33333333-3333-4333-8333-333333333333";
 const job = (extra: Record<string, unknown> = {}, options = { voiceover: true, music: false, portrait: false }) => ({ id: jobId, location_id: "loc", kind: "studio.video_assemble", lease_token: "44444444-4444-4444-8444-444444444444", attempts: 1, max_attempts: 1,
-  payload: { recordId: record, script: "Hi.", options, media: [{ uploadId: upload, name: "shot.mov", byteSize: 4 }], downloads: [{ name: "shot.mov", url: "https://r2.example/shot", byteSize: 4 }], ...extra } });
+  payload: { recordId: record, script: "Hi.", options, media: [{ uploadId: upload, name: "shot.mov", byteSize: 4 }], downloads: [{ name: "shot.mov", url: "https://r2.example/shot", byteSize: 4 }], voice: { engine: "local", model: "m", speaker: "ryan" }, ...extra } });
 const ctx = () => ({ signal: new AbortController().signal, workerId: "mac" });
 
 async function deps(over: Partial<VideoAssembleDeps> = {}) {
   const root = await mkdtemp(join(tmpdir(), "va-"));
   const calls: string[] = [];
   const api: ExportApi = { reserve: async () => { calls.push("reserve"); return { uploadId: upload, state: "reserved", uploadUrl: "https://r2.example/put" }; }, put: async () => { calls.push("put"); }, verify: async () => { calls.push("verify"); } };
-  const value: VideoAssembleDeps = { enabled: () => true, tools: async () => ({ ready: true, missing: [] }), speechReady: async () => true, workRoot: root, editorDocs: "/docs", api,
+  const value: VideoAssembleDeps = { enabled: () => true, tools: async () => ({ ready: true, missing: [] }), localSpeechReady: async () => true, workRoot: root, editorDocs: "/docs", api,
     fetcher: (async () => new Response("data")) as typeof fetch,
     assemble: async o => { await mkdir(join(o.projectDir, "exports"), { recursive: true }); await writeFile(join(o.projectDir, "exports", "Video r2.mp4"), Buffer.alloc(2000, 1));
       assert.deepEqual(await readdir(o.clipsDir), ["shot.mov"]); return { projectDir: o.projectDir, beats: 1, clips: ["shot.mov"], voiceFiles: ["voice-01.mp3"], timings: [0], brief: "" }; },
@@ -36,12 +37,14 @@ test("handler downloads footage, assembles, uploads through the lease-fenced exp
   assert.deepEqual(readAssemblyResult(result), result);
   assert.deepEqual(await readdir(root), [], "per-job folder removed");
 });
-test("gates: processing off, missing tools, missing voice engine only when voiceover, bad payload, missing links", async () => {
+test("gates: processing off, missing tools, voice choice and install only when voiceover, bad payload, missing links", async () => {
   const code = async (over: Partial<VideoAssembleDeps>, j = job()) => (await createVideoAssembleHandler((await deps(over)).value)(j as never, ctx()).catch(e => e)) as StudioJobError;
   assert.equal((await code({ enabled: () => false })).code, "local_policy");
   const tools = await code({ tools: async () => ({ ready: false, missing: ["substo"] }) }); assert.equal(tools.code, "video_assembly_tools_missing"); assert.equal(tools.retryable, true); assert.match(tools.message, /substo/);
-  assert.equal((await code({ speechReady: async () => false })).code, "voice_engine_missing");
-  const noVoice = await createVideoAssembleHandler((await deps({ speechReady: async () => false })).value)(job({}, { voiceover: false, music: false, portrait: false }) as never, ctx());
+  assert.equal((await code({ localSpeechReady: async () => false })).code, "local_voice_not_installed");
+  assert.equal((await code({}, job({ voice: undefined }))).code, "voice_missing");
+  assert.equal((await code({}, job({ voice: { engine: "hosted", provider: "fish", name: "Me", uploadIds: [upload] }, voiceDownloads: [] }))).code, "narration_unavailable");
+  const noVoice = await createVideoAssembleHandler((await deps({ localSpeechReady: async () => false })).value)(job({}, { voiceover: false, music: false, portrait: false }) as never, ctx());
   assert.ok((noVoice as { assembly: unknown }).assembly);
   assert.equal((await code({}, { ...job(), payload: { recordId: "x" } })).code, "invalid_job_payload");
   assert.equal((await code({}, job({ downloads: [] }))).code, "footage_unavailable");
@@ -75,4 +78,11 @@ test("readiness reports names only and the request form maps checkboxes", async 
   const form = new FormData(); form.set("voiceover", "on"); form.set("evil", "1");
   assert.deepEqual(readVideoAssemblyOptions(form), { voiceover: true, music: false, portrait: false });
   assert.equal(videoAssemblyStatusLine({ jobId, status: "queued", message: null, summary: null, createdAt: "" }, false), "Waiting for your Mac to come online.");
+});
+
+test("hosted narration is downloaded and handed to the assembler as pre-rendered files", async () => {
+  let seen: AssembleOptions | undefined;
+  const d = await deps({ assemble: async o => { seen = o; return { projectDir: o.projectDir, beats: 1, clips: ["shot.mov"], voiceFiles: ["voice-01.mp3"], timings: [0], brief: "" }; } });
+  await createVideoAssembleHandler(d.value)(job({ voice: { engine: "hosted", provider: "fish", name: "Me", uploadIds: [upload] }, voiceDownloads: [{ name: "Narration 01.mp3", url: "https://r2.example/n1", byteSize: 4 }] }) as never, ctx()).catch(() => {});
+  assert.deepEqual(seen?.voice, { engine: "prerendered", files: ["narration-001.mp3"] });
 });

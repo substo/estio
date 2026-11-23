@@ -15,6 +15,12 @@ const payload = z.object({
   options: z.object({ voiceover: z.boolean(), music: z.boolean(), portrait: z.boolean() }).strict(),
   media: z.array(z.object({ uploadId: z.string().uuid(), name: z.string().max(255), byteSize: z.number().int().positive() }).passthrough()).max(40),
   downloads: z.array(z.object({ name: z.string().max(255), url: z.string().url().max(4000), byteSize: z.number().int().positive() })).max(40).default([]),
+  /** The chosen voice. Hosted narration is already rendered by the server (the Mac never sees a provider key); local is generated here. */
+  voice: z.discriminatedUnion("engine", [
+    z.object({ engine: z.literal("local"), model: z.string().max(100), speaker: z.string().regex(/^[a-z_]{2,20}$/) }).strict(),
+    z.object({ engine: z.literal("hosted"), provider: z.enum(["fish", "elevenlabs"]), name: z.string().max(80), uploadIds: z.array(z.string().uuid()).min(1).max(200) }).strict(),
+  ]).optional(),
+  voiceDownloads: z.array(z.object({ name: z.string().max(255), url: z.string().url().max(4000), byteSize: z.number().int().positive() })).max(200).default([]),
 }).passthrough();
 
 export interface ExportLease { jobId: string; workerId: string; leaseToken: string }
@@ -45,8 +51,8 @@ export interface VideoAssembleDeps {
   enabled: () => boolean;
   /** substo + ffprobe present, and the subscription CLI that drives the editor is signed in. */
   tools: (signal: AbortSignal) => Promise<{ ready: boolean; missing: string[] }>;
-  /** A voice engine is usable (Fish or ElevenLabs key in the keys file, or on-device Qwen3-TTS). */
-  speechReady: () => Promise<boolean>;
+  /** On-device Qwen3-TTS is installed (only needed for a local voice). */
+  localSpeechReady: () => Promise<boolean>;
   workRoot: string; editorDocs: string; model?: string;
   api: ExportApi;
   assemble: (options: AssembleOptions) => Promise<AssembleResult>;
@@ -64,7 +70,7 @@ async function download(url: string, file: string, expected: number, signal: Abo
 }
 async function sha256(file: string) { const hash = createHash("sha256"); await pipeline(createReadStream(file), hash); return hash.digest("hex"); }
 
-/** Mac-only script-to-video. Subscription editing agent, voiceover (Fish, ElevenLabs or on-device) only when asked, no hosted or paid fallback, no replay after the agent started. */
+/** Mac-only script-to-video. Subscription editing agent, narration only when asked (server-rendered hosted voice or on-device), no hosted or paid fallback, no replay after the agent started. */
 export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHandler {
   return async (job, context) => {
     const parsed = payload.safeParse(job.payload);
@@ -73,7 +79,9 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
     if (!deps.enabled()) throw new StudioJobError("local_policy", "Turn on Mac processing in Setup and keep it On.", true, 300);
     const tools = await deps.tools(context.signal);
     if (!tools.ready) throw new StudioJobError("video_assembly_tools_missing", `This Mac is missing ${tools.missing.join(", ")}. Install it, then make the video again.`, true, 600);
-    if (p.options.voiceover && !await deps.speechReady()) throw new StudioJobError("voice_engine_missing", "Add a Fish Audio or ElevenLabs key to the project .env (STUDIO video keys) (or set up on-device voice), then make the video again.", false);
+    if (p.options.voiceover && !p.voice) throw new StudioJobError("voice_missing", "Choose a voice in Voices, then make the video again.", false);
+    if (p.options.voiceover && p.voice?.engine === "local" && !await deps.localSpeechReady()) throw new StudioJobError("local_voice_not_installed", "The on-device voice is not installed on this Mac. Install it in Settings, or choose a hosted voice.", false);
+    if (p.options.voiceover && p.voice?.engine === "hosted" && p.voiceDownloads.length !== p.voice.uploadIds.length) throw new StudioJobError("narration_unavailable", "Studio could not provide the narration. Make the video again.", false);
     if (!p.downloads.length && p.media.length) throw new StudioJobError("footage_unavailable", "Studio could not provide the footage links. Make the video again.", false);
 
     const work = join(deps.workRoot, job.id), clipsDir = join(work, "footage"), projectDir = join(work, "project");
@@ -87,10 +95,17 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
         try { await download(item.url, join(clipsDir, name), item.byteSize, context.signal, fetcher); }
         catch (error) { if (context.signal.aborted) throw error; throw new StudioJobError("footage_download_failed", "The Mac could not download the footage. Make the video again.", false); }
       }
+      const narration: string[] = [];
+      for (const [i, item] of p.voiceDownloads.entries()) {
+        const name = `narration-${String(i + 1).padStart(3, "0")}.mp3`; narration.push(name);
+        try { await download(item.url, join(clipsDir, name), item.byteSize, context.signal, fetcher); }
+        catch (error) { if (context.signal.aborted) throw error; throw new StudioJobError("narration_download_failed", "The Mac could not download the narration. Make the video again.", false); }
+      }
       let result: AssembleResult;
       try {
         result = await deps.assemble({ script: p.script, clipsDir, projectDir, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape",
-          voiceover: p.options.voiceover, music: p.options.music, model: deps.model, signal: context.signal });
+          voiceover: p.options.voiceover, music: p.options.music, model: deps.model, signal: context.signal,
+          voice: !p.options.voiceover ? undefined : p.voice?.engine === "local" ? { engine: "local", speaker: p.voice.speaker, model: p.voice.model } : p.voice?.engine === "hosted" ? { engine: "prerendered", files: narration } : undefined });
       } catch (error) {
         if (context.signal.aborted) throw error;
         throw new StudioJobError("video_assembly_failed", "The Mac could not finish editing this video. It was not retried.", false);

@@ -1,0 +1,84 @@
+import { speechModel } from "../video-assembly/tts";
+import type { HostedVoiceProvider } from "./policy";
+
+type Fetch = typeof fetch;
+export interface ProviderVoice { providerVoiceId: string; name: string; language: string | null; kind: "preset" | "clone" }
+export class VoiceProviderError extends Error {
+  constructor(readonly code: "invalid_key" | "unavailable" | "rejected" | "not_found", message: string) { super(message); }
+}
+const FISH = "https://api.fish.audio";
+const ELEVEN = "https://api.elevenlabs.io";
+const idPattern = /^[A-Za-z0-9_-]{6,64}$/;
+const fishHeaders = (key: string) => ({ authorization: `Bearer ${key}` });
+const elevenHeaders = (key: string) => ({ "xi-api-key": key });
+
+async function send(fetcher: Fetch, url: string, init: RequestInit, failure: string): Promise<Response> {
+  let response: Response;
+  try { response = await fetcher(url, { ...init, cache: "no-store", signal: init.signal ?? AbortSignal.timeout(60_000) }); }
+  catch { throw new VoiceProviderError("unavailable", `${failure} The provider could not be reached. Try again shortly.`); }
+  if (response.status === 401) throw new VoiceProviderError("invalid_key", "The provider rejected this key. Replace it in AI settings.");
+  if (response.status === 404) throw new VoiceProviderError("not_found", "The voice no longer exists at the provider.");
+  if (!response.ok) throw new VoiceProviderError(response.status >= 500 ? "unavailable" : "rejected", `${failure} The provider declined the request (${response.status}).`);
+  return response;
+}
+const json = async (response: Response) => { try { return await response.json() as Record<string, unknown>; } catch { return {}; } };
+const text = (v: unknown, max: number) => typeof v === "string" ? v.replace(/[\u0000-\u001f]/g, " ").trim().slice(0, max) : "";
+
+/** Free read-only check before a key is stored. ElevenLabs keys can be scoped: a missing-permission 401 still proves the key exists. */
+export async function verifyVoiceKey(provider: HostedVoiceProvider, key: string, fetcher: Fetch = fetch): Promise<"valid" | "invalid" | "unavailable"> {
+  try {
+    const response = provider === "fish"
+      ? await fetcher(`${FISH}/wallet/self/api-credit`, { headers: fishHeaders(key), cache: "no-store", signal: AbortSignal.timeout(10_000) })
+      : await fetcher(`${ELEVEN}/v1/voices?page_size=1`, { headers: elevenHeaders(key), cache: "no-store", signal: AbortSignal.timeout(10_000) });
+    if (response.ok) return "valid";
+    if (response.status === 401 && provider === "elevenlabs" && /missing_permissions/.test(await response.text().catch(() => ""))) return "valid";
+    return response.status === 401 || response.status === 403 ? "invalid" : "unavailable";
+  } catch { return "unavailable"; }
+}
+
+export async function listProviderVoices(provider: HostedVoiceProvider, key: string, fetcher: Fetch = fetch): Promise<ProviderVoice[]> {
+  if (provider === "fish") {
+    const body = await json(await send(fetcher, `${FISH}/model?self=true&page_size=100&page_number=1`, { headers: fishHeaders(key) }, "Could not list Fish voices."));
+    const items = Array.isArray(body.items) ? body.items : [];
+    return items.flatMap((item: Record<string, unknown>) => typeof item._id === "string" && idPattern.test(item._id)
+      ? [{ providerVoiceId: item._id, name: text(item.title, 80) || "Untitled voice", language: Array.isArray(item.languages) ? text(item.languages[0], 12) || null : null, kind: "clone" as const }] : []);
+  }
+  const body = await json(await send(fetcher, `${ELEVEN}/v1/voices`, { headers: elevenHeaders(key) }, "Could not list ElevenLabs voices."));
+  const voices = Array.isArray(body.voices) ? body.voices : [];
+  return voices.flatMap((v: Record<string, unknown>) => typeof v.voice_id === "string" && idPattern.test(v.voice_id)
+    ? [{ providerVoiceId: v.voice_id, name: text(v.name, 80) || "Untitled voice",
+        language: text((v.labels as Record<string, unknown> | undefined)?.language, 12) || null, kind: (v.category === "cloned" || v.category === "professional" ? "clone" : "preset") as "preset" | "clone" }] : []);
+}
+
+/** Instant clone from one sample. The sample is forwarded and never stored by Studio. Returns the provider's voice id. */
+export async function cloneProviderVoice(provider: HostedVoiceProvider, key: string, input: { name: string; sample: Blob; filename: string; language?: string | null }, fetcher: Fetch = fetch): Promise<string> {
+  const form = new FormData();
+  if (provider === "fish") {
+    form.set("type", "tts"); form.set("title", input.name); form.set("train_mode", "fast"); form.set("visibility", "private"); form.append("voices", input.sample, input.filename);
+    const id = (await json(await send(fetcher, `${FISH}/model`, { method: "POST", headers: fishHeaders(key), body: form, signal: AbortSignal.timeout(180_000) }, "Could not clone the voice.")))._id;
+    if (typeof id !== "string" || !idPattern.test(id)) throw new VoiceProviderError("rejected", "The provider did not return a voice id.");
+    return id;
+  }
+  form.set("name", input.name); form.append("files", input.sample, input.filename);
+  const id = (await json(await send(fetcher, `${ELEVEN}/v1/voices/add`, { method: "POST", headers: elevenHeaders(key), body: form, signal: AbortSignal.timeout(180_000) }, "Could not clone the voice."))).voice_id;
+  if (typeof id !== "string" || !idPattern.test(id)) throw new VoiceProviderError("rejected", "The provider did not return a voice id.");
+  return id;
+}
+
+export async function deleteProviderVoice(provider: HostedVoiceProvider, key: string, voiceId: string, fetcher: Fetch = fetch): Promise<void> {
+  if (!idPattern.test(voiceId)) throw new VoiceProviderError("rejected", "Invalid voice id.");
+  try {
+    await send(fetcher, provider === "fish" ? `${FISH}/model/${voiceId}` : `${ELEVEN}/v1/voices/${voiceId}`, { method: "DELETE", headers: provider === "fish" ? fishHeaders(key) : elevenHeaders(key) }, "Could not delete the voice.");
+  } catch (error) { if (!(error instanceof VoiceProviderError && error.code === "not_found")) throw error; }
+}
+
+const checkAudio = (bytes: Buffer) => { if (bytes.length < 1000) throw new VoiceProviderError("rejected", "The provider returned no audio."); return bytes; };
+/** One narration beat to MP3 bytes. Eleven v3 and Fish S2 both read bracketed tags such as [excited] or [laugh]. */
+export async function synthesizeHosted(provider: HostedVoiceProvider, key: string, voiceId: string, text: string, fetcher: Fetch = fetch, signal?: AbortSignal, fishModel = "s2-pro"): Promise<Buffer> {
+  if (!idPattern.test(voiceId)) throw new VoiceProviderError("rejected", "Invalid voice id.");
+  if (!text.trim() || text.length > 4500) throw new VoiceProviderError("rejected", "A narration paragraph must be 1 to 4,500 characters.");
+  const response = provider === "fish"
+    ? await send(fetcher, `${FISH}/v1/tts`, { method: "POST", signal, headers: { ...fishHeaders(key), "content-type": "application/json", model: fishModel }, body: JSON.stringify({ text, reference_id: voiceId, format: "mp3", mp3_bitrate: 128, latency: "normal" }) }, "Could not generate the voice.")
+    : await send(fetcher, `${ELEVEN}/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, { method: "POST", signal, headers: { ...elevenHeaders(key), "content-type": "application/json", accept: "audio/mpeg" }, body: JSON.stringify({ text, model_id: speechModel }) }, "Could not generate the voice.");
+  return checkAudio(Buffer.from(await response.arrayBuffer()));
+}
