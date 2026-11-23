@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { StudioQueue } from "../worker/queue";
 import { appOrigin, deviceTokenPattern, type DeviceCredentials } from "./config";
 
-const job = z.object({ id: z.string().uuid(), location_id: z.string().min(1).max(255), kind: z.enum(["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search"]),
+const job = z.object({ id: z.string().uuid(), location_id: z.string().min(1).max(255), kind: z.enum(["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble"]),
   payload: z.record(z.unknown()), lease_token: z.string().uuid(), lease_expires_at: z.string().datetime({ offset: true }),
   attempts: z.number().int().nonnegative(), max_attempts: z.number().int().positive(),
   /** The server-supplied Location AI order (validated where it is used, lib/studio/companion/route.ts). */
@@ -76,6 +76,8 @@ export function createDeviceStudioQueue(credentials: DeviceCredentials, options:
   videoReady?: () => boolean;
   /** A local browser is installed and the local gate allows processing. */
   youtubeReady?: () => boolean;
+  /** The editor, ffprobe and the Claude sign-in are present and the local gate allows processing. */
+  assembleReady?: () => boolean;
   capabilities?: () => Record<string, unknown>;
   /** Pending config acknowledgement to piggyback on the next heartbeat. */
   configAck?: () => ConfigAck | undefined;
@@ -87,7 +89,7 @@ export function createDeviceStudioQueue(credentials: DeviceCredentials, options:
   if (!deviceTokenPattern.test(token)) throw new Error("invalid_device_token");
   const call = <T>(operation: string, body: unknown, schema: z.ZodType<T>) => deviceCall(origin, token, operation, body, schema, options);
   return {
-    claim: (workerId, limit, leaseSeconds) => call("claim", { workerId, limit, leaseSeconds, textReady: options.textReady?.() === true, summaryReady: options.summaryReady?.() === true, researchReady: options.researchReady?.() === true, videoReady: options.videoReady?.() === true, youtubeReady: options.youtubeReady?.() === true }, z.array(job).max(50)),
+    claim: (workerId, limit, leaseSeconds) => call("claim", { workerId, limit, leaseSeconds, textReady: options.textReady?.() === true, summaryReady: options.summaryReady?.() === true, researchReady: options.researchReady?.() === true, videoReady: options.videoReady?.() === true, youtubeReady: options.youtubeReady?.() === true, assembleReady: options.assembleReady?.() === true }, z.array(job).max(50)),
     extend: (jobId, workerId, leaseSeconds, leaseToken) => call("extend", { jobId, workerId, leaseSeconds, leaseToken }, z.boolean()),
     complete: (jobId, workerId, { routeActual, ...result }, leaseToken) =>
       call("complete", { jobId, workerId, result, leaseToken, ...(routeActual ? { routeActual } : {}) }, z.boolean()),

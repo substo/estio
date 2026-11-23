@@ -9,6 +9,9 @@ import { StudioUploads } from "../../../_components/studio-uploads";
 import { getStudioContentRecord } from "@/lib/studio/content";
 import { ContentRecordForm } from "../../../_components/content-record-form";
 import { getStudioScriptTemplateChoices } from "@/lib/studio/script-templates";
+import { MakeVideo } from "../../../_components/make-video";
+import { getVideoAssemblyStatus } from "@/lib/studio/video-assembly";
+import { videoAssemblyStatusLine } from "@/lib/studio/video-assembly-policy";
 import { RelatedYoutubeVideos } from "../../../_components/related-youtube-videos";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +26,7 @@ export default async function StudioContentRecordPage({ params }: { params: Prom
   const inspirationId = typeof inspiration?.outlineId === "string"
     && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(inspiration.outlineId)
     && links.some(link => link.id === inspiration.sourceId) ? inspiration.outlineId : null;
+  const assembly = await getVideoAssemblyStatus(locationId, recordId);
   const [pendingUploads, templates] = await Promise.all([
     listPendingStudioUploads(locationId, recordId),
     getStudioScriptTemplateChoices(locationId, record.script_template_version_id),
@@ -50,6 +54,7 @@ export default async function StudioContentRecordPage({ params }: { params: Prom
       {!record.archived ? <Link href={`/studio/records/${recordId}/extract`} className="mr-4 inline-block text-sm text-primary hover:underline">Extract knowledge from saved text</Link> : null}
       <Link href={`/studio/records/${recordId}/links`} className="inline-block text-sm text-primary hover:underline">Manage linked records</Link>
       {links.length ? <section className="space-y-2"><h2 className="font-medium">Linked research and content</h2><ul className="space-y-2 text-sm">{links.map((linked) => <li key={linked.id}><Link className="text-primary hover:underline" href={`/studio/${linked.kind === "content" ? "content" : "library"}/${linked.id}`}>{linked.title}</Link><span className="ml-2 text-muted-foreground">{linked.kind}</span></li>)}</ul></section> : null}
+      {!record.archived && typeof record.payload.script === "string" && record.payload.script.trim() ? <MakeVideo locationId={locationId} recordId={recordId} status={videoAssemblyStatusLine(assembly.view, assembly.macOnline)} active={assembly.view?.status === "queued" || assembly.view?.status === "running"} /> : null}
       <StudioAttachments locationId={locationId} files={files} />
       <StudioUploads locationId={locationId} uploads={uploads} />
       <StudioUploadForm key={recordId} locationId={locationId} recordId={recordId} pendingUploads={pendingUploads} />

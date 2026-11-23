@@ -73,6 +73,8 @@ Canonical release remains the only deployment entrypoint. The shared working bra
 
 Website editing/publishing and Clerk email delivery have no new live acceptance in this cleanup. Do not publish, invite or send messages merely to test. Substo CRM setup-pending is intentionally deferred. Free-form onboarding/search, more social integrations, billing, custom domains and proxy work are deferred.
 
+5. **Local candidate, not deployed (2026-11-23): script to edited video on the Mac.** `studio.video_assemble` job + Make video action; see [AI workflows](ai-workflows.md#script-to-edited-video-mac). Needs migration `20261126100000`, a web deploy and the companion update to `studio-companion-14`; then one authorized live Mac job to prove it.
+
 ## Verify and release
 
 - Focused routes/auth: `npx tsx --test lib/studio/route-context.test.ts lib/auth/tenant-context.test.ts lib/auth/host-routing-policy.test.ts`

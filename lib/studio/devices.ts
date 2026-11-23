@@ -9,6 +9,7 @@ import { requireOwnStudioCommandLocation } from "./paid-workspace";
 import { StudioCommandError } from "./command-error";
 import { StudioDbError } from "./db";
 import { executeVideoFrameOperation } from "./video-transcription";
+import { executeExportOperation, withAssemblyDownloads } from "./video-assembly-device";
 import { authorizeEstioSchedule, currentEstioScheduleAuthority } from "./schedule-authority";
 import {
   defaultDeviceConfig, deviceOnline, deviceResearchReadiness, type DeviceResearchReadiness, formatPairingCode, isAllowedProviderLoginUrl, PAIRING_CODE_ALPHABET, safeDeviceCapabilities,
@@ -116,10 +117,11 @@ export async function executeStudioDeviceCommand(token: string, brand: "estio" |
     if (!identity || !await authorizeEstio(identity.locationId, identity.approvedBy)) throw new StudioCommandError("Access denied.", 403);
     estioAuthorizedBy = identity.approvedBy;
   }
-  // Outermost device entry point: YouTube search in the Mac's browser, video transcription, then Mac text runs, onboarding research, Library summaries and the base device protocol.
-  const call = (observed?: unknown) => studioDb.call<unknown>("studio_routed_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy, p_observed: observed });
+  // Outermost device entry point: script-to-video assembly, then YouTube search in the Mac's browser, video transcription, then Mac text runs, onboarding research, Library summaries and the base device protocol.
+  const call = (observed?: unknown) => studioDb.call<unknown>("studio_video_assembly_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy, p_observed: observed });
   if (operation === "video_frames_reserve" || operation === "video_frames_verify") return executeVideoFrameOperation(operation, call);
-  return call();
+  if (operation === "video_export_reserve" || operation === "video_export_verify") return executeExportOperation(operation, call);
+  return operation === "claim" ? withAssemblyDownloads(await call()) : call();
 }
 
 export const PAIRING_POLL_SECONDS = 5;

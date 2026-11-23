@@ -7,6 +7,8 @@ import { readContentDraft } from "@/lib/studio/content-policy";
 import { createStudioSourceIdea, saveStudioContentRecord } from "@/lib/studio/content";
 import { StudioRestError } from "@/lib/studio/rest";
 import { StudioCommandError } from "@/lib/studio/command-error";
+import { requestVideoAssembly } from "@/lib/studio/video-assembly";
+import { readVideoAssemblyOptions } from "@/lib/studio/video-assembly-policy";
 import { readScriptTemplateSelection } from "@/lib/studio/script-template-policy";
 
 export async function saveContentAction(
@@ -41,4 +43,17 @@ export async function createSourceIdeaAction(locationId: string, sourceId: strin
   revalidatePath("/studio/content");
   revalidatePath(`/studio/library/${sourceId}`);
   redirect(`/studio/content/${ideaId}`);
+}
+
+export async function makeVideoAction(locationId: string, recordId: string, _previous: { error?: string; notice?: string }, form: FormData): Promise<{ error?: string; notice?: string }> {
+  if (!await getStudioAccess(locationId)) notFound();
+  try {
+    const result = await requestVideoAssembly(locationId, recordId, readVideoAssemblyOptions(form));
+    if (!result.ok) return { error: result.message };
+    revalidatePath(`/studio/content/${recordId}`);
+    return { notice: result.reused ? "A video is already being made for this piece." : "Sent to your Mac." };
+  } catch (error) {
+    if (error instanceof StudioCommandError) return { error: error.message };
+    return { error: "Studio could not send this to your Mac. Try again." };
+  }
 }
