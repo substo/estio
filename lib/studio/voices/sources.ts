@@ -5,8 +5,8 @@ export type SourceChoice = "local" | "hosted";
 export type GenerationSources = Partial<Record<GenerationKind, SourceChoice>>;
 
 export const kindLabels: Record<GenerationKind, string> = { voice: "Voice", music: "Music", effects: "Sound effects" };
-/** Hosted music and sound effects come from ElevenLabs; hosted voice from ElevenLabs or Fish, whichever voice is picked. */
-export const hostedProviderLabel: Record<GenerationKind, string> = { voice: "ElevenLabs or Fish", music: "ElevenLabs", effects: "ElevenLabs" };
+/** Hosted music and sound effects come from fal.ai or ElevenLabs (the Location picks, see sound-providers.ts); hosted voice from ElevenLabs or Fish, whichever voice is picked. */
+export const hostedProviderLabel: Record<GenerationKind, string> = { voice: "ElevenLabs or Fish", music: "fal.ai or ElevenLabs", effects: "fal.ai or ElevenLabs" };
 
 export function readGenerationSources(value: unknown): GenerationSources {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};

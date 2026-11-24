@@ -163,6 +163,12 @@ export async function getVoiceAvailability(locationId: string): Promise<Availabi
   return { fish: Boolean(keys?.keys.fish), elevenlabs: Boolean(keys?.keys.elevenlabs), local, localClone };
 }
 
+/** Whether an online Mac has the Stable Audio 3 Small models installed (music and sound effects each have their own). */
+export async function getSoundModelState(locationId: string): Promise<{ music: boolean; effects: boolean }> {
+  const devices = await getStudioDevices(locationId).catch(() => null);
+  const installed = new Set((devices?.devices.filter(d => d.online && !d.paused && d.status !== "revoked") ?? []).flatMap(d => readReportedModels(d.capabilities.modelStates).filter(m => m.state === "installed").map(m => m.id)));
+  return { music: installed.has("stable-audio-3-small-music"), effects: installed.has("stable-audio-3-small-sfx") };
+}
 const GENDER_TAG: Record<string, string> = { woman: "female", female: "female", man: "male", male: "male" };
 /** Tags a designed voice carries so it filters like any other voice. */
 export function designTags(f: DesignFields): string[] {

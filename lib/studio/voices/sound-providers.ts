@@ -50,3 +50,10 @@ export function pickHostedSound(choice: HostedSoundProvider | undefined, keys: S
   if (choice && keys[choice]) return choice;
   return HOSTED_SOUND_PROVIDERS.find(p => keys[p]) ?? null;
 }
+
+/** The line the Make video dialog shows for one kind: where it will be made, by what. */
+export function soundSourceLabel(kind: SoundKind, source: "local" | "hosted" | "none", hosted: HostedSoundProvider | null, modelInstalled: boolean): string {
+  const word = kind === "music" ? "Music" : "Sound effects";
+  if (source === "hosted") return hosted ? `${word}: ${soundProvider(hosted)!.label}` : `${word}: add a fal.ai or ElevenLabs key (made on this Mac meanwhile)`;
+  return `${word}: made on this Mac with ${modelInstalled ? "Stable Audio 3 Small" : "the built-in synth"}`;
+}

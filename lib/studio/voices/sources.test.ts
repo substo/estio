@@ -18,5 +18,5 @@ test("with no choice: local when the Mac can, else hosted with a key, else nothi
 });
 test("the label names where the sound is made", () => {
   assert.equal(resolveSource("music", "local", { localReady: true, hostedKey: false }).label, "Music: made on this Mac");
-  assert.equal(resolveSource("effects", "hosted", { localReady: true, hostedKey: true }).label, "Sound effects: ElevenLabs");
+  assert.equal(resolveSource("effects", "hosted", { localReady: true, hostedKey: true }).label, "Sound effects: fal.ai or ElevenLabs");
 });

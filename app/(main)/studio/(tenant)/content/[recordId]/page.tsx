@@ -10,8 +10,10 @@ import { getStudioScriptTemplateChoices } from "@/lib/studio/script-templates";
 import { ContentWorkspace } from "../../../_components/workspace/content-workspace";
 import { getVideoLoopState } from "@/lib/studio/video-loop";
 import { getMacVideoStatus, getVideoAssemblyStatus } from "@/lib/studio/video-assembly";
-import { getVoiceAvailability, listVoices } from "@/lib/studio/voices/service";
-import { getGenerationSources } from "@/lib/studio/voices/sources-store";
+import { getSoundModelState, getVoiceAvailability, listVoices } from "@/lib/studio/voices/service";
+import { getGenerationSources, getSoundProviderChoices } from "@/lib/studio/voices/sources-store";
+import { soundKeyAvailability } from "@/lib/studio/voices/sound-keys";
+import { pickHostedSound, soundSourceLabel } from "@/lib/studio/voices/sound-providers";
 import { resolveSource, type GenerationSources } from "@/lib/studio/voices/sources";
 import { RelatedYoutubeVideos } from "../../../_components/related-youtube-videos";
 
@@ -29,7 +31,10 @@ export default async function StudioContentRecordPage({ params, searchParams }: 
     && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(inspiration.outlineId)
     && links.some(link => link.id === inspiration.sourceId) ? inspiration.outlineId : null;
   const [assembly, allVoices, availability, loop, mac, sources] = await Promise.all([getVideoAssemblyStatus(locationId, recordId), listVoices(locationId).catch(() => []), getVoiceAvailability(locationId), getVideoLoopState(locationId, recordId), getMacVideoStatus(locationId), getGenerationSources(locationId).catch((): GenerationSources => ({}))]);
-  const soundSources = { music: resolveSource("music", sources.music, { localReady: true, hostedKey: availability.elevenlabs }).label, effects: resolveSource("effects", sources.effects, { localReady: true, hostedKey: availability.elevenlabs }).label };
+  const [soundChoices, soundKeys, soundModels] = await Promise.all([getSoundProviderChoices(locationId), soundKeyAvailability(locationId), getSoundModelState(locationId)]);
+  const anyHostedSound = soundKeys.fal || soundKeys.elevenlabs;
+  const soundLine = (kind: "music" | "effects") => { const r = resolveSource(kind, sources[kind], { localReady: true, hostedKey: anyHostedSound }); return soundSourceLabel(kind, r.source, pickHostedSound(soundChoices[kind], soundKeys), soundModels[kind]); };
+  const soundSources = { music: soundLine("music"), effects: soundLine("effects") };
   const [pendingUploads, templates] = await Promise.all([
     listPendingStudioUploads(locationId, recordId),
     getStudioScriptTemplateChoices(locationId, record.script_template_version_id),

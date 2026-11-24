@@ -2,7 +2,10 @@
 import { revalidatePath } from "next/cache";
 import { isHostedProvider } from "@/lib/studio/voices/policy";
 import { VoiceSettingsError } from "@/lib/studio/voices/keys";
-import { setGenerationSource } from "@/lib/studio/voices/sources-store";
+import { setGenerationSource, setSoundProviderChoice } from "@/lib/studio/voices/sources-store";
+import { removeFalKey, saveFalKey } from "@/lib/studio/voices/sound-keys";
+import { readFalKey } from "@/lib/studio/voices/fal-client";
+import { isHostedSoundProvider, type SoundKind } from "@/lib/studio/voices/sound-providers";
 import { GENERATION_KINDS, type GenerationKind, type SourceChoice } from "@/lib/studio/voices/sources";
 import { deleteVoice, ensureLocalVoices, refreshProviderVoices, setDefaultVoice } from "@/lib/studio/voices/service";
 
@@ -36,4 +39,20 @@ export async function setGenerationSourceAction(locationId: string, kind: Genera
   if (!GENERATION_KINDS.includes(kind) || !["local", "hosted", "auto"].includes(choice)) return { error: "Unknown choice." };
   try { await setGenerationSource(locationId, kind, choice === "auto" ? null : choice); } catch (e) { return failure(e, "Could not save this choice."); }
   revalidatePath("/settings/voices"); return { notice: "Saved." };
+}
+
+export async function setSoundProviderAction(locationId: string, kind: SoundKind, provider: string, _p: State): Promise<State> {
+  if ((kind !== "music" && kind !== "effects") || (provider !== "auto" && !isHostedSoundProvider(provider))) return { error: "Unknown choice." };
+  try { await setSoundProviderChoice(locationId, kind, provider === "auto" ? null : provider as "fal" | "elevenlabs"); } catch (e) { return failure(e, "Could not save this choice."); }
+  revalidatePath("/settings/voices"); return { notice: "Saved." };
+}
+export async function saveFalKeyAction(locationId: string, _p: State, form: FormData): Promise<State> {
+  let key: string;
+  try { key = readFalKey(form.get("apiKey")); } catch (e) { return { error: (e as Error).message }; }
+  try { await saveFalKey(locationId, key); } catch (e) { return failure(e, "Could not save the key. Check your access and try again."); }
+  revalidatePath("/settings/voices"); return { notice: "Key verified and saved." };
+}
+export async function removeFalKeyAction(locationId: string, _p: State): Promise<State> {
+  try { await removeFalKey(locationId); } catch (e) { return failure(e, "Could not remove the key. Try again."); }
+  revalidatePath("/settings/voices"); return { notice: "Key removed." };
 }
