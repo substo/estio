@@ -4,7 +4,7 @@ import { reduceTimeline, type TimelineSnapshot } from "../workspace/timeline";
 
 /** The deployed server must have migration 20261201130000_studio_workspace_timeline before it accepts `timeline` in a job result.
  * Flip to true once that release is live (same switch pattern as SERVER_HAS_PROJECT_FIELDS in video-assemble.ts). */
-export const SERVER_HAS_TIMELINE_FIELD = false;
+export const SERVER_HAS_TIMELINE_FIELD = true;
 
 /** A bounded picture of the kept project's timeline, read from the editor's own CLI. Null on any problem: a missing picture must never fail a finished video. */
 export async function snapshotTimeline(projectFile: string, cwd: string, run: ProcessRunner = runNativeProcess, signal?: AbortSignal): Promise<TimelineSnapshot | null> {
