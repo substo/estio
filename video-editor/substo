@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+# Started with a bare environment (an agent's tool check passes only PATH), HOME can be unset: find it the way the shell does.
+HOME="${HOME:-$(cd ~ && pwd)}"
+export HOME
+
 # `substo app [project.substo]` opens the editor, and `substo url "..."`
 # sends it a substo:// link. Anything else goes to the substo command
 # inside the app bundle (run `substo help`).
