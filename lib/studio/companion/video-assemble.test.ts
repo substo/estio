@@ -118,3 +118,16 @@ test("an on-device cloned voice needs the Base model and its reference, and narr
   await createVideoAssembleHandler(value)(cloneJob() as never, ctx());
   assert.deepEqual(used, { engine: "local", speaker, model: "m", reference: { audio: "/v/a.wav", text: "the exact words" } });
 });
+
+test("the creator's storyboard photo is downloaded under its fixed name and passed on; without one, or when it fails, nothing is passed", async () => {
+  let seen: AssembleOptions | undefined;
+  const run = async (extra: Record<string, unknown>) => {
+    const d = await deps({ assemble: async o => { seen = o; return { projectDir: o.projectDir, beats: 1, clips: ["shot.mov"], voiceFiles: [], timings: [], brief: "" }; } });
+    seen = undefined;
+    await createVideoAssembleHandler(d.value)(job(extra) as never, ctx()).catch(() => {});
+    return seen as AssembleOptions | undefined;
+  };
+  assert.equal((await run({ avatar: { name: "storyboard-avatar.png", contentType: "image/png", url: "https://r2.example/a", byteSize: 4 } }))?.avatar, "storyboard-avatar.png");
+  assert.equal((await run({}))?.avatar, undefined);   // an older server or no photo
+  assert.equal((await run({ avatar: { name: "../../evil.png", contentType: "image/png", url: "https://r2.example/a", byteSize: 4 } }))?.avatar, undefined);   // only the fixed names are accepted
+});

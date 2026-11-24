@@ -78,3 +78,26 @@ test("without supplied sound files the brief does not promise any, and music off
   assert.match(await brief(false), /Do not add music/);
   void project;
 });
+
+test("the storyboard photo is kept out of the footage, copied into the project, and the brief swaps the grey card for it", async () => {
+  const clips = await mkdtemp(join(tmpdir(), "clips-")), project = await mkdtemp(join(tmpdir(), "proj-"));
+  await writeFile(join(clips, "a.mov"), "x"); await writeFile(join(clips, "storyboard-avatar.png"), "p");
+  const calls: { command: string; args: string[]; input?: string }[] = [];
+  const result = await assembleVideo({ script: "One.", clipsDir: clips, projectDir: project, editorDocs: "/docs", voiceover: false, avatar: "storyboard-avatar.png", run: async r => { calls.push(r); return { stdout: "done", stderr: "" }; } });
+  assert.deepEqual(result.clips, ["a.mov"]);
+  assert.deepEqual((await readdir(project)).sort(), ["a.mov", "storyboard-avatar.png"]);
+  const brief = calls.find(c => c.command === "claude")!.input!;
+  assert.match(brief, /storyboard-avatar\.png/);
+  assert.match(brief, /placeMedia/);
+  assert.match(brief, /FOOTAGE NEEDED: <the beat's visual note>/);
+  assert.doesNotMatch(brief, /solid-colour or title-card clip/);
+});
+
+test("an unexpected avatar name is ignored and the plain labelled card is used", async () => {
+  const clips = await mkdtemp(join(tmpdir(), "clips-")), project = await mkdtemp(join(tmpdir(), "proj-"));
+  await writeFile(join(clips, "a.mov"), "x"); await writeFile(join(clips, "me.png"), "p");
+  const calls: { command: string; args: string[]; input?: string }[] = [];
+  await assembleVideo({ script: "One.", clipsDir: clips, projectDir: project, editorDocs: "/docs", voiceover: false, avatar: "me.png", run: async r => { calls.push(r); return { stdout: "done", stderr: "" }; } });
+  assert.deepEqual((await readdir(project)).sort(), ["a.mov"]);
+  assert.match(calls.find(c => c.command === "claude")!.input!, /solid-colour or title-card clip/);
+});

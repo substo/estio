@@ -11,6 +11,7 @@ import { StudioDbError } from "./db";
 import { executeVideoFrameOperation } from "./video-transcription";
 import { executeExportOperation, withAssemblyDownloads } from "./video-assembly-device";
 import { withVoiceReferences } from "./voices/device";
+import { withStoryboardAvatar } from "./avatar";
 import { authorizeEstioSchedule, currentEstioScheduleAuthority } from "./schedule-authority";
 import {
   defaultDeviceConfig, deviceOnline, deviceResearchReadiness, type DeviceResearchReadiness, formatPairingCode, isAllowedProviderLoginUrl, PAIRING_CODE_ALPHABET, safeDeviceCapabilities,
@@ -122,7 +123,7 @@ export async function executeStudioDeviceCommand(token: string, brand: "estio" |
   const call = (observed?: unknown) => studioDb.call<unknown>("studio_voice_preview_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy, p_observed: observed });
   if (operation === "video_frames_reserve" || operation === "video_frames_verify") return executeVideoFrameOperation(operation, call);
   if (operation === "video_export_reserve" || operation === "video_export_verify") return executeExportOperation(operation, call);
-  return operation === "claim" ? withVoiceReferences(await withAssemblyDownloads(await call())) : call();
+  return operation === "claim" ? withStoryboardAvatar(await withVoiceReferences(await withAssemblyDownloads(await call()))) : call();
 }
 
 export const PAIRING_POLL_SECONDS = 5;

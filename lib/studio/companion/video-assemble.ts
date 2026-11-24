@@ -30,6 +30,8 @@ const payload = z.object({
   voiceDownloads: z.array(z.object({ name: z.string().max(255), url: z.string().url().max(4000), byteSize: z.number().int().positive() })).max(200).default([]),
   /** Music bed and whoosh the server made with the Location's key (absent on an older server: the brief then says no sound files exist). */
   soundDownloads: z.array(z.object({ role: z.enum(["music", "sfx"]), name: z.string().max(255), url: z.string().url().max(4000), byteSize: z.number().int().positive() })).max(2).default([]),
+  /** The creator's private storyboard photo, minted at claim time when they saved one. */
+  avatar: z.object({ name: z.string().regex(/^storyboard-avatar\.(jpg|png|webp)$/), contentType: z.string().max(40), url: z.string().url().max(4000), byteSize: z.number().int().positive().max(5 * 1024 * 1024) }).optional(),
 }).passthrough();
 
 /** The deployed server (edit-loop migration, 2026-11-23) accepts projectKept/projectName in the result. */
@@ -170,6 +172,12 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
         try { await download(item.url, join(clipsDir, name), item.byteSize, context.signal, fetcher); sounds[item.role] = name; }
         catch (error) { if (context.signal.aborted) throw error; }
       }
+      // The creator's photo for storyboard placeholders. Losing it only costs the picture: the plain labelled card is used instead.
+      let avatar: string | undefined;
+      if (p.avatar) {
+        try { await download(p.avatar.url, join(clipsDir, p.avatar.name), p.avatar.byteSize, context.signal, fetcher); avatar = p.avatar.name; }
+        catch (error) { if (context.signal.aborted) throw error; }
+      }
       // Anything the server did not supply is made here on the Mac (the default): a music bed sized to the script and a whoosh.
       if (p.options.music && deps.makeSound) {
         const words = parseScript(p.script).reduce((n, b) => n + b.narration.split(/\s+/).filter(Boolean).length, 0);
@@ -191,7 +199,7 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
         ? await deps.reference(p.voiceReference, context.signal).catch(() => { throw new StudioJobError("voice_reference_unavailable", "The Mac could not fetch this cloned voice. Make the video again.", false); }) : undefined;
       let result: AssembleResult;
       try {
-        result = await deps.assemble({ transcribeFootage: deps.transcribeFootage, script: p.script, clipsDir, projectDir, projectFile, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape", sounds,
+        result = await deps.assemble({ transcribeFootage: deps.transcribeFootage, script: p.script, clipsDir, projectDir, projectFile, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape", sounds, ...(avatar ? { avatar } : {}),
           voiceover: p.options.voiceover, music: p.options.music, model: deps.model, signal: context.signal,
           voice: !p.options.voiceover ? undefined : p.voice?.engine === "local" ? { engine: "local", speaker: p.voice.speaker, model: p.voice.model, ...(reference ? { reference } : {}) } : p.voice?.engine === "hosted" ? { engine: "prerendered", files: narration } : undefined });
       } catch (error) {
