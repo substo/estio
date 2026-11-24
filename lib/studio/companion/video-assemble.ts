@@ -13,7 +13,8 @@ import type { AssembleOptions, AssembleResult } from "../video-assembly/assemble
 import { snapshotTimeline, timelineField } from "./timeline-snapshot";
 import { runNativeProcess, type ProcessRunner } from "./process";
 import { freeBytes, nextProjectFile, projectFolderName, type ProjectStore } from "./video-projects";
-
+import { parseScript } from "../video-assembly/script";
+import { soundSeconds, type LocalSoundMaker } from "./local-sound";
 const payload = z.object({
   recordId: z.string().uuid(), script: z.string().min(1).max(20000),
   options: z.object({ voiceover: z.boolean(), music: z.boolean(), portrait: z.boolean() }).strict(),
@@ -79,6 +80,8 @@ export interface VideoAssembleDeps {
   run?: ProcessRunner;
   /** Offline timed speech for each footage file (Parakeet); omitted or null leaves the agent without a transcript. */
   transcribeFootage?: (file: string, signal?: AbortSignal) => Promise<{ start: number; end: number; text: string }[] | null>;
+  /** Makes the music bed or the whoosh on this Mac when the server did not supply one. */
+  makeSound?: LocalSoundMaker;
   assemble: (options: AssembleOptions) => Promise<AssembleResult>;
   fetcher?: typeof fetch;
 }
@@ -166,6 +169,15 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
         // A sound that cannot be fetched only costs the video that sound: the narration and picture are the job.
         try { await download(item.url, join(clipsDir, name), item.byteSize, context.signal, fetcher); sounds[item.role] = name; }
         catch (error) { if (context.signal.aborted) throw error; }
+      }
+      // Anything the server did not supply is made here on the Mac (the default): a music bed sized to the script and a whoosh.
+      if (p.options.music && deps.makeSound) {
+        const words = parseScript(p.script).reduce((n, b) => n + b.narration.split(/\s+/).filter(Boolean).length, 0);
+        for (const role of ["music", "sfx"] as const) {
+          if (sounds[role]) continue;
+          const name = role === "music" ? "music-bed.mp3" : "whoosh.mp3";
+          if (await deps.makeSound(role, soundSeconds(words), join(clipsDir, name), context.signal).catch(error => { if (context.signal.aborted) throw error; return false; })) sounds[role] = name;
+        }
       }
       const narration: string[] = [];
       for (const [i, item] of p.voiceDownloads.entries()) {

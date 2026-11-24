@@ -8,8 +8,8 @@ import { voiceStatus, type Availability } from "@/lib/studio/voices/library";
 import type { VoiceRow } from "@/lib/studio/voices/policy";
 
 /** The one place the options for a new video live: voice, music, vertical. Opens from the top bar, so the page itself carries no form. */
-export function MakeVideoDialog({ locationId, recordId, voices, availability, disabledReason, busy, trigger }: {
-  locationId: string; recordId: string; voices: VoiceRow[]; availability?: Availability; disabledReason: string | null; busy: boolean; trigger?: "primary" | "inline";
+export function MakeVideoDialog({ locationId, recordId, voices, availability, soundSources, disabledReason, busy, trigger }: {
+  locationId: string; recordId: string; voices: VoiceRow[]; availability?: Availability; soundSources?: { music: string; effects: string }; disabledReason: string | null; busy: boolean; trigger?: "primary" | "inline";
 }) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(makeVideoAction.bind(null, locationId, recordId), {} as { error?: string; notice?: string });
@@ -17,6 +17,7 @@ export function MakeVideoDialog({ locationId, recordId, voices, availability, di
   const avail: Availability = availability ?? { fish: true, elevenlabs: true, local: "ready", localClone: true };
   const ready = voices.filter(v => voiceStatus(v, avail).usable), preferred = ready.find(v => v.isDefault) ?? ready[0];
   const [voiceover, setVoiceover] = useState(false);
+  const [music, setMusic] = useState(false);
   const [voiceId, setVoiceId] = useState(preferred?.id ?? "");
   useEffect(() => { if (state.notice && !state.error) setOpen(false); }, [state]);
   const blocked = Boolean(disabledReason) || busy;
@@ -31,7 +32,8 @@ export function MakeVideoDialog({ locationId, recordId, voices, availability, di
         <form action={action} className="space-y-3 text-sm">
           <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="voiceover" checked={voiceover} onChange={e => setVoiceover(e.target.checked)} /> Generate the voiceover from the script</label>
           {voiceover ? <div className="pl-6"><VoicePicker locationId={locationId} voices={voices} availability={avail} value={voiceId} onChange={setVoiceId} /></div> : null}
-          <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="music" /> Add a music bed</label>
+          <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="music" checked={music} onChange={e => setMusic(e.target.checked)} /> Add a music bed and sound effects</label>
+          {music && soundSources ? <p className="pl-6 text-xs text-muted-foreground">{soundSources.music}. {soundSources.effects}. <Link href="/settings/voices" className="underline underline-offset-2">Change</Link></p> : null}
           <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="portrait" /> Vertical (9:16)</label>
           <button type="submit" disabled={pending || (voiceover && !voices.some(v => v.id === voiceId && voiceStatus(v, avail).usable))} className="inline-flex min-h-11 items-center rounded-md bg-primary px-4 font-medium text-primary-foreground disabled:opacity-60">{pending ? (voiceover ? "Preparing narration…" : "Sending…") : "Make video"}</button>
           {state.error ? <p role="alert" className="text-destructive">{state.error}</p> : null}

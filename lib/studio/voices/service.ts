@@ -295,7 +295,7 @@ export async function renderVideoSounds(access: NarrationAccess, recordId: strin
       out.sfx = reuse("sfx", 0);
       if (!out.sfx) out.sfx = await save("sfx", await (deps.sfx ?? generateSoundEffect)(key, "A soft, short whoosh transition sound, smooth air swoosh, clean, no music", 1), 1);
     }
-  } catch (error) { out.skipped = providerMessage(error) ?? "Music and sound effects could not be generated. The video will be made without them."; }
+  } catch (error) { out.skipped = providerMessage(error) ?? "Music and sound effects could not be generated. The Mac makes them instead."; }
   finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
   return out;
 }

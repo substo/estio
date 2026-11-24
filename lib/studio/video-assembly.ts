@@ -6,6 +6,8 @@ import { StudioCommandError } from "./command-error";
 import { StudioDbError } from "./db";
 import { studioDb } from "./studio-db";
 import { deviceOnline } from "./devices-policy";
+import { getGenerationSources } from "./voices/sources-store";
+import type { GenerationSources } from "./voices/sources";
 import { estimateVideoSeconds, listVoices, renderNarration, renderVideoSounds, type VideoSounds } from "./voices/service";
 import { resolveVoiceKey } from "./voices/keys";
 import { reusableBeatAudio, rememberRenderedBlockAudio } from "./script-audio";
@@ -29,8 +31,11 @@ export async function requestVideoAssembly(locationId: string, recordId: string,
     }
     const hostedVoice = voice && isHostedProvider(voice.provider) ? voice : undefined;
     if (voice && !hostedVoice) sqlOptions.voice = { voiceId };
-    // Music and the whoosh are made on the server with the Location's ElevenLabs key (the Mac never holds a provider key), which takes a while: same background path as hosted narration.
-    const wantsSound = options.music && Boolean(await resolveVoiceKey(access.locationId, "elevenlabs").catch(() => null));
+    // Music and the whoosh are made on this Mac unless the Location chose a hosted provider for that kind (Settings -> Voices -> Generation sources).
+    // Only then does the server render them, with the Location's own ElevenLabs key, which takes a while: same background path as hosted narration.
+    const sources = options.music ? await getGenerationSources(access.locationId).catch(() => ({} as GenerationSources)) : {};
+    const hasKey = options.music && (sources.music === "hosted" || sources.effects === "hosted") ? Boolean(await resolveVoiceKey(access.locationId, "elevenlabs").catch(() => null)) : false;
+    const wantsSound = hasKey ? { music: sources.music === "hosted", sfx: sources.effects === "hosted" } : null;
     if (hostedVoice || wantsSound) {
       const active = await studioDb.rows<{ id: string }>(Prisma.sql`select id from studio.studio_jobs where location_id = ${access.locationId} and kind = 'studio.video_assemble' and payload->>'recordId' = ${recordId} and status in ('queued','running') limit 1`);
       if (active[0]) return { ok: true, jobId: active[0].id, reused: true };   // never render (and pay for) narration or sound twice
@@ -57,16 +62,16 @@ export async function requestVideoAssembly(locationId: string, recordId: string,
 
 type Actor = { locationId: string; app: "estio" | "substo"; userId: string };
 /** The background half of a hosted-voice request: render each beat with the Location's key, then queue the Mac job with the finished narration. Failures are recorded for the page, never thrown. */
-async function narrateThenAssemble(actor: Actor, recordId: string, voice: Parameters<typeof renderNarration>[2] | undefined, voiceId: string | undefined, script: string, sqlOptions: Record<string, unknown>, runId: string, reuse: ReadonlyMap<number, string> = new Map(), sound = false) {
+async function narrateThenAssemble(actor: Actor, recordId: string, voice: Parameters<typeof renderNarration>[2] | undefined, voiceId: string | undefined, script: string, sqlOptions: Record<string, unknown>, runId: string, reuse: ReadonlyMap<number, string> = new Map(), sound: { music: boolean; sfx: boolean } | null = null) {
   const finish = (ok: boolean, message: string | null, jobId: string | null) => studioDb.call("studio_finish_narration_run", { p_location_id: actor.locationId, p_run_id: runId, p_ok: ok, p_message: message, p_job_id: jobId });
   try {
     const narration = voice ? await renderNarration(actor.locationId, recordId, voice, script, { access: actor, reuse,
       onBeat: done => studioDb.call("studio_narration_progress", { p_location_id: actor.locationId, p_run_id: runId, p_done: done }).then(() => {}, () => {}) }) : null;
     // A failed or skipped sound never stops the video: the Mac job simply gets no sound files and the brief says so.
-    const sounds: VideoSounds | null = sound ? await renderVideoSounds(actor, recordId, { music: true, sfx: true, seconds: estimateVideoSeconds(script) }).catch((): VideoSounds | null => ({ music: null, sfx: null, skipped: "Music and sound effects could not be generated." })) : null;
+    const sounds: VideoSounds | null = sound ? await renderVideoSounds(actor, recordId, { music: sound.music, sfx: sound.sfx, seconds: estimateVideoSeconds(script) }).catch((): VideoSounds | null => ({ music: null, sfx: null, skipped: "Music and sound effects could not be generated." })) : null;
     const r = await studioDb.call<{ jobId: string }>("studio_request_video_assembly", { p_location_id: actor.locationId, p_actor_app: actor.app, p_clerk_user_id: actor.userId, p_record_id: recordId,
       p_options: narration && voice ? { ...sqlOptions, voice: { voiceId, uploadIds: narration.uploadIds } } : sqlOptions });
-    await finish(true, sounds?.skipped ? `Made without music or sound effects: ${sounds.skipped}` : null, r.jobId);
+    await finish(true, sounds?.skipped ? `Made with the Mac's own music and effects instead: ${sounds.skipped}` : null, r.jobId);
     if (narration && voice) await rememberRenderedBlockAudio(actor, recordId, voice.id, new Map(parseScript(script).map(b => [b.index, b.narration])), narration.rendered);
   } catch (error) {
     const reason = error instanceof StudioDbError && error.code ? videoAssemblyCodeReason[error.code] : undefined;

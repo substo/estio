@@ -27,7 +27,7 @@ type FormProps = Omit<React.ComponentProps<typeof ContentRecordForm>, "visible">
 export function ContentWorkspace(props: {
   locationId: string; recordId: string; title: string; archived: boolean; hasScript: boolean; initialMode: string | null;
   form: FormProps; uploads: AssetUpload[]; pending: PendingUpload[];
-  loop: VideoLoopState | null; assembly: VideoAssemblyView | null; narration: NarrationView | null; mac: MacStatusInput; /** Every voice in the Location; the picker groups them by availability. */ voices: VoiceRow[]; availability?: Availability;
+  loop: VideoLoopState | null; assembly: VideoAssemblyView | null; narration: NarrationView | null; mac: MacStatusInput; /** Every voice in the Location; the picker groups them by availability. */ voices: VoiceRow[]; availability?: Availability; /** Where music and sound effects will be made, from the Location's generation sources (labels only). */ soundSources?: { music: string; effects: string };
   uploadSlot: React.ReactNode; nextSteps: React.ReactNode; detailsExtra: React.ReactNode;
 }) {
   const { locationId, recordId, loop } = props;
@@ -72,7 +72,7 @@ export function ContentWorkspace(props: {
           <div className="flex flex-wrap items-center gap-2">
             <MacChip status={mac} />
             {loop?.projectKept ? <form action={open}><button type="submit" disabled={opening || editorPending} className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm font-medium hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60">{editorPending ? "Opening…" : "Open in editor"}</button></form> : null}
-            <MakeVideoDialog locationId={locationId} recordId={recordId} voices={props.voices} availability={props.availability} disabledReason={makeBlock} busy={busy} />
+            <MakeVideoDialog locationId={locationId} recordId={recordId} voices={props.voices} availability={props.availability} soundSources={props.soundSources} disabledReason={makeBlock} busy={busy} />
           </div>
         </div>
         <div role="tablist" aria-label="Workspace mode" className="inline-flex rounded-lg border p-1">
@@ -96,7 +96,7 @@ export function ContentWorkspace(props: {
           <div className="order-1 min-w-0 space-y-4 lg:order-2">
             <PlayerStage versions={versions} versionId={versionId} onVersion={setVersionId} steps={steps}
               empty={<><p className="font-medium">No video yet</p><p className="text-muted-foreground">Add your footage on the left, then press Make video. Your Mac does the editing.</p>
-                <MakeVideoDialog locationId={locationId} recordId={recordId} voices={props.voices} availability={props.availability} disabledReason={makeBlock} busy={busy} trigger="inline" /></>} />
+                <MakeVideoDialog locationId={locationId} recordId={recordId} voices={props.voices} availability={props.availability} soundSources={props.soundSources} disabledReason={makeBlock} busy={busy} trigger="inline" /></>} />
             {hasVideo ? <TimelineView snapshot={current?.timeline ?? null} selected={selected} onSelect={setSelected} onAction={onClipAction} canEdit={Boolean(loop?.projectKept)} busy={busy || asking} /> : null}
           </div>
           <aside aria-label="Agent" className={`order-3 ${agentOpen ? "fixed inset-x-0 bottom-0 z-40 flex max-h-[75vh] rounded-t-2xl border bg-background p-4 shadow-lg" : "hidden"} lg:static lg:flex lg:max-h-none lg:rounded-xl lg:border lg:bg-card lg:p-4 lg:shadow-none`}>

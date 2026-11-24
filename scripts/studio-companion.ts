@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+import { createLocalSoundMaker } from "../lib/studio/companion/local-sound";
 import { createSubscriptionTextRunHandler } from "../lib/studio/companion/text-run";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
@@ -189,7 +190,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
       youtubeSignedIn = result.signedIn; return result;
     };
     const projects = createProjectStore();
-    const videoAssemble = createVideoAssembleHandler({ transcribeFootage: createFootageTranscriber({ tools: async () => { videoTools = await discoverVideoTools(); return videoTools; }, scriptsDir: fileURLToPath(new URL("./studio-video", import.meta.url)) }), enabled: () => gate().processing, tools: async signal => { await refreshAssembly(); return assembly; }, localSpeechReady: () => localTtsReady(), localCloneReady: () => localCloneReady(), reference: (ref, signal) => ensureVoiceReference(ref, { signal }), api: createExportApi(credentials),
+    const videoAssemble = createVideoAssembleHandler({ makeSound: createLocalSoundMaker({ tools: async () => { videoTools = await discoverVideoTools(); return videoTools; }, scriptsDir: fileURLToPath(new URL("./studio-video", import.meta.url)) }), transcribeFootage: createFootageTranscriber({ tools: async () => { videoTools = await discoverVideoTools(); return videoTools; }, scriptsDir: fileURLToPath(new URL("./studio-video", import.meta.url)) }), enabled: () => gate().processing, tools: async signal => { await refreshAssembly(); return assembly; }, localSpeechReady: () => localTtsReady(), localCloneReady: () => localCloneReady(), reference: (ref, signal) => ensureVoiceReference(ref, { signal }), api: createExportApi(credentials),
       workRoot: join(os.homedir(), "Library", "Application Support", "Estio", "StudioCompanion", "video-assembly"), projectsRoot: projectsRoot(), projects, editorDocs: fileURLToPath(new URL("../video-editor/docs", import.meta.url)), assemble: assembleVideo });
     const loopDeps = { enabled: () => gate().processing, tools: async () => { await refreshAssembly(); return assembly; }, projects, editorDocs: fileURLToPath(new URL("../video-editor/docs", import.meta.url)) };
     const videoEdit = createVideoEditHandler({ ...loopDeps, api: createExportApi(credentials) });
