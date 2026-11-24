@@ -1,0 +1,43 @@
+"use client";
+import Link from "next/link";
+import { useActionState, useEffect, useState } from "react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { makeVideoAction } from "../../(tenant)/content/actions";
+import { VoicePicker } from "@/components/voices/voice-picker";
+import { voiceStatus, type Availability } from "@/lib/studio/voices/library";
+import type { VoiceRow } from "@/lib/studio/voices/policy";
+
+/** The one place the options for a new video live: voice, music, vertical. Opens from the top bar, so the page itself carries no form. */
+export function MakeVideoDialog({ locationId, recordId, voices, availability, disabledReason, busy, trigger }: {
+  locationId: string; recordId: string; voices: VoiceRow[]; availability?: Availability; disabledReason: string | null; busy: boolean; trigger?: "primary" | "inline";
+}) {
+  const [open, setOpen] = useState(false);
+  const [state, action, pending] = useActionState(makeVideoAction.bind(null, locationId, recordId), {} as { error?: string; notice?: string });
+  // Without availability (older callers) every voice counts as usable.
+  const avail: Availability = availability ?? { fish: true, elevenlabs: true, local: "ready", localClone: true };
+  const ready = voices.filter(v => voiceStatus(v, avail).usable), preferred = ready.find(v => v.isDefault) ?? ready[0];
+  const [voiceover, setVoiceover] = useState(false);
+  const [voiceId, setVoiceId] = useState(preferred?.id ?? "");
+  useEffect(() => { if (state.notice && !state.error) setOpen(false); }, [state]);
+  const blocked = Boolean(disabledReason) || busy;
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <button type="button" disabled={blocked} title={disabledReason ?? undefined} className={`inline-flex min-h-11 items-center rounded-md px-4 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60 ${trigger === "inline" ? "border hover:bg-accent" : "bg-primary text-primary-foreground hover:opacity-90"}`}>{busy ? "Making video…" : "Make video"}</button>
+      </DialogTrigger>
+      <DialogContent className="max-w-md">
+        <DialogHeader><DialogTitle>Make video from this script</DialogTitle>
+          <DialogDescription>Your Mac cuts the footage you added to the saved script, with captions, titles and sound, and saves the result here.</DialogDescription></DialogHeader>
+        <form action={action} className="space-y-3 text-sm">
+          <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="voiceover" checked={voiceover} onChange={e => setVoiceover(e.target.checked)} /> Generate the voiceover from the script</label>
+          {voiceover ? <div className="pl-6"><VoicePicker locationId={locationId} voices={voices} availability={avail} value={voiceId} onChange={setVoiceId} /></div> : null}
+          <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="music" /> Add a music bed</label>
+          <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="portrait" /> Vertical (9:16)</label>
+          <button type="submit" disabled={pending || (voiceover && !voices.some(v => v.id === voiceId && voiceStatus(v, avail).usable))} className="inline-flex min-h-11 items-center rounded-md bg-primary px-4 font-medium text-primary-foreground disabled:opacity-60">{pending ? (voiceover ? "Preparing narration…" : "Sending…") : "Make video"}</button>
+          {state.error ? <p role="alert" className="text-destructive">{state.error}</p> : null}
+          {state.notice ? <p role="status">{state.notice}</p> : null}
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}

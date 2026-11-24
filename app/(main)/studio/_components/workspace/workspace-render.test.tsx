@@ -1,0 +1,54 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { renderToStaticMarkup } from "react-dom/server";
+import { AgentDock } from "./agent-dock";
+import { AssetsRail } from "./assets-rail";
+import { PlayerStage } from "./player-stage";
+import { TimelineView } from "./timeline-view";
+import { groupAssets } from "@/lib/studio/workspace/assets";
+
+const noop = () => {};
+const snapshot = { d: 20, tracks: [
+  { n: "Text", k: "video" as const, c: [{ s: 1, e: 4, l: "TIP 1", k: "text" }, { s: 10, e: 12, l: "TIP 2", k: "text" }] },
+  { n: "Screen", k: "video" as const, c: [{ s: 0, e: 20, l: "shot", k: "media" }] },
+  { n: "Voice", k: "audio" as const, c: [] },
+] };
+
+test("timeline renders every layer, labelled accessible clip buttons, and selection actions", () => {
+  const html = renderToStaticMarkup(<TimelineView snapshot={snapshot} selected={{ track: "Text", clip: snapshot.tracks[0].c[0] }} onSelect={noop} onAction={noop} canEdit busy={false} />);
+  for (const name of ["Text", "Screen", "Voice"]) assert.match(html, new RegExp(`>${name}<`));
+  assert.match(html, /aria-label="Text: TIP 1, 0:01 to 0:04"/);
+  assert.match(html, /aria-pressed="true"/);
+  for (const label of ["Trim", "Replace", "Delete", "Retake audio", "Ask the agent"]) assert.match(html, new RegExp(`>${label}<`));
+  assert.doesNotMatch(renderToStaticMarkup(<TimelineView snapshot={snapshot} selected={null} onSelect={noop} onAction={noop} canEdit busy={false} />), /Selected clip/);
+});
+
+test("timeline without a snapshot explains itself; actions are disabled until a project exists", () => {
+  assert.match(renderToStaticMarkup(<TimelineView snapshot={null} selected={null} onSelect={noop} onAction={noop} canEdit={false} busy={false} />), /appears after the next video/);
+  const html = renderToStaticMarkup(<TimelineView snapshot={snapshot} selected={{ track: "Text", clip: snapshot.tracks[0].c[0] }} onSelect={noop} onAction={noop} canEdit={false} busy={false} />);
+  assert.match(html, /disabled=""[^>]*>Trim/); assert.match(html, /Make a video first/);
+});
+
+test("player shows the video with a version switcher, a live stepper, or the empty state", () => {
+  const v = (id: string, i: number) => ({ id, name: `Edited video ${i}.mp4`, bytes: 9_000_000, createdAt: "2026-11-23T11:00:00Z" });
+  const html = renderToStaticMarkup(<PlayerStage versions={[v("a", 2), v("b", 1)]} versionId="a" onVersion={noop} steps={[{ key: "narration", label: "Narration", state: "active", detail: "3 of 6 voiced" }, { key: "editing", label: "Editing", state: "pending", detail: null }]} empty={null} />);
+  assert.match(html, /<video[^>]*controls/); assert.match(html, /src="\/studio\/uploads\/a\?inline=1"/); assert.match(html, /Latest/); assert.match(html, /3 of 6 voiced/); assert.match(html, /aria-current="step"/);
+  assert.match(renderToStaticMarkup(<PlayerStage versions={[]} versionId="" onVersion={noop} steps={null} empty={<p>No video yet</p>} />), /No video yet/);
+});
+
+test("agent dock shows its focus, suggestions and enabled/disabled states", () => {
+  const thread = [{ id: "1", instruction: "Make it shorter", createdAt: "2026-11-23T11:00:00Z", status: "succeeded" as const, reply: "Trimmed 4 s" }];
+  const html = renderToStaticMarkup(<AgentDock thread={thread} projectKept busy={false} selected={{ track: "Text", clip: { s: 1, e: 4, l: "TIP 1", k: "text" } }} onClearSelection={noop} onSend={noop} pending={false} />);
+  assert.match(html, /Focus: Text · TIP 1/); assert.match(html, /Make it shorter/); assert.match(html, /Trimmed 4 s/); assert.match(html, /Make this shorter/); assert.match(html, /aria-label="Clear focus"/);
+  const off = renderToStaticMarkup(<AgentDock thread={[]} projectKept={false} busy={false} selected={null} onClearSelection={noop} onSend={noop} pending={false} />);
+  assert.match(off, /Focus: whole video/); assert.match(off, /Make a video first/); assert.match(off, /disabled=""/);
+});
+
+test("assets rail groups by provenance and never lists raw upload rows", () => {
+  const up = (id: string, name: string, status = "uploaded") => ({ id, name, contentType: name.endsWith(".mp3") ? "audio/mpeg" : "video/mp4", byteSize: 4_000_000, createdAt: "2026-11-23T11:40:00Z", status });
+  const groups = groupAssets([up("1", "shot.mp4"), up("2", "Edited video 2026-11-23 1325.mp4"), up("3", "Narration 2026-11-23 1140 01.mp3"), up("4", "Narration 2026-11-23 1140 02.mp3"), up("5", "bad.mov", "awaiting_upload")], []);
+  const html = renderToStaticMarkup(<AssetsRail groups={groups} uploadSlot={<div>UPLOAD-ZONE</div>} onShowVersion={noop} />);
+  for (const h of ["Footage", "Narration", "Exports"]) assert.match(html, new RegExp(h));
+  assert.match(html, /You uploaded/); assert.match(html, /Generated narration/); assert.match(html, /Made from your script/); assert.match(html, /2 clips/); assert.match(html, /UPLOAD-ZONE/);
+  assert.doesNotMatch(html, /bad\.mov/); assert.doesNotMatch(html, /Check storage and finish/);
+});

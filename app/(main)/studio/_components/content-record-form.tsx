@@ -8,7 +8,9 @@ import { ScriptTemplateBeats } from "./script-template-beats";
 import Link from "next/link";
 
 export function ContentRecordForm({ locationId, recordId, version, title = "", payload = {}, templateOptions = [],
-  pinnedTemplateId, templateSelectionSaved, canSelectTemplate = false }: {
+  pinnedTemplateId, templateSelectionSaved, canSelectTemplate = false, visible = "all" }: {
+  /** Which part the workspace shows. Every field stays mounted (hidden ones keep their values and are still submitted), so switching modes never loses an unsaved edit. */
+  visible?: "all" | "script" | "details" | "none";
   locationId: string; recordId: string; version: number; title?: string; payload?: Record<string, unknown>;
   templateOptions?: readonly ScriptTemplateOption[]; pinnedTemplateId?: string | null;
   templateSelectionSaved?: boolean; canSelectTemplate?: boolean;
@@ -28,7 +30,8 @@ export function ContentRecordForm({ locationId, recordId, version, title = "", p
   const [state, action, pending] = useActionState(saveContentAction.bind(null, locationId, recordId, version), {});
   const inputClass = "mt-1 w-full rounded-md border bg-background p-3 text-sm";
   return (
-    <form action={action} className="space-y-5 rounded-xl border bg-card p-6">
+    <form action={action} hidden={visible === "none"} className="space-y-5 rounded-xl border bg-card p-6">
+      <div hidden={visible === "script"} className="space-y-5">
       <label className="block text-sm font-medium">Title<input name="title" value={values.title} required maxLength={180} onChange={(event) => setValues({ ...values, title: event.target.value })} className={inputClass} /></label>
       <div className="grid gap-4 sm:grid-cols-3">
         <label className="text-sm font-medium">Content stage<select name="stage" value={stage} onChange={(event) => setStage(event.target.value)} className={inputClass}>
@@ -44,8 +47,10 @@ export function ContentRecordForm({ locationId, recordId, version, title = "", p
           {[1, 2, 3, 4].map((value) => <option key={value} value={value}>Pillar {value}</option>)}
         </select></label>
       </div>
+      </div>
       {[{ name: "summary", label: "Idea summary", rows: 3 }, { name: "script", label: "Script", rows: 16 }, { name: "notes", label: "Production notes", rows: 6 }].map(({ name, label, rows }) => (
-        <div key={name} className="space-y-3">
+        // SLOT: the Notion-style block editor replaces the script textarea here (structured blocks, per-block audio, voice picker).
+        <div key={name} hidden={name === "script" ? visible === "details" : visible === "script"} className="space-y-3">
           {name === "script" && (selectedTemplate || canSelectTemplate) ? <div className="space-y-2">
             {canSelectTemplate && templateOptions.length ? <label className="block text-sm font-medium">
               Script template
@@ -65,7 +70,7 @@ export function ContentRecordForm({ locationId, recordId, version, title = "", p
         </div>
       ))}
       <input type="hidden" name="approvedPresent" value="1" /><input type="hidden" name="archivedPresent" value="1" />
-      <div className="flex flex-wrap gap-5 text-sm">
+      <div hidden={visible === "script"} className="flex flex-wrap gap-5 text-sm">
         <label className="flex items-center gap-2"><input name="approved" type="checkbox" checked={approved} onChange={(event) => setApproved(event.target.checked)} />Reviewed and approved</label>
         <label className="flex items-center gap-2"><input name="archived" type="checkbox" checked={archived} onChange={(event) => setArchived(event.target.checked)} />Archived</label>
       </div>

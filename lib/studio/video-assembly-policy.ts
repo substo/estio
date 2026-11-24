@@ -54,7 +54,7 @@ export const videoLoopMessages: Record<VideoLoopReason, string> = {
 export const videoLoopCodeReason: Record<string, VideoLoopReason> = {
   VE001: "edit_no_content", VE002: "edit_bad_instruction", VE003: "edit_no_project", VE004: "edit_busy", VE011: "edit_no_mac", VE012: "edit_processing_off", VE013: "edit_mac_not_ready", VE014: "edit_companion_outdated", "42501": "no_authority",
 };
-export interface VideoVersion { id: string; name: string; bytes: number; createdAt: string }
+export interface VideoVersion { id: string; name: string; bytes: number; createdAt: string; /** What the Mac's timeline looked like for this export; absent for older exports. */ timeline?: import("./workspace/timeline").TimelineSnapshot | null }
 export interface VideoThreadMessage { id: string; instruction: string; createdAt: string; status: VideoAssemblyJobStatus; reply: string | null }
 export interface VideoLoopState { projectKept: boolean; versions: VideoVersion[]; thread: VideoThreadMessage[]; openEditor: { jobId: string; status: VideoAssemblyJobStatus; message: string | null } | null; busy: boolean }
 /** One line for a thread message's state. */

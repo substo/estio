@@ -688,3 +688,57 @@ test("a public comment sample is read-only: official API key only, no author dat
   assert.equal(calls.length, before);
   delete process.env.YOUTUBE_DATA_API_KEY;
 });
+
+test("chosen and no evidence are pinned to a turn, fenced from other reads, and traceable from Knowledge", async () => {
+  const fresh = crypto.randomUUID();
+  const [current] = await sql("select version from studio.studio_records where id=$1::uuid", source);
+  await sql("insert into studio.studio_knowledge_sources values($1,$2::uuid,'{}',1,1) on conflict do nothing", loc, source);
+  const seeds = await Promise.all(["Visible chosen quote.", "Unselected approved quote.", "Stale private quote."].map(async (quote, index) => {
+    const evidence = crypto.randomUUID(), insight = crypto.randomUUID();
+    await sql("insert into studio.studio_knowledge_insights(location_id,id,source_id,status,statement,payload) values($1,$2::uuid,$3::uuid,'approved',$4,'{}')", loc, insight, source, quote);
+    await sql("insert into studio.studio_knowledge_evidence(location_id,id,insight_id,source_id,payload) values($1,$2::uuid,$3::uuid,$4::uuid,$5::jsonb)",
+      loc, evidence, insight, source, JSON.stringify({ source_version: index === 2 ? 0 : Number(current.version), quote, evidence_type: "speech", start_sec: 2 }));
+    return { evidence, insight };
+  }));
+  const [pick, unselected, stale] = seeds;
+  const choice = await agent.getAgentEvidenceChoices(loc, null, source);
+  assert.ok(choice.some(row => row.id === pick.evidence));
+  assert.ok(!choice.some(row => row.id === stale.evidence));
+  const submit = (id: string, ids: string[] | null, version = 1, message = "Use only my evidence") =>
+    agent.sendAgentMessage(loc, policy.readAgentSendCommand({ recordId: fresh, turnId: id, version, sourceId: version === 0 ? source : null,
+      sourceVersion: Number(current.version), message, evidenceIds: ids, provider: "subscription", confirmSubscription: true }));
+  const earlier = crypto.randomUUID();
+  await submit(earlier, null, 0, "EARLIER-HISTORY-MARKER");
+  await drive(earlier, () => step({ reply: "Earlier reply." }), 1);
+  await assert.rejects(submit(crypto.randomUUID(), [stale.evidence]), /no longer available/);
+  await assert.rejects(submit(crypto.randomUUID(), [crypto.randomUUID()]), /no longer available/);
+
+  const selected = crypto.randomUUID();
+  await submit(selected, [pick.evidence]);
+  await assert.rejects(submit(selected, [unselected.evidence]), /different inputs/);
+  await sql("update studio.studio_knowledge_insights set status='pending' where id=$1::uuid", pick.insight);
+  await submit(selected, [pick.evidence]); // idempotent even after the finding changes
+  const viewed = await drive(selected, snapshot => {
+    assert.deepEqual(snapshot.sources, []);
+    assert.deepEqual(snapshot.ideas[0].sources, []);
+    assert.deepEqual(snapshot.conversation, []);
+    assert.doesNotMatch(JSON.stringify(snapshot), /EARLIER-HISTORY-MARKER|Unselected approved quote/);
+    assert.deepEqual(snapshot.observations[0].result.items.map((item: any) => item.id), [`f:${pick.evidence}`]);
+    if (snapshot.operation.round===1) return step({ step: "tool", reply: null, tool: { name: "search_knowledge", query: "unselected", sourceId: null, offset: null, stage: null, skill: null } });
+    assert.match(snapshot.observations[1].result.error, /restricted source evidence/);
+    return step({ proposals: [{ stage: "Hook", text: "New hook.", rationale: "Chosen quote.", evidenceIds: [`f:${pick.evidence}`], verify: [] }] });
+  }, 2);
+  assert.match(viewed.turn.result!.proposals[0].evidence[0].quote, /Visible chosen quote/);
+  assert.equal(viewed.turn.inputs.reads[0].tool, "Selected source evidence");
+  const linked = await (await import("./knowledge")).getStudioKnowledgeInsight(loc, pick.insight, { evidence: 0, reviews: 0, units: 0 });
+  assert.deepEqual(linked?.selectedInDrafts.map(row => [row.id, row.cited]), [[fresh, true]]);
+  const suppressed = crypto.randomUUID();
+  await submit(suppressed, []);
+  const none = await drive(suppressed, snapshot => {
+    assert.deepEqual(snapshot.observations[0].result.items, []);
+    assert.deepEqual(snapshot.sources, []);
+    assert.deepEqual(snapshot.conversation, []);
+    return step({ reply: "No evidence supplied." });
+  }, 1);
+  assert.equal(none.turn.inputs.reads[0].tool, "No source evidence");
+});

@@ -1,4 +1,5 @@
 import { StudioCommandError } from "./command-error";
+import { isTimelineSnapshot } from "./workspace/timeline";
 import { relatedResultSchema } from "./related-search-policy";
 import { readFramesReserve, readFramesVerify, readTranscriptChunk, readVideoResult, VIDEO_TOOL_NAMES } from "./video-transcription-policy";
 import { NATIVE_REJECTION_BACKOFF_MS, reportedSubscriptionLimit } from "./subscription-readiness";
@@ -249,7 +250,8 @@ function readConfigAck(value: unknown) {
 export function readAssemblyResult(value: unknown) {
   const v = object(value); valid(Object.keys(v).length === 1);
   const a = object(v.assembly);
-  valid(Object.keys(a).every(k => ["exportName", "bytes", "seconds", "beats", "clips", "voiced", "uploadId", "summary", "exportSaved", "projectKept", "projectName"].includes(k)));
+  valid(Object.keys(a).every(k => ["exportName", "bytes", "seconds", "beats", "clips", "voiced", "uploadId", "summary", "exportSaved", "projectKept", "projectName", "timeline"].includes(k)));
+  valid(a.timeline === undefined || isTimelineSnapshot(a.timeline) && new TextEncoder().encode(JSON.stringify(a.timeline)).length <= 24_000);
   valid(a.exportName === undefined || typeof a.exportName === "string" && a.exportName.length <= 200);
   for (const k of ["bytes", "seconds", "beats", "clips", "voiced"]) valid(a[k] === undefined || typeof a[k] === "number" && Number.isFinite(a[k]) && Number(a[k]) >= 0 && Number(a[k]) <= 1e12);
   valid(a.uploadId === undefined || typeof a.uploadId === "string" && uuid.test(a.uploadId));

@@ -51,11 +51,11 @@ test("the state file is trusted only for existing projects inside the projects f
 test("edit: runs the agent on the kept project with the instruction, uploads a new version, replies with the agent's words", async () => {
   const { store, dir, calls, api } = await fixture();
   let seen: { cwd: string; input?: string; args: string[] } | undefined;
-  const run = async (r: { cwd: string; input?: string; args: string[] }) => { seen = r; await writeFile(join(dir, "exports", "Video r3.mp4"), Buffer.alloc(2000, 1)); return { stdout: "I made the intro 4 seconds shorter.\nCheck the cut at 0:12.\n/x/exports/Video r3.mp4\n", stderr: "" }; };
+  const run = async (r: { cwd: string; input?: string; args: string[]; command?: string }) => { if (r.command === "substo") return { stdout: "{}", stderr: "" }; seen = r; await writeFile(join(dir, "exports", "Video r3.mp4"), Buffer.alloc(2000, 1)); return { stdout: "I made the intro 4 seconds shorter.\nCheck the cut at 0:12.\n/x/exports/Video r3.mp4\n", stderr: "" }; };
   const handler = createVideoEditHandler({ ...ready, projects: store, api, run: run as never });
   const result = await handler(job("studio.video_edit", { recordId: rec, title: "Launch video", instruction: "Make the intro shorter", history: [{ instruction: "Add captions", reply: "Added." }] }), ctx()) as { assembly: Record<string, unknown> };
   assert.equal(seen!.cwd, dir);
-  assert.ok(seen!.args.includes("Bash(substo:*),Read"));
+  assert.ok(seen!.args.includes("Bash(substo:*),Read,Edit(./batch-*.json)"));
   assert.match(seen!.input!, /Make the intro shorter/); assert.match(seen!.input!, /Add captions/); assert.match(seen!.input!, /--project "Video\.substo"/);
   assert.deepEqual(calls, ["reserve", "put", "verify"]);
   assert.equal(result.assembly.uploadId, up); assert.equal(result.assembly.projectKept, true);

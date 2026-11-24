@@ -1,3 +1,4 @@
+import { snapshotTimeline, timelineField } from "./timeline-snapshot";
 import { z } from "zod";
 import { StudioJobError, type StudioJobHandler } from "../worker/handlers";
 import { agentEnv, agentSummary, runEditingAgent } from "../video-assembly/agent";
@@ -47,7 +48,8 @@ export function createVideoEditHandler(deps: VideoLoopDeps & { api: ExportApi })
     if (!exported) return { assembly: { summary: agentSummary(output) || "Nothing was changed.", projectKept: true, projectName: projectFolderName(p.title, p.recordId) } };
     const uploadId = await saveExport(deps.api, lease, exported, context.signal);
     await deps.projects.set(p.recordId, { dir: project.dir, file: project.file }).catch(() => {});
-    return { assembly: { exportName: exported.name.slice(0, 200), bytes: exported.size, uploadId, exportSaved: true, projectKept: true, projectName: projectFolderName(p.title, p.recordId), summary: agentSummary(output) } };
+    const timeline = await snapshotTimeline(project.file, project.dir, deps.run, context.signal);
+    return { assembly: { exportName: exported.name.slice(0, 200), bytes: exported.size, uploadId, exportSaved: true, ...timelineField(timeline), projectKept: true, projectName: projectFolderName(p.title, p.recordId), summary: agentSummary(output) } };
   };
 }
 
