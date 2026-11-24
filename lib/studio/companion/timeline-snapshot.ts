@@ -2,7 +2,7 @@ import { tmpdir } from "node:os";
 import { runNativeProcess, type ProcessRunner } from "./process";
 import { reduceTimeline, type TimelineSnapshot } from "../workspace/timeline";
 
-/** The deployed server must have migration 20261201100000_studio_workspace_timeline before it accepts `timeline` in a job result.
+/** The deployed server must have migration 20261201130000_studio_workspace_timeline before it accepts `timeline` in a job result.
  * Flip to true once that release is live (same switch pattern as SERVER_HAS_PROJECT_FIELDS in video-assemble.ts). */
 export const SERVER_HAS_TIMELINE_FIELD = false;
 
