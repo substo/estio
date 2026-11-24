@@ -1,6 +1,6 @@
 "use client";
 import { useActionState, useRef, useState } from "react";
-import { AVATAR_NOTE } from "@/lib/studio/avatar-policy";
+import { AVATAR_NOTE } from "@/lib/studio/avatar-note";
 import { removeAvatarAction, saveAvatarAction } from "./actions";
 
 type State = { error?: string; notice?: string };

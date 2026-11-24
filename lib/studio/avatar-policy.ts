@@ -22,4 +22,4 @@ export function readAvatarBytes(bytes: Uint8Array): { ok: true; contentType: Ava
 /** Derived from the Location and a hash of the user id: never from user input, and it does not spell out the user id in storage. */
 export const avatarObjectKey = (locationId: string, userId: string) => `${locationId}/avatars/${createHash("sha256").update(userId).digest("hex").slice(0, 40)}`;
 export const avatarFileName = (contentType: string) => `storyboard-avatar.${extensions[contentType as AvatarType] ?? "jpg"}`;
-export const AVATAR_NOTE = "Your photo stays private to this workspace. It is only used as the stand-in picture on storyboard placeholders while a video is made, and you can remove it any time.";
+export { AVATAR_NOTE } from "./avatar-note";
