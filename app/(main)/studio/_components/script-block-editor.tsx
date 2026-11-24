@@ -45,15 +45,16 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
   useEffect(() => { blocksRef.current = blocks; voiceRef.current = voiceOverride; onBlocksChange(json, voiceOverride); }, [blocks, voiceOverride, json, onBlocksChange]);
 
   // ---- saving: one request at a time, always with the newest version. A stale version is refused by the database and never overwritten. ----
-  const persist = useCallback((): Promise<boolean> => {
+  const persisted = useRef(false); // legacy scripts get fresh block ids on every server read until the blocks are saved once
+  const persist = useCallback((force = false): Promise<boolean> => {
     chain.current = chain.current.then(async () => {
       if (conflict.current) return false;
       const payload = JSON.stringify(blocksDoc(blocksRef.current)), voice = voiceRef.current, key = `${payload}\n${voice}`;
-      if (key === lastSaved.current) { setSave(s => s === "error" ? s : "saved"); return true; }
+      if (key === lastSaved.current && !(force && !persisted.current)) { setSave(s => s === "error" ? s : "saved"); return true; }
       setSave("saving");
       const result: AutosaveResult = await autosaveScriptAction(locationId, recordId, versionRef.current, payload, voice).catch(() => ({ ok: false as const, error: "Could not reach Studio. Your edits are still here; retrying." }));
       if (result.ok) {
-        versionRef.current = result.version; lastSaved.current = key; onVersion(result.version);
+        versionRef.current = result.version; lastSaved.current = key; persisted.current = true; onVersion(result.version);
         const stillDirty = `${JSON.stringify(blocksDoc(blocksRef.current))}\n${voiceRef.current}` !== key;
         setSave(stillDirty ? "unsaved" : "saved"); setSaveError(""); return true;
       }
@@ -110,7 +111,7 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
     if (!hosted || busy) return;
     setBusy(label); setAudioMessage("");
     if (timer.current) clearTimeout(timer.current);
-    const ok = await persist();
+    const ok = await persist(true);
     if (!ok) { setBusy(null); setAudioMessage("Save the script first: it could not be saved yet."); return; }
     const snapshot = blocksRef.current;
     const result: RegenerateResult = await regenerateBlockAudioAction(locationId, recordId, versionRef.current, only).catch(() => ({ ok: false as const, error: "Could not reach Studio. Try again." }));
