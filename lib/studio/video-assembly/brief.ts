@@ -22,7 +22,7 @@ export function buildBrief(i: BriefInput): string {
   return `You are editing a finished video from a script. The current directory is a Substo Video project folder (already created with \`substo new\`). Use ONLY the \`substo\` command; read ${i.editorDocs}/AGENTS.md, then agents/cutting.md, agents/broll-and-titles.md, agents/sound.md and agents/shorts.md as needed. Pass --author claude and --project "${i.projectFile}" on every command.
 
 Canvas: ${i.orientation}. Footage the creator shot (already in this folder): ${i.clips.join(", ") || "none"}.
-${i.hasVoiceover ? "Generated voiceover files (one per beat, in this folder) are the narration: place them back to back on the Voice track in order." : "The footage carries the narration: transcribe it (`substo wait transcript`) and cut to the script."}
+${i.hasVoiceover ? "Generated voiceover files (one per beat, in this folder) are the narration: place them back to back on the Voice track in order." : "The footage carries the narration: transcribe it (`substo wait transcript`) and cut to the script. Files named voice-NN.mp3 in this folder are leftovers from an earlier version: do not place them, and remove any that an earlier revision left on the Voice track."}
 
 Script beats:
 ${beats}
