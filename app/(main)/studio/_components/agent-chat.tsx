@@ -38,6 +38,11 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   const { recordId, record, setRecord, setPlan, target, setTarget, sendRef, prepareMessage } = useAgentDraft();
   const [turns, setTurns] = useState(initialTurns);
   const [text, setText] = useState("");
+  // "Brainstorm this section" in the script editor leaves a prompt for this piece: show it for review once; nothing is sent until the owner does.
+  useEffect(() => {
+    if (!recordId) return;
+    try { const key = `studio-agent-prefill:${recordId}`, prefill = sessionStorage.getItem(key); if (prefill) { sessionStorage.removeItem(key); setText(prefill.slice(0, AGENT_MESSAGE_LIMIT)); } } catch { /* no storage: start blank */ }
+  }, [recordId]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [applying, setApplying] = useState<string | null>(null);

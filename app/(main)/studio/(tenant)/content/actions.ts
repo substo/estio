@@ -4,7 +4,8 @@ import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getStudioAccess } from "@/lib/studio/access";
 import { readContentDraft } from "@/lib/studio/content-policy";
-import { createStudioSourceIdea, saveStudioContentRecord } from "@/lib/studio/content";
+import { createStudioSourceIdea, getStudioContentRecord, saveStudioContentRecord } from "@/lib/studio/content";
+import { regenerateBlockAudio, type RegenerateResult } from "@/lib/studio/script-audio";
 import { StudioRestError } from "@/lib/studio/rest";
 import { StudioCommandError } from "@/lib/studio/command-error";
 import { requestVideoEdit, requestOpenEditor } from "@/lib/studio/video-loop";
@@ -80,5 +81,34 @@ export async function makeVideoAction(locationId: string, recordId: string, _pre
   } catch (error) {
     if (error instanceof StudioCommandError) return { error: error.message };
     return { error: "Studio could not send this to your Mac. Try again." };
+  }
+}
+
+export type AutosaveResult = { ok: true; version: number } | { ok: false; error: string; conflict?: boolean };
+/** Autosave for the block editor: the same version-fenced save as the form (stale versions are refused, never overwritten), without the redirect. Only the blocks and the voice are written. */
+export async function autosaveScriptAction(locationId: string, recordId: string, version: number, scriptBlocks: string, voiceId: string): Promise<AutosaveResult> {
+  if (!await getStudioAccess(locationId)) notFound();
+  try {
+    const current = await getStudioContentRecord(locationId, recordId);
+    if (!current) return { ok: false, error: "This piece could not be found." };
+    const form = new FormData(); form.set("title", current.record.title); form.set("scriptBlocks", scriptBlocks); form.set("voiceId", voiceId);
+    const saved = await saveStudioContentRecord(locationId, recordId, readContentDraft(form), version);
+    return { ok: true, version: Number((saved as { version?: unknown }).version ?? version + 1) };
+  } catch (error) {
+    if (error instanceof StudioRestError && error.code === "40001") return { ok: false, conflict: true, error: "This piece changed in another tab. Your edits are still here; reload the latest piece and review before saving." };
+    if (error instanceof Error && /script|block|voice/i.test(error.message) && !(error instanceof StudioRestError)) return { ok: false, error: error.message };
+    console.error("[studio-content] Autosave failed", error instanceof StudioRestError ? { status: error.status, code: error.code } : { type: "unavailable" });
+    return { ok: false, error: "Could not save. Your edits are still here; retrying." };
+  }
+}
+
+export async function regenerateBlockAudioAction(locationId: string, recordId: string, version: number, only: string[] | null): Promise<RegenerateResult> {
+  if (!await getStudioAccess(locationId)) notFound();
+  if (only && (only.length > 200 || only.some(id => typeof id !== "string" || id.length > 40))) return { ok: false, error: "Choose valid blocks." };
+  try { return await regenerateBlockAudio(locationId, recordId, version, only ?? undefined); }
+  catch (error) {
+    if (error instanceof StudioRestError && error.code === "40001") return { ok: false, error: "The script changed while audio was generating. Reload the piece; generated clips are kept." };
+    console.error("[studio-content] Block audio failed", { type: error instanceof Error ? error.constructor.name : "unknown" });
+    return { ok: false, error: "Could not generate audio. Try again." };
   }
 }

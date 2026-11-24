@@ -86,7 +86,7 @@ export function ContentWorkspace(props: {
       {/* One form instance, never unmounted: Script and Details show their own parts of it. */}
       <div className={mode === "details" ? "mx-auto max-w-3xl space-y-6" : mode === "script" ? "grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]" : "hidden"}>
         <div className="space-y-6"><ContentRecordForm {...props.form} visible={mode === "script" ? "script" : mode === "details" ? "details" : "none"} />{mode === "details" ? props.detailsExtra : null}</div>
-        {mode === "script" ? <div className="space-y-4">{props.nextSteps}<p className="text-xs text-muted-foreground">When the script is ready, switch to Edit and press Make video. Blocks, per-block voice and brainstorming a section with the agent are coming to this mode.</p></div> : null}
+        {mode === "script" ? <div className="space-y-4">{props.nextSteps}<p className="text-xs text-muted-foreground">When the script is ready, switch to Edit and press Make video. Narration that already has up-to-date audio is reused, so only changed blocks are voiced again.</p></div> : null}
       </div>
 
       {mode === "edit" ? (

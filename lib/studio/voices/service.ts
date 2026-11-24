@@ -145,7 +145,7 @@ export async function renderBlockNarration(locationId: string, recordId: string,
   const clean = text.replace(/\s+/g, " ").trim();
   if (!clean) throw new VoiceSettingsError("This block has no text to voice.");
   if (clean.length > 4500) throw new VoiceSettingsError("This block is longer than 4,500 characters. Split it and try again.");
-  return withClipContext(locationId, recordId, voice, undefined, undefined, ctx => renderClip(ctx, clean, `Narration ${stampNow()} ${label.slice(0, 40)}.mp3`));
+  return withClipContext(locationId, recordId, voice, undefined, undefined, ctx => renderClip(ctx, clean, `Narration ${stampNow()} ${label.replace(/[^A-Za-z0-9 ._-]/g, "").slice(0, 40) || "block"}.mp3`));
 }
 
 const LOCAL_MODEL_ID = "qwen3-tts-0.6b-4bit";
