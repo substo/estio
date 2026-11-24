@@ -13,7 +13,7 @@ test("a failing or malformed CLI gives no picture and never throws", async () =>
   assert.equal(await snapshotTimeline("/p", "/p", async () => { throw new Error("boom"); }), null);
   assert.equal(await snapshotTimeline("/p", "/p", async () => ({ stdout: "not json", stderr: "" })), null);
 });
-test("the field is withheld until the server accepts it", () => {
-  assert.equal(SERVER_HAS_TIMELINE_FIELD, false);
-  assert.deepEqual(timelineField({ d: 1, tracks: [] }), {});
+test("the field is sent now that the server accepts it", () => {
+  assert.equal(SERVER_HAS_TIMELINE_FIELD, true);
+  assert.deepEqual(timelineField({ d: 1, tracks: [] }), { timeline: { d: 1, tracks: [] } });
 });
