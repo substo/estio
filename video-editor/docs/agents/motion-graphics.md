@@ -28,6 +28,7 @@ needs more than a preset.
 - **Self-contained**: inline SVG, CSS and canvas, system fonts, or files in the project folder. The network is blocked.
 - **Scale from the frame**: `const W = innerWidth, H = innerHeight, u = Math.min(W, H) / 1080;` and size everything in `u`, so the
   same file works at 1920x1080 and 1080x1920.
+- **Never on top of other text.** Before placing, run `substo timeline` and note every title, placeholder and caption that is on screen during the graphic's span. Put the graphic in a region none of them use (design it for that corner or band, not the middle), or move or shorten the other text, or ask for the graphic's moment to change. After placing, view the composed frame (`substo frame <time>`): overlapping text is a defect to fix, not to ship. A translucent card does not make it acceptable.
 - Text at least `48 * u` tall, inside safe margins (about 5%; portrait: 150 px top and 170 px bottom for platform UI), never over
   the captions, a few words at a time. Use the numbers, names and words from the script exactly. **Never invent a figure.**
 - **Banned** (the generic "AI look"): particle bursts, glows and lens flares, RGB split, camera shake, crossfades as the only
