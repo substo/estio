@@ -5,6 +5,7 @@ import { SETTINGS_DOMAINS } from "@/lib/settings/constants";
 import { getStudioAccess } from "../access";
 import { requireVoiceManager } from "./keys";
 import { readSoundProviderChoices, type HostedSoundProvider, type SoundKind, type SoundProviderChoices } from "./sound-providers";
+import { readMotionChoice, type MotionChoice } from "../video-assembly/motion-style";
 import { readGenerationSources, GENERATION_KINDS, type GenerationKind, type GenerationSources, type SourceChoice } from "./sources";
 
 const ref = (locationId: string) => ({ scopeType: "LOCATION" as const, scopeId: locationId, domain: SETTINGS_DOMAINS.LOCATION_AI });
@@ -46,4 +47,19 @@ export async function setSoundProviderChoice(locationId: string, kind: SoundKind
   const actor = (await db.user.findFirst({ where: { clerkId: access.userId, authRealm: access.app }, select: { id: true } }))?.id ?? null;
   await settingsService.upsertDocument({ ...ref(access.locationId), payload: { whatsappTranscriptRetentionDays: 90, ...(current?.payload ?? {}), [PROVIDER_FIELD]: choices }, actorUserId: actor, expectedVersion: current?.version ?? 0, schemaVersion: 1 });
   return choices;
+}
+
+const MOTION_FIELD = "studioMotionStyle";
+/** The Location's look for titles and callouts in made videos (Clean until chosen). Same per-Location settings document as the audio sources. */
+export async function getMotionChoice(locationId: string): Promise<MotionChoice> {
+  const doc = await settingsService.getDocument<Record<string, unknown>>(ref(locationId)).catch(() => null);
+  return readMotionChoice(doc?.payload?.[MOTION_FIELD]);
+}
+export async function setMotionChoice(locationId: string, choice: MotionChoice): Promise<MotionChoice> {
+  const clean = readMotionChoice(choice);
+  const access = await requireVoiceManager(locationId);
+  const current = await settingsService.getDocument<Record<string, unknown>>(ref(access.locationId));
+  const actor = (await db.user.findFirst({ where: { clerkId: access.userId, authRealm: access.app }, select: { id: true } }))?.id ?? null;
+  await settingsService.upsertDocument({ ...ref(access.locationId), payload: { whatsappTranscriptRetentionDays: 90, ...(current?.payload ?? {}), [MOTION_FIELD]: clean }, actorUserId: actor, expectedVersion: current?.version ?? 0, schemaVersion: 1 });
+  return clean;
 }

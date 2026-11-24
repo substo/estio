@@ -1,4 +1,5 @@
 import type { Beat } from "./script";
+import { DEFAULT_MOTION_CHOICE, motionBriefStep, type MotionChoice } from "./motion-style";
 
 export interface BriefInput {
   /** The .substo file in the current folder; every command names it (a folder may hold several versions). */ projectFile: string;
@@ -10,6 +11,8 @@ export interface BriefInput {
   soundFiles?: { music?: string; sfx?: string };
   /** The creator's own photo (storyboard-avatar.png/jpg/webp in the project folder), used instead of a grey card on beats without footage. */
   avatarFile?: string;
+  /** The look of titles and callouts, chosen by the creator in the Make video dialog (Clean when absent). */
+  motion?: MotionChoice;
 }
 
 function soundStep(i: BriefInput): string {
@@ -39,7 +42,7 @@ Do this, in order:
 1. \`substo media\` and \`substo timeline --summary\` to learn what exists.
 2. Build the picture: for each beat put the best-matching footage on the camera/screen/B-roll track for that beat's length. Use \`substo search\` on transcripts to match footage to lines. Trim dead air; do not invent footage. Where a beat has a [visual] note and no footage fits, use a title or graphic instead.
 3. Captions: try \`substo captions --apply\` (word-by-word) once the voice track is in place. Transcripts need macOS 26; if it reports transcripts are unavailable, instead add one text clip (preset caption) per short phrase of each beat on the Text track, timed inside that beat's voiceover span (a beat lasts from its start to the next beat's start).
-4. Motion graphics, kept modest: a section title card at each major topic change and a short lower-third or callout for key numbers or names, using the title presets (callout, sectionHeader, label) with animationIn/animationOut (fade, pop, slideUp, typewriter). Keep text to a few words (longest line checked at the frame where it is fully visible), at least 48 px tall, inside safe margins (about 5% each side; portrait: 150 px top, 170 px bottom for platform UI), not overlapping the captions. For portrait, re-place elements for the tall frame instead of shrinking a landscape layout. Check with \`substo frame <time> -o /tmp/f.png\` and look at the image, and look at a contact sheet of frames across the video (clipped type, weak hierarchy, overlaps) before exporting.
+4. ${motionBriefStep(i.motion ?? DEFAULT_MOTION_CHOICE, i.orientation)}
 5. Sound design: ${soundStep(i)}
 6. \`substo loudness\` then normalise speech, then \`substo check --changed\` and fix what it reports.
 7. \`substo export --preset ${i.orientation === "portrait" ? "short" : "youtube1080"}\` and print the exported path as the last line.

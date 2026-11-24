@@ -14,6 +14,7 @@ import { snapshotTimeline, timelineField } from "./timeline-snapshot";
 import { runNativeProcess, type ProcessRunner } from "./process";
 import { freeBytes, nextProjectFile, projectFolderName, type ProjectStore } from "./video-projects";
 import { parseScript } from "../video-assembly/script";
+import { readMotionChoice } from "../video-assembly/motion-style";
 import { soundSeconds, type LocalSoundMaker } from "./local-sound";
 const payload = z.object({
   recordId: z.string().uuid(), script: z.string().min(1).max(20000),
@@ -30,6 +31,8 @@ const payload = z.object({
   voiceDownloads: z.array(z.object({ name: z.string().max(255), url: z.string().url().max(4000), byteSize: z.number().int().positive() })).max(200).default([]),
   /** Music bed and whoosh the server made with the Location's key (absent on an older server: the brief then says no sound files exist). */
   soundDownloads: z.array(z.object({ role: z.enum(["music", "sfx"]), name: z.string().max(255), url: z.string().url().max(4000), byteSize: z.number().int().positive() })).max(2).default([]),
+  /** The creator's chosen look for titles and callouts, added at claim time (absent on an older server: Clean). Read defensively: it is text from the server. */
+  motionStyle: z.unknown().optional(),
   /** The creator's private storyboard photo, minted at claim time when they saved one. */
   avatar: z.object({ name: z.string().regex(/^storyboard-avatar\.(jpg|png|webp)$/), contentType: z.string().max(40), url: z.string().url().max(4000), byteSize: z.number().int().positive().max(5 * 1024 * 1024) }).optional(),
 }).passthrough();
@@ -199,7 +202,7 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
         ? await deps.reference(p.voiceReference, context.signal).catch(() => { throw new StudioJobError("voice_reference_unavailable", "The Mac could not fetch this cloned voice. Make the video again.", false); }) : undefined;
       let result: AssembleResult;
       try {
-        result = await deps.assemble({ transcribeFootage: deps.transcribeFootage, script: p.script, clipsDir, projectDir, projectFile, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape", sounds, ...(avatar ? { avatar } : {}),
+        result = await deps.assemble({ transcribeFootage: deps.transcribeFootage, script: p.script, clipsDir, projectDir, projectFile, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape", sounds, motion: readMotionChoice(p.motionStyle), ...(avatar ? { avatar } : {}),
           voiceover: p.options.voiceover, music: p.options.music, model: deps.model, signal: context.signal,
           voice: !p.options.voiceover ? undefined : p.voice?.engine === "local" ? { engine: "local", speaker: p.voice.speaker, model: p.voice.model, ...(reference ? { reference } : {}) } : p.voice?.engine === "hosted" ? { engine: "prerendered", files: narration } : undefined });
       } catch (error) {

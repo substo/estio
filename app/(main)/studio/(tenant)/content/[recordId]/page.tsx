@@ -11,7 +11,7 @@ import { ContentWorkspace } from "../../../_components/workspace/content-workspa
 import { getVideoLoopState } from "@/lib/studio/video-loop";
 import { getMacVideoStatus, getVideoAssemblyStatus } from "@/lib/studio/video-assembly";
 import { getSoundModelState, getVoiceAvailability, listVoices } from "@/lib/studio/voices/service";
-import { getGenerationSources, getSoundProviderChoices } from "@/lib/studio/voices/sources-store";
+import { getGenerationSources, getMotionChoice, getSoundProviderChoices } from "@/lib/studio/voices/sources-store";
 import { soundKeyAvailability } from "@/lib/studio/voices/sound-keys";
 import { pickHostedSound, soundSourceLabel } from "@/lib/studio/voices/sound-providers";
 import { resolveSource, type GenerationSources } from "@/lib/studio/voices/sources";
@@ -31,7 +31,7 @@ export default async function StudioContentRecordPage({ params, searchParams }: 
     && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(inspiration.outlineId)
     && links.some(link => link.id === inspiration.sourceId) ? inspiration.outlineId : null;
   const [assembly, allVoices, availability, loop, mac, sources] = await Promise.all([getVideoAssemblyStatus(locationId, recordId), listVoices(locationId).catch(() => []), getVoiceAvailability(locationId), getVideoLoopState(locationId, recordId), getMacVideoStatus(locationId), getGenerationSources(locationId).catch((): GenerationSources => ({}))]);
-  const [soundChoices, soundKeys, soundModels] = await Promise.all([getSoundProviderChoices(locationId), soundKeyAvailability(locationId), getSoundModelState(locationId)]);
+  const [soundChoices, soundKeys, soundModels, motion] = await Promise.all([getSoundProviderChoices(locationId), soundKeyAvailability(locationId), getSoundModelState(locationId), getMotionChoice(locationId)]);
   const anyHostedSound = soundKeys.fal || soundKeys.elevenlabs;
   const soundLine = (kind: "music" | "effects") => { const r = resolveSource(kind, sources[kind], { localReady: true, hostedKey: anyHostedSound }); return soundSourceLabel(kind, r.source, pickHostedSound(soundChoices[kind], soundKeys), soundModels[kind]); };
   const soundSources = { music: soundLine("music"), effects: soundLine("effects") };
@@ -72,7 +72,7 @@ export default async function StudioContentRecordPage({ params, searchParams }: 
     <ContentWorkspace locationId={locationId} recordId={recordId} title={record.title} archived={record.archived} hasScript={Boolean(script.trim())} initialMode={mode ?? null}
       form={{ locationId, recordId, version: record.version, title: record.title, payload: record.payload, templateOptions: templates.options, pinnedTemplateId: record.script_template_version_id,
         templateSelectionSaved: record.script_template_selected, canSelectTemplate: templates.canSelect && !record.archived, voices: allVoices, locked: record.archived }}
-      uploads={assets} pending={pending} loop={loop} assembly={assembly.view} narration={assembly.narration} mac={mac} voices={allVoices} availability={availability} soundSources={soundSources}
+      uploads={assets} pending={pending} loop={loop} assembly={assembly.view} narration={assembly.narration} mac={mac} voices={allVoices} availability={availability} soundSources={soundSources} motion={motion}
       uploadSlot={<StudioUploadForm key={recordId} compact locationId={locationId} recordId={recordId} pendingUploads={pendingUploads}
         attention={assets.filter(a => a.status !== "uploaded").map(a => ({ id: a.id, name: a.name, why: "Upload did not finish" }))} />}
       nextSteps={nextSteps} detailsExtra={detailsExtra} />

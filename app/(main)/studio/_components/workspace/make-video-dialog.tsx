@@ -6,10 +6,11 @@ import { makeVideoAction } from "../../(tenant)/content/actions";
 import { VoicePicker } from "@/components/voices/voice-picker";
 import { voiceStatus, type Availability } from "@/lib/studio/voices/library";
 import type { VoiceRow } from "@/lib/studio/voices/policy";
+import { DEFAULT_MOTION_CHOICE, MOTION_STYLES, MOTION_STYLE_IDS, describeMotionStyle, type MotionChoice, type MotionStyleId } from "@/lib/studio/video-assembly/motion-style";
 
 /** The one place the options for a new video live: voice, music, vertical. Opens from the top bar, so the page itself carries no form. */
-export function MakeVideoDialog({ locationId, recordId, voices, availability, soundSources, disabledReason, busy, trigger }: {
-  locationId: string; recordId: string; voices: VoiceRow[]; availability?: Availability; soundSources?: { music: string; effects: string }; disabledReason: string | null; busy: boolean; trigger?: "primary" | "inline";
+export function MakeVideoDialog({ locationId, recordId, voices, availability, soundSources, motion, disabledReason, busy, trigger }: {
+  locationId: string; recordId: string; voices: VoiceRow[]; availability?: Availability; soundSources?: { music: string; effects: string }; motion?: MotionChoice; disabledReason: string | null; busy: boolean; trigger?: "primary" | "inline";
 }) {
   const [open, setOpen] = useState(false);
   const [state, action, pending] = useActionState(makeVideoAction.bind(null, locationId, recordId), {} as { error?: string; notice?: string });
@@ -19,6 +20,11 @@ export function MakeVideoDialog({ locationId, recordId, voices, availability, so
   const [voiceover, setVoiceover] = useState(false);
   const [music, setMusic] = useState(false);
   const [voiceId, setVoiceId] = useState(preferred?.id ?? "");
+  const saved = motion ?? DEFAULT_MOTION_CHOICE;
+  const [style, setStyle] = useState<MotionStyleId>(saved.style);
+  const [accent, setAccent] = useState(saved.accent ?? MOTION_STYLES[saved.style].accent);
+  const [accentChosen, setAccentChosen] = useState(Boolean(saved.accent));
+  const [notes, setNotes] = useState(saved.notes ?? "");
   useEffect(() => { if (state.notice && !state.error) setOpen(false); }, [state]);
   const blocked = Boolean(disabledReason) || busy;
   return (
@@ -34,6 +40,20 @@ export function MakeVideoDialog({ locationId, recordId, voices, availability, so
           {voiceover ? <div className="pl-6"><VoicePicker locationId={locationId} voices={voices} availability={avail} value={voiceId} onChange={setVoiceId} /></div> : null}
           <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="music" checked={music} onChange={e => setMusic(e.target.checked)} /> Add a music bed and sound effects</label>
           {music && soundSources ? <p className="pl-6 text-xs text-muted-foreground">{soundSources.music}. {soundSources.effects}. <Link href="/settings/voices" className="underline underline-offset-2">Change</Link></p> : null}
+          <fieldset className="space-y-2 rounded-md border p-3">
+            <legend className="px-1 text-xs font-medium text-muted-foreground">Look of titles and callouts</legend>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="sr-only" htmlFor="motion-style">Style</label>
+              <select id="motion-style" name="motionStyle" value={style} onChange={e => { const next = e.target.value as MotionStyleId; setStyle(next); if (!accentChosen) setAccent(MOTION_STYLES[next].accent); }} className="min-h-11 rounded-md border bg-background px-2">
+                {MOTION_STYLE_IDS.map(id => <option key={id} value={id}>{MOTION_STYLES[id].label}</option>)}
+              </select>
+              <label className="flex min-h-11 items-center gap-2 text-xs">Accent <input type="color" name="motionAccent" value={accent} onChange={e => { setAccent(e.target.value); setAccentChosen(true); }} className="h-9 w-11 rounded border" /></label>
+            </div>
+            <p className="text-xs">{MOTION_STYLES[style].summary}</p>
+            <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">{describeMotionStyle({ style, accent }).map(line => <li key={line}>{line}</li>)}</ul>
+            <label className="block text-xs">Your notes on the look (optional)
+              <textarea name="motionNotes" value={notes} onChange={e => setNotes(e.target.value)} maxLength={300} rows={2} placeholder="e.g. Use our brand blue, keep titles short, no all-caps" className="mt-1 w-full rounded-md border bg-background p-2 text-sm" /></label>
+          </fieldset>
           <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="portrait" /> Vertical (9:16)</label>
           <button type="submit" disabled={pending || (voiceover && !voices.some(v => v.id === voiceId && voiceStatus(v, avail).usable))} className="inline-flex min-h-11 items-center rounded-md bg-primary px-4 font-medium text-primary-foreground disabled:opacity-60">{pending ? (voiceover ? "Preparing narration…" : "Sending…") : "Make video"}</button>
           {state.error ? <p role="alert" className="text-destructive">{state.error}</p> : null}

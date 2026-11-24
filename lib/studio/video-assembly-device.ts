@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { StudioCommandError } from "./command-error";
 import { createStudioR2Store, readStudioR2Config, type StudioR2Store } from "./media-r2";
 import { studioDb } from "./studio-db";
+import { getMotionChoice } from "./voices/sources-store";
 import { EXPORT_PRESIGN_SECONDS, runExportOperation } from "./video-assembly-export";
 
 export interface AssemblyDownload { name: string; url: string; byteSize: number }
@@ -39,7 +40,8 @@ export async function withAssemblyDownloads(jobs: unknown, store?: Pick<StudioR2
     const linked = await link(wanted.map(w => w.id));
     // Same order as `wanted`, minus any whose file is not there any more.
     const soundDownloads: SoundDownload[] = linked.flatMap(d => { const role = wanted.find(w => d.name.startsWith(`Narration sound-${w.role} `))?.role; return role ? [{ ...d, role }] : []; });
-    return { ...job, payload: { ...job.payload, downloads, voiceDownloads, ...(soundDownloads.length ? { soundDownloads } : {}) } };
+    const motionStyle = await getMotionChoice(job.location_id).catch(() => undefined);
+    return { ...job, payload: { ...job.payload, downloads, voiceDownloads, ...(soundDownloads.length ? { soundDownloads } : {}), ...(motionStyle ? { motionStyle } : {}) } };
   }));
 }
 

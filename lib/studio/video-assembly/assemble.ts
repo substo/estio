@@ -16,6 +16,8 @@ export interface AssembleOptions {
   sounds?: { music?: string; sfx?: string };
   /** File name (in clipsDir) of the creator's storyboard photo, if they saved one. */
   avatar?: string;
+  /** The look of titles and callouts (Clean when absent). */
+  motion?: import("./motion-style").MotionChoice;
   /** Timed speech in a footage file (file time, seconds), made on this Mac when the editor cannot transcribe. */
   transcribeFootage?: (file: string, signal?: AbortSignal) => Promise<{ start: number; end: number; text: string }[] | null>;
   /** Who narrates when voiceover is on: the on-device engine, or narration the server already rendered with the Location's key (files in clipsDir, in beat order). */
@@ -73,7 +75,7 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
     const segments = await o.transcribeFootage(join(o.projectDir, f), o.signal).catch(() => null);
     if (segments?.length) footageTranscripts.push({ file: f, lines: segments.map(x => `${x.start.toFixed(1)}-${x.end.toFixed(1)} ${x.text}`).join("\n").slice(0, 6000) });
   }
-  const brief = buildBrief({ footageTranscripts, projectFile, editorDocs: o.editorDocs, orientation: o.orientation ?? "landscape", beats, voiceFiles, timings, clips, hasVoiceover: Boolean(o.voiceover), music: o.music ?? false, soundFiles, avatarFile });
+  const brief = buildBrief({ footageTranscripts, projectFile, editorDocs: o.editorDocs, orientation: o.orientation ?? "landscape", beats, voiceFiles, timings, clips, hasVoiceover: Boolean(o.voiceover), music: o.music ?? false, soundFiles, avatarFile, ...(o.motion ? { motion: o.motion } : {}) });
   if (o.dryRun) return { projectDir: o.projectDir, projectFile, beats: beats.length, clips, voiceFiles, timings, brief };
   log("Editing with the agent");
   const agentOutput = await runEditingAgent({ cwd, brief, editorDocs: o.editorDocs, model: o.model, run, signal: o.signal });
