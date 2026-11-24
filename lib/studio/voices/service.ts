@@ -93,38 +93,59 @@ export async function previewVoice(locationId: string, voiceId: string): Promise
   catch (error) { throw new StudioCommandError(providerMessage(error) ?? "Could not preview this voice.", 502); }
 }
 
-export interface Narration { uploadIds: string[]; beats: number; characters: number }
-/** Hosted narration for a content piece: one MP3 per script paragraph, generated here with the Location's key, saved as private media. The Mac only downloads the files. */
-export async function renderNarration(locationId: string, recordId: string, voice: VoiceRow, script: string, deps: { synth?: typeof synthesizeHosted; access?: { locationId: string; app: "estio" | "substo"; userId: string }; onBeat?: (done: number, total: number) => Promise<void> | void } = {}): Promise<Narration> {
+export interface Narration { uploadIds: string[]; beats: number; characters: number; rendered: { beat: number; uploadId: string }[] }
+type NarrationAccess = { locationId: string; app: "estio" | "substo"; userId: string };
+/** One narration clip: synthesize with the Location's key, store it as private media, record it against the piece. Shared by whole-script and per-block rendering. */
+async function renderClip(ctx: { access: NarrationAccess; recordId: string; voice: VoiceRow; key: string; store: ReturnType<typeof createStudioR2Store>; synth: typeof synthesizeHosted; dir: string }, text: string, filename: string): Promise<string> {
+  let audio: Buffer;
+  try { audio = await ctx.synth(ctx.voice.provider as HostedVoiceProvider, ctx.key, ctx.voice.providerVoiceId, text); }
+  catch (error) { throw new VoiceSettingsError(providerMessage(error) ?? "The voice provider could not generate the narration."); }
+  const id = randomUUID(), file = join(ctx.dir, `${id}.mp3`);
+  await writeFile(file, audio, { mode: 0o600 });
+  await ctx.store.uploadCreateOnly({ key: `${ctx.access.locationId}/uploads/${id}/original`, filePath: file, byteSize: audio.length, contentType: "audio/mpeg" });
+  await call("studio_save_narration", ctx.access, { p_record_id: ctx.recordId, p_upload_id: id, p_filename: filename,
+    p_byte_size: audio.length, p_sha256: createHash("sha256").update(audio).digest("hex"), p_bucket: ctx.store.bucket });
+  return id;
+}
+async function withClipContext<T>(locationId: string, recordId: string, voice: VoiceRow, supplied: NarrationAccess | undefined, synthOverride: typeof synthesizeHosted | undefined, work: (ctx: Parameters<typeof renderClip>[0]) => Promise<T>): Promise<T> {
   // A caller that already proved the requester (the click that started a background render) passes the access along: no request context exists later.
-  const access = deps.access ?? await requireVoiceManager(locationId);
+  const access = supplied ?? await requireVoiceManager(locationId);
   if (!isHostedProvider(voice.provider)) throw new VoiceSettingsError("This voice is generated on the Mac.");
+  const key = await needKey(access.locationId, voice.provider);
+  const config = readStudioR2Config();
+  if (!config) throw new StudioCommandError("Media storage is not configured.", 503);
+  const dir = await mkdtemp(join(tmpdir(), "studio-narration-"));
+  try { return await work({ access, recordId, voice, key, store: createStudioR2Store(config), synth: synthOverride ?? synthesizeHosted, dir }); }
+  finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
+}
+const stampNow = () => new Date().toISOString().slice(0, 16).replace("T", " ").replace(":", "");
+
+/** Hosted narration for a content piece: one MP3 per script paragraph, generated here with the Location's key, saved as private media. The Mac only downloads the files.
+ * `reuse` maps a 1-based beat number to an existing, still-fresh clip so only changed paragraphs are rendered (and paid for). */
+export async function renderNarration(locationId: string, recordId: string, voice: VoiceRow, script: string, deps: { synth?: typeof synthesizeHosted; access?: NarrationAccess; onBeat?: (done: number, total: number) => Promise<void> | void; reuse?: ReadonlyMap<number, string> } = {}): Promise<Narration> {
   const beats = parseScript(script);
   if (!beats.length) throw new VoiceSettingsError("The script has no spoken paragraphs.");
   const long = beats.find(b => b.narration.length > 4500);
   if (long) throw new VoiceSettingsError(`Paragraph ${long.index} is longer than 4,500 characters. Split it and try again.`);
-  const key = await needKey(access.locationId, voice.provider);
-  const config = readStudioR2Config();
-  if (!config) throw new StudioCommandError("Media storage is not configured.", 503);
-  const store = createStudioR2Store(config), synth = deps.synth ?? synthesizeHosted;
-  const stamp = new Date().toISOString().slice(0, 16).replace("T", " ").replace(":", "");
-  const dir = await mkdtemp(join(tmpdir(), "studio-narration-"));
-  const uploadIds: string[] = [];
-  try {
+  const stamp = stampNow();
+  return withClipContext(locationId, recordId, voice, deps.access, deps.synth, async ctx => {
+    const uploadIds: string[] = [], rendered: Narration["rendered"] = [];
     for (const beat of beats) {
-      let audio: Buffer;
-      try { audio = await synth(voice.provider, key, voice.providerVoiceId, beat.narration); }
-      catch (error) { throw new VoiceSettingsError(providerMessage(error) ?? "The voice provider could not generate the narration."); }
-      const id = randomUUID(), file = join(dir, `${id}.mp3`);
-      await writeFile(file, audio, { mode: 0o600 });
-      await store.uploadCreateOnly({ key: `${access.locationId}/uploads/${id}/original`, filePath: file, byteSize: audio.length, contentType: "audio/mpeg" });
-      await call("studio_save_narration", access, { p_record_id: recordId, p_upload_id: id, p_filename: `Narration ${stamp} ${String(beat.index).padStart(2, "0")}.mp3`,
-        p_byte_size: audio.length, p_sha256: createHash("sha256").update(audio).digest("hex"), p_bucket: store.bucket });
-      uploadIds.push(id);
+      const existing = deps.reuse?.get(beat.index);
+      if (existing) uploadIds.push(existing);
+      else { const id = await renderClip(ctx, beat.narration, `Narration ${stamp} ${String(beat.index).padStart(2, "0")}.mp3`); uploadIds.push(id); rendered.push({ beat: beat.index, uploadId: id }); }
       await deps.onBeat?.(uploadIds.length, beats.length);
     }
-  } finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
-  return { uploadIds, beats: beats.length, characters: beats.reduce((n, b) => n + b.narration.length, 0) };
+    return { uploadIds, rendered, beats: beats.length, characters: beats.reduce((n, b) => n + b.narration.length, 0) };
+  });
+}
+
+/** One block's audio (the editor's Regenerate audio). Hosted voices only: a Mac voice is generated when the video is made. */
+export async function renderBlockNarration(locationId: string, recordId: string, voice: VoiceRow, text: string, label: string): Promise<string> {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!clean) throw new VoiceSettingsError("This block has no text to voice.");
+  if (clean.length > 4500) throw new VoiceSettingsError("This block is longer than 4,500 characters. Split it and try again.");
+  return withClipContext(locationId, recordId, voice, undefined, undefined, ctx => renderClip(ctx, clean, `Narration ${stampNow()} ${label.slice(0, 40)}.mp3`));
 }
 
 const LOCAL_MODEL_ID = "qwen3-tts-0.6b-4bit";
