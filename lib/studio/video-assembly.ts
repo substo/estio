@@ -79,3 +79,18 @@ export async function getVideoAssemblyStatus(locationId: string, recordId: strin
   }
   return { view: { jobId: job.id, status: job.status, message: job.last_error_message, summary: job.result?.assembly?.summary ?? null, createdAt: job.created_at }, macOnline, narration };
 }
+
+/** What the requester's own Mac reports about video tools, in the shape the status chip needs. Never reads another account's device. */
+export async function getMacVideoStatus(locationId: string): Promise<import("./workspace/mac-status").MacStatusInput> {
+  const none = { hasDevice: false, processing: false, paused: false, online: false, assemblyReady: null, missing: [] as string[] };
+  const access = await getStudioAccess(locationId);
+  if (!access) return none;
+  const d = await studioDb.one<{ seen_at: string | null; report: Record<string, unknown>; processing_enabled: boolean; paused: boolean }>(Prisma.sql`
+    select seen_at, report, processing_enabled, paused from studio.studio_devices
+    where location_id = ${access.locationId} and created_by = ${access.userId} and revoked_at is null order by seen_at desc nulls last limit 1`).catch(() => null);
+  if (!d) return none;
+  const va = (d.report?.videoAssembly ?? null) as { ready?: unknown; missing?: unknown } | null;
+  return { hasDevice: true, processing: d.processing_enabled, paused: d.paused, online: deviceOnline(d.seen_at, d.report ?? {}),
+    assemblyReady: va && typeof va.ready === "boolean" ? va.ready : null,
+    missing: Array.isArray(va?.missing) ? (va!.missing as unknown[]).filter((x): x is string => typeof x === "string").slice(0, 6) : [] };
+}

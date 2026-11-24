@@ -8,8 +8,10 @@ import type { PendingStudioUpload } from "@/lib/studio/uploads";
 
 type Pending = PendingStudioUpload & { start?: UploadCommand };
 /** Metadata lives on the server; signed URLs and file bytes are never put in browser storage. */
-export function StudioUploadForm({ locationId, recordId, pendingUploads = [] }: {
+export function StudioUploadForm({ locationId, recordId, pendingUploads = [], compact = false, attention = [] }: {
   locationId: string; recordId: string; pendingUploads?: PendingStudioUpload[];
+  /** Workspace rail: a drop zone, and unfinished uploads folded into one "Needs attention" row instead of a long list. */
+  compact?: boolean; attention?: { id: string; name: string; why: string }[];
 }) {
   const tenantHeaders = useStudioTenantHeaders();
   const router = useRouter();
@@ -75,22 +77,44 @@ export function StudioUploadForm({ locationId, recordId, pendingUploads = [] }: 
     } finally { busy.current = false; setProgress(null); }
   }
 
+  const pendingList = pending.length ? <div className="space-y-3">
+    <p className="text-xs text-muted-foreground">Check storage first. Recovery is available for seven hours after registration. Interrupted transfers restart from the beginning; select the original file.</p>
+    {pending.map(entry => <div key={entry.id} className="space-y-2 rounded border p-3">
+      <p className="break-words">{entry.original_filename} · {Number(entry.byte_size).toLocaleString()} bytes</p>
+      <button type="button" className="min-h-11 text-primary underline" disabled={progress !== null} onClick={() => void run(entry)}>Check storage and finish</button>
+      <label className="block">Retry with original file<input aria-label={`Retry ${entry.original_filename}`} type="file" disabled={progress !== null}
+        onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void run(entry, file); }} className="mt-1 block w-full" /></label>
+    </div>)}
+  </div> : null;
+  const extras = attention.filter(a => !pending.some(p => p.id === a.id));
+  const messages = <>
+    {progress !== null ? <p role="status">Uploading or checking storage… {progress}%</p> : null}
+    {message.error ? <p role="alert" className="text-destructive">{message.error}</p> : message.saved ? <p role="status" className="text-muted-foreground">{message.saved}</p> : null}
+  </>;
+  if (compact) {
+    const count = pending.length + extras.length;
+    return <div className="space-y-2 text-sm">
+      <label onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const file = event.dataTransfer.files?.[0]; if (file) void run(undefined, file); }}
+        className="flex min-h-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed p-3 text-center hover:bg-accent focus-within:outline focus-within:outline-2 focus-within:outline-offset-2">
+        <span className="font-medium">Add footage</span><span className="text-xs text-muted-foreground">Drop a video or audio file, or choose one. Up to 5 GB, stored privately.</span>
+        <input type="file" accept="video/mp4,video/quicktime,video/webm,audio/*" disabled={progress !== null} className="sr-only"
+          onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void run(undefined, file); }} />
+      </label>
+      {messages}
+      {count ? <details className="rounded-lg border p-2"><summary className="min-h-11 cursor-pointer leading-[2.75rem]">Needs attention ({count})</summary>
+        <div className="space-y-3 pb-2">
+          {extras.map(a => <p key={a.id} className="break-words text-muted-foreground">{a.name} · {a.why}</p>)}
+          {pendingList}
+        </div></details> : null}
+    </div>;
+  }
   return <div className="space-y-3 rounded-xl border bg-card p-4 text-sm">
     <label className="block font-medium">Upload your own video or audio
       <input type="file" accept="video/mp4,video/quicktime,video/webm,audio/*" disabled={progress !== null}
         onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void run(undefined, file); }}
         className="mt-2 block w-full text-sm" /></label>
     <p className="text-xs text-muted-foreground">Up to 5 GB. Stored privately and transcribed automatically with this location&apos;s OpenAI key. If interrupted, recover the existing upload below before starting a new one.</p>
-    {pending.length ? <div className="space-y-3"><h3 className="font-medium">Your unfinished uploads</h3>
-      <p className="text-xs text-muted-foreground">Check storage first. Recovery is available for seven hours after registration. Interrupted transfers restart from the beginning; select the original file. This list shows up to 100 uploads, oldest first.</p>
-      {pending.map(entry => <div key={entry.id} className="space-y-2 rounded border p-3">
-        <p>{entry.original_filename} · {Number(entry.byte_size).toLocaleString()} bytes</p>
-        <button type="button" className="text-primary underline" disabled={progress !== null} onClick={() => void run(entry)}>Check storage and finish</button>
-        <label className="block">Retry with original file<input aria-label={`Retry ${entry.original_filename}`} type="file" disabled={progress !== null}
-          onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void run(entry, file); }} className="mt-1 block w-full" /></label>
-      </div>)}
-    </div> : null}
-    {progress !== null ? <p role="status">Uploading or checking storage… {progress}%</p> : null}
-    {message.error ? <p role="alert" className="text-destructive">{message.error}</p> : message.saved ? <p role="status" className="text-muted-foreground">{message.saved}</p> : null}
+    {pending.length ? <div className="space-y-3"><h3 className="font-medium">Your unfinished uploads</h3>{pendingList}</div> : null}
+    {messages}
   </div>;
 }
