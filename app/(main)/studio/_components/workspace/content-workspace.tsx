@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { startTransition, useActionState, useEffect, useMemo, useState } from "react";
+import { startTransition, useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { MessageSquare } from "lucide-react";
 import { askVideoEditAction, openEditorAction, stopVideoAction } from "../../(tenant)/content/actions";
 import { ContentRecordForm } from "../content-record-form";
@@ -19,6 +19,8 @@ import { MacChip } from "./mac-chip";
 import { MakeVideoDialog } from "./make-video-dialog";
 import { PlayerStage } from "./player-stage";
 import { TimelineView } from "./timeline-view";
+import { TranscriptPanel } from "./transcript-panel";
+import { buildTranscript } from "@/lib/studio/workspace/transcript";
 
 type Form = { error?: string; notice?: string };
 type FormProps = Omit<React.ComponentProps<typeof ContentRecordForm>, "visible">;
@@ -28,6 +30,7 @@ export function ContentWorkspace(props: {
   locationId: string; recordId: string; title: string; archived: boolean; hasScript: boolean; initialMode: string | null;
   form: FormProps; uploads: AssetUpload[]; pending: PendingUpload[];
   loop: VideoLoopState | null; assembly: VideoAssemblyView | null; narration: NarrationView | null; mac: MacStatusInput; /** Every voice in the Location; the picker groups them by availability. */ voices: VoiceRow[]; availability?: Availability; /** Where music and sound effects will be made, from the Location's generation sources (labels only). */ soundSources?: { music: string; effects: string }; /** The Location's saved look for titles and callouts. */ motion?: import("@/lib/studio/video-assembly/motion-style").MotionChoice;
+  /** The script's spoken beats in order, for the transcript. */ beats?: string[];
   uploadSlot: React.ReactNode; nextSteps: React.ReactNode; detailsExtra: React.ReactNode;
 }) {
   const { locationId, recordId, loop } = props;
@@ -40,6 +43,7 @@ export function ContentWorkspace(props: {
   const [askState, ask, asking] = useActionState(askVideoEditAction.bind(null, locationId, recordId), {} as Form);
   const [stopState, stop, stopping] = useActionState(stopVideoAction.bind(null, locationId, recordId), {} as Form);
   const [draft, setDraft] = useState("");
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const [openState, open, opening] = useActionState(openEditorAction.bind(null, locationId, recordId), {} as Form);
   const latestId = versions[0]?.id;
   useEffect(() => { if (latestId) setVersionId(latestId); }, [latestId]);   // a new export shows itself
@@ -55,11 +59,13 @@ export function ContentWorkspace(props: {
   // Choosing an action sends nothing. It focuses the clip and starts a message in the agent's box for the user to finish (how long, how, what instead) and send.
   const onClipAction = (action: ClipAction, clip: SelectedClip) => { setSelected(clip); setDraft(clipStarter(action)); setAgentOpen(true); };
 
+  const current = versions.find(v => v.id === versionId) ?? versions[0];
+  const voiceClips = current?.timeline?.tracks.find(t => t.n === "Voice")?.c ?? [];
+  const transcript = useMemo(() => (props.beats?.length ? buildTranscript(props.beats, voiceClips.map(c => ({ s: c.s, e: c.e }))) : null), [props.beats, current?.timeline]);
   const groups = useMemo(() => groupAssets(props.uploads, props.pending), [props.uploads, props.pending]);
   const steps = jobStepper({ narration: props.narration, assembly: props.assembly });
   const busy = Boolean(loop?.busy) || steps?.some(s => s.state === "active") === true;
   const mac = describeMac(props.mac);
-  const current = versions.find(v => v.id === versionId) ?? versions[0];
   const editorPending = loop?.openEditor?.status === "queued" || loop?.openEditor?.status === "running";
   const makeBlock = props.archived ? "This piece is archived." : !props.hasScript ? "Save a script first (Script mode)." : null;
 
@@ -95,10 +101,11 @@ export function ContentWorkspace(props: {
         <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)_340px]">
           <div className="order-2 lg:order-1"><AssetsRail groups={groups} uploadSlot={props.uploadSlot} /></div>
           <div className="order-1 min-w-0 space-y-4 lg:order-2">
-            <PlayerStage versions={versions} versionId={versionId} onVersion={setVersionId} steps={steps} onStop={busy ? onStop : undefined} stopping={stopping}
+            <PlayerStage versions={versions} versionId={versionId} onVersion={setVersionId} steps={steps} onStop={busy ? onStop : undefined} stopping={stopping} videoRef={videoRef}
               empty={<><p className="font-medium">No video yet</p><p className="text-muted-foreground">Add your footage on the left, then press Make video. Your Mac does the editing.</p>
                 <MakeVideoDialog locationId={locationId} recordId={recordId} voices={props.voices} availability={props.availability} soundSources={props.soundSources} motion={props.motion} disabledReason={makeBlock} busy={busy} trigger="inline" /></>} />
             {hasVideo ? <TimelineView snapshot={current?.timeline ?? null} selected={selected} onSelect={setSelected} onAction={onClipAction} canEdit={Boolean(loop?.projectKept)} busy={busy || asking} /> : null}
+            {transcript ? <TranscriptPanel lines={transcript} videoRef={videoRef} onEditScript={() => choose("script")} /> : null}
           </div>
           <aside aria-label="Agent" className={`order-3 ${agentOpen ? "fixed inset-x-0 bottom-0 z-40 flex max-h-[75vh] rounded-t-2xl border bg-background p-4 shadow-lg" : "hidden"} lg:static lg:flex lg:max-h-none lg:rounded-xl lg:border lg:bg-card lg:p-4 lg:shadow-none`}>
             <div className="flex w-full min-h-0 flex-col">

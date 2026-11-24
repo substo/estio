@@ -5,6 +5,8 @@ import { AgentDock } from "./agent-dock";
 import { AssetsRail } from "./assets-rail";
 import { PlayerStage } from "./player-stage";
 import { TimelineView } from "./timeline-view";
+import { TranscriptPanel } from "./transcript-panel";
+import { buildTranscript } from "@/lib/studio/workspace/transcript";
 import { groupAssets } from "@/lib/studio/workspace/assets";
 
 const noop = () => {};
@@ -55,4 +57,11 @@ test("assets rail lists the footage only: narration lives on the script blocks a
   assert.match(html, /Footage/); assert.match(html, /You uploaded/); assert.match(html, /UPLOAD-ZONE/); assert.match(html, /shot\.mp4/);
   assert.doesNotMatch(html, /Narration/); assert.doesNotMatch(html, /Exports/); assert.doesNotMatch(html, /Show in player/); assert.doesNotMatch(html, /Edited video/);
   assert.doesNotMatch(html, /bad\.mov/); assert.doesNotMatch(html, /Check storage and finish/);
+});
+
+test("transcript shows each beat as a line of clickable words with a start time, and says the timing is estimated", () => {
+  const lines = buildTranscript(["Stop scrolling, now.", "Watch this"], [{ s: 0, e: 4 }, { s: 65, e: 67 }])!;
+  const html = renderToStaticMarkup(<TranscriptPanel lines={lines} videoRef={{ current: null }} onEditScript={noop} />);
+  assert.match(html, /aria-label="Transcript"/); assert.match(html, />Stop /); assert.match(html, /scrolling, /); assert.match(html, /Play from 0:00/); assert.match(html, /Play from 1:05/);
+  assert.match(html, /Click a word to play from it/); assert.match(html, /estimated/); assert.match(html, /Edit the script/);
 });

@@ -8,8 +8,8 @@ const when = (iso: string) => new Date(iso).toLocaleString("en-GB", { day: "nume
 const icon = { done: <Check aria-hidden className="h-4 w-4 text-emerald-600" />, active: <Loader2 aria-hidden className="h-4 w-4 animate-spin motion-reduce:animate-none" />, pending: <Circle aria-hidden className="h-4 w-4 text-muted-foreground" />, failed: <AlertTriangle aria-hidden className="h-4 w-4 text-destructive" /> };
 
 /** The video, its versions, and an honest one-line progress while a job runs. */
-export function PlayerStage({ versions, versionId, onVersion, steps, empty, onStop, stopping }: {
-  versions: VideoVersion[]; versionId: string; onVersion: (id: string) => void; steps: Step[] | null; empty: React.ReactNode; /** Present while something is being made or changed. */ onStop?: () => void; stopping?: boolean;
+export function PlayerStage({ versions, versionId, onVersion, steps, empty, onStop, stopping, videoRef }: {
+  versions: VideoVersion[]; versionId: string; onVersion: (id: string) => void; steps: Step[] | null; empty: React.ReactNode; /** Present while something is being made or changed. */ onStop?: () => void; stopping?: boolean; /** Lets the transcript follow and seek the video. */ videoRef?: React.RefObject<HTMLVideoElement | null>;
 }) {
   const current = versions.find(v => v.id === versionId) ?? versions[0];
   return (
@@ -22,7 +22,7 @@ export function PlayerStage({ versions, versionId, onVersion, steps, empty, onSt
       {onStop ? <button type="button" onClick={onStop} disabled={stopping} className="inline-flex min-h-11 items-center rounded-md border border-destructive px-4 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-60">{stopping ? "Stopping…" : "Stop"}</button> : null}
       {current ? (
         <>
-          <video key={current.id} controls preload="metadata" playsInline className="aspect-video w-full rounded-lg bg-black" src={`/studio/uploads/${current.id}?inline=1`} />
+          <video key={current.id} ref={videoRef} controls preload="metadata" playsInline className="aspect-video w-full rounded-lg bg-black" src={`/studio/uploads/${current.id}?inline=1`} />
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
             <span>{current.name} · {formatBytes(current.bytes)} · <a className="text-primary hover:underline" href={`/studio/uploads/${current.id}`} download>Download</a></span>
             {versions.length > 1 ? <label className="flex items-center gap-2">Version
