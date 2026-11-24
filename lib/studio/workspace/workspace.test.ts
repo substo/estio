@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { groupAssets, classifyUpload } from "./assets";
-import { clipInstruction, MAX_INSTRUCTION } from "./clip-actions";
+import { clipStarter, focusedInstruction, MAX_INSTRUCTION } from "./clip-actions";
 import { describeMac } from "./mac-status";
 import { defaultMode, parseMode } from "./modes";
 import { jobStepper } from "./stepper";
@@ -59,10 +59,15 @@ test("stepper reports narration progress, queueing, editing and failure honestly
 
 test("clip instructions name the clip and stay bounded", () => {
   const sel = { track: "Text", clip: { s: 12, e: 18, l: "TIP 1", k: "text" } };
-  assert.match(clipInstruction("trim", sel), /Text track.*"TIP 1".*0:12 to 0:18.*trim it/);
-  assert.match(clipInstruction("delete", sel), /delete it/);
-  assert.ok(clipInstruction("ask", sel, "x".repeat(5000)).length <= MAX_INSTRUCTION);
-  assert.doesNotMatch(clipInstruction("trim", sel, "by two seconds"), /tighter/);
+  // Choosing an action only starts a message; the user finishes it (how long, how, what instead).
+  assert.match(clipStarter("trim"), /^Trim 2 seconds off the end of this clip\.$/);
+  assert.match(clipStarter("replace"), /^Replace this clip with $/);
+  assert.match(clipStarter("delete"), /Delete this clip/);
+  assert.match(clipStarter("retake"), /Retake the audio/);
+  assert.equal(clipStarter("ask"), "");
+  // What is sent names the clip and carries the user's own words, bounded.
+  assert.match(focusedInstruction(sel, "Trim 3 seconds off the start"), /Text track.*"TIP 1".*0:12 to 0:18.*Trim 3 seconds off the start/);
+  assert.ok(focusedInstruction(sel, "x".repeat(5000)).length <= MAX_INSTRUCTION);
 });
 
 test("Mac status names what is missing and never echoes unsafe text", () => {

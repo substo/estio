@@ -2,18 +2,20 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { threadReplyLine, type VideoThreadMessage } from "@/lib/studio/video-assembly-policy";
-import { clipLabel, suggestedPrompts, type SelectedClip } from "@/lib/studio/workspace/clip-actions";
+import { clipLabel, focusedInstruction, suggestedPrompts, type SelectedClip } from "@/lib/studio/workspace/clip-actions";
 
 const when = (iso: string) => new Date(iso).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 /** The always-docked agent: a persisted thread, a context chip (whole video or the selected clip), and suggested prompts. */
-export function AgentDock({ thread, projectKept, busy, selected, onClearSelection, onSend, pending, error, notice }: {
+export function AgentDock({ thread, projectKept, busy, selected, onClearSelection, onSend, pending, error, notice, draft, onDraft, onStop, stopping }: {
   thread: VideoThreadMessage[]; projectKept: boolean; busy: boolean; selected: SelectedClip | null; onClearSelection: () => void;
   onSend: (text: string) => void; pending: boolean; error?: string; notice?: string;
+  /** The message being written. Held by the workspace so a clip action can start it for the user to finish. */ draft: string; onDraft: (text: string) => void;
+  onStop: () => void; stopping: boolean;
 }) {
-  const [text, setText] = useState("");
+  const text = draft, setText = onDraft;
   const disabled = !projectKept || busy || pending;
-  const send = (value: string) => { const t = value.trim(); if (!t) return; onSend(selected ? `On the ${selected.track} track, the clip "${selected.clip.l}": ${t}` : t); setText(""); };
+  const send = (value: string) => { const t = value.trim(); if (!t) return; onSend(selected ? focusedInstruction(selected, t) : t); setText(""); };
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 text-sm">
       <div className="flex items-center justify-between gap-2"><h2 className="font-medium">Agent</h2>
@@ -29,12 +31,14 @@ export function AgentDock({ thread, projectKept, busy, selected, onClearSelectio
             </li>))}</ol>
         ) : <p className="text-muted-foreground">{projectKept ? "Ask for a change in plain words. The agent edits the project on your Mac and saves a new version." : "Make a video first. The agent works on the project your Mac keeps."}</p>}
       </div>
-      <div className="flex flex-wrap gap-2">{suggestedPrompts(Boolean(selected)).map(p => <button key={p} type="button" disabled={disabled} onClick={() => send(p)} className="min-h-11 rounded-full border px-3 text-xs hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60">{p}</button>)}</div>
+      <div className="flex flex-wrap gap-2">{suggestedPrompts(Boolean(selected)).map(p => <button key={p} type="button" disabled={disabled} onClick={() => setText(p)} className="min-h-11 rounded-full border px-3 text-xs hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60">{p}</button>)}</div>
       <form onSubmit={e => { e.preventDefault(); send(text); }} className="space-y-2">
         <label className="block"><span className="sr-only">Message to the agent</span>
           <textarea value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); send(text); } }} maxLength={900} rows={3} disabled={disabled}
             placeholder={busy ? "The agent is working…" : selected ? "What should change about this clip?" : "What should change?"} className="block w-full rounded-md border bg-background p-3" /></label>
         <button type="submit" disabled={disabled || !text.trim()} className="inline-flex min-h-11 items-center rounded-md bg-primary px-4 font-medium text-primary-foreground disabled:opacity-60">{pending ? "Sending…" : busy ? "Agent is working…" : "Send"}</button>
+        {busy ? <button type="button" onClick={onStop} disabled={stopping} className="ml-2 inline-flex min-h-11 items-center rounded-md border border-destructive px-4 font-medium text-destructive hover:bg-destructive/10 disabled:opacity-60">{stopping ? "Stopping…" : "Stop"}</button> : null}
+        <p className="text-xs text-muted-foreground">Sending asks the agent to edit your project on your Mac and save a new version. That takes a few minutes, and you can stop it.</p>
         {error ? <p role="alert" className="text-destructive">{error}</p> : null}
         {notice ? <p role="status" className="text-muted-foreground">{notice}</p> : null}
       </form>

@@ -8,7 +8,7 @@ import { createStudioSourceIdea, getStudioContentRecord, saveStudioContentRecord
 import { regenerateBlockAudio, type RegenerateResult } from "@/lib/studio/script-audio";
 import { StudioRestError } from "@/lib/studio/rest";
 import { StudioCommandError } from "@/lib/studio/command-error";
-import { requestVideoEdit, requestOpenEditor } from "@/lib/studio/video-loop";
+import { requestVideoEdit, requestOpenEditor, stopVideoWork } from "@/lib/studio/video-loop";
 import { discardUnfinishedUploads } from "@/lib/studio/uploads";
 import { requestVideoAssembly } from "@/lib/studio/video-assembly";
 import { readVideoAssemblyOptions } from "@/lib/studio/video-assembly-policy";
@@ -60,6 +60,18 @@ export async function askVideoEditAction(locationId: string, recordId: string, _
   } catch (error) {
     if (error instanceof StudioCommandError) return { error: error.message };
     return { error: "Studio could not send this to your Mac. Try again." };
+  }
+}
+export async function stopVideoAction(locationId: string, recordId: string, _previous: { error?: string; notice?: string }): Promise<{ error?: string; notice?: string }> {
+  if (!await getStudioAccess(locationId)) notFound();
+  try {
+    const result = await stopVideoWork(locationId, recordId);
+    if (!result.ok) return { error: result.message };
+    revalidatePath(`/studio/content/${recordId}`);
+    return { notice: result.stopped ? "Stopping. Your Mac stops within a minute; edits already saved stay in the project history." : "Nothing was running." };
+  } catch (error) {
+    if (error instanceof StudioCommandError) return { error: error.message };
+    return { error: "Studio could not stop this. Try again." };
   }
 }
 export async function openEditorAction(locationId: string, recordId: string, _previous: { error?: string; notice?: string }): Promise<{ error?: string; notice?: string }> {

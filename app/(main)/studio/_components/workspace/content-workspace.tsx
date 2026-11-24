@@ -2,14 +2,14 @@
 import Link from "next/link";
 import { startTransition, useActionState, useEffect, useMemo, useState } from "react";
 import { MessageSquare } from "lucide-react";
-import { askVideoEditAction, openEditorAction } from "../../(tenant)/content/actions";
+import { askVideoEditAction, openEditorAction, stopVideoAction } from "../../(tenant)/content/actions";
 import { ContentRecordForm } from "../content-record-form";
 import { AutoRefresh } from "../auto-refresh";
 import { openEditorLine, type VideoAssemblyView, type NarrationView, type VideoLoopState } from "@/lib/studio/video-assembly-policy";
 import type { VoiceRow } from "@/lib/studio/voices/policy";
 import type { Availability } from "@/lib/studio/voices/library";
 import { groupAssets, type AssetUpload, type PendingUpload } from "@/lib/studio/workspace/assets";
-import { clipInstruction, type ClipAction, type SelectedClip } from "@/lib/studio/workspace/clip-actions";
+import { clipStarter, type ClipAction, type SelectedClip } from "@/lib/studio/workspace/clip-actions";
 import { describeMac, type MacStatusInput } from "@/lib/studio/workspace/mac-status";
 import { defaultMode, modeLabels, parseMode, workspaceModes, type WorkspaceMode } from "@/lib/studio/workspace/modes";
 import { jobStepper } from "@/lib/studio/workspace/stepper";
@@ -38,6 +38,8 @@ export function ContentWorkspace(props: {
   const [selected, setSelected] = useState<SelectedClip | null>(null);
   const [agentOpen, setAgentOpen] = useState(false);
   const [askState, ask, asking] = useActionState(askVideoEditAction.bind(null, locationId, recordId), {} as Form);
+  const [stopState, stop, stopping] = useActionState(stopVideoAction.bind(null, locationId, recordId), {} as Form);
+  const [draft, setDraft] = useState("");
   const [openState, open, opening] = useActionState(openEditorAction.bind(null, locationId, recordId), {} as Form);
   const latestId = versions[0]?.id;
   useEffect(() => { if (latestId) setVersionId(latestId); }, [latestId]);   // a new export shows itself
@@ -49,10 +51,9 @@ export function ContentWorkspace(props: {
     const url = new URL(window.location.href); url.searchParams.set("mode", next); window.history.replaceState(null, "", url);
   };
   const send = (text: string) => { const form = new FormData(); form.set("instruction", text); startTransition(() => ask(form)); setSelected(null); };
-  const onClipAction = (action: ClipAction, clip: SelectedClip) => {
-    if (action === "ask") { setAgentOpen(true); return; }   // asking opens the agent with the clip as its focus
-    send(clipInstruction(action, clip));
-  };
+  const onStop = () => startTransition(() => stop());
+  // Choosing an action sends nothing. It focuses the clip and starts a message in the agent's box for the user to finish (how long, how, what instead) and send.
+  const onClipAction = (action: ClipAction, clip: SelectedClip) => { setSelected(clip); setDraft(clipStarter(action)); setAgentOpen(true); };
 
   const groups = useMemo(() => groupAssets(props.uploads, props.pending), [props.uploads, props.pending]);
   const steps = jobStepper({ narration: props.narration, assembly: props.assembly });
@@ -92,9 +93,9 @@ export function ContentWorkspace(props: {
 
       {mode === "edit" ? (
         <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)_340px]">
-          <div className="order-2 lg:order-1"><AssetsRail groups={groups} uploadSlot={props.uploadSlot} onShowVersion={setVersionId} /></div>
+          <div className="order-2 lg:order-1"><AssetsRail groups={groups} uploadSlot={props.uploadSlot} /></div>
           <div className="order-1 min-w-0 space-y-4 lg:order-2">
-            <PlayerStage versions={versions} versionId={versionId} onVersion={setVersionId} steps={steps}
+            <PlayerStage versions={versions} versionId={versionId} onVersion={setVersionId} steps={steps} onStop={busy ? onStop : undefined} stopping={stopping}
               empty={<><p className="font-medium">No video yet</p><p className="text-muted-foreground">Add your footage on the left, then press Make video. Your Mac does the editing.</p>
                 <MakeVideoDialog locationId={locationId} recordId={recordId} voices={props.voices} availability={props.availability} soundSources={props.soundSources} motion={props.motion} disabledReason={makeBlock} busy={busy} trigger="inline" /></>} />
             {hasVideo ? <TimelineView snapshot={current?.timeline ?? null} selected={selected} onSelect={setSelected} onAction={onClipAction} canEdit={Boolean(loop?.projectKept)} busy={busy || asking} /> : null}
@@ -102,7 +103,7 @@ export function ContentWorkspace(props: {
           <aside aria-label="Agent" className={`order-3 ${agentOpen ? "fixed inset-x-0 bottom-0 z-40 flex max-h-[75vh] rounded-t-2xl border bg-background p-4 shadow-lg" : "hidden"} lg:static lg:flex lg:max-h-none lg:rounded-xl lg:border lg:bg-card lg:p-4 lg:shadow-none`}>
             <div className="flex w-full min-h-0 flex-col">
               <button type="button" onClick={() => setAgentOpen(false)} className="mb-2 self-end text-xs text-muted-foreground underline lg:hidden">Close</button>
-              <AgentDock thread={loop?.thread ?? []} projectKept={Boolean(loop?.projectKept)} busy={busy} selected={selected} onClearSelection={() => setSelected(null)} onSend={send} pending={asking} error={askState.error} notice={askState.notice} />
+              <AgentDock thread={loop?.thread ?? []} projectKept={Boolean(loop?.projectKept)} busy={busy} selected={selected} onClearSelection={() => setSelected(null)} onSend={send} pending={asking} error={askState.error ?? stopState.error} notice={stopState.notice ?? askState.notice} draft={draft} onDraft={setDraft} onStop={onStop} stopping={stopping} />
             </div>
           </aside>
           <button type="button" onClick={() => setAgentOpen(true)} className="fixed bottom-4 right-4 z-30 inline-flex min-h-11 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground shadow-lg lg:hidden"><MessageSquare aria-hidden className="h-4 w-4" />Agent</button>
