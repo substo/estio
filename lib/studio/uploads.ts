@@ -7,6 +7,7 @@ import { createStudioR2Store, readStudioR2Config } from "./media-r2";
 import type { StudioUploadRequest } from "./upload-policy";
 import { recoverUpload, type RecoverableUpload, type UploadCommand } from "./upload-recovery";
 import { StudioCommandError } from "./command-error";
+import { readDiscardResult, readDiscardTarget } from "./upload-discard-policy";
 
 export class StudioUploadError extends StudioCommandError {}
 
@@ -81,4 +82,21 @@ export async function listStudioRecordUploads(locationId: string, recordId: stri
     jobIds ? studioDb.rows<{ id: string; status: string; attempts: number; max_attempts: number; last_error_message: string | null }>(Prisma.sql`select id,status,attempts,max_attempts,last_error_message from studio.studio_jobs t where location_id = ${locationId} and id = any(string_to_array(${jobIds}, ',')::uuid[])`) : [],
   ]);
   return uploads.map(u => ({ ...u, transcript: transcripts.find(t => t.upload_id === u.id) ?? null, job: jobs.find(j => j.id === u.transcription_job_id) ?? null }));
+}
+
+/** Remove the caller's own unfinished uploads of one record (one, or all). SQL decides which rows qualify; finished uploads, exports and narration are never matched. Storage objects are removed best-effort afterwards. */
+export async function discardUnfinishedUploads(locationId: string, recordId: string, uploadId?: string | null): Promise<{ discarded: number }> {
+  const access = await getStudioAccess(locationId);
+  if (!access || (await auth()).actor) throw new StudioUploadError("Discarding uploads requires your own authorized account.", 403);
+  if (!/^[0-9a-f-]{36}$/i.test(recordId)) throw new StudioUploadError("Invalid piece.");
+  const target = readDiscardTarget(uploadId ?? null);
+  if (!target.ok) throw new StudioUploadError(target.error);
+  const raw = await studioDb.call("studio_discard_unfinished_uploads", { p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_record_id: recordId, p_upload_id: target.uploadId });
+  const result = readDiscardResult(raw, access.locationId);
+  const config = readStudioR2Config();
+  if (config && result.objects.length) {
+    const store = createStudioR2Store(config);
+    await Promise.all(result.objects.map(o => store.deleteObject(o.key).catch(() => {})));   // a partial object that cannot be removed now expires with the bucket's own lifecycle rules
+  }
+  return { discarded: result.discarded };
 }

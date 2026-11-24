@@ -9,6 +9,7 @@ import { regenerateBlockAudio, type RegenerateResult } from "@/lib/studio/script
 import { StudioRestError } from "@/lib/studio/rest";
 import { StudioCommandError } from "@/lib/studio/command-error";
 import { requestVideoEdit, requestOpenEditor } from "@/lib/studio/video-loop";
+import { discardUnfinishedUploads } from "@/lib/studio/uploads";
 import { requestVideoAssembly } from "@/lib/studio/video-assembly";
 import { readVideoAssemblyOptions } from "@/lib/studio/video-assembly-policy";
 import { readScriptTemplateSelection } from "@/lib/studio/script-template-policy";
@@ -110,5 +111,18 @@ export async function regenerateBlockAudioAction(locationId: string, recordId: s
     if (error instanceof StudioRestError && error.code === "40001") return { ok: false, error: "The script changed while audio was generating. Reload the piece; generated clips are kept." };
     console.error("[studio-content] Block audio failed", { type: error instanceof Error ? error.constructor.name : "unknown" });
     return { ok: false, error: "Could not generate audio. Try again." };
+  }
+}
+
+export async function discardUnfinishedUploadsAction(locationId: string, recordId: string, uploadId: string | null): Promise<{ ok: true; discarded: number } | { ok: false; error: string }> {
+  if (!await getStudioAccess(locationId)) notFound();
+  try {
+    const { discarded } = await discardUnfinishedUploads(locationId, recordId, uploadId);
+    revalidatePath(`/studio/content/${recordId}`);
+    return { ok: true, discarded };
+  } catch (error) {
+    if (error instanceof StudioCommandError) return { ok: false, error: error.message };
+    console.error("[studio-content] Discard failed", { type: error instanceof Error ? error.constructor.name : "unknown" });
+    return { ok: false, error: "Could not discard. Try again." };
   }
 }

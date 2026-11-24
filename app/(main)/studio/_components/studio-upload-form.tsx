@@ -5,6 +5,8 @@ import { useRef, useState } from "react";
 import { readStudioUploadRequest } from "@/lib/studio/upload-policy";
 import type { UploadCommand, UploadRecoveryResult } from "@/lib/studio/upload-recovery";
 import type { PendingStudioUpload } from "@/lib/studio/uploads";
+import { discardUnfinishedUploadsAction } from "@/app/(main)/studio/(tenant)/content/actions";
+import { discardConfirmText } from "@/lib/studio/upload-discard-policy";
 
 type Pending = PendingStudioUpload & { start?: UploadCommand };
 /** Metadata lives on the server; signed URLs and file bytes are never put in browser storage. */
@@ -19,6 +21,25 @@ export function StudioUploadForm({ locationId, recordId, pendingUploads = [], co
   const [progress, setProgress] = useState<number | null>(null);
   const [pending, setPending] = useState<Pending[]>(pendingUploads);
   const [message, setMessage] = useState<{ error?: string; saved?: string }>({});
+  /** Which discard is waiting for a confirm: one upload id, or "all". */
+  const [confirming, setConfirming] = useState<string | "all" | null>(null);
+  async function discard(target: string | "all") {
+    if (busy.current) return;
+    busy.current = true; setMessage({});
+    try {
+      const result = await discardUnfinishedUploadsAction(locationId, recordId, target === "all" ? null : target);
+      if (!result.ok) { setMessage({ error: result.error }); return; }
+      setPending(rows => target === "all" ? [] : rows.filter(row => row.id !== target));
+      setConfirming(null);
+      setMessage({ saved: result.discarded ? `Discarded ${result.discarded} unfinished upload${result.discarded === 1 ? "" : "s"}.` : "Nothing to discard: it had already finished or been removed." });
+      router.refresh();
+    } catch { setMessage({ error: "Could not discard. Try again." }); }
+    finally { busy.current = false; }
+  }
+  const confirmBox = (target: string | "all", names: string[]) => confirming === target ? <div role="group" aria-label="Confirm discard" className="space-y-2 rounded border border-destructive/40 p-2">
+    <p className="text-xs">{discardConfirmText(names)}</p>
+    <div className="flex gap-3"><button type="button" className="min-h-11 text-destructive underline" onClick={() => void discard(target)}>Discard</button>
+      <button type="button" className="min-h-11 underline" onClick={() => setConfirming(null)}>Keep</button></div></div> : null;
 
   async function command(value: UploadCommand): Promise<UploadRecoveryResult> {
     const response = await fetch(`/studio/uploads/api`, {
@@ -84,7 +105,12 @@ export function StudioUploadForm({ locationId, recordId, pendingUploads = [], co
       <button type="button" className="min-h-11 text-primary underline" disabled={progress !== null} onClick={() => void run(entry)}>Check storage and finish</button>
       <label className="block">Retry with original file<input aria-label={`Retry ${entry.original_filename}`} type="file" disabled={progress !== null}
         onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void run(entry, file); }} className="mt-1 block w-full" /></label>
+      <button type="button" className="min-h-11 text-destructive underline" disabled={progress !== null} onClick={() => setConfirming(entry.id)}>Discard this upload</button>
+      {confirmBox(entry.id, [entry.original_filename])}
     </div>)}
+    {pending.length > 1 ? <div className="space-y-2">
+      <button type="button" className="min-h-11 text-destructive underline" disabled={progress !== null} onClick={() => setConfirming("all")}>Discard all unfinished ({pending.length})</button>
+      {confirmBox("all", pending.map(entry => entry.original_filename))}</div> : null}
   </div> : null;
   const extras = attention.filter(a => !pending.some(p => p.id === a.id));
   const messages = <>
