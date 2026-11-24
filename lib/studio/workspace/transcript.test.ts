@@ -37,3 +37,8 @@ test("emoji, quotes and numbers do not break the weights", () => {
   assert.equal(lines[0].words.length, 6);
   assert.ok(lines[0].words.every(w => w.end > w.start));
 });
+
+test("markdown emphasis marks are not shown as words", () => {
+  const lines = buildTranscript(["**Does your first shot deliver?** Then `go`."], [{ s: 0, e: 5 }])!;
+  assert.equal(lines[0].words.map(w => w.text).join(" "), "Does your first shot deliver? Then go.");
+});

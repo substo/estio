@@ -23,7 +23,8 @@ export function buildTranscript(beats: string[], voice: VoiceSpan[]): Transcript
   const clips = [...voice].filter(c => Number.isFinite(c.s) && Number.isFinite(c.e) && c.e > c.s).sort((a, b) => a.s - b.s);
   if (!beats.length || beats.length !== clips.length) return null;
   return beats.map((text, i) => {
-    const words = text.split(/\s+/).filter(Boolean), clip = clips[i];
+    // Display text: markdown emphasis and code marks are not spoken, and are not shown.
+    const words = text.replace(/[*`]+/g, "").split(/\s+/).filter(Boolean), clip = clips[i];
     const total = words.reduce((sum, w) => sum + weightOf(w), 0) || 1;
     let at = clip.s;
     const out = words.map(word => {

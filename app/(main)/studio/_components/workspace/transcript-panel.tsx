@@ -34,8 +34,8 @@ export function TranscriptPanel({ lines, videoRef, onEditScript }: { lines: Tran
             <button type="button" onClick={() => seek(line.start)} aria-label={`Play from ${clock(line.start)}`} className="mt-0.5 w-10 shrink-0 text-left text-xs tabular-nums text-muted-foreground hover:text-foreground">{clock(line.start)}</button>
             <p className="leading-relaxed">{line.words.map((w, i) => {
               const on = active?.line === line.index && active.word === i;
-              return <button key={i} type="button" ref={on ? activeEl : undefined} onClick={() => seek(w.start)} aria-current={on ? "true" : undefined}
-                className={`inline rounded px-0.5 text-left hover:bg-accent ${on ? "bg-primary text-primary-foreground" : ""}`}>{w.text}{" "}</button>;
+              return <span key={i}>{i > 0 ? " " : null}<button type="button" ref={on ? activeEl : undefined} onClick={() => seek(w.start)} aria-current={on ? "true" : undefined}
+                className={`inline rounded px-0.5 text-left hover:bg-accent ${on ? "bg-primary text-primary-foreground" : ""}`}>{w.text}</button></span>;
             })}</p>
           </li>))}
       </ol>
