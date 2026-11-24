@@ -8,8 +8,8 @@ needs more than a preset.
 ## The loop
 
 1. **Write** `./graphic-<n>.html` in the project folder (Write tool, relative path, `graphic-*.html` only).
-2. **Look**: `substo graphic frame graphic-<n>.html --at <seconds> -o graphic-<n>-a.png --size 1920x1080`, then view the image.
-   Check the first, middle and last moment. Fix and look again until each frame is right.
+2. **Look** at the proof moments: the starting state, the signature motion (the middle of the main move) and the final frame, plus anything the style promises. `substo graphic frame graphic-<n>.html --at <seconds> -o graphic-<n>-a.png --size 1920x1080`, then view the image.
+   Check the first, middle and last moment. Fix and look again until each frame is right. Repair the graphic in place: never lengthen, shorten or re-time it just to hide a defect.
 3. **Render**: `substo graphic render graphic-<n>.html --duration <s> --size 1920x1080` writes `graphic-<n>.mov`, ProRes 4444
    with alpha. `--size 1080x1920` for a portrait video. Up to 3840x2160, 60 s, 12 to 60 fps.
 4. **Place** it like any overlay, on the Graphics track by ID (find it with `substo timeline`), for the moment it belongs to:
