@@ -1,5 +1,6 @@
 #!/usr/bin/env tsx
 import { createLocalSoundMaker } from "../lib/studio/companion/local-sound";
+import { catalogModel } from "../lib/studio/local-models";
 import { createSubscriptionTextRunHandler } from "../lib/studio/companion/text-run";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
@@ -38,7 +39,7 @@ import { assembleVideo } from "../lib/studio/video-assembly/assemble";
 import { localCloneReady, localTtsReady, synthesizeLocal, synthesizeLocalClone } from "../lib/studio/video-assembly/tts";
 import { ensureVoiceReference } from "../lib/studio/companion/voice-profiles";
 import { createVoicePreviewHandler } from "../lib/studio/companion/voice-preview";
-import { ModelManager } from "../lib/studio/companion/model-manager";
+import { detectModel, hubDirectory, ModelManager, modelVenv } from "../lib/studio/companion/model-manager";
 import { createPlaywrightYoutubeBrowser, createYoutubeSearchHandler, findChrome, openYoutubeLogin, youtubeBrowserProfile } from "../lib/studio/companion/youtube-search";
 
 const version = "studio-companion-16";
@@ -190,7 +191,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
       youtubeSignedIn = result.signedIn; return result;
     };
     const projects = createProjectStore();
-    const videoAssemble = createVideoAssembleHandler({ makeSound: createLocalSoundMaker({ tools: async () => { videoTools = await discoverVideoTools(); return videoTools; }, scriptsDir: fileURLToPath(new URL("./studio-video", import.meta.url)) }), transcribeFootage: createFootageTranscriber({ tools: async () => { videoTools = await discoverVideoTools(); return videoTools; }, scriptsDir: fileURLToPath(new URL("./studio-video", import.meta.url)) }), enabled: () => gate().processing, tools: async signal => { await refreshAssembly(); return assembly; }, localSpeechReady: () => localTtsReady(), localCloneReady: () => localCloneReady(), reference: (ref, signal) => ensureVoiceReference(ref, { signal }), api: createExportApi(credentials),
+    const videoAssemble = createVideoAssembleHandler({ makeSound: createLocalSoundMaker({ modelPython: join(modelVenv(), "bin", "python"), model: async role => { const m = catalogModel(role === "music" ? "stable-audio-3-small-music" : "stable-audio-3-small-sfx"); return m && await detectModel(m, hubDirectory()) ? m.repo : null; }, tools: async () => { videoTools = await discoverVideoTools(); return videoTools; }, scriptsDir: fileURLToPath(new URL("./studio-video", import.meta.url)) }), transcribeFootage: createFootageTranscriber({ tools: async () => { videoTools = await discoverVideoTools(); return videoTools; }, scriptsDir: fileURLToPath(new URL("./studio-video", import.meta.url)) }), enabled: () => gate().processing, tools: async signal => { await refreshAssembly(); return assembly; }, localSpeechReady: () => localTtsReady(), localCloneReady: () => localCloneReady(), reference: (ref, signal) => ensureVoiceReference(ref, { signal }), api: createExportApi(credentials),
       workRoot: join(os.homedir(), "Library", "Application Support", "Estio", "StudioCompanion", "video-assembly"), projectsRoot: projectsRoot(), projects, editorDocs: fileURLToPath(new URL("../video-editor/docs", import.meta.url)), assemble: assembleVideo });
     const loopDeps = { enabled: () => gate().processing, tools: async () => { await refreshAssembly(); return assembly; }, projects, editorDocs: fileURLToPath(new URL("../video-editor/docs", import.meta.url)) };
     const videoEdit = createVideoEditHandler({ ...loopDeps, api: createExportApi(credentials) });
