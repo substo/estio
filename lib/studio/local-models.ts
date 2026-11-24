@@ -16,6 +16,8 @@ export interface CatalogModel {
   files: readonly { path: string; minBytes: number }[];
   /** Built-in speakers, for voice models that ship named voices. */
   voices?: readonly string[]; defaultVoice?: string;
+  /** Zero-shot voice cloning from a short reference clip and its transcript (no built-in speakers). */
+  cloning?: boolean;
 }
 export const MODEL_CATALOG: readonly CatalogModel[] = Object.freeze([
   { id: "qwen3-tts-0.6b-4bit", task: "voice", title: "Qwen3-TTS 0.6B (4-bit)", summary: "On-device narration with built-in speakers. Slower than a hosted voice, free to run, nothing leaves the Mac.",
@@ -23,6 +25,10 @@ export const MODEL_CATALOG: readonly CatalogModel[] = Object.freeze([
     sizeGb: 1.0, minMemoryGb: 8, minFreeDiskGb: 6, languages: ["en", "zh", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"], licence: "Apache-2.0", runtime: "mlx-audio",
     files: [{ path: "model.safetensors", minBytes: 500_000_000 }, { path: "config.json", minBytes: 100 }],
     voices: ["serena", "vivian", "uncle_fu", "ryan", "aiden", "ono_anna", "sohee", "eric", "dylan"], defaultVoice: "ryan" },
+  { id: "qwen3-tts-0.6b-base-4bit", task: "voice", title: "Qwen3-TTS 0.6B Base (voice cloning)", summary: "Clone a voice on this Mac from a short recording. The recording stays on your Mac; nothing is sent to a voice provider.",
+    repo: "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit", revision: "0d6bb6fe33f92d47a507e23b9148940e8366ab5b",
+    sizeGb: 1.7, minMemoryGb: 8, minFreeDiskGb: 6, languages: ["en", "zh", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"], licence: "Apache-2.0", runtime: "mlx-audio",
+    files: [{ path: "model.safetensors", minBytes: 900_000_000 }, { path: "config.json", minBytes: 100 }, { path: "speech_tokenizer/model.safetensors", minBytes: 600_000_000 }], cloning: true },
   { id: "parakeet-tdt-0.6b-v3", task: "transcription", title: "Parakeet TDT 0.6B v3", summary: "On-device speech-to-text for video transcription (25 European languages).",
     repo: "mlx-community/parakeet-tdt-0.6b-v3", revision: "ed2b7e8c15f9aaa0b5772e2efb986255eaef7e15",
     sizeGb: 2.5, minMemoryGb: 8, minFreeDiskGb: 8, languages: ["en", "de", "fr", "es", "it", "pt", "nl", "pl", "ru", "uk", "cs", "el", "bg", "hr", "da", "et", "fi", "hu", "lv", "lt", "mt", "ro", "sk", "sl", "sv"], licence: "CC-BY-4.0", runtime: "parakeet-mlx",

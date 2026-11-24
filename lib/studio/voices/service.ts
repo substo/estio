@@ -15,7 +15,7 @@ import { readReportedModels } from "../local-models";
 import { Prisma } from "@prisma/client";
 import { LOCAL_SPEAKER_CATALOG, PREVIEW_TEXT_MAX, PREVIEW_TEXT_MIN, buildDesignPrompt, consentSpeech, designError, normalizeTag, type Availability, type DesignFields, type LocalState } from "./library";
 import { getVoiceKeySummary, requireVoiceManager, resolveVoiceKey, VoiceSettingsError } from "./keys";
-import { CLONE_CONSENT_STATEMENT, LOCAL_SPEAKERS, isHostedProvider, providerLabels, type CloneInput, type HostedVoiceProvider, type VoiceRow } from "./policy";
+import { CLONE_CONSENT_STATEMENT, LOCAL_SPEAKERS, isHostedProvider, providerLabels, type CloneInput, type HostedVoiceProvider, type LocalCloneInput, type VoiceRow } from "./policy";
 
 const call = <T>(fn: string, access: { locationId: string; app: "estio" | "substo"; userId: string }, args: Record<string, unknown> = {}) =>
   studioDb.call<T>(fn, { p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, ...args });
@@ -75,7 +75,8 @@ export async function setDefaultVoice(locationId: string, voiceId: string) {
 /** Removes the voice here; a clone made through Studio is also deleted at the provider. A voice that was already in the provider account is only unlinked. */
 export async function deleteVoice(locationId: string, voiceId: string): Promise<{ providerCleanup: "done" | "failed" | "not_needed" }> {
   const access = await requireVoiceManager(locationId);
-  const removed = await call<{ provider: string; providerVoiceId: string; removeAtProvider: boolean }>("studio_delete_voice", access, { p_voice_id: voiceId });
+  const removed = await call<{ provider: string; providerVoiceId: string; removeAtProvider: boolean; removeReference?: boolean }>("studio_delete_voice", access, { p_voice_id: voiceId });
+  if (removed.removeReference) { await removeVoiceReference(access.locationId, voiceId).catch(() => {}); return { providerCleanup: "not_needed" }; }
   if (!removed.removeAtProvider || !isHostedProvider(removed.provider)) return { providerCleanup: "not_needed" };
   const key = await resolveVoiceKey(access.locationId, removed.provider);
   if (!key) return { providerCleanup: "failed" };
@@ -199,3 +200,36 @@ export async function readLocalPreview(locationId: string, jobId: string): Promi
   return { status: "failed", message: row.last_error_message || "The Mac could not generate the preview." };
 }
 export { StudioDbError };
+
+/** Where an on-device clone's reference lives in private storage. Derived from the voice id, never from user input. */
+export const voiceReferenceKeys = (locationId: string, voiceId: string) => ({ audio: `${locationId}/voice-refs/${voiceId}.wav`, text: `${locationId}/voice-refs/${voiceId}.json` });
+async function removeVoiceReference(locationId: string, voiceId: string) {
+  const config = readStudioR2Config(); if (!config) return;
+  const store = createStudioR2Store(config), keys = voiceReferenceKeys(locationId, voiceId);
+  await store.deleteObject(keys.audio); await store.deleteObject(keys.text);
+}
+
+/** Clone on this Mac. The recording and its transcript are kept in private storage only so the owner's own Mac can fetch them; nothing goes to a voice provider. */
+export async function cloneVoiceOnDevice(locationId: string, input: LocalCloneInput, sample: File, deps: { store?: Pick<ReturnType<typeof createStudioR2Store>, "uploadCreateOnly" | "bucket" | "deleteObject"> } = {}): Promise<{ id: string }> {
+  const access = await requireVoiceManager(locationId);
+  const bytes = Buffer.from(await sample.arrayBuffer());
+  const config = readStudioR2Config();
+  const store = deps.store ?? (config ? createStudioR2Store(config) : null);
+  if (!store) throw new StudioCommandError("Media storage is not configured.", 503);
+  const sha = createHash("sha256").update(bytes).digest("hex");
+  const created = await call<{ id: string; providerVoiceId: string }>("studio_record_local_clone", access, { p_name: input.name, p_language: input.language, p_persona: input.persona,
+    p_statement: input.consentRecorded ? `${CLONE_CONSENT_STATEMENT} Recorded consent: "${consentSpeech(input.name)}"`.slice(0, 400) : CLONE_CONSENT_STATEMENT, p_sample_sha256: sha });
+  const keys = voiceReferenceKeys(access.locationId, created.id), dir = await mkdtemp(join(tmpdir(), "studio-voice-ref-"));
+  try {
+    const wav = join(dir, "reference.wav"), meta = join(dir, "reference.json"), text = Buffer.from(JSON.stringify({ text: input.transcript }));
+    await writeFile(wav, bytes, { mode: 0o600 }); await writeFile(meta, text, { mode: 0o600 });
+    await store.uploadCreateOnly({ key: keys.audio, filePath: wav, byteSize: bytes.length, contentType: "audio/wav" });
+    await store.uploadCreateOnly({ key: keys.text, filePath: meta, byteSize: text.length, contentType: "application/json" });
+    return { id: created.id };
+  } catch (error) {
+    // Never leave a voice that cannot be used: remove the row and any stored half.
+    await call("studio_delete_voice", access, { p_voice_id: created.id }).catch(() => {});
+    await store.deleteObject(keys.audio).catch(() => {}); await store.deleteObject(keys.text).catch(() => {});
+    throw error instanceof VoiceSettingsError ? error : new VoiceSettingsError("The recording could not be stored. Try again.");
+  } finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
+}

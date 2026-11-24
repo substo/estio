@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import {
-  AbortMultipartUploadCommand, CompleteMultipartUploadCommand, CreateMultipartUploadCommand, GetObjectCommand,
+  AbortMultipartUploadCommand, CompleteMultipartUploadCommand, CreateMultipartUploadCommand, DeleteObjectCommand, GetObjectCommand,
   HeadBucketCommand, HeadObjectCommand, PutObjectCommand, S3Client, UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -49,6 +49,8 @@ export interface StudioR2Store extends StudioObjectStore {
   presignUpload(input: { key: string; contentType: string; byteSize: number }): Promise<string>;
   headObject(key: string): Promise<{ byteSize: number; contentType: string | null } | null>;
   presignWorkerRead(key: string, seconds?: number): Promise<string>;
+  /** Remove one object (an on-device voice reference when its voice is deleted). A missing object is not an error. */
+  deleteObject(key: string): Promise<void>;
 }
 
 const statusOf = (error: unknown) => (error as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
@@ -154,10 +156,15 @@ export function createStudioR2Store(config: StudioR2Config, client?: Sender, max
     return getSignedUrl(signer, new GetObjectCommand({ Bucket, Key: key }), { expiresIn: seconds });
   }
 
+  async function deleteObject(key: string) {
+    try { await s3.send(new DeleteObjectCommand({ Bucket, Key: key })); }
+    catch (error) { if (statusOf(error) === 404 || nameOf(error) === "NoSuchKey") return; throw new StudioMediaStoreError("stored_object_delete_failed"); }
+  }
+
   async function checkBucket(signal?: AbortSignal) {
     try { await s3.send(new HeadBucketCommand({ Bucket }), { abortSignal: signal ?? AbortSignal.timeout(10_000) }); }
     catch { throw new StudioMediaStoreError("media_bucket_unavailable"); }
   }
 
-  return { checkBucket, bucket: Bucket, readDigest, uploadCreateOnly, presignRead, presignUpload, headObject, presignWorkerRead };
+  return { checkBucket, bucket: Bucket, readDigest, uploadCreateOnly, presignRead, presignUpload, headObject, presignWorkerRead, deleteObject };
 }

@@ -64,3 +64,31 @@ export async function assertSampleLength(provider: HostedVoiceProvider, sample: 
   const verdict = checkSampleLength(provider, seconds);
   if (verdict.level === "error") throw new Error(`The sample: ${verdict.message}`);
 }
+
+export const LOCAL_CLONE_PATTERN = /^clone-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const isLocalCloneSpeaker = (value: unknown): value is string => typeof value === "string" && LOCAL_CLONE_PATTERN.test(value);
+export interface LocalCloneInput { name: string; language: string | null; persona: string | null; transcript: string; consentRecorded: boolean }
+/** Clone on this Mac: a recorded WAV plus the exact words spoken. The reference never goes to a voice provider. */
+export function readLocalCloneForm(form: FormData): { input: LocalCloneInput; sample: File } {
+  const name = String(form.get("name") ?? "").trim();
+  if (name.length < 1 || name.length > 80 || /[\u0000-\u001f]/.test(name)) throw new Error("Give the voice a name of up to 80 characters.");
+  const language = String(form.get("language") ?? "").trim();
+  if (language && !/^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(language)) throw new Error("Use a language code like en or pt-BR.");
+  const persona = String(form.get("persona") ?? "").trim();
+  if (persona.length > 80) throw new Error("The persona label can be at most 80 characters.");
+  if (form.get("attested") !== "on") throw new Error("Confirm you have the right to clone this voice.");
+  const transcript = String(form.get("transcript") ?? "").replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, 1500);
+  if (transcript.length < 20) throw new Error("Enter the exact words spoken in the recording.");
+  const sample = form.get("sample");
+  if (!(sample instanceof File)) throw new Error("Record or choose a sample.");
+  if (!sample.type.includes("wav")) throw new Error("Use a WAV recording for on-device cloning.");
+  if (sample.size < MIN_SAMPLE_BYTES) throw new Error("The sample is too short. Use at least 8 seconds of clear speech.");
+  if (sample.size > MAX_SAMPLE_BYTES) throw new Error("The sample is larger than 12 MB. Use a shorter clip.");
+  return { input: { name, language: language || null, persona: persona || null, transcript, consentRecorded: form.get("consentRecorded") === "on" }, sample };
+}
+export async function assertLocalSampleLength(sample: File): Promise<void> {
+  const seconds = wavSeconds(new Uint8Array(await sample.arrayBuffer()));
+  if (seconds === null) throw new Error("The sample: use a plain 16-bit WAV recording.");
+  const verdict = checkSampleLength("local", seconds);
+  if (verdict.level === "error") throw new Error(`The sample: ${verdict.message}`);
+}
