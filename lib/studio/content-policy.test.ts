@@ -69,3 +69,17 @@ test("combined stage and search filters retain exact summary rows, ordering and 
   assert.match(contentListQuery("resolved-location", false).text, /and archived = false/);
   assert.doesNotMatch(contentListQuery("resolved-location", true).text, /archived = false/);
 });
+
+test("structured script blocks are validated and the plain script is derived from them", async () => {
+  const { readContentDraft } = await import("./content-policy");
+  const form = new FormData(); form.set("title", "T"); form.set("script", "stale text that must be ignored");
+  form.set("scriptBlocks", JSON.stringify({ version: 1, blocks: [{ id: "a", type: "heading", text: "Intro", level: 1 }, { id: "b", type: "narration", text: "Hello." }] }));
+  form.set("voiceId", "11111111-1111-4111-8111-111111111111");
+  const draft = readContentDraft(form);
+  assert.equal(draft.payload.script, "# Intro\n\nHello.");
+  assert.equal(draft.payload.voiceId, "11111111-1111-4111-8111-111111111111");
+  const bad = new FormData(); bad.set("title", "T"); bad.set("scriptBlocks", JSON.stringify({ version: 1, blocks: [{ id: "a", type: "nope", text: "x" }] }));
+  assert.throws(() => readContentDraft(bad), /invalid block/);
+  const badVoice = new FormData(); badVoice.set("title", "T"); badVoice.set("voiceId", "../x");
+  assert.throws(() => readContentDraft(badVoice), /Choose a voice/);
+});
