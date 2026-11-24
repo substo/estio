@@ -24,6 +24,6 @@ export default async function VoicesPage() {
       <p className="text-sm text-muted-foreground">The voices your videos can use. Set a default once; you can still pick another voice for each video. Hosted voices are billed to your own provider account. Keys are in <Link className="text-primary hover:underline" href="/settings/ai">Settings → AI</Link>; the on-device model is in <Link className="text-primary hover:underline" href="/settings/computer">Devices</Link>.</p>
     </div>
     <VoiceLibrary locationId={locationId} voices={voices} availability={availability} canManage={canManage} connected={[...connected]} />
-    {canManage ? <CreateVoice locationId={locationId} providers={[...connected]} /> : null}
+    {canManage ? <CreateVoice locationId={locationId} providers={[...connected]} local={availability.local} /> : null}
   </main>;
 }

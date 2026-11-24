@@ -51,10 +51,15 @@ export const LOCAL_SPEAKER_CATALOG: Record<typeof LOCAL_SPEAKERS[number], { desc
 export interface LibraryVoice { id: string; provider: VoiceProvider; providerVoiceId: string; name: string; kind: "preset" | "clone" | "designed"; language: string | null;
   persona: string | null; isDefault: boolean; description?: string | null; tags?: string[] }
 export type LocalState = "ready" | "not_installed" | "mac_offline";
-export interface Availability { fish: boolean; elevenlabs: boolean; local: LocalState }
+/** `localClone`: an online Mac has the Base (cloning) model installed. */
+export interface Availability { fish: boolean; elevenlabs: boolean; local: LocalState; localClone?: boolean }
 export type VoiceStatus = { usable: true } | { usable: false; need: "key" | "install" | "mac"; message: string };
 
-export function voiceStatus(voice: Pick<LibraryVoice, "provider">, a: Availability): VoiceStatus {
+export function voiceStatus(voice: Pick<LibraryVoice, "provider"> & { kind?: LibraryVoice["kind"] }, a: Availability): VoiceStatus {
+  if (voice.provider === "local" && voice.kind === "clone") {
+    if (a.local === "mac_offline") return { usable: false, need: "mac", message: "Your Mac is offline. Start the companion to use your cloned voice." };
+    return a.localClone ? { usable: true } : { usable: false, need: "install", message: "Install Qwen3-TTS Base (voice cloning) under Devices." };
+  }
   if (voice.provider === "local") {
     if (a.local === "ready") return { usable: true };
     return a.local === "mac_offline"
@@ -127,3 +132,10 @@ export const SAMPLE_PASSAGES = [
 ] as const;
 /** Spoken before the sample: bound to the voice name so the consent recording cannot be reused for another voice. */
 export const consentSpeech = (voiceName: string) => `I, speaking now, give permission to create a voice called ${voiceName.trim().slice(0, 60)} from this recording, for use in my workspace's videos.`;
+
+/** What is read aloud for a recording. A hosted clone takes the consent sentence and all passages (about 90 s); an on-device clone only needs a clean 15 to 30 s reference, so it reads the consent sentence and the first passage. */
+export function cloneScript(target: "elevenlabs" | "fish" | "local", voiceName: string): { parts: Array<{ label: string; text: string }>; transcript: string } {
+  const passages = target === "local" ? SAMPLE_PASSAGES.slice(0, 1) : SAMPLE_PASSAGES;
+  const parts = [{ label: "Consent", text: consentSpeech(voiceName || "your voice name") }, ...passages.map(text => ({ label: "Passage", text }))];
+  return { parts, transcript: parts.map(p => p.text).join(" ") };
+}

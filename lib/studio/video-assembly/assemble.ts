@@ -4,7 +4,7 @@ import { runNativeProcess, type ProcessRunner } from "../companion/process";
 import { buildBrief } from "./brief";
 import { parseScript } from "./script";
 import { agentEnv, runEditingAgent } from "./agent";
-import { localSpeech, type SpeechEngine } from "./tts";
+import { localCloneSpeech, localSpeech, type SpeechEngine } from "./tts";
 
 const videoExtensions = new Set([".mp4", ".mov", ".m4v", ".mkv", ".webm", ".mp3", ".wav", ".m4a"]);
 export interface AssembleOptions {
@@ -13,7 +13,7 @@ export interface AssembleOptions {
   orientation?: "landscape" | "portrait"; voiceover?: boolean; music?: boolean; model?: string; dryRun?: boolean;
   run?: ProcessRunner;
   /** Who narrates when voiceover is on: the on-device engine, or narration the server already rendered with the Location's key (files in clipsDir, in beat order). */
-  voice?: { engine: "local"; speaker?: string; model?: string } | { engine: "prerendered"; files: string[] };
+  voice?: { engine: "local"; speaker?: string; model?: string; /** An on-device clone: the reference recording and its exact transcript, both on this Mac. */ reference?: { audio: string; text: string } } | { engine: "prerendered"; files: string[] };
   /** Test seam. */ speak?: SpeechEngine; log?: (line: string) => void; signal?: AbortSignal;
 }
 export interface AssembleResult { projectDir: string; projectFile: string; beats: number; clips: string[]; voiceFiles: string[]; timings: number[]; brief: string; agentOutput?: string }
@@ -41,7 +41,7 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
   if (o.voiceover) {
     if (!o.voice && !o.speak) throw new Error("Choose a voice for the voiceover.");
     if (o.voice?.engine === "prerendered" && o.voice.files.length !== beats.length) throw new Error("The rendered narration does not match the script. Make the video again.");
-    const engine = o.speak ?? (o.voice?.engine === "local" ? localSpeech(o.voice.speaker ?? "ryan", o.voice.model) : null);
+    const engine = o.speak ?? (o.voice?.engine === "local" ? (o.voice.reference ? localCloneSpeech(o.voice.reference.audio, o.voice.reference.text) : localSpeech(o.voice.speaker ?? "ryan", o.voice.model)) : null);
     for (const b of beats) {
       const name = `voice-${String(b.index).padStart(2, "0")}.mp3`;
       if (!o.dryRun) {

@@ -128,14 +128,15 @@ export async function renderNarration(locationId: string, recordId: string, voic
   return { uploadIds, beats: beats.length, characters: beats.reduce((n, b) => n + b.narration.length, 0) };
 }
 
-const LOCAL_MODEL_ID = "qwen3-tts-0.6b-4bit";
+const LOCAL_MODEL_ID = "qwen3-tts-0.6b-4bit", CLONE_MODEL_ID = "qwen3-tts-0.6b-base-4bit";
 /** What can run right now: which provider keys exist and whether an online Mac has the on-device voice model. */
 export async function getVoiceAvailability(locationId: string): Promise<Availability> {
   const [keys, devices] = await Promise.all([getVoiceKeySummary(locationId).catch(() => null), getStudioDevices(locationId).catch(() => null)]);
   const online = devices?.devices.filter(d => d.online && !d.paused && d.status !== "revoked") ?? [];
   const local: LocalState = !online.length ? "mac_offline"
     : online.some(d => readReportedModels(d.capabilities.modelStates).some(m => m.id === LOCAL_MODEL_ID && m.state === "installed")) ? "ready" : "not_installed";
-  return { fish: Boolean(keys?.keys.fish), elevenlabs: Boolean(keys?.keys.elevenlabs), local };
+  const localClone = online.some(d => readReportedModels(d.capabilities.modelStates).some(m => m.id === CLONE_MODEL_ID && m.state === "installed"));
+  return { fish: Boolean(keys?.keys.fish), elevenlabs: Boolean(keys?.keys.elevenlabs), local, localClone };
 }
 
 const GENDER_TAG: Record<string, string> = { woman: "female", female: "female", man: "male", male: "male" };

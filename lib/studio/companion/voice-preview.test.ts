@@ -27,3 +27,16 @@ test("gates: bad payload, unknown speaker, processing off, model not installed, 
   assert.equal(await code(createVoicePreviewHandler(deps({ compress: async () => Buffer.alloc(10) })), base), "voice_preview_failed");
   assert.equal(await code(createVoicePreviewHandler(deps({ synth: async () => { throw new Error("boom"); } })), base), "voice_preview_failed");
 });
+
+const CLONE = "clone-22222222-2222-4222-8222-222222222222";
+const ref = { id: "22222222-2222-4222-8222-222222222222", audioUrl: "https://r2.example/a.wav", textUrl: "https://r2.example/t.json" };
+test("an on-device clone is previewed from its reference; it needs the Base model and a reference", async () => {
+  let seen: { speaker: string; reference?: { audio: string; text: string } } | null = null;
+  const h = createVoicePreviewHandler(deps({ ready: async (s: string) => s.startsWith("clone-"), reference: async () => ({ audio: "/v/a.wav", text: "the exact words spoken" }),
+    synth: async (speaker: string, _t: string, _s: AbortSignal, reference?: { audio: string; text: string }) => { seen = { speaker, reference }; return Buffer.alloc(5000, 1); } }));
+  const r = await h(job({ ...base, speaker: CLONE, voiceReference: ref }), ctx()) as { preview: { speaker: string } };
+  assert.equal(r.preview.speaker, CLONE); assert.deepEqual(seen!.reference, { audio: "/v/a.wav", text: "the exact words spoken" });
+  assert.equal(await code(createVoicePreviewHandler(deps({ ready: async () => false })), { ...base, speaker: CLONE, voiceReference: ref }), "voice_model_missing");
+  assert.equal(await code(createVoicePreviewHandler(deps({ reference: async () => ({ audio: "a", text: "b" }) })), { ...base, speaker: CLONE }), "voice_reference_missing");
+  assert.equal(await code(createVoicePreviewHandler(deps({ reference: async () => ({ audio: "a", text: "b" }) })), { ...base, speaker: "clone-../x", voiceReference: ref }), "invalid_job_payload");
+});

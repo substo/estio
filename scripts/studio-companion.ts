@@ -34,7 +34,8 @@ import { createOpenEditorHandler, createVideoEditHandler } from "../lib/studio/c
 import { createProjectStore, projectsRoot } from "../lib/studio/companion/video-projects";
 import { discoverAssemblyTools, type AssemblyTools } from "../lib/studio/companion/video-assemble-tools";
 import { assembleVideo } from "../lib/studio/video-assembly/assemble";
-import { localTtsReady, synthesizeLocal } from "../lib/studio/video-assembly/tts";
+import { localCloneReady, localTtsReady, synthesizeLocal, synthesizeLocalClone } from "../lib/studio/video-assembly/tts";
+import { ensureVoiceReference } from "../lib/studio/companion/voice-profiles";
 import { createVoicePreviewHandler } from "../lib/studio/companion/voice-preview";
 import { ModelManager } from "../lib/studio/companion/model-manager";
 import { createPlaywrightYoutubeBrowser, createYoutubeSearchHandler, findChrome, openYoutubeLogin, youtubeBrowserProfile } from "../lib/studio/companion/youtube-search";
@@ -125,7 +126,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const refreshAssembly = async () => { assembly = await discoverAssemblyTools(providers.claude.ready && providers.claude.authenticated, undefined, controller.signal); };
     await refreshAssembly();
     let localVoiceInstalled = false;
-    const refreshLocalVoice = async () => { localVoiceInstalled = await localTtsReady().catch(() => false); };
+    const refreshLocalVoice = async () => { localVoiceInstalled = (await localTtsReady().catch(() => false)) || (await localCloneReady().catch(() => false)); };
     await refreshLocalVoice();
     const previewReady = () => localVoiceInstalled && gate().processing;
     setInterval(() => { if (!controller.signal.aborted) { void refreshAssembly(); void refreshLocalVoice(); } }, 60_000).unref();
@@ -188,12 +189,13 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
       youtubeSignedIn = result.signedIn; return result;
     };
     const projects = createProjectStore();
-    const videoAssemble = createVideoAssembleHandler({ transcribeFootage: createFootageTranscriber({ tools: async () => { videoTools = await discoverVideoTools(); return videoTools; }, scriptsDir: fileURLToPath(new URL("./studio-video", import.meta.url)) }), enabled: () => gate().processing, tools: async signal => { await refreshAssembly(); return assembly; }, localSpeechReady: () => localTtsReady(), api: createExportApi(credentials),
+    const videoAssemble = createVideoAssembleHandler({ transcribeFootage: createFootageTranscriber({ tools: async () => { videoTools = await discoverVideoTools(); return videoTools; }, scriptsDir: fileURLToPath(new URL("./studio-video", import.meta.url)) }), enabled: () => gate().processing, tools: async signal => { await refreshAssembly(); return assembly; }, localSpeechReady: () => localTtsReady(), localCloneReady: () => localCloneReady(), reference: (ref, signal) => ensureVoiceReference(ref, { signal }), api: createExportApi(credentials),
       workRoot: join(os.homedir(), "Library", "Application Support", "Estio", "StudioCompanion", "video-assembly"), projectsRoot: projectsRoot(), projects, editorDocs: fileURLToPath(new URL("../video-editor/docs", import.meta.url)), assemble: assembleVideo });
     const loopDeps = { enabled: () => gate().processing, tools: async () => { await refreshAssembly(); return assembly; }, projects, editorDocs: fileURLToPath(new URL("../video-editor/docs", import.meta.url)) };
     const videoEdit = createVideoEditHandler({ ...loopDeps, api: createExportApi(credentials) });
     const openEditor = createOpenEditorHandler(loopDeps);
-    const voicePreview = createVoicePreviewHandler({ enabled: () => gate().processing, ready: () => localTtsReady(), synth: (speaker, text, signal) => synthesizeLocal({ text, voice: speaker, signal }) });
+    const voicePreview = createVoicePreviewHandler({ enabled: () => gate().processing, ready: async speaker => speaker.startsWith("clone-") ? localCloneReady() : localTtsReady(), reference: (ref, signal) => ensureVoiceReference(ref, { signal }),
+      synth: (speaker, text, signal, reference) => reference ? synthesizeLocalClone({ text, refAudio: reference.audio, refText: reference.text, signal }) : synthesizeLocal({ text, voice: speaker, signal }) });
     const handlers: Record<string, StudioJobHandler> = { "studio.voice_preview": withShutdown(voicePreview), "studio.video_assemble": withShutdown(videoAssemble), "studio.video_edit": withShutdown(videoEdit), "studio.open_editor": withShutdown(openEditor), "studio.video_transcribe": withShutdown(video), "studio.youtube_search": withShutdown(youtubeSearch), "studio.text_run": withShutdown(textRun), "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
     const report = { instanceId, handlers: Object.keys(handlers) };
     if (once) {

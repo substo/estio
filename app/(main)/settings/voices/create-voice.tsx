@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CLONE_CONSENT_STATEMENT, providerLabels, type HostedVoiceProvider } from "@/lib/studio/voices/policy";
-import { consentSpeech, PREVIEW_TEXT_MIN, SAMPLE_PASSAGES, type DesignFields } from "@/lib/studio/voices/library";
+import { cloneScript, PREVIEW_TEXT_MIN, type DesignFields, type LocalState } from "@/lib/studio/voices/library";
 import { checkSampleLength, encodeWav16, resampleMono, SAMPLE_POLICY, SAMPLE_TIPS, WAV_RATE, type CloneTarget } from "@/lib/studio/voices/clone-sample";
 import { button } from "./voice-library";
 
@@ -79,24 +79,27 @@ function useUploadSeconds(file: File | null) {
   return seconds;
 }
 
-function CloneForm({ locationId, providers, mode }: { locationId: string; providers: HostedVoiceProvider[]; mode: "record" | "upload" }) {
+function CloneForm({ locationId, providers, mode, local }: { locationId: string; providers: HostedVoiceProvider[]; mode: "record" | "upload"; local: LocalState }) {
   const router = useRouter();
   const [state, setState] = useState<State>({}); const [busy, setBusy] = useState(false); const [name, setName] = useState("");
-  const [provider, setProvider] = useState<HostedVoiceProvider>(providers[0]);
+  const targets: CloneTarget[] = [...providers, ...(local !== "mac_offline" ? ["local" as const] : [])];
+  const [provider, setProvider] = useState<CloneTarget>(targets[0]);
+  const [words, setWords] = useState("");
   const [recording, setRecording] = useState<{ file: File | null; seconds: number }>({ file: null, seconds: 0 });
   const [upload, setUpload] = useState<File | null>(null); const uploadSeconds = useUploadSeconds(upload);
   const uploadVerdict = mode === "upload" && upload && uploadSeconds !== null ? checkSampleLength(provider, uploadSeconds) : null;
-  const script = `${consentSpeech(name || "your voice name")} ${SAMPLE_PASSAGES.join(" ")}`;
+  const script = cloneScript(provider, name);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setState({});
     const form = new FormData(event.currentTarget);
     if (mode === "record") {
       const verdict = recording.file ? checkSampleLength(provider, recording.seconds) : { level: "error", message: "Record the passages first." };
       if (verdict.level === "error") { setState({ error: verdict.message }); setBusy(false); return; }
-      form.set("sample", recording.file as File); form.set("consentRecorded", "on"); form.set("transcript", script);
+      form.set("sample", recording.file as File); form.set("consentRecorded", "on"); form.set("transcript", script.transcript);
     } else if (uploadVerdict?.level === "error") { setState({ error: uploadVerdict.message }); setBusy(false); return; }
+    else if (provider === "local") form.set("transcript", words);
     try {
-      const response = await fetch("/api/studio/voices/clone", { method: "POST", headers: { "X-Studio-Tenant": locationId }, body: form });
+      const response = await fetch(provider === "local" ? "/api/studio/voices/clone-local" : "/api/studio/voices/clone", { method: "POST", headers: { "X-Studio-Tenant": locationId }, body: form });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) setState({ error: body.error ?? "The voice could not be created." });
       else { setState({ notice: "Voice created. It now appears in the library." }); (event.target as HTMLFormElement).reset(); setName(""); setUpload(null); setRecording({ file: null, seconds: 0 }); router.refresh(); }
@@ -104,21 +107,22 @@ function CloneForm({ locationId, providers, mode }: { locationId: string; provid
     setBusy(false);
   }
   return <form onSubmit={submit} className="space-y-3">
-    <label className="block space-y-1"><span>Provider</span><select name="provider" value={provider} onChange={e => setProvider(e.target.value as HostedVoiceProvider)} className={field}>{providers.map(p => <option key={p} value={p}>{providerLabels[p]}</option>)}</select></label>
+    <label className="block space-y-1"><span>Where to clone it</span><select name="provider" value={provider} onChange={e => setProvider(e.target.value as CloneTarget)} className={field}>{targets.map(p => <option key={p} value={p}>{p === "local" ? "On this Mac (free, private)" : providerLabels[p]}</option>)}</select>
+      {provider === "local" ? <span className="block text-xs text-muted-foreground">The recording stays on your Mac and in your private storage; nothing is sent to a voice provider.{local === "not_installed" ? " Install Qwen3-TTS Base (voice cloning) under Devices to use the voice." : ""}</span> : null}</label>
     <label className="block space-y-1"><span>Voice name</span><input name="name" required maxLength={80} value={name} onChange={e => setName(e.target.value)} className={field} /></label>
     <label className="block space-y-1"><span>Persona (optional)</span><input name="persona" maxLength={80} placeholder="Host, narrator, support agent…" className={field} /></label>
     {mode === "record" ? <div className="space-y-3 rounded-lg border p-3">
       <p className="font-medium">Read this aloud, in one take</p>
       <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">{SAMPLE_TIPS.map(t => <li key={t}>{t}</li>)}</ul>
       <ol className="space-y-2">
-        <li className="rounded bg-muted p-2"><span className="block text-xs uppercase tracking-wide text-muted-foreground">1 · Consent</span>{consentSpeech(name || "your voice name")}</li>
-        {SAMPLE_PASSAGES.map((p, i) => <li key={i} className="rounded bg-muted p-2"><span className="block text-xs uppercase tracking-wide text-muted-foreground">{i + 2} · Passage</span>{p}</li>)}
+        {script.parts.map((p, i) => <li key={i} className="rounded bg-muted p-2"><span className="block text-xs uppercase tracking-wide text-muted-foreground">{i + 1} · {p.label}</span>{p.text}</li>)}
       </ol>
       <Recorder key={provider} target={provider} onChange={(file, seconds) => setRecording({ file, seconds })} />
-    </div> : <div className="space-y-2"><label className="block space-y-1"><span>Voice sample</span><input name="sample" type="file" required accept="audio/*" onChange={e => setUpload(e.target.files?.[0] ?? null)} className="block w-full" />
+    </div> : <div className="space-y-2"><label className="block space-y-1"><span>Voice sample</span><input name="sample" type="file" required accept={provider === "local" ? "audio/wav,audio/x-wav" : "audio/*"} onChange={e => setUpload(e.target.files?.[0] ?? null)} className="block w-full" />
       <span className="block text-xs text-muted-foreground">One clean recording of a single speaker. {SAMPLE_POLICY[provider].basis} MP3 or WAV works. The sample goes to the provider and is not kept by Studio.</span></label>
+      {provider === "local" ? <label className="block space-y-1"><span>The exact words spoken in the recording</span><textarea value={words} onChange={e => setWords(e.target.value)} required minLength={20} maxLength={1500} rows={3} className={field} /><span className="block text-xs text-muted-foreground">On-device cloning needs the transcript to match the audio. Use a WAV file.</span></label> : null}
       {uploadVerdict ? <p role={uploadVerdict.level === "error" ? "alert" : "status"} className={uploadVerdict.level === "error" ? "text-destructive" : "text-muted-foreground"}>{uploadVerdict.message}</p> : null}</div>}
-    <label className="flex items-start gap-2"><input type="checkbox" name="cleanAudio" className="mt-1 size-4" /><span>Clean up background noise (use only if the room was noisy; it can soften the voice).</span></label>
+    {provider !== "local" ? <label className="flex items-start gap-2"><input type="checkbox" name="cleanAudio" className="mt-1 size-4" /><span>Clean up background noise (use only if the room was noisy; it can soften the voice).</span></label> : null}
     <label className="flex items-start gap-2"><input type="checkbox" name="attested" required className="mt-1 size-4" /><span>{CLONE_CONSENT_STATEMENT}</span></label>
     <button type="submit" disabled={busy} className={button}>{busy ? "Creating…" : "Create voice"}</button>
     <Say s={state} />
@@ -168,7 +172,7 @@ function DesignForm({ locationId, initial }: { locationId: string; initial?: Par
 }
 
 /** Disclosed: the library stays the first thing on the page. */
-export function CreateVoice({ locationId, providers }: { locationId: string; providers: HostedVoiceProvider[] }) {
+export function CreateVoice({ locationId, providers, local }: { locationId: string; providers: HostedVoiceProvider[]; local: LocalState }) {
   const [mode, setMode] = useState<Mode>("record");
   const [seed, setSeed] = useState<{ key: number; fields: Partial<DesignFields> } | null>(null);
   const details = useRef<HTMLDetailsElement>(null);
@@ -176,7 +180,7 @@ export function CreateVoice({ locationId, providers }: { locationId: string; pro
     const on = (e: Event) => { if (!providers.includes("elevenlabs")) return; setSeed({ key: Date.now(), fields: (e as CustomEvent<Partial<DesignFields>>).detail }); setMode("design"); if (details.current) { details.current.open = true; details.current.scrollIntoView({ behavior: "smooth", block: "nearest" }); } };
     window.addEventListener("voices:design", on); return () => window.removeEventListener("voices:design", on);
   }, [providers]);
-  if (!providers.length) return <p className="text-sm text-muted-foreground">Add a Fish Audio or ElevenLabs key in Settings → AI to record, clone or design a voice.</p>;
+  if (!providers.length && local === "mac_offline") return <p className="text-sm text-muted-foreground">Add a Fish Audio or ElevenLabs key in Settings → AI, or start the companion on your Mac, to record, clone or design a voice.</p>;
   const modes: Array<[Mode, string, boolean]> = [["record", "Record", true], ["upload", "Upload a sample", true], ["design", "Design from a description", providers.includes("elevenlabs")]];
   return <details ref={details} className="rounded-xl border p-4 text-sm">
     <summary className="min-h-11 cursor-pointer font-medium leading-[2.75rem]">Create a voice</summary>
@@ -184,7 +188,7 @@ export function CreateVoice({ locationId, providers }: { locationId: string; pro
       <div role="tablist" aria-label="How to create a voice" className="flex flex-wrap gap-2">
         {modes.filter(m => m[2]).map(([key, label]) => <button key={key} role="tab" type="button" aria-selected={mode === key} onClick={() => setMode(key)} className={`inline-flex min-h-11 items-center rounded-md border px-3 font-medium ${mode === key ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent"}`}>{label}</button>)}
       </div>
-      {mode === "design" ? <DesignForm key={seed?.key ?? 0} locationId={locationId} initial={seed?.fields} /> : <CloneForm key={mode} locationId={locationId} providers={providers} mode={mode} />}
+      {mode === "design" ? <DesignForm key={seed?.key ?? 0} locationId={locationId} initial={seed?.fields} /> : <CloneForm key={mode} locationId={locationId} providers={providers} mode={mode} local={local} />}
     </div>
   </details>;
 }

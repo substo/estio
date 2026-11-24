@@ -3,13 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { StudioJobError, type StudioJobHandler } from "../worker/handlers";
-import { LOCAL_SPEAKERS } from "../voices/policy";
+import { LOCAL_CLONE_PATTERN, LOCAL_SPEAKERS } from "../voices/policy";
 import { runNativeProcess, type ProcessRunner } from "./process";
 
 export const PREVIEW_TEXT = "Hello, this is how I will sound in your videos.";
 /** The device request body is bounded at 32 KiB, so the sample is a short mono clip: about 4 s at 32 kbps is 16 KB (21 KB as base64). */
 export const MAX_PREVIEW_BASE64 = 24000;
-const payload = z.object({ voiceId: z.string().uuid(), speaker: z.enum(LOCAL_SPEAKERS), name: z.string().max(80).optional() }).passthrough();
+const payload = z.object({ voiceId: z.string().uuid(), speaker: z.union([z.enum(LOCAL_SPEAKERS), z.string().regex(LOCAL_CLONE_PATTERN)]), name: z.string().max(80).optional(),
+  voiceReference: z.object({ id: z.string().uuid(), audioUrl: z.string().url().max(4000), textUrl: z.string().url().max(4000) }).optional() }).passthrough();
 
 /** Shrink the synthesized MP3 to a short mono clip that fits a device result. */
 export async function compressPreview(mp3: Buffer, run: ProcessRunner = runNativeProcess, ffmpeg = process.env.STUDIO_FFMPEG || "/opt/homebrew/bin/ffmpeg"): Promise<Buffer> {
@@ -24,8 +25,10 @@ export async function compressPreview(mp3: Buffer, run: ProcessRunner = runNativ
 export interface VoicePreviewDeps {
   enabled: () => boolean;
   /** The on-device voice model and runtime are installed. */
-  ready: () => Promise<boolean>;
-  synth: (speaker: string, text: string, signal: AbortSignal) => Promise<Buffer>;
+  ready: (speaker: string) => Promise<boolean>;
+  /** `reference` is set for an on-device clone (fetched and cached on this Mac). */
+  synth: (speaker: string, text: string, signal: AbortSignal, reference?: { audio: string; text: string }) => Promise<Buffer>;
+  reference?: (ref: { id: string; audioUrl: string; textUrl: string }, signal: AbortSignal) => Promise<{ audio: string; text: string }>;
   compress?: (mp3: Buffer) => Promise<Buffer>;
 }
 /** studio.voice_preview: one short sample of a built-in speaker, generated on this Mac and returned inside the job result so the Voices page can play it. No paid provider is involved. */
@@ -34,9 +37,14 @@ export function createVoicePreviewHandler(deps: VoicePreviewDeps): StudioJobHand
     const parsed = payload.safeParse(job.payload);
     if (!parsed.success) throw new StudioJobError("invalid_job_payload", "This preview request is invalid.", false);
     if (!deps.enabled()) throw new StudioJobError("local_policy", "Turn on Mac processing in Setup and keep it On.", true, 300);
-    if (!await deps.ready()) throw new StudioJobError("voice_model_missing", "Install the on-device voice model under Devices, then preview again.", false);
+    const clone = LOCAL_CLONE_PATTERN.test(parsed.data.speaker);
+    if (!await deps.ready(parsed.data.speaker)) throw new StudioJobError("voice_model_missing", clone ? "Install \"Qwen3-TTS Base (voice cloning)\" under Devices, then preview again." : "Install the on-device voice model under Devices, then preview again.", false);
+    if (clone && (!parsed.data.voiceReference || !deps.reference)) throw new StudioJobError("voice_reference_missing", "This cloned voice's recording is not available. Re-create the voice.", false);
     let audio: Buffer;
-    try { audio = await (deps.compress ?? (b => compressPreview(b)))(await deps.synth(parsed.data.speaker, PREVIEW_TEXT, context.signal)); }
+    try {
+      const reference = clone ? await deps.reference!(parsed.data.voiceReference!, context.signal) : undefined;
+      audio = await (deps.compress ?? (b => compressPreview(b)))(await deps.synth(parsed.data.speaker, PREVIEW_TEXT, context.signal, reference));
+    }
     catch (error) {
       if (context.signal.aborted) throw error;
       throw new StudioJobError("voice_preview_failed", "The Mac could not generate the preview. Try again.", false);

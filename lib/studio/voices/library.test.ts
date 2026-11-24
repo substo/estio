@@ -44,3 +44,15 @@ test("design prompt is structured, bounded and validated; consent speech is boun
   assert.equal(designError(p), null);
   assert.match(consentSpeech("Mark"), /called Mark/);
 });
+
+test("an on-device clone needs the Base model; built-in speakers keep their own rule", async () => {
+  const { voiceStatus, cloneScript } = await import("./library");
+  const base = { fish: false, elevenlabs: false, local: "ready" as const };
+  assert.equal(voiceStatus({ provider: "local", kind: "clone" }, base).usable, false);
+  assert.equal(voiceStatus({ provider: "local", kind: "clone" }, { ...base, localClone: true }).usable, true);
+  assert.equal(voiceStatus({ provider: "local", kind: "preset" }, base).usable, true);
+  assert.equal(voiceStatus({ provider: "local", kind: "clone" }, { ...base, local: "mac_offline", localClone: true }).usable, false);
+  const local = cloneScript("local", "Sam"), hosted = cloneScript("elevenlabs", "Sam");
+  assert.equal(local.parts.length, 2); assert.equal(hosted.parts.length, 4);
+  assert.match(local.transcript, /called Sam from this recording/); assert.equal(local.transcript, local.parts.map(p => p.text).join(" "));
+});

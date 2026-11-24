@@ -93,3 +93,18 @@ test("hosted narration is downloaded and handed to the assembler as pre-rendered
   await createVideoAssembleHandler(d.value)(job({ voice: { engine: "hosted", provider: "fish", name: "Me", uploadIds: [upload] }, voiceDownloads: [{ name: "Narration 01.mp3", url: "https://r2.example/n1", byteSize: 4 }] }) as never, ctx()).catch(() => {});
   assert.deepEqual(seen?.voice, { engine: "prerendered", files: ["narration-001.mp3"] });
 });
+
+test("an on-device cloned voice needs the Base model and its reference, and narrates from the cached reference", async () => {
+  const speaker = "clone-55555555-5555-4555-8555-555555555555", ref = { id: "55555555-5555-4555-8555-555555555555", audioUrl: "https://r2.example/a.wav", textUrl: "https://r2.example/t.json" };
+  const cloneJob = (extra: Record<string, unknown> = {}) => job({ voice: { engine: "local", model: "m", speaker }, voiceReference: ref, ...extra });
+  const code = async (over: Partial<VideoAssembleDeps>, j = cloneJob()) => (await createVideoAssembleHandler((await deps(over)).value)(j as never, ctx()).catch(e => e)) as StudioJobError;
+  assert.equal((await code({ localCloneReady: async () => false })).code, "local_clone_model_missing");
+  assert.equal((await code({ localCloneReady: async () => true }, cloneJob({ voiceReference: undefined }))).code, "voice_reference_missing");
+  assert.equal((await code({ localCloneReady: async () => true, reference: async () => { throw new Error("x"); } })).code, "voice_reference_unavailable");
+  let used: unknown;
+  const { value } = await deps({ localCloneReady: async () => true, reference: async () => ({ audio: "/v/a.wav", text: "the exact words" }),
+    assemble: async o => { used = o.voice; await mkdir(join(o.projectDir, "exports"), { recursive: true }); await writeFile(join(o.projectDir, "exports", "Video r2.mp4"), Buffer.alloc(2000, 1));
+      return { projectDir: o.projectDir, projectFile: "Video.substo", beats: 1, clips: ["shot.mov"], voiceFiles: ["voice-01.mp3"], timings: [0], brief: "" }; } });
+  await createVideoAssembleHandler(value)(cloneJob() as never, ctx());
+  assert.deepEqual(used, { engine: "local", speaker, model: "m", reference: { audio: "/v/a.wav", text: "the exact words" } });
+});

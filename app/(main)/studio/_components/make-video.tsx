@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useActionState, useState } from "react";
 import { makeVideoAction } from "../(tenant)/content/actions";
 import { VoicePicker } from "@/components/voices/voice-picker";
-import { pickDefaultVoice, voiceStatus, type Availability } from "@/lib/studio/voices/library";
+import { voiceStatus, type Availability } from "@/lib/studio/voices/library";
 import type { VoiceRow } from "@/lib/studio/voices/policy";
 import { AutoRefresh } from "./auto-refresh";
 
@@ -11,7 +11,7 @@ import { AutoRefresh } from "./auto-refresh";
 /** `voices` is every voice in the Location; the picker groups them into Available and Not connected using `availability`. */
 export function MakeVideo({ locationId, recordId, status, active, voices, availability }: { locationId: string; recordId: string; status: string | null; active: boolean; voices: VoiceRow[]; availability: Availability }) {
   const [state, action, pending] = useActionState(makeVideoAction.bind(null, locationId, recordId), {} as { error?: string; notice?: string });
-  const preferred = pickDefaultVoice(voices, p => voiceStatus({ provider: p }, availability).usable);
+  const ready = voices.filter(v => voiceStatus(v, availability).usable), preferred = ready.find(v => v.isDefault) ?? ready[0];
   const [voiceover, setVoiceover] = useState(false);
   const [voiceId, setVoiceId] = useState(preferred?.id ?? "");
   return (

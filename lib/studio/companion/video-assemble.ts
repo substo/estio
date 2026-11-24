@@ -19,9 +19,11 @@ const payload = z.object({
   downloads: z.array(z.object({ name: z.string().max(255), url: z.string().url().max(4000), byteSize: z.number().int().positive() })).max(40).default([]),
   /** The chosen voice. Hosted narration is already rendered by the server (the Mac never sees a provider key); local is generated here. */
   voice: z.discriminatedUnion("engine", [
-    z.object({ engine: z.literal("local"), model: z.string().max(100), speaker: z.string().regex(/^[a-z_]{2,20}$/) }).strict(),
+    z.object({ engine: z.literal("local"), model: z.string().max(100), speaker: z.string().regex(/^([a-z_]{2,20}|clone-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12})$/) }).strict(),
     z.object({ engine: z.literal("hosted"), provider: z.enum(["fish", "elevenlabs"]), name: z.string().max(80), uploadIds: z.array(z.string().uuid()).min(1).max(200) }).strict(),
   ]).optional(),
+  /** Short-lived links to an on-device clone's reference, minted at claim time. */
+  voiceReference: z.object({ id: z.string().uuid(), audioUrl: z.string().url().max(4000), textUrl: z.string().url().max(4000) }).optional(),
   voiceDownloads: z.array(z.object({ name: z.string().max(255), url: z.string().url().max(4000), byteSize: z.number().int().positive() })).max(200).default([]),
 }).passthrough();
 
@@ -62,6 +64,10 @@ export interface VideoAssembleDeps {
   tools: (signal: AbortSignal) => Promise<{ ready: boolean; missing: string[] }>;
   /** On-device Qwen3-TTS is installed (only needed for a local voice). */
   localSpeechReady: () => Promise<boolean>;
+  /** The Base (cloning) model is installed. */
+  localCloneReady?: () => Promise<boolean>;
+  /** Fetch/cache an on-device clone's reference on this Mac. */
+  reference?: (ref: { id: string; audioUrl: string; textUrl: string }, signal: AbortSignal) => Promise<{ audio: string; text: string }>;
   /** Scratch space for downloads; removed after every job. The project itself lives in projectsRoot and is kept. */
   workRoot: string; projectsRoot: string; projects: ProjectStore; editorDocs: string; model?: string;
   api: ExportApi;
@@ -125,7 +131,10 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
     const tools = await deps.tools(context.signal);
     if (!tools.ready) throw new StudioJobError("video_assembly_tools_missing", `This Mac is missing ${tools.missing.join(", ")}. Install it, then make the video again.`, true, 600);
     if (p.options.voiceover && !p.voice) throw new StudioJobError("voice_missing", "Choose a voice in Voices, then make the video again.", false);
-    if (p.options.voiceover && p.voice?.engine === "local" && !await deps.localSpeechReady()) throw new StudioJobError("local_voice_not_installed", "The on-device voice is not installed on this Mac. Install it in Settings, or choose a hosted voice.", false);
+    const clone = p.voice?.engine === "local" && p.voice.speaker.startsWith("clone-");
+    if (p.options.voiceover && clone && !(await (deps.localCloneReady?.() ?? Promise.resolve(false)))) throw new StudioJobError("local_clone_model_missing", "Install \"Qwen3-TTS Base (voice cloning)\" under Devices, then make the video again.", false);
+    if (p.options.voiceover && clone && !p.voiceReference) throw new StudioJobError("voice_reference_missing", "This cloned voice's recording is not available. Re-create the voice, then make the video again.", false);
+    if (p.options.voiceover && p.voice?.engine === "local" && !clone && !await deps.localSpeechReady()) throw new StudioJobError("local_voice_not_installed", "The on-device voice is not installed on this Mac. Install it in Settings, or choose a hosted voice.", false);
     if (p.options.voiceover && p.voice?.engine === "hosted" && p.voiceDownloads.length !== p.voice.uploadIds.length) throw new StudioJobError("narration_unavailable", "Studio could not provide the narration. Make the video again.", false);
     if (!p.downloads.length && p.media.length) throw new StudioJobError("footage_unavailable", "Studio could not provide the footage links. Make the video again.", false);
 
@@ -153,11 +162,13 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
       }
       await mkdir(projectDir, { recursive: true });
       const projectFile = await nextProjectFile(projectDir), startedAt = Date.now();
+      const reference = clone && p.voiceReference && deps.reference
+        ? await deps.reference(p.voiceReference, context.signal).catch(() => { throw new StudioJobError("voice_reference_unavailable", "The Mac could not fetch this cloned voice. Make the video again.", false); }) : undefined;
       let result: AssembleResult;
       try {
         result = await deps.assemble({ transcribeFootage: deps.transcribeFootage, script: p.script, clipsDir, projectDir, projectFile, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape",
           voiceover: p.options.voiceover, music: p.options.music, model: deps.model, signal: context.signal,
-          voice: !p.options.voiceover ? undefined : p.voice?.engine === "local" ? { engine: "local", speaker: p.voice.speaker, model: p.voice.model } : p.voice?.engine === "hosted" ? { engine: "prerendered", files: narration } : undefined });
+          voice: !p.options.voiceover ? undefined : p.voice?.engine === "local" ? { engine: "local", speaker: p.voice.speaker, model: p.voice.model, ...(reference ? { reference } : {}) } : p.voice?.engine === "hosted" ? { engine: "prerendered", files: narration } : undefined });
       } catch (error) {
         if (context.signal.aborted) throw error;
         throw new StudioJobError("video_assembly_failed", "The Mac could not finish editing this video. It was not retried.", false);
