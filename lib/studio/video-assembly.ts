@@ -63,10 +63,10 @@ async function narrateThenAssemble(actor: Actor, recordId: string, voice: Parame
     const narration = voice ? await renderNarration(actor.locationId, recordId, voice, script, { access: actor, reuse,
       onBeat: done => studioDb.call("studio_narration_progress", { p_location_id: actor.locationId, p_run_id: runId, p_done: done }).then(() => {}, () => {}) }) : null;
     // A failed or skipped sound never stops the video: the Mac job simply gets no sound files and the brief says so.
-    if (sound) await renderVideoSounds(actor, recordId, { music: true, sfx: true, seconds: estimateVideoSeconds(script) }).catch((): VideoSounds | null => null);
+    const sounds: VideoSounds | null = sound ? await renderVideoSounds(actor, recordId, { music: true, sfx: true, seconds: estimateVideoSeconds(script) }).catch((): VideoSounds | null => ({ music: null, sfx: null, skipped: "Music and sound effects could not be generated." })) : null;
     const r = await studioDb.call<{ jobId: string }>("studio_request_video_assembly", { p_location_id: actor.locationId, p_actor_app: actor.app, p_clerk_user_id: actor.userId, p_record_id: recordId,
       p_options: narration && voice ? { ...sqlOptions, voice: { voiceId, uploadIds: narration.uploadIds } } : sqlOptions });
-    await finish(true, null, r.jobId);
+    await finish(true, sounds?.skipped ? `Made without music or sound effects: ${sounds.skipped}` : null, r.jobId);
     if (narration && voice) await rememberRenderedBlockAudio(actor, recordId, voice.id, new Map(parseScript(script).map(b => [b.index, b.narration])), narration.rendered);
   } catch (error) {
     const reason = error instanceof StudioDbError && error.code ? videoAssemblyCodeReason[error.code] : undefined;
