@@ -99,7 +99,14 @@ export function readAgentSendCommand(value: unknown) {
       || typeof sel.text !== "string" || !sel.text.trim() || sel.text.length > 1800 || sel.text.includes("\0") || sel.end - sel.start !== sel.text.length) throw new StudioCommandError("Select the exact words again.");
     selection = { stage: sel.stage as CreationStage, action: sel.action as AgentSelection["action"], start: sel.start, end: sel.end, text: sel.text };
   }
-  return { recordId, turnId, version, sourceId, sourceVersion: sourceId ? sourceVersion as number : null, message: input.message.trim(), provider, selection,
+  let evidenceIds: string[] | null = null;
+  if (input.evidenceIds != null) {
+    if (!Array.isArray(input.evidenceIds) || input.evidenceIds.length > 4) throw new StudioCommandError("Choose up to four individual passages.");
+    const ids = input.evidenceIds.map(id);
+    if (ids.some(value => value === null) || new Set(ids).size !== ids.length) throw new StudioCommandError("Choose each evidence passage once.");
+    evidenceIds = ids as string[];
+  }
+  return { recordId, turnId, version, evidenceIds, sourceId, sourceVersion: sourceId ? sourceVersion as number : null, message: input.message.trim(), provider, selection,
     confirmPaid: provider === "openai", confirmSubscription: provider === "subscription", confirmRoute: provider === "location_order" };
 }
 

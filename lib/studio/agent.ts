@@ -14,7 +14,7 @@ import { SPEAKING_WPM, formatClock, lengthFit, parseDurationRequest, scriptStats
 import { agentRoundRequestId } from "./agent-request";
 
 type TurnRow = { id: string; location_id: string; record_id: string; seq: number; message: string; provider: string; status: "running" | "done" | "failed";
-  rounds: Array<{ round: number; reviewId: string; tool: AgentToolCall | null; observation: AgentObservation | null }>; result: AgentFinal | null; error: string | null; created_by_clerk_user_id: string; created_at: string; target_seconds: number | null; selection: AgentSelection | null };
+  rounds: Array<{ round: number; reviewId: string; tool: AgentToolCall | null; observation: AgentObservation | null }>; result: AgentFinal | null; error: string | null; created_by_clerk_user_id: string; created_at: string; target_seconds: number | null; selection: AgentSelection | null; evidence_choice: AgentItem[] | null };
 export type AgentTurnView = {
   id: string; seq: number; message: string; provider: "location_order" | "subscription" | "openai"; status: "running" | "done" | "failed"; error: string | null;
   /** Real activity only: what the assistant actually read, in order. */
@@ -44,7 +44,7 @@ export function describeAgentStep(tool: AgentToolCall, observation: AgentObserva
 
 async function loadTurn(access: StudioAccess, id: string) {
   return studioDb.one<TurnRow>(Prisma.sql`
-    SELECT id,location_id,record_id,seq,message,provider,status,rounds,result,error,created_by_clerk_user_id,created_at,target_seconds,selection
+    SELECT id,location_id,record_id,seq,message,provider,status,rounds,result,error,created_by_clerk_user_id,created_at,target_seconds,selection,evidence_choice
     FROM studio.studio_agent_turns WHERE id=${id}::uuid AND location_id=${access.locationId} AND created_by_clerk_user_id=${access.userId} AND actor_app=${access.app}`);
 }
 
@@ -59,7 +59,8 @@ async function views(access: StudioAccess, turns: TurnRow[], pending: Map<string
     SELECT id::text,execution_provider,model FROM studio.studio_idea_reviews WHERE location_id=${access.locationId} AND id=ANY(${reviewIds}::uuid[])`) : [];
   const model = new Map(models.map(m => [m.id, m]));
   return turns.map(turn => {
-    const items = new Map<string, AgentItem>();
+    const chosen = turn.evidence_choice ?? null;
+    const items = new Map<string, AgentItem>((chosen ?? []).map(item => [item.id, item]));
     for (const round of turn.rounds) for (const item of round.observation?.items ?? []) items.set(item.id, item);
     const last = turn.rounds.at(-1);
     const run = last ? model.get(last.reviewId) : undefined;
@@ -70,18 +71,30 @@ async function views(access: StudioAccess, turns: TurnRow[], pending: Map<string
       route: run ? `${run.execution_provider === "subscription" ? "Your Mac subscription" : "Location OpenAI key (paid)"} · ${run.model.replace(/^mac_/, "")}` : null,
       result: turn.result && { ...turn.result, plan: turn.result.plan ?? [], proposals: turn.result.proposals.map(p => ({ ...p, ...(p.stage === "Script" && !p.replaces ? { length: measure(p.text, turn.target_seconds) } : {}),
         evidence: p.evidenceIds.flatMap(id => { const item = items.get(id); return item ? [{ id, label: item.label, quote: item.text, sourceId: item.sourceId ?? null, at: item.at ?? null }] : []; }) })) },
-      inputs: { reads: turn.rounds.filter(r => r.tool).map(r => ({ tool: describeAgentStep(r.tool!, r.observation), items: (r.observation?.items ?? []).map(i => i.label) })),
+      inputs: { reads: [
+        ...(chosen === null ? [] : [{ tool: chosen.length ? "Selected source evidence" : "No source evidence", items: chosen.map(item => item.label) }]),
+        ...turn.rounds.filter(r => r.tool).map(r => ({ tool: describeAgentStep(r.tool!, r.observation), items: (r.observation?.items ?? []).map(i => i.label) })),
+      ],
         // Length checks and kept-original outcomes are separate from reads: they say what the server measured, not what the model looked at.
         checks: turn.rounds.filter(r => !r.tool && r.observation?.summary).map(r => r.observation!.summary!),
-        context: ["Your message", "Earlier choices and the last six exchanges", "The current draft stages", "Linked source list (text only through reads)", "Business profile as voice context, not as the publisher"] } };
+        context: ["Your message", "The current draft stages", "Business profile as voice context, not as the publisher",
+          ...(chosen === null ? ["Earlier choices and the last six exchanges", "Linked source list (text only through reads)"] : [])] } };
   });
+}
+
+export async function getAgentEvidenceChoices(locationId: string, recordId: string | null, sourceId: string | null) {
+  const access = await requireCreationWriter(locationId);
+  if (recordId && !await loadRecord(access, recordId)) throw new StudioCommandError("Creation draft unavailable.", 404);
+  return studioDb.rows<{ id: string; statement: string; quote: string; title: string; source_id: string }>(Prisma.sql`
+    SELECT id,statement,quote,title,source_id
+    FROM studio.studio_agent_evidence_options(${access.locationId},${recordId}::uuid,${sourceId}::uuid,NULL::uuid[])`);
 }
 
 /** Everything the page needs to reopen a draft's conversation. Read-only; the poll route advances running turns. */
 export async function getAgentConversation(locationId: string, recordId: string) {
   const access = await requireCreationWriter(locationId);
   const rows = await studioDb.rows<TurnRow>(Prisma.sql`
-    SELECT id,location_id,record_id,seq,message,provider,status,rounds,result,error,created_by_clerk_user_id,created_at,target_seconds,selection FROM (
+    SELECT id,location_id,record_id,seq,message,provider,status,rounds,result,error,created_by_clerk_user_id,created_at,target_seconds,selection,evidence_choice FROM (
       SELECT * FROM studio.studio_agent_turns WHERE location_id=${access.locationId} AND record_id=${recordId}::uuid
         AND actor_app=${access.app} AND created_by_clerk_user_id=${access.userId} ORDER BY seq DESC LIMIT 40) t ORDER BY seq`);
   const turns = await views(access, rows);
@@ -137,9 +150,11 @@ export async function sendAgentMessage(locationId: string, command: ReturnType<t
   const target = request?.kind === "set" ? request.seconds : request?.kind === "clear" ? 0 : -1;
   let begun: { turnId: string; seq: number };
   try {
-    begun = await studioDb.call("studio_agent_begin_turn", { p_location: access.locationId, p_app: access.app, p_actor: access.userId,
-      p_record: row.id, p_turn: command.turnId, p_message: command.message, p_provider: command.provider, p_target: target, p_selection: command.selection });
+    begun = await studioDb.call("studio_agent_begin_evidence_turn", { p_location: access.locationId, p_app: access.app, p_actor: access.userId,
+      p_record: row.id, p_turn: command.turnId, p_message: command.message, p_provider: command.provider, p_target: target, p_selection: command.selection, p_evidence: command.evidenceIds });
   } catch (error) {
+    if (error instanceof StudioDbError && error.code === "P2018") throw new StudioCommandError("Some selected passages changed or are no longer available. Refresh the evidence choices and try again.", 409);
+    if (error instanceof StudioDbError && error.code === "23505") throw new StudioCommandError("That message was already sent with different inputs. Refresh the conversation before retrying.", 409);
     if (error instanceof StudioDbError && error.code === "P2015") throw new StudioCommandError("The assistant is still answering your last message.", 409);
     throw error;
   }
@@ -233,6 +248,8 @@ async function advanceStep(locationId: string, turnId: string): Promise<AgentTur
     const state = expose(record).state;
     const repeat = turn.rounds.some(r => r.tool && JSON.stringify(r.tool) === JSON.stringify(step.tool));
     observation = step.tool.name === "search_knowledge" && review.prompt_version !== AGENT_PROMPT ? { items: [], error: "That tool is not available in this conversation.", untrusted: true } : repeat ? { items: [], error: "Already read in this message.", untrusted: true }
+      : turn.evidence_choice != null && ["search_source", "read_source", "list_findings", "search_library", "search_knowledge"].includes(step.tool.name)
+        ? { items: [], error: "The owner restricted source evidence for this message. Use the passages already supplied, if any.", untrusted: true }
       : await runAgentTool(access, turn.record_id, step.tool, stage => stageDraft(state, stage as CreationStage).text).catch(() => ({ items: [], error: "That read failed. Continue without it.", untrusted: true as const }));
   }
   const recorded = await studioDb.call<TurnRow>("studio_agent_record_step", { p_location: access.locationId, p_app: access.app, p_actor: access.userId,

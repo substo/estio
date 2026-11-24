@@ -55,7 +55,7 @@ test("edit: runs the agent on the kept project with the instruction, uploads a n
   const handler = createVideoEditHandler({ ...ready, projects: store, api, run: run as never });
   const result = await handler(job("studio.video_edit", { recordId: rec, title: "Launch video", instruction: "Make the intro shorter", history: [{ instruction: "Add captions", reply: "Added." }] }), ctx()) as { assembly: Record<string, unknown> };
   assert.equal(seen!.cwd, dir);
-  assert.ok(seen!.args.includes("Bash(substo:*),Read"));
+  assert.ok(seen!.args.includes("Bash(substo:*),Read,Edit(./batch-*.json)"));
   assert.match(seen!.input!, /Make the intro shorter/); assert.match(seen!.input!, /Add captions/); assert.match(seen!.input!, /--project "Video\.substo"/);
   assert.deepEqual(calls, ["reserve", "put", "verify"]);
   assert.equal(result.assembly.uploadId, up); assert.equal(result.assembly.projectKept, true);
