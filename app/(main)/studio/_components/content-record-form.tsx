@@ -1,14 +1,18 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useCallback, useEffect, useMemo, useState } from "react";
 import { CONTENT_LEVELS, CONTENT_STAGES } from "@/lib/studio/content-policy";
 import { saveContentAction } from "../(tenant)/content/actions";
 import { initialScriptTemplateSelection, type ScriptTemplateOption } from "@/lib/studio/script-template-policy";
 import { ScriptTemplateBeats } from "./script-template-beats";
 import Link from "next/link";
+import { reconcileBlocks } from "@/lib/studio/script-blocks";
+import type { VoiceRow } from "@/lib/studio/voices/policy";
+import { ScriptBlockEditor } from "./script-block-editor";
 
 export function ContentRecordForm({ locationId, recordId, version, title = "", payload = {}, templateOptions = [],
-  pinnedTemplateId, templateSelectionSaved, canSelectTemplate = false, visible = "all" }: {
+  pinnedTemplateId, templateSelectionSaved, canSelectTemplate = false, visible = "all", voices = [], locked = false }: {
+  voices?: readonly VoiceRow[]; /** The piece is archived: the script is read-only. */ locked?: boolean;
   /** Which part the workspace shows. Every field stays mounted (hidden ones keep their values and are still submitted), so switching modes never loses an unsaved edit. */
   visible?: "all" | "script" | "details" | "none";
   locationId: string; recordId: string; version: number; title?: string; payload?: Record<string, unknown>;
@@ -16,7 +20,7 @@ export function ContentRecordForm({ locationId, recordId, version, title = "", p
   templateSelectionSaved?: boolean; canSelectTemplate?: boolean;
 }) {
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(
-    ["title", "summary", "notes", "script"].map((field) => [field, field === "title" ? title : typeof payload[field] === "string" ? payload[field] as string : ""]),
+    ["title", "summary", "notes"].map((field) => [field, field === "title" ? title : typeof payload[field] === "string" ? payload[field] as string : ""]),
   ));
   const [stage, setStage] = useState(Object.hasOwn(payload, "stage") ? String(payload.stage ?? "") : "idea");
   const [level, setLevel] = useState(Object.hasOwn(payload, "level") ? String(payload.level ?? "") : "discover");
@@ -27,7 +31,15 @@ export function ContentRecordForm({ locationId, recordId, version, title = "", p
     ? initialScriptTemplateSelection({ pinnedId: pinnedTemplateId, selectionSaved: templateSelectionSaved, script: payload.script, options: templateOptions })
     : pinnedTemplateId ?? "unchanged");
   const selectedTemplate = templateOptions.find(template => template.id === templateId);
-  const [state, action, pending] = useActionState(saveContentAction.bind(null, locationId, recordId, version), {});
+  // Autosave moves the version forward; the Save button must always use the newest one.
+  const [liveVersion, setLiveVersion] = useState(version);
+  useEffect(() => setLiveVersion(current => Math.max(current, version)), [version]);
+  const initialBlocks = useMemo(() => reconcileBlocks(payload), []);  // eslint-disable-line react-hooks/exhaustive-deps -- first open only: later edits live in the editor
+  const initialVoiceId = typeof payload.voiceId === "string" ? payload.voiceId : "";
+  const [blocksJson, setBlocksJson] = useState(() => JSON.stringify({ version: 1, blocks: initialBlocks }));
+  const [voiceId, setVoiceId] = useState(initialVoiceId);
+  const onBlocksChange = useCallback((json: string, voice: string) => { setBlocksJson(json); setVoiceId(voice); }, []);
+  const [state, action, pending] = useActionState(saveContentAction.bind(null, locationId, recordId, liveVersion), {});
   const inputClass = "mt-1 w-full rounded-md border bg-background p-3 text-sm";
   return (
     <form action={action} hidden={visible === "none"} className="space-y-5 rounded-xl border bg-card p-6">
@@ -48,10 +60,8 @@ export function ContentRecordForm({ locationId, recordId, version, title = "", p
         </select></label>
       </div>
       </div>
-      {[{ name: "summary", label: "Idea summary", rows: 3 }, { name: "script", label: "Script", rows: 16 }, { name: "notes", label: "Production notes", rows: 6 }].map(({ name, label, rows }) => (
-        // SLOT: the Notion-style block editor replaces the script textarea here (structured blocks, per-block audio, voice picker).
-        <div key={name} hidden={name === "script" ? visible === "details" : visible === "script"} className="space-y-3">
-          {name === "script" && (selectedTemplate || canSelectTemplate) ? <div className="space-y-2">
+      <div hidden={visible === "details"} className="space-y-4">
+          {selectedTemplate || canSelectTemplate ? <div className="space-y-2">
             {canSelectTemplate && templateOptions.length ? <label className="block text-sm font-medium">
               Script template
               <select name="scriptTemplateVersion" value={templateId} onChange={event => setTemplateId(event.target.value)} className={inputClass}>
@@ -66,6 +76,12 @@ export function ContentRecordForm({ locationId, recordId, version, title = "", p
               <ScriptTemplateBeats beats={selectedTemplate.beats} />
             </details> : null}
           </div> : null}
+        <ScriptBlockEditor locationId={locationId} recordId={recordId} version={version} initialBlocks={initialBlocks} voices={voices} initialVoiceId={initialVoiceId}
+          archived={locked} onVersion={setLiveVersion} onBlocksChange={onBlocksChange} />
+        <input type="hidden" name="scriptBlocks" value={blocksJson} /><input type="hidden" name="voiceId" value={voiceId} />
+      </div>
+      {[{ name: "summary", label: "Idea summary", rows: 3 }, { name: "notes", label: "Production notes", rows: 6 }].map(({ name, label, rows }) => (
+        <div key={name} hidden={visible === "script"} className="space-y-3">
           <label className="block text-sm font-medium">{label}<textarea name={name} rows={rows} value={values[name]} maxLength={name === "script" ? 100_000 : 20_000} onChange={(event) => setValues({ ...values, [name]: event.target.value })} className={inputClass} /></label>
         </div>
       ))}

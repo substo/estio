@@ -63,7 +63,7 @@ export default async function StudioContentRecordPage({ params, searchParams }: 
   return (
     <ContentWorkspace locationId={locationId} recordId={recordId} title={record.title} archived={record.archived} hasScript={Boolean(script.trim())} initialMode={mode ?? null}
       form={{ locationId, recordId, version: record.version, title: record.title, payload: record.payload, templateOptions: templates.options, pinnedTemplateId: record.script_template_version_id,
-        templateSelectionSaved: record.script_template_selected, canSelectTemplate: templates.canSelect && !record.archived }}
+        templateSelectionSaved: record.script_template_selected, canSelectTemplate: templates.canSelect && !record.archived, voices: allVoices, locked: record.archived }}
       uploads={assets} pending={pending} loop={loop} assembly={assembly.view} narration={assembly.narration} mac={mac} voices={allVoices} availability={availability}
       uploadSlot={<StudioUploadForm key={recordId} compact locationId={locationId} recordId={recordId} pendingUploads={pendingUploads}
         attention={assets.filter(a => a.status !== "uploaded").map(a => ({ id: a.id, name: a.name, why: "Upload did not finish" }))} />}

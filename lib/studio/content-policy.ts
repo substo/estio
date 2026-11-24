@@ -1,9 +1,10 @@
 import { Prisma } from "@prisma/client";
+import { blocksToScript, MAX_SCRIPT, parseScriptBlocks, type ScriptBlocksDoc } from "./script-blocks";
 export const CONTENT_STAGES = ["idea", "research", "script", "record", "edit", "cover", "ready"] as const;
 export const CONTENT_LEVELS = ["discover", "consider", "decide", "retain"] as const;
 export type ContentStage = typeof CONTENT_STAGES[number];
 export type ContentLevel = typeof CONTENT_LEVELS[number];
-export type ContentPayloadPatch = Record<string, string | number | boolean | null>;
+export type ContentPayloadPatch = Record<string, string | number | boolean | null | ScriptBlocksDoc>;
 export interface ContentDraft { kind: "content"; title: string; payload: ContentPayloadPatch; }
 
 export function contentStageForDisplay(value: unknown): ContentStage | "unclassified" {
@@ -20,6 +21,20 @@ export function readContentDraft(form: FormData): ContentDraft {
     const value = String(form.get(field) || "");
     if (value.length > (field === "script" ? 100_000 : 20_000)) throw new Error(`${field} is too long.`);
     payload[field] = value;
+  }
+  if (form.has("scriptBlocks")) {
+    // Structured script: validated and bounded, and the plain `script` is always derived from it so every other reader stays in step.
+    let parsed: unknown; try { parsed = JSON.parse(String(form.get("scriptBlocks") || "")); } catch { throw new Error("The script could not be read. Reload the piece and try again."); }
+    const doc = parseScriptBlocks(parsed);
+    if (!doc) throw new Error("The script has an invalid block. Reload the piece and try again.");
+    const derived = blocksToScript(doc.blocks);
+    if (derived.length > MAX_SCRIPT) throw new Error("script is too long.");
+    payload.scriptBlocks = doc; payload.script = derived;
+  }
+  if (form.has("voiceId")) {
+    const voiceId = String(form.get("voiceId") || "");
+    if (voiceId !== "" && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(voiceId)) throw new Error("Choose a voice from the list.");
+    payload.voiceId = voiceId || null;
   }
   if (form.has("stage")) {
     const stage = String(form.get("stage") || "");
