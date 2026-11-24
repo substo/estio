@@ -334,6 +334,7 @@ maps every command to its HTTP endpoint and MCP tool.
 | [agents/broll-and-titles.md](agents/broll-and-titles.md) | Put B-roll over a sentence; Add a title (presets, animations, style); Add a section card |
 | [agents/layout-and-colour.md](agents/layout-and-colour.md) | Set the PiP layout; Zoom into the screen recording; Grade the camera take |
 | [agents/sound.md](agents/sound.md) | Level the voice; Tame the peaks on a quiet mic; Clean up a roomy mic; Check the sound; Put a swoosh on every push |
+| [agents/motion-graphics.md](agents/motion-graphics.md) | Design a motion graphic as HTML and render it (`substo graphic`): the loop, the rules (pure function of time, transparent, offline), the five-part brief, easing helpers, and four starters (kinetic title, stat reveal, bar chart, lower third) |
 | [agents/shorts.md](agents/shorts.md) | Make a short; Caption a short |
 | [agents/assets.md](agents/assets.md) | the asset library and shared library; Credits for the description; Reuse an intro, an outro or a call to action (segments) |
 | [agents/review-and-history.md](agents/review-and-history.md) | `substo check` and `--cuts` in full; What changed, and putting it back (diff, history, restore); Do the creator's comments; Export a review clip; Work alongside the creator |

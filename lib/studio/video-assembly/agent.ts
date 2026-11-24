@@ -5,7 +5,7 @@ export const agentEnv = () => ({ HOME: process.env.HOME, USER: process.env.USER,
 export async function runEditingAgent(o: { cwd: string; brief: string; editorDocs: string; model?: string; run?: ProcessRunner; signal?: AbortSignal }): Promise<string> {
   const run = o.run ?? runNativeProcess;
   const agent = await run({ command: "claude", cwd: o.cwd, env: agentEnv(), signal: o.signal, timeoutMs: 45 * 60_000, maxOutputBytes: 512 * 1024, input: o.brief,
-    args: ["-p", ...(o.model ? ["--model", o.model] : []), "--permission-mode", "dontAsk", "--allowedTools", "Bash(substo:*),Read,Edit(./batch-*.json)", "--add-dir", o.editorDocs, "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--no-session-persistence"] });
+    args: ["-p", ...(o.model ? ["--model", o.model] : []), "--permission-mode", "dontAsk", "--allowedTools", "Bash(substo:*),Read,Edit(./batch-*.json),Edit(./graphic-*.html)", "--add-dir", o.editorDocs, "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--no-session-persistence"] });
   return agent.stdout;
 }
 /** The agent's closing words, without the exported-path line, bounded: what the owner reads as the reply. */

@@ -44,3 +44,11 @@ test("the full brief uses Clean when no style is given, and the style when it is
   assert.match(buildBrief(base), /style "Clean"/);
   assert.match(buildBrief({ ...base, motion: { style: "data" } }), /style "Data first"/);
 });
+
+test("only styles with a graphics budget tell the agent to design custom graphics", () => {
+  assert.doesNotMatch(motionBriefStep({ style: "clean" }, "landscape"), /Custom graphics/);
+  assert.doesNotMatch(motionBriefStep({ style: "minimal" }, "landscape"), /Custom graphics/);
+  assert.match(motionBriefStep({ style: "data" }, "landscape"), /up to 3 as HTML.*substo graphic render/s);
+  assert.match(motionBriefStep({ style: "kinetic" }, "landscape"), /skip custom graphics and use the presets/);
+  assert.ok(describeMotionStyle({ style: "data" }).some(l => /custom animated graphics/.test(l)));
+});

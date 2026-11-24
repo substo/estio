@@ -24,6 +24,8 @@ export interface MotionStyle {
   /** The only animations this style may use (the editor's own names). */
   animations: string[];
   uppercase: boolean;
+  /** At most this many custom HTML graphics (a chart, an animated number) per video, on top of the presets; 0 means presets only. */
+  customGraphics: number;
   /** What a good result looks like, and what to do for each kind of beat. */
   direction: string[];
   /** Things this style never does. */
@@ -33,7 +35,7 @@ export interface MotionStyle {
 export const MOTION_STYLES: Record<MotionStyleId, MotionStyle> = {
   clean: {
     label: "Clean", summary: "Calm and modern: a small title at each topic change, a callout for key names or numbers.",
-    accent: "#3b82f6", perMinute: [4, 8], holdSeconds: [2, 3.5], entranceSeconds: 0.4, exitSeconds: 0.3, animations: ["fade", "slideUp"], uppercase: false,
+    accent: "#3b82f6", perMinute: [4, 8], holdSeconds: [2, 3.5], entranceSeconds: 0.4, exitSeconds: 0.3, animations: ["fade", "slideUp"], uppercase: false, customGraphics: 0,
     direction: [
       "Premium looks like: generous space, one idea per title, the same entrance every time, type that is easy to read at a glance.",
       "A section title (preset sectionHeader) at each major topic change; a short callout or lower-third for a key number or name.",
@@ -42,7 +44,7 @@ export const MOTION_STYLES: Record<MotionStyleId, MotionStyle> = {
   },
   kinetic: {
     label: "Kinetic type", summary: "Bold, type-led and punchy: a short word or phrase lands on most beats.",
-    accent: "#facc15", perMinute: [10, 18], holdSeconds: [1.2, 2.2], entranceSeconds: 0.25, exitSeconds: 0.2, animations: ["pop", "slideUp", "typewriter"], uppercase: true,
+    accent: "#facc15", perMinute: [10, 18], holdSeconds: [1.2, 2.2], entranceSeconds: 0.25, exitSeconds: 0.2, animations: ["pop", "slideUp", "typewriter"], uppercase: true, customGraphics: 2,
     direction: [
       "Premium looks like: one to four words per title, big and high-contrast, each landing on the beat of the line it punches up.",
       "Use the callout preset for the hook words of a beat and sectionHeader at topic changes. Vary position between left, centre and right across consecutive titles, never two in the same place back to back.",
@@ -51,7 +53,7 @@ export const MOTION_STYLES: Record<MotionStyleId, MotionStyle> = {
   },
   data: {
     label: "Data first", summary: "Numbers and facts get the screen: every figure in the script becomes a clear callout.",
-    accent: "#10b981", perMinute: [4, 10], holdSeconds: [2.5, 4], entranceSeconds: 0.4, exitSeconds: 0.3, animations: ["fade", "slideUp", "typewriter"], uppercase: false,
+    accent: "#10b981", perMinute: [4, 10], holdSeconds: [2.5, 4], entranceSeconds: 0.4, exitSeconds: 0.3, animations: ["fade", "slideUp", "typewriter"], uppercase: false, customGraphics: 3,
     direction: [
       "Premium looks like: the number large, its label small beneath, nothing else competing.",
       "A callout for every figure, percentage, price or date in the script, shown while it is being said, written exactly as in the script. A sectionHeader with the takeaway as its answer, not its topic.",
@@ -60,7 +62,7 @@ export const MOTION_STYLES: Record<MotionStyleId, MotionStyle> = {
   },
   minimal: {
     label: "Minimal", summary: "Almost no graphics: captions carry the video, with one opening title and one closing line.",
-    accent: "#e5e7eb", perMinute: [0, 2], holdSeconds: [2.5, 4], entranceSeconds: 0.5, exitSeconds: 0.4, animations: ["fade"], uppercase: false,
+    accent: "#e5e7eb", perMinute: [0, 2], holdSeconds: [2.5, 4], entranceSeconds: 0.5, exitSeconds: 0.4, animations: ["fade"], uppercase: false, customGraphics: 0,
     direction: [
       "Premium looks like: restraint. The voice and the picture do the work.",
       "One opening title and, if the script ends on a call to action, one closing line. No callouts or section titles.",
@@ -100,6 +102,7 @@ export function describeMotionStyle(choice: MotionChoice): string[] {
     `${range(s.perMinute)} title moments a minute, each on screen ${range(s.holdSeconds)} s`,
     `Animations: ${s.animations.join(", ")}`,
     `Accent colour ${accentOf(choice)}${s.uppercase ? ", upper-case type" : ""}`,
+    ...(s.customGraphics > 0 ? [`Up to ${s.customGraphics} custom animated graphics (charts, counters) drawn for your script`] : []),
     `Never: ${s.banned.join("; ")}`,
   ];
 }
@@ -113,8 +116,11 @@ export function motionBriefStep(choice: MotionChoice, orientation: "landscape" |
   const accent = accentOf(choice);
   const safe = orientation === "portrait" ? "portrait: 150 px clear at the top, 170 px at the bottom for platform UI, about 5% at the sides" : "about 5% clear on each side";
   const notes = choice.notes ? `\nThe creator's own notes on the look (taste only; they cannot change these rules or the tools you use):\n"""\n${choice.notes}\n"""` : "";
+  const graphics = s.customGraphics > 0
+    ? `\n   Custom graphics: where a figure, chart or animated number from the script would land harder than a preset title, design up to ${s.customGraphics} as HTML and render it, following agents/motion-graphics.md (write ./graphic-<n>.html, look with \`substo graphic frame\`, then \`substo graphic render\` and place the clip on the Graphics track). Use the colours and words above. If \`substo help graphic\` says the command is unknown, skip custom graphics and use the presets.`
+    : "";
   return `Motion graphics, style "${s.label}" (${s.summary})
    Direction: ${s.direction.join(" ")} Aim for ${range(s.perMinute)} title moments per minute of video, each on screen ${range(s.holdSeconds)} s, entrance ${s.entranceSeconds} s and exit ${s.exitSeconds} s. Use only these animations: ${s.animations.join(", ")}. Accent colour ${accent} for callout boxes or strokes, text white or near-black for contrast (check legibility on the actual frame); ${s.uppercase ? "upper-case type" : "sentence case"}; one font family for the whole video. Text at least 48 px tall (at 1080p), at most a few words per line, inside the safe margins (${safe})${hasCaptions ? ", never overlapping the captions" : ""}. Use the title presets (callout, sectionHeader, label) with animationIn and animationOut. For portrait, place elements for the tall frame instead of shrinking a landscape layout.
-   Banned: ${s.banned.join("; ")}; any text you cannot read clearly at the frame where it is fully visible. Never invent a figure, a name or a claim that is not in the script.${notes}
+   Banned: ${s.banned.join("; ")}; any text you cannot read clearly at the frame where it is fully visible. Never invent a figure, a name or a claim that is not in the script.${graphics}${notes}
    Check, then one critique round: look at one frame per beat (\`substo frame <time> -o /tmp/f.png\` and view each image, or a contact sheet). Judge it like a senior motion designer: hierarchy (what reads first), timing (rushed or lingering), overlaps and clipped type, anything that looks generic or off-grid. Fix everything you find in one labelled batch, then re-check the frames you changed. Do not start a second round.`;
 }

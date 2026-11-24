@@ -25,7 +25,7 @@ test("assembly voices each beat, creates the project and runs the agent with sub
   assert.deepEqual((await readdir(project)).sort(), ["a.mov", "voice-01.mp3", "voice-02.mp3"]);
   const agent = calls.find(c => c.command === "claude")!;
   assert.ok(calls.some(c => c.command === "substo"));
-  assert.ok(agent.args.includes("Bash(substo:*),Read,Edit(./batch-*.json)"));
+  assert.ok(agent.args.includes("Bash(substo:*),Read,Edit(./batch-*.json),Edit(./graphic-*.html)"));
   assert.match(agent.input!, /voice-02\.mp3/);
   assert.match(agent.input!, /place at 2.35s/);
   assert.match(agent.input!, /music bed/);
