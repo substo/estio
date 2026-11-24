@@ -91,14 +91,14 @@ export function ContentWorkspace(props: {
 
       {mode === "edit" ? (
         <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)_340px]">
-          <AssetsRail groups={groups} uploadSlot={props.uploadSlot} onShowVersion={setVersionId} />
-          <div className="min-w-0 space-y-4">
+          <div className="order-2 lg:order-1"><AssetsRail groups={groups} uploadSlot={props.uploadSlot} onShowVersion={setVersionId} /></div>
+          <div className="order-1 min-w-0 space-y-4 lg:order-2">
             <PlayerStage versions={versions} versionId={versionId} onVersion={setVersionId} steps={steps}
               empty={<><p className="font-medium">No video yet</p><p className="text-muted-foreground">Add your footage on the left, then press Make video. Your Mac does the editing.</p>
                 <MakeVideoDialog locationId={locationId} recordId={recordId} voices={props.voices} disabledReason={makeBlock} busy={busy} trigger="inline" /></>} />
             {hasVideo ? <TimelineView snapshot={current?.timeline ?? null} selected={selected} onSelect={setSelected} onAction={onClipAction} canEdit={Boolean(loop?.projectKept)} busy={busy || asking} /> : null}
           </div>
-          <aside aria-label="Agent" className={`${agentOpen ? "fixed inset-x-0 bottom-0 z-40 flex max-h-[75vh] rounded-t-2xl border bg-background p-4 shadow-lg" : "hidden"} lg:static lg:flex lg:max-h-none lg:rounded-xl lg:border lg:bg-card lg:p-4 lg:shadow-none`}>
+          <aside aria-label="Agent" className={`order-3 ${agentOpen ? "fixed inset-x-0 bottom-0 z-40 flex max-h-[75vh] rounded-t-2xl border bg-background p-4 shadow-lg" : "hidden"} lg:static lg:flex lg:max-h-none lg:rounded-xl lg:border lg:bg-card lg:p-4 lg:shadow-none`}>
             <div className="flex w-full min-h-0 flex-col">
               <button type="button" onClick={() => setAgentOpen(false)} className="mb-2 self-end text-xs text-muted-foreground underline lg:hidden">Close</button>
               <AgentDock thread={loop?.thread ?? []} projectKept={Boolean(loop?.projectKept)} busy={busy} selected={selected} onClearSelection={() => setSelected(null)} onSend={send} pending={asking} error={askState.error} notice={askState.notice} />
