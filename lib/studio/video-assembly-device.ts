@@ -33,7 +33,7 @@ export async function withAssemblyDownloads(jobs: unknown, store?: Pick<StudioR2
     const voiceDownloads: AssemblyDownload[] = await link(voiceIds);   // beat order = uploadIds order
     const soundRows = job.payload?.options?.music === true && uuid(job.payload?.recordId) ? await studioDb.rows<{ id: string; original_filename: string }>(Prisma.sql`
       select id, original_filename from studio.studio_uploads where location_id = ${job.location_id} and record_id = ${job.payload.recordId}::uuid and status = 'uploaded'
-        and original_filename like 'Narration sound-%' and created_at > now() - make_interval(hours => ${SOUND_WINDOW_HOURS}) order by created_at desc`) : [];
+        and original_filename like 'Narration sound-%' and created_at > now() - make_interval(hours => ${Prisma.raw(String(Math.trunc(SOUND_WINDOW_HOURS)))}) order by created_at desc`) : [];
     const newest = (role: "music" | "sfx") => soundRows.find(r => r.original_filename.startsWith(`Narration sound-${role} `))?.id;
     const wanted = (["music", "sfx"] as const).flatMap(role => { const id = newest(role); return id ? [{ role, id }] : []; });
     const linked = await link(wanted.map(w => w.id));

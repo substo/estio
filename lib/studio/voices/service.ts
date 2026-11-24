@@ -276,7 +276,7 @@ export async function renderVideoSounds(access: NarrationAccess, recordId: strin
   if (!config) throw new StudioCommandError("Media storage is not configured.", 503);
   const store = createStudioR2Store(config), dir = await mkdtemp(join(tmpdir(), "studio-sound-"));
   const recent = await studioDb.rows<{ id: string; original_filename: string }>(Prisma.sql`select id, original_filename from studio.studio_uploads
-    where location_id = ${access.locationId} and record_id = ${recordId}::uuid and status = 'uploaded' and original_filename like 'Narration sound-%' and created_at > now() - make_interval(hours => ${SOUND_REUSE_HOURS}) order by created_at desc`);
+    where location_id = ${access.locationId} and record_id = ${recordId}::uuid and status = 'uploaded' and original_filename like 'Narration sound-%' and created_at > now() - make_interval(hours => ${Prisma.raw(String(Math.trunc(SOUND_REUSE_HOURS)))}) order by created_at desc`);
   const reuse = (role: "music" | "sfx", minSeconds: number) => recent.find(r => { const m = SOUND_NAME.exec(r.original_filename); return m?.[1] === role && (role === "sfx" || Number(m[2] ?? 0) >= minSeconds); })?.id ?? null;
   const save = async (role: "music" | "sfx", audio: Buffer, seconds: number) => {
     const id = randomUUID(), file = join(dir, `${id}.mp3`);
