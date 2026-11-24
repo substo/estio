@@ -16,6 +16,7 @@ export function groupAssets(uploads: AssetUpload[], pending: PendingUpload[]): A
   const out: AssetGroups = { footage: [], narration: [], exports: [], attention: [] };
   const runs = new Map<string, NarrationRun>();
   for (const u of uploads) {
+    if (/^Narration sound-/i.test(u.name)) continue;   // the music bed and whoosh are plumbing for Make video, not something to browse
     if (u.status !== "uploaded") { out.attention.push({ id: u.id, name: u.name, why: "Upload did not finish" }); continue; }
     const group = classifyUpload(u.name), kind = mediaKind(u.contentType);
     if (group === "narration") {

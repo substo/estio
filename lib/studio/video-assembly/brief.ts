@@ -8,6 +8,14 @@ export interface BriefInput {
   footageTranscripts?: { file: string; lines: string }[];
 }
 
+function soundStep(i: BriefInput): string {
+  const sfx = i.soundFiles?.sfx, music = i.soundFiles?.music;
+  const effect = sfx ? `Use ${sfx} (already in the project's media, do not generate anything) as a soft whoosh on title entrances and on cuts that change scene: about -15 dB, never more than one every few seconds.` : "No sound effect file was supplied and none can be generated here, so add no effects.";
+  if (!i.music) return `${effect} Do not add music.`;
+  const bed = music ? `Place ${music} (already in the project's media) once on the music track from 0 s to the end of the video, about -31 dB under the voice, with a 2 s fade out; trim it to the video length.` : "No music bed file was supplied and none can be generated here, so add no music and say so in your final message.";
+  return `${effect} ${bed}`;
+}
+
 /** The instruction handed to the editing agent. Everything it may do goes through the `substo` command, so edits land in the editor's undo history. */
 export function buildBrief(i: BriefInput): string {
   const beats = i.beats.map((b, n) => `${b.index}. "${b.narration}"${b.direction ? `  [visual: ${b.direction}]` : ""}${i.voiceFiles[n] ? `  (voiceover: ${i.voiceFiles[n]}${i.timings[n] !== undefined ? `, place at ${i.timings[n]}s` : ""})` : ""}`).join("\n");
@@ -25,7 +33,7 @@ Do this, in order:
 2. Build the picture: for each beat put the best-matching footage on the camera/screen/B-roll track for that beat's length. Use \`substo search\` on transcripts to match footage to lines. Trim dead air; do not invent footage. Where a beat has a [visual] note and no footage fits, use a title or graphic instead.
 3. Captions: try \`substo captions --apply\` (word-by-word) once the voice track is in place. Transcripts need macOS 26; if it reports transcripts are unavailable, instead add one text clip (preset caption) per short phrase of each beat on the Text track, timed inside that beat's voiceover span (a beat lasts from its start to the next beat's start).
 4. Motion graphics, kept modest: a section title card at each major topic change and a short lower-third or callout for key numbers or names, using the title presets (callout, sectionHeader, label) with animationIn/animationOut (fade, pop, slideUp, typewriter). Keep text to a few words (longest line checked at the frame where it is fully visible), at least 48 px tall, inside safe margins (about 5% each side; portrait: 150 px top, 170 px bottom for platform UI), not overlapping the captions. For portrait, re-place elements for the tall frame instead of shrinking a landscape layout. Check with \`substo frame <time> -o /tmp/f.png\` and look at the image, and look at a contact sheet of frames across the video (clipped type, weak hierarchy, overlaps) before exporting.
-5. Sound design: a soft whoosh on title entrances and cuts that change scene (\`substo assets\` to find or generate SFX); no more than one effect every few seconds, about -15 dB.${i.music ? " Add one instrumental music bed under the whole video, about -31 dB with a 2 s fade out." : " Do not add music."}
+5. Sound design: ${soundStep(i)}
 6. \`substo loudness\` then normalise speech, then \`substo check --changed\` and fix what it reports.
 7. \`substo export --preset ${i.orientation === "portrait" ? "short" : "youtube1080"}\` and print the exported path as the last line.
 

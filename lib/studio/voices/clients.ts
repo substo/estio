@@ -120,3 +120,19 @@ export async function saveDesignedVoice(key: string, input: { name: string; desc
   if (typeof id !== "string" || !idPattern.test(id)) throw new VoiceProviderError("rejected", "The provider did not return a voice id.");
   return id;
 }
+
+/** Instrumental music bed for a video. ElevenLabs Music: prompt + length in, MP3 out. Billed to the Location's own account. */
+export async function generateMusicBed(key: string, prompt: string, seconds: number, fetcher: Fetch = fetch, signal?: AbortSignal): Promise<Buffer> {
+  const ms = Math.round(Math.min(600, Math.max(3, seconds)) * 1000);
+  if (prompt.trim().length < 3 || prompt.length > 1000) throw new VoiceProviderError("rejected", "The music prompt must be 3 to 1,000 characters.");
+  const response = await send(fetcher, `${ELEVEN}/v1/music?output_format=mp3_44100_128`, { method: "POST", signal: signal ?? AbortSignal.timeout(300_000),
+    headers: { ...elevenHeaders(key), "content-type": "application/json", accept: "audio/mpeg" }, body: JSON.stringify({ prompt, music_length_ms: ms, force_instrumental: true }) }, "Could not generate the music.");
+  return checkAudio(Buffer.from(await response.arrayBuffer()));
+}
+/** One short sound effect (for example a soft whoosh). ElevenLabs Sound Effects: text + duration in, MP3 out. */
+export async function generateSoundEffect(key: string, description: string, seconds: number, fetcher: Fetch = fetch, signal?: AbortSignal): Promise<Buffer> {
+  if (description.trim().length < 3 || description.length > 450) throw new VoiceProviderError("rejected", "The sound description must be 3 to 450 characters.");
+  const response = await send(fetcher, `${ELEVEN}/v1/sound-generation?output_format=mp3_44100_128`, { method: "POST", signal: signal ?? AbortSignal.timeout(120_000),
+    headers: { ...elevenHeaders(key), "content-type": "application/json", accept: "audio/mpeg" }, body: JSON.stringify({ text: description, duration_seconds: Math.min(30, Math.max(0.5, seconds)), prompt_influence: 0.5 }) }, "Could not generate the sound effect.");
+  return checkAudio(Buffer.from(await response.arrayBuffer()));
+}

@@ -9,7 +9,7 @@ import { StudioDbError } from "../db";
 import { createStudioR2Store, readStudioR2Config } from "../media-r2";
 import { studioDb } from "../studio-db";
 import { parseScript } from "../video-assembly/script";
-import { cloneProviderVoice, deleteProviderVoice, designProviderVoice, listProviderVoices, saveDesignedVoice as saveDesignedAtProvider, synthesizeHosted, VoiceProviderError, type DesignPreview } from "./clients";
+import { cloneProviderVoice, deleteProviderVoice, designProviderVoice, generateMusicBed, generateSoundEffect, listProviderVoices, saveDesignedVoice as saveDesignedAtProvider, synthesizeHosted, VoiceProviderError, type DesignPreview } from "./clients";
 import { getStudioDevices } from "../devices";
 import { readReportedModels } from "../local-models";
 import { Prisma } from "@prisma/client";
@@ -254,4 +254,48 @@ export async function cloneVoiceOnDevice(locationId: string, input: LocalCloneIn
     await store.deleteObject(keys.audio).catch(() => {}); await store.deleteObject(keys.text).catch(() => {});
     throw error instanceof VoiceSettingsError ? error : new VoiceSettingsError("The recording could not be stored. Try again.");
   } finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
+}
+
+// ---- Music bed and sound effect for Make video ------------------------------------------------------------------------------------------
+// The editor's own asset generator needs a provider key on the Mac. Keys live in the product, so the server makes the two files with the Location's
+// ElevenLabs key and the Mac downloads them like narration. They are stored as "Narration sound-..." uploads, which the Mac job never treats as footage.
+export const SOUND_NAME = /^Narration sound-(music|sfx) (?:(\d{2,3})s )?\d{4}-\d{2}-\d{2} \d{4}\.mp3$/;
+const SOUND_REUSE_HOURS = 48;
+/** Rough spoken length of a script, so the music bed covers the video. */
+export function estimateVideoSeconds(script: string): number {
+  const words = parseScript(script).reduce((n, b) => n + b.narration.split(/\s+/).filter(Boolean).length, 0);
+  return Math.min(180, Math.max(30, Math.ceil(words / 2.5) + 6));
+}
+export interface VideoSounds { music: string | null; sfx: string | null; skipped: string | null }
+export async function renderVideoSounds(access: NarrationAccess, recordId: string, want: { music: boolean; sfx: boolean; seconds: number }, deps: { music?: typeof generateMusicBed; sfx?: typeof generateSoundEffect } = {}): Promise<VideoSounds> {
+  const out: VideoSounds = { music: null, sfx: null, skipped: null };
+  if (!want.music && !want.sfx) return out;
+  const key = await resolveVoiceKey(access.locationId, "elevenlabs");
+  if (!key) { out.skipped = "Music and sound effects need an ElevenLabs key in AI settings."; return out; }
+  const config = readStudioR2Config();
+  if (!config) throw new StudioCommandError("Media storage is not configured.", 503);
+  const store = createStudioR2Store(config), dir = await mkdtemp(join(tmpdir(), "studio-sound-"));
+  const recent = await studioDb.rows<{ id: string; original_filename: string }>(Prisma.sql`select id, original_filename from studio.studio_uploads
+    where location_id = ${access.locationId} and record_id = ${recordId}::uuid and status = 'uploaded' and original_filename like 'Narration sound-%' and created_at > now() - make_interval(hours => ${SOUND_REUSE_HOURS}) order by created_at desc`);
+  const reuse = (role: "music" | "sfx", minSeconds: number) => recent.find(r => { const m = SOUND_NAME.exec(r.original_filename); return m?.[1] === role && (role === "sfx" || Number(m[2] ?? 0) >= minSeconds); })?.id ?? null;
+  const save = async (role: "music" | "sfx", audio: Buffer, seconds: number) => {
+    const id = randomUUID(), file = join(dir, `${id}.mp3`);
+    await writeFile(file, audio, { mode: 0o600 });
+    await store.uploadCreateOnly({ key: `${access.locationId}/uploads/${id}/original`, filePath: file, byteSize: audio.length, contentType: "audio/mpeg" });
+    await call("studio_save_narration", access, { p_record_id: recordId, p_upload_id: id, p_filename: `Narration sound-${role} ${role === "music" ? `${Math.round(seconds)}s ` : ""}${stampNow()}.mp3`,
+      p_byte_size: audio.length, p_sha256: createHash("sha256").update(audio).digest("hex"), p_bucket: store.bucket });
+    return id;
+  };
+  try {
+    if (want.music) {
+      out.music = reuse("music", want.seconds);
+      if (!out.music) out.music = await save("music", await (deps.music ?? generateMusicBed)(key, "Calm, modern instrumental background music for a creator video. Soft pulse, light piano and warm pads, no vocals, steady energy, loop-friendly, leaves room for a spoken voiceover.", want.seconds), want.seconds);
+    }
+    if (want.sfx) {
+      out.sfx = reuse("sfx", 0);
+      if (!out.sfx) out.sfx = await save("sfx", await (deps.sfx ?? generateSoundEffect)(key, "A soft, short whoosh transition sound, smooth air swoosh, clean, no music", 1), 1);
+    }
+  } catch (error) { out.skipped = providerMessage(error) ?? "Music and sound effects could not be generated. The video will be made without them."; }
+  finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
+  return out;
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cloneProviderVoice, deleteProviderVoice, listProviderVoices, synthesizeHosted, verifyVoiceKey, VoiceProviderError } from "./clients";
+import { cloneProviderVoice, deleteProviderVoice, generateMusicBed, generateSoundEffect, listProviderVoices, synthesizeHosted, verifyVoiceKey, VoiceProviderError } from "./clients";
 import { assertSampleLength, pickDefaultVoice, readCloneForm, readVoiceKey, type VoiceRow } from "./policy";
 
 const calls: { url: string; init: RequestInit }[] = [];
@@ -123,4 +123,27 @@ test("voice design: custom preview text replaces auto text; bounds are enforced"
   await designProviderVoice("k".repeat(24), "A warm middle-aged woman with a calm, steady delivery.", fetcher, "x".repeat(120));
   assert.equal(bodies[1].text, "x".repeat(120)); assert.equal(bodies[1].auto_generate_text, undefined);
   await assert.rejects(designProviderVoice("k".repeat(24), "A warm middle-aged woman with a calm, steady delivery.", fetcher, "too short"), /100 to 1,000/);
+});
+
+test("music and sound effects: ElevenLabs request bodies, bounds and errors", async () => {
+  calls.length = 0;
+  const audio = Buffer.alloc(2000);
+  await generateMusicBed("ek", "Calm instrumental bed", 64.2, respond(audio));
+  assert.match(calls[0].url, /api\.elevenlabs\.io\/v1\/music\?output_format=mp3_44100_128$/);
+  assert.equal((calls[0].init.headers as Record<string, string>)["xi-api-key"], "ek");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { prompt: "Calm instrumental bed", music_length_ms: 64200, force_instrumental: true });
+  await generateMusicBed("ek", "Bed", 9999, respond(audio));
+  assert.equal(JSON.parse(String(calls[1].init.body)).music_length_ms, 600000);   // the provider's own ceiling
+  await generateMusicBed("ek", "Bed", 0, respond(audio));
+  assert.equal(JSON.parse(String(calls[2].init.body)).music_length_ms, 3000);
+  await generateSoundEffect("ek", "soft whoosh", 1, respond(audio));
+  assert.match(calls[3].url, /\/v1\/sound-generation\?output_format=mp3_44100_128$/);
+  assert.deepEqual(JSON.parse(String(calls[3].init.body)), { text: "soft whoosh", duration_seconds: 1, prompt_influence: 0.5 });
+  await generateSoundEffect("ek", "soft whoosh", 99, respond(audio));
+  assert.equal(JSON.parse(String(calls[4].init.body)).duration_seconds, 30);
+  await assert.rejects(generateMusicBed("ek", "  ", 30, respond(audio)), /music prompt/);
+  await assert.rejects(generateSoundEffect("ek", "x".repeat(500), 1, respond(audio)), /sound description/);
+  await assert.rejects(generateMusicBed("ek", "Bed", 30, respond(Buffer.alloc(10))), /no audio/);
+  await assert.rejects(generateMusicBed("ek", "Bed", 30, respond({ detail: { message: "plan limit reached" } }, 422)), /plan limit reached/);
+  await assert.rejects(generateSoundEffect("bad", "whoosh", 1, respond({}, 401)), /rejected this key/);
 });

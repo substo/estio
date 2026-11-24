@@ -54,3 +54,27 @@ test("voiceover without a chosen voice is refused before any work", async () => 
   await writeFile(join(clips, "a.mov"), "x");
   await assert.rejects(assembleVideo({ script: "One.", clipsDir: clips, projectDir: project, editorDocs: "/d", voiceover: true, run: async () => ({ stdout: "", stderr: "" }) }), /Choose a voice/);
 });
+
+test("server-made music and whoosh are kept out of the footage, copied into the project and named in the brief", async () => {
+  const clips = await mkdtemp(join(tmpdir(), "clips-")), project = await mkdtemp(join(tmpdir(), "proj-"));
+  await writeFile(join(clips, "a.mov"), "x"); await writeFile(join(clips, "music-bed.mp3"), "m"); await writeFile(join(clips, "whoosh.mp3"), "w");
+  const calls: { command: string; args: string[]; input?: string }[] = [];
+  const result = await assembleVideo({ script: "One.", clipsDir: clips, projectDir: project, editorDocs: "/docs", voiceover: false, music: true, sounds: { music: "music-bed.mp3", sfx: "whoosh.mp3" },
+    run: async r => { calls.push(r); return { stdout: "done", stderr: "" }; } });
+  assert.deepEqual(result.clips, ["a.mov"]);   // never treated as footage
+  assert.deepEqual((await readdir(project)).sort(), ["a.mov", "music-bed.mp3", "whoosh.mp3"]);
+  const brief = calls.find(c => c.command === "claude")!.input!;
+  assert.match(brief, /Place music-bed\.mp3 .* -31 dB .* 2 s fade out/);
+  assert.match(brief, /Use whoosh\.mp3 .* -15 dB/);
+  assert.doesNotMatch(brief, /substo assets/);
+});
+
+test("without supplied sound files the brief does not promise any, and music off means no music", async () => {
+  const clips = await mkdtemp(join(tmpdir(), "clips-")), project = await mkdtemp(join(tmpdir(), "proj-"));
+  await writeFile(join(clips, "a.mov"), "x");
+  const brief = async (music: boolean) => { const calls: { command: string; input?: string }[] = []; await assembleVideo({ script: "One.", clipsDir: clips, projectDir: await mkdtemp(join(tmpdir(), "proj-")), editorDocs: "/docs", voiceover: false, music, run: async r => { calls.push(r); return { stdout: "done", stderr: "" }; } }); return calls.find(c => c.command === "claude")!.input!; };
+  assert.match(await brief(true), /No music bed file was supplied.*add no music/);
+  assert.match(await brief(true), /add no effects/);
+  assert.match(await brief(false), /Do not add music/);
+  void project;
+});

@@ -74,3 +74,8 @@ test("Mac status names what is missing and never echoes unsafe text", () => {
   assert.equal(describeMac({ ...base, assemblyReady: false, missing: ["Claude sign-in", "ffprobe", "<script>x</script>"] }).label, "Mac needs Claude sign-in, ffprobe");
   assert.equal(describeMac({ ...base, assemblyReady: null }).label, "Mac is starting");
 });
+
+test("the music bed and whoosh made for Make video are plumbing, not assets to browse", () => {
+  const g = groupAssets([up("1", "shot.mp4"), up("2", "Narration sound-music 90s 2026-11-24 1030.mp3"), up("3", "Narration sound-sfx 2026-11-24 1030.mp3")], []);
+  assert.equal(g.footage.length, 1); assert.equal(g.narration.length, 0);
+});

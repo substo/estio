@@ -94,6 +94,16 @@ test("hosted narration is downloaded and handed to the assembler as pre-rendered
   assert.deepEqual(seen?.voice, { engine: "prerendered", files: ["narration-001.mp3"] });
 });
 
+test("server-made music and whoosh are downloaded under fixed names and passed to the assembler; a failed one is skipped, not fatal", async () => {
+  let seen: AssembleOptions | undefined;
+  const d = await deps({ assemble: async o => { seen = o; return { projectDir: o.projectDir, beats: 1, clips: ["shot.mov"], voiceFiles: [], timings: [], brief: "" }; } });
+  await createVideoAssembleHandler(d.value)(job({ soundDownloads: [{ role: "music", name: "Narration sound-music 90s x.mp3", url: "https://r2.example/m", byteSize: 4 }, { role: "sfx", name: "Narration sound-sfx x.mp3", url: "https://r2.example/s", byteSize: 4 }] }) as never, ctx()).catch(() => {});
+  assert.deepEqual(seen?.sounds, { music: "music-bed.mp3", sfx: "whoosh.mp3" });
+  const none = await deps({ assemble: async o => { seen = o; return { projectDir: o.projectDir, beats: 1, clips: [], voiceFiles: [], timings: [], brief: "" }; } });
+  await createVideoAssembleHandler(none.value)(job() as never, ctx()).catch(() => {});
+  assert.deepEqual(seen?.sounds, {});   // an older server sends nothing: the brief then promises no sound files
+});
+
 test("an on-device cloned voice needs the Base model and its reference, and narrates from the cached reference", async () => {
   const speaker = "clone-55555555-5555-4555-8555-555555555555", ref = { id: "55555555-5555-4555-8555-555555555555", audioUrl: "https://r2.example/a.wav", textUrl: "https://r2.example/t.json" };
   const cloneJob = (extra: Record<string, unknown> = {}) => job({ voice: { engine: "local", model: "m", speaker }, voiceReference: ref, ...extra });

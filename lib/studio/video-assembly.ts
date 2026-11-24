@@ -6,8 +6,8 @@ import { StudioCommandError } from "./command-error";
 import { StudioDbError } from "./db";
 import { studioDb } from "./studio-db";
 import { deviceOnline } from "./devices-policy";
-import { listVoices } from "./voices/service";
-import { renderNarration } from "./voices/service";
+import { estimateVideoSeconds, listVoices, renderNarration, renderVideoSounds, type VideoSounds } from "./voices/service";
+import { resolveVoiceKey } from "./voices/keys";
 import { reusableBeatAudio, rememberRenderedBlockAudio } from "./script-audio";
 import { isHostedProvider } from "./voices/policy";
 import { VoiceSettingsError } from "./voices/keys";
@@ -21,24 +21,29 @@ export async function requestVideoAssembly(locationId: string, recordId: string,
   try {
     const { voiceId, ...base } = options;
     const sqlOptions: Record<string, unknown> = { ...base };
+    let voice: Awaited<ReturnType<typeof listVoices>>[number] | undefined;
     if (options.voiceover) {
       if (!voiceId) return { ok: false, message: videoAssemblyMessages.no_voice };
-      const voice = (await listVoices(access.locationId)).find(v => v.id === voiceId);
+      voice = (await listVoices(access.locationId)).find(v => v.id === voiceId);
       if (!voice) return { ok: false, message: videoAssemblyMessages.no_voice };
+    }
+    const hostedVoice = voice && isHostedProvider(voice.provider) ? voice : undefined;
+    if (voice && !hostedVoice) sqlOptions.voice = { voiceId };
+    // Music and the whoosh are made on the server with the Location's ElevenLabs key (the Mac never holds a provider key), which takes a while: same background path as hosted narration.
+    const wantsSound = options.music && Boolean(await resolveVoiceKey(access.locationId, "elevenlabs").catch(() => null));
+    if (hostedVoice || wantsSound) {
       const active = await studioDb.rows<{ id: string }>(Prisma.sql`select id from studio.studio_jobs where location_id = ${access.locationId} and kind = 'studio.video_assemble' and payload->>'recordId' = ${recordId} and status in ('queued','running') limit 1`);
-      if (active[0]) return { ok: true, jobId: active[0].id, reused: true };   // never render (and pay for) narration twice
-      if (isHostedProvider(voice.provider)) {
-        const row = (await studioDb.rows<{ payload: Record<string, unknown> | null }>(Prisma.sql`select payload from studio.studio_records where location_id = ${access.locationId} and id = ${recordId}::uuid and kind = 'content'`))[0];
-        const script = typeof row?.payload?.script === "string" ? row.payload.script : "";
-        if (!script.trim()) return { ok: false, message: videoAssemblyMessages.no_script };
-        // Rendering six beats takes minutes: record the run, answer the click at once, and finish in the background (progress is on the page).
-        const begun = await studioDb.call<{ runId: string; reused: boolean }>("studio_begin_narration_run", { p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_record_id: recordId, p_beats: parseScript(script).length });
-        if (begun.reused) return { ok: true, jobId: begun.runId, reused: true };
-        const actor = { locationId: access.locationId, app: access.app, userId: access.userId };
-        const { reuse } = await reusableBeatAudio(access.locationId, recordId, row?.payload ?? {}, voice.id, parseScript(script).length).catch(() => ({ reuse: new Map<number, string>() }));   // clips already fresh for this text and voice are never paid for twice
-        after(() => narrateThenAssemble(actor, recordId, voice, voiceId, script, sqlOptions, begun.runId, reuse));
-        return { ok: true, jobId: begun.runId, reused: false, narrating: true };
-      } else sqlOptions.voice = { voiceId };
+      if (active[0]) return { ok: true, jobId: active[0].id, reused: true };   // never render (and pay for) narration or sound twice
+      const row = (await studioDb.rows<{ payload: Record<string, unknown> | null }>(Prisma.sql`select payload from studio.studio_records where location_id = ${access.locationId} and id = ${recordId}::uuid and kind = 'content'`))[0];
+      const script = typeof row?.payload?.script === "string" ? row.payload.script : "";
+      if (!script.trim()) return { ok: false, message: videoAssemblyMessages.no_script };
+      // Rendering takes minutes: record the run, answer the click at once, and finish in the background (progress is on the page).
+      const begun = await studioDb.call<{ runId: string; reused: boolean }>("studio_begin_narration_run", { p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_record_id: recordId, p_beats: parseScript(script).length });
+      if (begun.reused) return { ok: true, jobId: begun.runId, reused: true };
+      const actor = { locationId: access.locationId, app: access.app, userId: access.userId };
+      const { reuse } = hostedVoice ? await reusableBeatAudio(access.locationId, recordId, row?.payload ?? {}, hostedVoice.id, parseScript(script).length).catch(() => ({ reuse: new Map<number, string>() })) : { reuse: new Map<number, string>() };   // clips already fresh for this text and voice are never paid for twice
+      after(() => narrateThenAssemble(actor, recordId, hostedVoice, voiceId, script, sqlOptions, begun.runId, reuse, wantsSound));
+      return { ok: true, jobId: begun.runId, reused: false, narrating: true };
     }
     const r = await studioDb.call<{ jobId: string; reused: boolean }>("studio_request_video_assembly", {
       p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_record_id: recordId, p_options: sqlOptions });
@@ -52,15 +57,17 @@ export async function requestVideoAssembly(locationId: string, recordId: string,
 
 type Actor = { locationId: string; app: "estio" | "substo"; userId: string };
 /** The background half of a hosted-voice request: render each beat with the Location's key, then queue the Mac job with the finished narration. Failures are recorded for the page, never thrown. */
-async function narrateThenAssemble(actor: Actor, recordId: string, voice: Parameters<typeof renderNarration>[2], voiceId: string, script: string, sqlOptions: Record<string, unknown>, runId: string, reuse: ReadonlyMap<number, string> = new Map()) {
+async function narrateThenAssemble(actor: Actor, recordId: string, voice: Parameters<typeof renderNarration>[2] | undefined, voiceId: string | undefined, script: string, sqlOptions: Record<string, unknown>, runId: string, reuse: ReadonlyMap<number, string> = new Map(), sound = false) {
   const finish = (ok: boolean, message: string | null, jobId: string | null) => studioDb.call("studio_finish_narration_run", { p_location_id: actor.locationId, p_run_id: runId, p_ok: ok, p_message: message, p_job_id: jobId });
   try {
-    const narration = await renderNarration(actor.locationId, recordId, voice, script, { access: actor, reuse,
-      onBeat: done => studioDb.call("studio_narration_progress", { p_location_id: actor.locationId, p_run_id: runId, p_done: done }).then(() => {}, () => {}) });
+    const narration = voice ? await renderNarration(actor.locationId, recordId, voice, script, { access: actor, reuse,
+      onBeat: done => studioDb.call("studio_narration_progress", { p_location_id: actor.locationId, p_run_id: runId, p_done: done }).then(() => {}, () => {}) }) : null;
+    // A failed or skipped sound never stops the video: the Mac job simply gets no sound files and the brief says so.
+    if (sound) await renderVideoSounds(actor, recordId, { music: true, sfx: true, seconds: estimateVideoSeconds(script) }).catch((): VideoSounds | null => null);
     const r = await studioDb.call<{ jobId: string }>("studio_request_video_assembly", { p_location_id: actor.locationId, p_actor_app: actor.app, p_clerk_user_id: actor.userId, p_record_id: recordId,
-      p_options: { ...sqlOptions, voice: { voiceId, uploadIds: narration.uploadIds } } });
+      p_options: narration && voice ? { ...sqlOptions, voice: { voiceId, uploadIds: narration.uploadIds } } : sqlOptions });
     await finish(true, null, r.jobId);
-    await rememberRenderedBlockAudio(actor, recordId, voice.id, new Map(parseScript(script).map(b => [b.index, b.narration])), narration.rendered);
+    if (narration && voice) await rememberRenderedBlockAudio(actor, recordId, voice.id, new Map(parseScript(script).map(b => [b.index, b.narration])), narration.rendered);
   } catch (error) {
     const reason = error instanceof StudioDbError && error.code ? videoAssemblyCodeReason[error.code] : undefined;
     const message = error instanceof VoiceSettingsError ? error.message : reason ? videoAssemblyMessages[reason] : videoAssemblyMessages.narration_not_ready;

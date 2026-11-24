@@ -12,6 +12,8 @@ export interface AssembleOptions {
   /** The project file inside projectDir (a revision of the same piece gets the next free name). */ projectFile?: string;
   orientation?: "landscape" | "portrait"; voiceover?: boolean; music?: boolean; model?: string; dryRun?: boolean;
   run?: ProcessRunner;
+  /** Music bed and whoosh the server already rendered (file names inside clipsDir). They are copied into the project beside the voice files and never treated as footage. */
+  sounds?: { music?: string; sfx?: string };
   /** Who narrates when voiceover is on: the on-device engine, or narration the server already rendered with the Location's key (files in clipsDir, in beat order). */
   voice?: { engine: "local"; speaker?: string; model?: string; /** An on-device clone: the reference recording and its exact transcript, both on this Mac. */ reference?: { audio: string; text: string } } | { engine: "prerendered"; files: string[] };
   /** Test seam. */ speak?: SpeechEngine; log?: (line: string) => void; signal?: AbortSignal;
@@ -30,13 +32,15 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
   const log = o.log ?? (() => {}), run = o.run ?? runNativeProcess, projectFile = o.projectFile ?? "Video.substo";
   const beats = parseScript(o.script);
   if (!beats.length) throw new Error("The script has no spoken paragraphs.");
-  const narration = new Set(o.voice?.engine === "prerendered" ? o.voice.files : []);
+  const narration = new Set([...(o.voice?.engine === "prerendered" ? o.voice.files : []), ...[o.sounds?.music, o.sounds?.sfx].filter((f): f is string => Boolean(f))]);
   const sources = (await readdir(o.clipsDir)).filter(f => !f.startsWith(".") && !narration.has(f) && videoExtensions.has(extname(f).toLowerCase())).sort();
   if (!sources.length && !o.voiceover) throw new Error("No footage found and voiceover is off.");
   await mkdir(o.projectDir, { recursive: true });
   const clips: string[] = [];
   for (const f of sources) { await copyFile(join(o.clipsDir, f), join(o.projectDir, f)); clips.push(f); }
 
+  const soundFiles: { music?: string; sfx?: string } = {};
+  if (!o.dryRun) for (const role of ["music", "sfx"] as const) { const f = o.sounds?.[role]; if (f && o.music !== false) { await copyFile(join(o.clipsDir, f), join(o.projectDir, f)); soundFiles[role] = f; } }
   const voiceFiles: string[] = [];
   if (o.voiceover) {
     if (!o.voice && !o.speak) throw new Error("Choose a voice for the voiceover.");
@@ -63,7 +67,7 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
     const segments = await o.transcribeFootage(join(o.projectDir, f), o.signal).catch(() => null);
     if (segments?.length) footageTranscripts.push({ file: f, lines: segments.map(x => `${x.start.toFixed(1)}-${x.end.toFixed(1)} ${x.text}`).join("\n").slice(0, 6000) });
   }
-  const brief = buildBrief({ footageTranscripts, projectFile, editorDocs: o.editorDocs, orientation: o.orientation ?? "landscape", beats, voiceFiles, timings, clips, hasVoiceover: Boolean(o.voiceover), music: o.music ?? false });
+  const brief = buildBrief({ footageTranscripts, projectFile, editorDocs: o.editorDocs, orientation: o.orientation ?? "landscape", beats, voiceFiles, timings, clips, hasVoiceover: Boolean(o.voiceover), music: o.music ?? false, soundFiles });
   if (o.dryRun) return { projectDir: o.projectDir, projectFile, beats: beats.length, clips, voiceFiles, timings, brief };
   log("Editing with the agent");
   const agentOutput = await runEditingAgent({ cwd, brief, editorDocs: o.editorDocs, model: o.model, run, signal: o.signal });

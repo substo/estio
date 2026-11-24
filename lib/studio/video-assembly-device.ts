@@ -6,6 +6,9 @@ import { studioDb } from "./studio-db";
 import { EXPORT_PRESIGN_SECONDS, runExportOperation } from "./video-assembly-export";
 
 export interface AssemblyDownload { name: string; url: string; byteSize: number }
+export interface SoundDownload extends AssemblyDownload { role: "music" | "sfx" }
+/** Music and effect files the server made for this piece in the last two days (see renderVideoSounds). Newest of each role. */
+export const SOUND_WINDOW_HOURS = 48;
 
 /** Footage links are minted at claim time (never stored in the job): each is a short-lived private R2 read for exactly one object of this Location. */
 export async function withAssemblyDownloads(jobs: unknown, store?: Pick<StudioR2Store, "presignWorkerRead">): Promise<unknown> {
@@ -28,7 +31,15 @@ export async function withAssemblyDownloads(jobs: unknown, store?: Pick<StudioR2
     };
     const downloads: AssemblyDownload[] = await link(ids);
     const voiceDownloads: AssemblyDownload[] = await link(voiceIds);   // beat order = uploadIds order
-    return { ...job, payload: { ...job.payload, downloads, voiceDownloads } };
+    const soundRows = job.payload?.options?.music === true && uuid(job.payload?.recordId) ? await studioDb.rows<{ id: string; original_filename: string }>(Prisma.sql`
+      select id, original_filename from studio.studio_uploads where location_id = ${job.location_id} and record_id = ${job.payload.recordId}::uuid and status = 'uploaded'
+        and original_filename like 'Narration sound-%' and created_at > now() - make_interval(hours => ${SOUND_WINDOW_HOURS}) order by created_at desc`) : [];
+    const newest = (role: "music" | "sfx") => soundRows.find(r => r.original_filename.startsWith(`Narration sound-${role} `))?.id;
+    const wanted = (["music", "sfx"] as const).flatMap(role => { const id = newest(role); return id ? [{ role, id }] : []; });
+    const linked = await link(wanted.map(w => w.id));
+    // Same order as `wanted`, minus any whose file is not there any more.
+    const soundDownloads: SoundDownload[] = linked.flatMap(d => { const role = wanted.find(w => d.name.startsWith(`Narration sound-${w.role} `))?.role; return role ? [{ ...d, role }] : []; });
+    return { ...job, payload: { ...job.payload, downloads, voiceDownloads, ...(soundDownloads.length ? { soundDownloads } : {}) } };
   }));
 }
 
