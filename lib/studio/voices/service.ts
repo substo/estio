@@ -9,12 +9,15 @@ import { StudioDbError } from "../db";
 import { createStudioR2Store, readStudioR2Config } from "../media-r2";
 import { studioDb } from "../studio-db";
 import { parseScript } from "../video-assembly/script";
-import { cloneProviderVoice, deleteProviderVoice, designProviderVoice, generateMusicBed, generateSoundEffect, listProviderVoices, saveDesignedVoice as saveDesignedAtProvider, synthesizeHosted, VoiceProviderError, type DesignPreview } from "./clients";
+import { cloneProviderVoice, deleteProviderVoice, designProviderVoice, listProviderVoices, saveDesignedVoice as saveDesignedAtProvider, synthesizeHosted, VoiceProviderError, type DesignPreview } from "./clients";
 import { getStudioDevices } from "../devices";
 import { readReportedModels } from "../local-models";
 import { Prisma } from "@prisma/client";
 import { LOCAL_SPEAKER_CATALOG, PREVIEW_TEXT_MAX, PREVIEW_TEXT_MIN, buildDesignPrompt, consentSpeech, designError, normalizeTag, type Availability, type DesignFields, type LocalState } from "./library";
 import { getVoiceKeySummary, requireVoiceManager, resolveVoiceKey, VoiceSettingsError } from "./keys";
+import { resolveFalKey } from "./sound-keys";
+import { generateHostedSound, soundErrorMessage } from "./sound-render";
+import type { HostedSoundProvider } from "./sound-providers";
 import { CLONE_CONSENT_STATEMENT, LOCAL_SPEAKERS, isHostedProvider, providerLabels, type CloneInput, type HostedVoiceProvider, type LocalCloneInput, type VoiceRow } from "./policy";
 
 const call = <T>(fn: string, access: { locationId: string; app: "estio" | "substo"; userId: string }, args: Record<string, unknown> = {}) =>
@@ -267,11 +270,11 @@ export function estimateVideoSeconds(script: string): number {
   return Math.min(180, Math.max(30, Math.ceil(words / 2.5) + 6));
 }
 export interface VideoSounds { music: string | null; sfx: string | null; skipped: string | null }
-export async function renderVideoSounds(access: NarrationAccess, recordId: string, want: { music: boolean; sfx: boolean; seconds: number }, deps: { music?: typeof generateMusicBed; sfx?: typeof generateSoundEffect } = {}): Promise<VideoSounds> {
+export async function renderVideoSounds(access: NarrationAccess, recordId: string, want: { music: HostedSoundProvider | null; sfx: HostedSoundProvider | null; seconds: number }, deps: { generate?: typeof generateHostedSound; key?: (provider: HostedSoundProvider) => Promise<string | null> } = {}): Promise<VideoSounds> {
   const out: VideoSounds = { music: null, sfx: null, skipped: null };
   if (!want.music && !want.sfx) return out;
-  const key = await resolveVoiceKey(access.locationId, "elevenlabs");
-  if (!key) { out.skipped = "Music and sound effects need an ElevenLabs key in AI settings."; return out; }
+  const keyFor = deps.key ?? (async (provider: HostedSoundProvider) => provider === "fal" ? resolveFalKey(access.locationId) : resolveVoiceKey(access.locationId, "elevenlabs"));
+  const generate = deps.generate ?? generateHostedSound;
   const config = readStudioR2Config();
   if (!config) throw new StudioCommandError("Media storage is not configured.", 503);
   const store = createStudioR2Store(config), dir = await mkdtemp(join(tmpdir(), "studio-sound-"));
@@ -286,16 +289,22 @@ export async function renderVideoSounds(access: NarrationAccess, recordId: strin
       p_byte_size: audio.length, p_sha256: createHash("sha256").update(audio).digest("hex"), p_bucket: store.bucket });
     return id;
   };
+  /** Each kind is tried on its own, so one that fails (a plan limit, a bad key) does not stop the other; the page gets the provider's own reason. */
+  const reasons: string[] = [];
+  const one = async (role: "music" | "sfx", provider: HostedSoundProvider | null, seconds: number): Promise<string | null> => {
+    if (!provider) return null;
+    const reused = reuse(role, seconds);
+    if (reused) return reused;
+    try {
+      const key = await keyFor(provider);
+      if (!key) throw new VoiceSettingsError(`Add your ${provider === "fal" ? "fal.ai" : "ElevenLabs"} key in the voice settings first.`);
+      return await save(role, await generate(provider, role === "music" ? "music" : "effects", key, seconds), seconds);
+    } catch (error) { reasons.push(soundErrorMessage(error) ?? (error instanceof VoiceSettingsError ? error.message : "The provider could not make this sound.")); return null; }
+  };
   try {
-    if (want.music) {
-      out.music = reuse("music", want.seconds);
-      if (!out.music) out.music = await save("music", await (deps.music ?? generateMusicBed)(key, "Calm, modern instrumental background music for a creator video. Soft pulse, light piano and warm pads, no vocals, steady energy, loop-friendly, leaves room for a spoken voiceover.", want.seconds), want.seconds);
-    }
-    if (want.sfx) {
-      out.sfx = reuse("sfx", 0);
-      if (!out.sfx) out.sfx = await save("sfx", await (deps.sfx ?? generateSoundEffect)(key, "A soft, short whoosh transition sound, smooth air swoosh, clean, no music", 1), 1);
-    }
-  } catch (error) { out.skipped = providerMessage(error) ?? "Music and sound effects could not be generated. The Mac makes them instead."; }
-  finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
+    if (want.music) out.music = await one("music", want.music, want.seconds);
+    if (want.sfx) out.sfx = await one("sfx", want.sfx, 1);
+  } finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
+  if (reasons.length) out.skipped = [...new Set(reasons)].join(" ");
   return out;
 }

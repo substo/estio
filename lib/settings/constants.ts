@@ -20,6 +20,7 @@ export const SETTINGS_SECRET_KEYS = {
     OPENAI_API_KEY: "openai_api_key",
     FISH_API_KEY: "fish_api_key",
     ELEVENLABS_API_KEY: "elevenlabs_api_key",
+    FAL_API_KEY: "fal_api_key",
     CHATGPT_CODEX_ACCESS_TOKEN: "chatgpt_codex_access_token",
     CHATGPT_CODEX_AUTH_CACHE: "chatgpt_codex_auth_cache",
     WHATSAPP_ACCESS_TOKEN: "whatsapp_access_token",

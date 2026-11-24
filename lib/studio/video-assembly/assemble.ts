@@ -14,6 +14,8 @@ export interface AssembleOptions {
   run?: ProcessRunner;
   /** Music bed and whoosh the server already rendered (file names inside clipsDir). They are copied into the project beside the voice files and never treated as footage. */
   sounds?: { music?: string; sfx?: string };
+  /** Timed speech in a footage file (file time, seconds), made on this Mac when the editor cannot transcribe. */
+  transcribeFootage?: (file: string, signal?: AbortSignal) => Promise<{ start: number; end: number; text: string }[] | null>;
   /** Who narrates when voiceover is on: the on-device engine, or narration the server already rendered with the Location's key (files in clipsDir, in beat order). */
   voice?: { engine: "local"; speaker?: string; model?: string; /** An on-device clone: the reference recording and its exact transcript, both on this Mac. */ reference?: { audio: string; text: string } } | { engine: "prerendered"; files: string[] };
   /** Test seam. */ speak?: SpeechEngine; log?: (line: string) => void; signal?: AbortSignal;

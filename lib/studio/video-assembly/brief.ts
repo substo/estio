@@ -6,6 +6,8 @@ export interface BriefInput {
   beats: Beat[]; voiceFiles: string[]; timings: number[]; clips: string[]; hasVoiceover: boolean; music: boolean;
   /** Timed speech in each footage file (file time, seconds), made on this Mac when the editor cannot transcribe. */
   footageTranscripts?: { file: string; lines: string }[];
+  /** Music bed and whoosh files in this folder (made on this Mac or by the server), when there are any. */
+  soundFiles?: { music?: string; sfx?: string };
 }
 
 function soundStep(i: BriefInput): string {
