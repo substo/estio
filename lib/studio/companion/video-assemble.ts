@@ -15,6 +15,9 @@ import { runNativeProcess, type ProcessRunner } from "./process";
 import { freeBytes, nextProjectFile, projectFolderName, type ProjectStore } from "./video-projects";
 import { parseScript } from "../video-assembly/script";
 import { readMotionChoice } from "../video-assembly/motion-style";
+import { renderShot } from "../images/prompts";
+import { shotForBeat } from "../images/storyboard";
+import type { FrameDrawer } from "./codex-image";
 import { soundSeconds, type LocalSoundMaker } from "./local-sound";
 const payload = z.object({
   recordId: z.string().uuid(), script: z.string().min(1).max(20000),
@@ -33,6 +36,8 @@ const payload = z.object({
   soundDownloads: z.array(z.object({ role: z.enum(["music", "sfx"]), name: z.string().max(255), url: z.string().url().max(4000), byteSize: z.number().int().positive() })).max(2).default([]),
   /** The creator's chosen look for titles and callouts, added at claim time (absent on an older server: Clean). Read defensively: it is text from the server. */
   motionStyle: z.unknown().optional(),
+  /** Added at claim time when the Location chose Codex on the Mac for storyboard frames: draw one per beat when there is no footage. */
+  storyboardFrames: z.object({ source: z.literal("codex"), max: z.number().int().min(1).max(8) }).optional(),
   /** The creator's private storyboard photo, minted at claim time when they saved one. */
   avatar: z.object({ name: z.string().regex(/^storyboard-avatar\.(jpg|png|webp)$/), contentType: z.string().max(40), url: z.string().url().max(4000), byteSize: z.number().int().positive().max(5 * 1024 * 1024) }).optional(),
 }).passthrough();
@@ -87,6 +92,8 @@ export interface VideoAssembleDeps {
   transcribeFootage?: (file: string, signal?: AbortSignal) => Promise<{ start: number; end: number; text: string }[] | null>;
   /** Makes the music bed or the whoosh on this Mac when the server did not supply one. */
   makeSound?: LocalSoundMaker;
+  /** Draws a storyboard frame with the Codex CLI on this Mac (the owner's ChatGPT login). Absent: placeholders keep the plain photo. */
+  drawFrame?: FrameDrawer;
   assemble: (options: AssembleOptions) => Promise<AssembleResult>;
   fetcher?: typeof fetch;
 }
@@ -181,6 +188,17 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
         try { await download(p.avatar.url, join(clipsDir, p.avatar.name), p.avatar.byteSize, context.signal, fetcher); avatar = p.avatar.name; }
         catch (error) { if (context.signal.aborted) throw error; }
       }
+      // Storyboard frames, only when there is no footage (every beat is a placeholder): the creator's photo in a new scene per beat, drawn by Codex on this Mac.
+      // A frame that fails costs only that frame: the beat keeps the plain photo.
+      const frames: string[] = [];
+      if (p.storyboardFrames && avatar && deps.drawFrame && p.downloads.length === 0) {
+        for (const beat of parseScript(p.script).slice(0, p.storyboardFrames.max)) {
+          const name = `storyboard-frame-${beat.index}.png`;
+          const { prompt } = renderShot(shotForBeat(beat, p.options.portrait), "edit", { acceptsText: false });
+          const ok = await deps.drawFrame({ prompt, references: [join(clipsDir, avatar)], out: join(clipsDir, name), signal: context.signal }).catch(error => { if (context.signal.aborted) throw error; return false; });
+          if (ok) frames[beat.index] = name;
+        }
+      }
       // Anything the server did not supply is made here on the Mac (the default): a music bed sized to the script and a whoosh.
       if (p.options.music && deps.makeSound) {
         const words = parseScript(p.script).reduce((n, b) => n + b.narration.split(/\s+/).filter(Boolean).length, 0);
@@ -202,7 +220,7 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
         ? await deps.reference(p.voiceReference, context.signal).catch(() => { throw new StudioJobError("voice_reference_unavailable", "The Mac could not fetch this cloned voice. Make the video again.", false); }) : undefined;
       let result: AssembleResult;
       try {
-        result = await deps.assemble({ transcribeFootage: deps.transcribeFootage, script: p.script, clipsDir, projectDir, projectFile, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape", sounds, motion: readMotionChoice(p.motionStyle), ...(avatar ? { avatar } : {}),
+        result = await deps.assemble({ transcribeFootage: deps.transcribeFootage, script: p.script, clipsDir, projectDir, projectFile, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape", sounds, motion: readMotionChoice(p.motionStyle), ...(avatar ? { avatar } : {}), ...(frames.some(Boolean) ? { frames } : {}),
           voiceover: p.options.voiceover, music: p.options.music, model: deps.model, signal: context.signal,
           voice: !p.options.voiceover ? undefined : p.voice?.engine === "local" ? { engine: "local", speaker: p.voice.speaker, model: p.voice.model, ...(reference ? { reference } : {}) } : p.voice?.engine === "hosted" ? { engine: "prerendered", files: narration } : undefined });
       } catch (error) {

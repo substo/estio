@@ -2,13 +2,12 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
-import { CONNECTIONS, type ConnectionId } from "@/lib/studio/ai/connections";
-import { imageModel, type ImageChoice, type ImagePlatformId } from "@/lib/studio/images/catalog";
+import { IMAGE_PLATFORMS, imageModel, type ImageChoice, type ImagePlatformId } from "@/lib/studio/images/catalog";
 import { SAMPLE_SHOT, renderShot } from "@/lib/studio/images/prompts";
 import type { ImageTests } from "@/lib/studio/images/keys";
 import { setImageChoicesAction, testImageAction } from "../actions";
 
-export interface ImageOffer { model: string; platform: ConnectionId }
+export interface ImageOffer { model: string; platform: ImagePlatformId }
 const dialectWord = { natural: "Flowing description", edit: "Instruction to an editing model", tags: "Short phrases plus a negative prompt", ideogram: "Quoted text first" } as const;
 const keyOf = (c: { model: string; platform: string } | null) => c ? `${c.model}|${c.platform}` : "";
 
@@ -28,9 +27,9 @@ export function ImageActions({ locationId, canManage, offers, choice, fallback, 
     const before = { primary, second }; setPrimary(nextPrimary); setSecond(nextPrimary ? nextSecond : null); setError("");
     start(async () => { const r = await setImageChoicesAction(locationId, nextPrimary, nextPrimary ? nextSecond : null); if (r.error) { setPrimary(before.primary); setSecond(before.second); setError(r.error); } });
   };
-  const label = (o: ImageOffer) => `${imageModel(o.model)?.label ?? o.model} · ${CONNECTIONS[o.platform].label}`;
-  const runTest = (o: ImageOffer) => { const k = keyOf(o); setTesting(k); setError("");
-    start(async () => { const r = await testImageAction(locationId, o.platform, o.model, imageModel(o.model)?.endpoints.find(x => x.platform === o.platform)?.discovered ? endpointOf(o) : null); setResults(p => ({ ...p, [k]: r })); setTesting(""); }); };
+  const label = (o: { model: string; platform: string }) => `${imageModel(o.model)?.label ?? o.model} · ${IMAGE_PLATFORMS[o.platform as ImagePlatformId]?.label ?? o.platform}`;
+  const runTest = (o: ImageOffer, withPhoto = false) => { const k = keyOf(o); setTesting(k); setError("");
+    start(async () => { const r = await testImageAction(locationId, o.platform, o.model, imageModel(o.model)?.endpoints.find(x => x.platform === o.platform)?.discovered ? endpointOf(o) : null, withPhoto); setResults(p => ({ ...p, [k]: r })); setTesting(""); }); };
 
   if (!offers.length) return <section className="space-y-2 rounded-lg border p-4"><h2 className="text-base font-semibold">What makes it</h2>
     <p className="text-sm text-muted-foreground">No image platform is connected and switched on for images yet. Connect one (the fal.ai key alone reaches six models) and allow its image models.</p>
@@ -51,13 +50,14 @@ export function ImageActions({ locationId, canManage, offers, choice, fallback, 
       {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     </div>
     <div className="space-y-2"><h3 className="text-sm font-semibold">Models you can use</h3>
-      <p className="text-xs text-muted-foreground">Only connected platforms and the models you allowed on Connections. Test makes one real picture (a few cents) so a key and an endpoint are proven, not assumed.</p>
+      <p className="text-xs text-muted-foreground">Only connected platforms and the models you allowed on Connections. Test makes one real picture (a few cents) so a key and an endpoint are proven, not assumed. &quot;Test with my photo&quot; draws you in a new scene from your saved photo, to check that the face stays the same; your photo is sent only to that platform, only when you press it. Add or change your photo in <Link href="/settings/voices" className="text-primary hover:underline">Settings → Voices → Your look</Link>.</p>
       <ul className="space-y-2">{offers.map(o => { const k = keyOf(o), m = imageModel(o.model)!, e = m.endpoints.find(x => x.platform === o.platform)!, r = results[k];
         const last = tests[`${o.platform}|${o.model}|${endpointOf(o)}`]; const sample = renderShot(SAMPLE_SHOT, m.dialect, { acceptsText: m.text, negative: m.negative });
         return <li key={k} className="space-y-2 rounded-md border p-3">
-          <div className="flex flex-wrap items-center gap-2"><div className="min-w-48 flex-1"><p className="text-sm font-medium">{m.label} <span className="font-normal text-muted-foreground">· {CONNECTIONS[o.platform].label}</span></p>
+          <div className="flex flex-wrap items-center gap-2"><div className="min-w-48 flex-1"><p className="text-sm font-medium">{m.label} <span className="font-normal text-muted-foreground">· {IMAGE_PLATFORMS[o.platform].label}</span></p>
             <p className="text-xs text-muted-foreground">{m.strength} {e.price ? `${e.price}. ` : ""}{m.references ? `Takes up to ${m.references} reference photo${m.references === 1 ? "" : "s"}.` : "Text only."} Prompt style: {dialectWord[m.dialect]}. {e.status === "documented" ? "Endpoint documented." : "Endpoint unverified until tested."}</p></div>
-            {canManage ? <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => runTest(o)}>{testing === k ? "Making a picture…" : "Test (one picture)"}</Button> : null}</div>
+            {o.platform === "codex" ? <p className="text-xs text-muted-foreground">Runs inside Make video on your Mac. It was proven on this Mac: one picture from a reference photo in about a minute.</p> : canManage ? <div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => runTest(o)}>{testing === k ? "Making a picture…" : "Test (one picture)"}</Button>
+              {m.references > 0 ? <Button type="button" size="sm" variant="outline" disabled={pending} title="Sends your saved photo to this platform for this one picture" onClick={() => runTest(o, true)}>Test with my photo</Button> : null}</div> : null}</div>
           {last && !r ? <p className={`text-xs ${last.ok ? "text-emerald-700 dark:text-emerald-400" : "text-destructive"}`}>{last.ok ? `Worked ${new Date(last.at).toLocaleDateString("en-GB")} (${(last.ms / 1000).toFixed(0)} s)` : `Last test failed: ${last.message}`}</p> : null}
           {r ? r.ok && r.dataUrl ? <div className="space-y-1">{/* eslint-disable-next-line @next/next/no-img-element */}<img src={r.dataUrl} alt="Test picture" className="max-h-48 rounded-md border" /><p className="text-xs text-muted-foreground">Made in {(r.ms / 1000).toFixed(1)} s with: {r.prompt}</p></div> : <p role="alert" className="text-sm text-destructive">{r.message}</p> : null}
           <details className="text-xs"><summary className="cursor-pointer text-muted-foreground">How a storyboard shot is written for this model</summary><p className="mt-1 whitespace-pre-wrap rounded-md bg-muted/40 p-2">{sample.prompt}{sample.negative ? `\n\nNegative: ${sample.negative}` : ""}</p></details>

@@ -131,3 +131,28 @@ test("the creator's storyboard photo is downloaded under its fixed name and pass
   assert.equal((await run({}))?.avatar, undefined);   // an older server or no photo
   assert.equal((await run({ avatar: { name: "../../evil.png", contentType: "image/png", url: "https://r2.example/a", byteSize: 4 } }))?.avatar, undefined);   // only the fixed names are accepted
 });
+
+test("storyboard frames: Codex draws one per beat when there is no footage, with the creator's photo attached; a failed frame costs only that frame; with footage, or without the photo, none are drawn", async () => {
+  const avatar = { name: "storyboard-avatar.png", contentType: "image/png", url: "https://r2.example/a", byteSize: 4 };
+  const script = "One line.\n\n[Open on the desk]\nTwo lines here.\n\nThree.";
+  const run = async (extra: Record<string, unknown>, failBeat = 0) => {
+    const drawn: { out: string; references: string[]; prompt: string }[] = [];
+    let seen: AssembleOptions | undefined;
+    const d = await deps({
+      drawFrame: async r => { drawn.push(r); return !r.out.endsWith(`storyboard-frame-${failBeat}.png`); },
+      assemble: async o => { seen = o; return { projectDir: o.projectDir, beats: 3, clips: [], voiceFiles: [], timings: [], brief: "" }; },
+    });
+    await createVideoAssembleHandler(d.value)(job({ script, ...extra }) as never, ctx()).catch(() => {});
+    return { drawn, seen: seen as AssembleOptions | undefined };
+  };
+  const none = { media: [], downloads: [], avatar, storyboardFrames: { source: "codex", max: 6 } };
+  const a = await run(none, 2);
+  assert.equal(a.drawn.length, 3);
+  assert.ok(a.drawn.every(d => d.references.length === 1 && d.references[0].endsWith("storyboard-avatar.png")));
+  assert.match(a.drawn[1].prompt, /Open on the desk/);   // the beat's own visual note is its scene
+  assert.deepEqual((a.seen?.frames ?? []).filter(Boolean), ["storyboard-frame-1.png", "storyboard-frame-3.png"]);   // beat 2 failed: it keeps the plain photo
+  assert.equal((await run({ ...none, storyboardFrames: { source: "codex", max: 2 } })).drawn.length, 2);   // the cap
+  assert.equal((await run({ avatar, storyboardFrames: { source: "codex", max: 6 } })).drawn.length, 0);      // footage present
+  assert.equal((await run({ media: [], downloads: [], storyboardFrames: { source: "codex", max: 6 } })).drawn.length, 0);   // no photo
+  assert.equal((await run({ media: [], downloads: [], avatar })).drawn.length, 0);                              // not chosen
+});

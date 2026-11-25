@@ -48,7 +48,16 @@ test("the full brief uses Clean when no style is given, and the style when it is
 test("only styles with a graphics budget tell the agent to design custom graphics", () => {
   assert.doesNotMatch(motionBriefStep({ style: "clean" }, "landscape"), /Custom graphics/);
   assert.doesNotMatch(motionBriefStep({ style: "minimal" }, "landscape"), /Custom graphics/);
-  assert.match(motionBriefStep({ style: "data" }, "landscape"), /up to 3 as HTML.*substo graphic render/s);
+  assert.match(motionBriefStep({ style: "data" }, "landscape"), /up to 3 as HTML[\s\S]*substo graphic render/);
   assert.match(motionBriefStep({ style: "kinetic" }, "landscape"), /skip custom graphics and use the presets/);
   assert.ok(describeMotionStyle({ style: "data" }).some(l => /custom animated graphics/.test(l)));
+});
+
+test("storyboard frames are named on their beat lines and the agent is told to use them instead of the plain photo", () => {
+  const base = { projectFile: "Video.substo", editorDocs: "/docs", orientation: "landscape" as const, beats: [{ index: 1, narration: "One." }, { index: 2, narration: "Two." }], voiceFiles: [], timings: [], clips: [], hasVoiceover: false, music: false, avatarFile: "storyboard-avatar.png" };
+  const withFrames = buildBrief({ ...base, frameFiles: ["", "storyboard-frame-1.png", ""] });
+  assert.match(withFrames, /1\. "One\."  \[storyboard frame: storyboard-frame-1\.png\]/);
+  assert.doesNotMatch(withFrames, /2\. "Two\."[^\n]*storyboard frame/);
+  assert.match(withFrames, /place the frame file[\s\S]*instead of the plain photo/);
+  assert.doesNotMatch(buildBrief(base), /\[storyboard frame:/);
 });

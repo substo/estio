@@ -171,7 +171,9 @@ async function stability(key: string, r: ImageRequest, fetcher: Fetch, signal?: 
   return { bytes, contentType: response.headers.get("content-type")?.split(";")[0] || "image/png" };
 }
 
-const PLATFORM = { fal, google, openai, replicate, bfl, ideogram, stability } as const;
+/** Codex draws on the paired Mac inside Make video (the companion), never from the server. */
+const codex = async (): Promise<ImageResult> => { throw new ImageError("rejected", "ChatGPT subscription images are drawn on your Mac while a video is made. There is nothing to test from here."); };
+const PLATFORM = { fal, google, openai, replicate, bfl, ideogram, stability, codex } as const;
 /** One picture. The caller has already chosen the model and rendered the prompt for its dialect (prompts.ts). */
 export async function generateImage(key: string, request: ImageRequest, fetcher: Fetch = fetch, signal?: AbortSignal): Promise<ImageResult> {
   if ((request.references?.length ?? 0) > request.model.references) throw new ImageError("rejected", `${request.model.label} takes at most ${request.model.references} reference photo(s).`);
@@ -192,6 +194,7 @@ export async function verifyImageKey(platform: ImagePlatformId, key: string, fet
       case "bfl": response = await fetcher("https://api.bfl.ai/v1/credits", { headers: { "x-key": key, accept: "application/json" }, signal: sig(), cache: "no-store" }); break;
       case "stability": response = await fetcher("https://api.stability.ai/v1/user/balance", { headers: { authorization: `Bearer ${key}` }, signal: sig(), cache: "no-store" }); break;
       case "ideogram": response = await fetcher("https://api.ideogram.ai/v1/ideogram-v3/generate", { method: "POST", headers: { "Api-Key": key }, body: new FormData(), signal: sig(), cache: "no-store" }); break;
+      case "codex": return "valid";
       case "fal": response = await fetcher("https://fal.run/fal-ai/flux-pro/kontext", { method: "POST", headers: { authorization: `Key ${key}`, "content-type": "application/json" }, body: "{}", signal: sig(), cache: "no-store" }); break;
     }
     if (response.status === 401 || response.status === 403) return "invalid";

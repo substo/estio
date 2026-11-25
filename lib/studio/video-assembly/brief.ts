@@ -13,6 +13,8 @@ export interface BriefInput {
   avatarFile?: string;
   /** The look of titles and callouts, chosen by the creator in the Make video dialog (Clean when absent). */
   motion?: MotionChoice;
+  /** AI-drawn storyboard frames by beat number (file names in this folder), when the Mac drew them. */
+  frameFiles?: string[];
 }
 
 function soundStep(i: BriefInput): string {
@@ -28,7 +30,7 @@ export function buildBrief(i: BriefInput): string {
   const placeholder = i.avatarFile
     ? `a clearly labelled storyboard placeholder that shows the creator: run \`substo media --refresh\`, find ${i.avatarFile} in \`substo media\`, and place it with placeMedia on the B-roll track for the beat's duration (fill the frame without stretching or altering the photo), then add a lower caption text clip on the Text track reading "FOOTAGE NEEDED: <the beat's visual note>" so it is clear which shot to film. Use only this photo, never another person's picture`
     : `a clearly labelled placeholder: a solid-colour or title-card clip for the beat's duration showing the beat's words and "FOOTAGE NEEDED: <the beat's visual note>"`;
-  const beats = i.beats.map((b, n) => `${b.index}. "${b.narration}"${b.direction ? `  [visual: ${b.direction}]` : ""}${i.voiceFiles[n] ? `  (voiceover: ${i.voiceFiles[n]}${i.timings[n] !== undefined ? `, place at ${i.timings[n]}s` : ""})` : ""}`).join("\n");
+  const beats = i.beats.map((b, n) => `${b.index}. "${b.narration}"${b.direction ? `  [visual: ${b.direction}]` : ""}${i.frameFiles?.[b.index] ? `  [storyboard frame: ${i.frameFiles[b.index]}]` : ""}${i.voiceFiles[n] ? `  (voiceover: ${i.voiceFiles[n]}${i.timings[n] !== undefined ? `, place at ${i.timings[n]}s` : ""})` : ""}`).join("\n");
   return `You are editing a finished video from a script. The current directory is a Substo Video project folder (already created with \`substo new\`). Use ONLY the \`substo\` command; read ${i.editorDocs}/AGENTS.md, then agents/cutting.md, agents/broll-and-titles.md, agents/sound.md, agents/shorts.md and agents/motion-graphics.md as needed. Pass --author claude and --project "${i.projectFile}" on every command.
 
 Canvas: ${i.orientation}. Footage the creator shot (already in this folder): ${i.clips.join(", ") || "none"}.
@@ -47,7 +49,7 @@ Do this, in order:
 6. \`substo loudness\` then normalise speech, then \`substo check --changed\` and fix what it reports.
 7. \`substo export --preset ${i.orientation === "portrait" ? "short" : "youtube1080"}\` and print the exported path as the last line.
 
-ALWAYS finish with a complete, exported DRAFT the creator can preview; never stop to ask questions or because material is missing. Where footage is absent, too short, or does not match a beat (including test patterns), fill that beat with ${placeholder} Without measured narration, give each beat a duration from its word count (about 2.5 words per second, minimum 2 s) and time titles and caption text clips to that. Report in your final message which beats used real footage and which are placeholders.
+ALWAYS finish with a complete, exported DRAFT the creator can preview; never stop to ask questions or because material is missing. Where footage is absent, too short, or does not match a beat (including test patterns), fill that beat with ${placeholder} Without measured narration, give each beat a duration from its word count (about 2.5 words per second, minimum 2 s) and time titles and caption text clips to that. A beat line that names a storyboard frame has an AI-drawn picture of the creator in that scene: for that beat place the frame file (run \`substo media --refresh\`, find it in \`substo media\`) exactly as described for the photo, instead of the plain photo, and keep the same FOOTAGE NEEDED caption. Report in your final message which beats used real footage and which are placeholders.
 
 Rules: run exactly one plain \`substo ...\` command per Bash call (never put a JSON batch on the command line or in a heredoc: write it with the Write tool using the RELATIVE path ./batch-<n>.json (never an absolute path; other paths are refused), then run substo apply batch-<n>.json --author claude; only batch-*.json files and graphic-*.html files in this folder may be written); no pipes, cd, variables, ; or &&, which are refused. Never delete or overwrite the creator's source files; never use footage not in this folder; if something cannot be done, say so in your final message and use a labelled placeholder rather than presenting it as real footage. Finish with a short summary of what you placed and anything needing the creator's attention.`;
 }

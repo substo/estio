@@ -16,6 +16,8 @@ export interface AssembleOptions {
   sounds?: { music?: string; sfx?: string };
   /** File name (in clipsDir) of the creator's storyboard photo, if they saved one. */
   avatar?: string;
+  /** Storyboard frames the Mac drew, by beat number (file names in clipsDir): used for that beat's placeholder instead of the plain photo. */
+  frames?: string[];
   /** The look of titles and callouts (Clean when absent). */
   motion?: import("./motion-style").MotionChoice;
   /** Timed speech in a footage file (file time, seconds), made on this Mac when the editor cannot transcribe. */
@@ -48,6 +50,8 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
   const soundFiles: { music?: string; sfx?: string } = {};
   const avatarFile = o.avatar && /^storyboard-avatar\.(jpg|png|webp)$/.test(o.avatar) ? o.avatar : undefined;
   if (avatarFile && !o.dryRun) await copyFile(join(o.clipsDir, avatarFile), join(o.projectDir, avatarFile));
+  const frameFiles = (o.frames ?? []).map(f => f && /^storyboard-frame-\d{1,2}\.png$/.test(f) ? f : "");
+  if (!o.dryRun) for (const f of frameFiles) if (f) await copyFile(join(o.clipsDir, f), join(o.projectDir, f));
   if (!o.dryRun) for (const role of ["music", "sfx"] as const) { const f = o.sounds?.[role]; if (f && o.music !== false) { await copyFile(join(o.clipsDir, f), join(o.projectDir, f)); soundFiles[role] = f; } }
   const voiceFiles: string[] = [];
   if (o.voiceover) {
@@ -75,7 +79,7 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
     const segments = await o.transcribeFootage(join(o.projectDir, f), o.signal).catch(() => null);
     if (segments?.length) footageTranscripts.push({ file: f, lines: segments.map(x => `${x.start.toFixed(1)}-${x.end.toFixed(1)} ${x.text}`).join("\n").slice(0, 6000) });
   }
-  const brief = buildBrief({ footageTranscripts, projectFile, editorDocs: o.editorDocs, orientation: o.orientation ?? "landscape", beats, voiceFiles, timings, clips, hasVoiceover: Boolean(o.voiceover), music: o.music ?? false, soundFiles, avatarFile, ...(o.motion ? { motion: o.motion } : {}) });
+  const brief = buildBrief({ footageTranscripts, projectFile, editorDocs: o.editorDocs, orientation: o.orientation ?? "landscape", beats, voiceFiles, timings, clips, hasVoiceover: Boolean(o.voiceover), music: o.music ?? false, soundFiles, avatarFile, ...(frameFiles.some(Boolean) ? { frameFiles } : {}), ...(o.motion ? { motion: o.motion } : {}) });
   if (o.dryRun) return { projectDir: o.projectDir, projectFile, beats: beats.length, clips, voiceFiles, timings, brief };
   log("Editing with the agent");
   const agentOutput = await runEditingAgent({ cwd, brief, editorDocs: o.editorDocs, model: o.model, run, signal: o.signal });

@@ -10,7 +10,7 @@
  * until the Test button has made one real image with it, and OpenAI/Google model ids are discovered from the platform's own model list.
  * Prices are hints from public listings at the time of writing; check the platform's pricing page before budgeting.
  */
-export const IMAGE_PLATFORM_IDS = ["fal", "google", "openai", "replicate", "bfl", "ideogram", "stability"] as const;
+export const IMAGE_PLATFORM_IDS = ["fal", "google", "openai", "replicate", "bfl", "ideogram", "stability", "codex"] as const;
 export type ImagePlatformId = typeof IMAGE_PLATFORM_IDS[number];
 
 export interface ImagePlatform {
@@ -35,6 +35,7 @@ export const IMAGE_PLATFORMS: Record<ImagePlatformId, ImagePlatform> = {
   replicate: { id: "replicate", label: "Replicate", keyUrl: "https://replicate.com/account/api-tokens", billing: "Pay as you go, per image. Hosts the same FLUX, Ideogram and Stable Diffusion models as fal.ai.", freeCheck: "account" },
   bfl: { id: "bfl", label: "Black Forest Labs (FLUX, direct)", keyUrl: "https://dashboard.bfl.ai", billing: "Credits (1 credit = $0.01). FLUX.1 Kontext pro is about 4 credits an image; FLUX.2 is billed by megapixel.", freeCheck: "credits" },
   ideogram: { id: "ideogram", label: "Ideogram (direct)", keyUrl: "https://ideogram.ai/manage-api", billing: "Per image by rendering speed. Best for images that contain readable text.", freeCheck: "empty-request" },
+  codex: { id: "codex", label: "ChatGPT subscription (Codex on your Mac)", keyUrl: "https://chatgpt.com/", billing: "Included in your ChatGPT subscription: no API key and no pay-as-you-go. Each picture uses about 17,000 to 38,000 tokens of your Codex allowance. Runs on your paired Mac, so the Mac must be on.", freeCheck: "account" },
   stability: { id: "stability", label: "Stability AI (direct)", keyUrl: "https://platform.stability.ai/account/keys", billing: "Credits, per image. Stable Diffusion 3.5 models.", freeCheck: "balance" },
 };
 
@@ -75,6 +76,9 @@ export interface ImageModel {
 const WIDE = ["16:9", "9:16", "1:1", "4:3", "3:4"];
 
 export const IMAGE_MODELS: ImageModel[] = [
+  { id: "codex-imagegen", label: "GPT Image via Codex (ChatGPT subscription)", strength: "Drawn on your own Mac with your ChatGPT login: included in the subscription, keeps the person from your photo across scenes.", dialect: "edit", references: 3, negative: false, text: true, aspects: ["16:9", "9:16", "1:1"],
+    endpoints: [{ platform: "codex", endpoint: "imagegen", status: "documented", price: "included in your subscription" }],
+    note: "Runs inside Make video on your Mac, one frame per beat that has no footage." },
   { id: "flux-kontext-pro", label: "FLUX.1 Kontext [pro]", strength: "Keeps the same person across scenes from one reference photo; edits by instruction.", dialect: "edit", references: 1, negative: false, text: true, aspects: WIDE,
     endpoints: [
       { platform: "fal", endpoint: "fal-ai/flux-pro/kontext", status: "unverified", price: "about $0.04" },

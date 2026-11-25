@@ -34,7 +34,7 @@ export async function setImageChoicesAction(locationId: string, primary: ChoiceI
   try { await setImageChoices(locationId, toChoice(primary), toChoice(fallback)); } catch (e) { return failure(e, "Could not save this choice."); }
   return {};
 }
-export async function testImageAction(locationId: string, platform: string, model: string, endpoint: string | null): Promise<ImageTestResult> {
+export async function testImageAction(locationId: string, platform: string, model: string, endpoint: string | null, withPhoto = false): Promise<ImageTestResult> {
   const id = platformOf(platform);
   if (!id) return { ok: false, message: "Unknown platform.", ms: 0 };
   try { const out = await testImageModel(locationId, id, model, endpoint && ENDPOINT.test(endpoint) ? endpoint : undefined); return out; }
