@@ -66,3 +66,5 @@ Open **Script → Writing agent → Audience language** on an existing piece. On
 - **Review as observation** lets you edit and save one observation for later chat turns.
 
 The writing actions prepare an editable Assistant message with a small selection of supporting excerpts. Inside Script mode they return to the same composer and keep any unsent text. Review it and choose **Process with** before pressing **Send**. That dropdown controls writing and revision, independently of the analysis model on the brief. The paired-Mac route follows the native text provider and model in **Settings → Devices**. **Location AI order** follows **Settings → AI** and its configured providers. The Assistant shows the route used in **What this answer used**. Use approved Knowledge or an independent source for factual claims.
+
+Each suggestion also prepares a targeted edit for its section. For opening, explanation and payoff edits, the agent is asked to show the affected lines before and after, keeping the rest of the script intact. **Suggest a script edit** uses an observation that you already saved. The composer shows the request before you send it.

@@ -105,8 +105,27 @@ function promptWithObservations(task: string, signals: readonly Suggestion[]) {
   return `${task}\n${reviewInstruction}\n${JSON.stringify(observations)}`;
 }
 
-export function audienceSuggestionPrompt(signal: Suggestion) {
-  return promptWithObservations("Help me work this audience suggestion into the draft while keeping the existing audience and purpose. Show what you would change and why.", [signal]);
+const audienceEditTasks: Record<string, readonly [string, string]> = {
+  concept: ["Refine the premise", "Propose one distinct Concept that addresses this concern and preserves the intended audience and purpose."],
+  title: ["Try this in the title", "Propose one Title using the audience's language naturally. Explain in one sentence how the saved script can deliver that promise."],
+  hook: ["Revise the opening", "Propose a Script changing only the spoken opening. With no saved Script, propose a Hook instead. Show the current and suggested line in your reply."],
+  development: ["Revise the explanation", "Propose a Script changing only the relevant explanation or demonstration. Show the specific lines to add, replace or cut in your reply."],
+  payoff: ["Strengthen the payoff", "Propose a Script changing only the payoff. Show the current and suggested lines in your reply and explain how the new payoff delivers the title's promise."],
+};
+
+export function audienceSuggestionEdit(signal: Suggestion) {
+  const [label, task] = audienceEditTasks[signal.beat];
+  const check = signal.action === "verify"
+    ? " Identify what needs independent confirmation before we say it. Leave any unresolved claim out of the proposed wording."
+    : "";
+  return { label, message: promptWithObservations(`${task} Keep every unrelated line of the saved script unchanged.${check}`, [signal]) };
+}
+
+export function audienceObservationEdit(signal: AudienceSignal) {
+  const task = signal.kind === "phrase" ? "Propose one natural place to use the audience's wording in the spoken script."
+    : signal.kind === "question" || signal.kind === "objection" ? "Propose one short addition to the script that addresses the audience's concern."
+    : "Propose one specific script edit suggested by this observation.";
+  return `${task} Quote the exact before and after in your reply and change only the relevant passage in the proposal. ${reviewInstruction}\n\n${JSON.stringify({ observation: signal.text, origin: signal.origin })}`;
 }
 
 const briefActions = {

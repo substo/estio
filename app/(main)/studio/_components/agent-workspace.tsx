@@ -8,7 +8,7 @@ import type { AgentSelection } from "@/lib/studio/agent-policy";
 import { Button } from "@/components/ui/button";
 import { AUDIENCE_KINDS, AUDIENCE_LIMIT, AUDIENCE_ORIGINS, AUDIENCE_TEXT_LIMIT, CREATION_STAGES, stageDraft, type AudienceSignal, type CreationRecord, type CreationStage } from "@/lib/studio/creation-policy";
 import { AUDIENCE_ANALYSIS_ROUTES, AUDIENCE_BRIEF_MAX_BYTES, audienceAnalysisCommand, audienceBriefPrompt,
-  audienceObservation, audienceSuggestionPrompt, readAudienceBrief, type AudienceAnalysisRoute } from "@/lib/studio/audience-brief";
+  audienceObservation, audienceObservationEdit, audienceSuggestionEdit, readAudienceBrief, type AudienceAnalysisRoute } from "@/lib/studio/audience-brief";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
 
 type Draft = { recordId: string; record: CreationRecord | null; setRecord: (record: CreationRecord) => void; plan: string[]; setPlan: (plan: string[]) => void; target: number | null; setTarget: (seconds: number | null) => void;
@@ -309,7 +309,7 @@ function AudienceSignals({ record, sourceId, command, busy, embedded = false, on
           {briefStatus ? <p role="status" className="text-xs text-muted-foreground">{briefStatus}</p> : null}
           {brief.discarded ? <p className="text-xs text-muted-foreground">Skipped {brief.discarded.toLocaleString()} suggestions with unmatched excerpts.</p> : null}
           {brief.signals.length === 0 ? <p className="text-xs text-muted-foreground">This brief has no supported suggestions.</p> : null}
-          <ul className="space-y-2">{brief.signals.map((item, index) => <li key={index} className="space-y-1 rounded-md bg-muted/60 p-2 break-words">
+          <ul className="space-y-2">{brief.signals.map((item, index) => { const edit = audienceSuggestionEdit(item); return <li key={index} className="space-y-1 rounded-md bg-muted/60 p-2 break-words">
             <p className="text-xs font-medium capitalize">{item.beat} · {item.action}</p>
             <p>{item.signal}</p>
             <p className="text-xs">{item.suggestion}</p>
@@ -321,7 +321,7 @@ function AudienceSignals({ record, sourceId, command, busy, embedded = false, on
               </li>)}</ul>
             </details>
             <Button type="button" variant="outline" className="min-h-9 px-2 text-xs"
-              onClick={() => prepareBriefMessage(audienceSuggestionPrompt(item))}>Use this suggestion</Button>
+              onClick={() => prepareBriefMessage(edit.message)}>{edit.label}</Button>
             <Button type="button" variant="ghost" className="min-h-9 px-2 text-xs"
               disabled={!record || busy || Boolean(text.trim()) || signals.length >= AUDIENCE_LIMIT}
               onClick={() => {
@@ -330,12 +330,15 @@ function AudienceSignals({ record, sourceId, command, busy, embedded = false, on
                 setOrigin("comments");
                 observationRef.current?.focus();
               }}>Review as observation</Button>
-          </li>)}</ul>
+          </li>; })}</ul>
         </div> : null}
       </div>
-      {signals.length ? <ul className="space-y-1.5">{signals.map(item => <li key={item.id} className="flex items-start justify-between gap-2 rounded-md bg-muted/60 p-2">
+      {signals.length ? <ul className="space-y-1.5">{signals.map(item => <li key={item.id} className="space-y-1 rounded-md bg-muted/60 p-2">
         <span><span className="mr-1.5 rounded-full border px-1.5 py-0.5 text-[11px] capitalize">{item.kind}</span>{item.text}<span className="ml-1 text-xs text-muted-foreground">· {item.origin}</span></span>
-        <Button type="button" variant="ghost" className="min-h-8 px-2 text-xs" disabled={busy} onClick={() => void command({ action: "audience_remove", signalId: item.id })} aria-label={`Remove observation: ${item.text.slice(0, 40)}`}>Remove</Button></li>)}</ul> : null}
+        <div className="flex flex-wrap gap-1">
+          <Button type="button" variant="outline" className="min-h-9 px-2 text-xs" onClick={() => prepareBriefMessage(audienceObservationEdit(item))}>Suggest a script edit</Button>
+          <Button type="button" variant="ghost" className="min-h-9 px-2 text-xs" disabled={busy} onClick={() => void command({ action: "audience_remove", signalId: item.id })} aria-label={`Remove observation: ${item.text.slice(0, 40)}`}>Remove</Button>
+        </div></li>)}</ul> : null}
       {record && signals.length < AUDIENCE_LIMIT ? <div className="space-y-2">
         <label className="sr-only" htmlFor={observationId}>Your observation</label>
         <textarea ref={observationRef} id={observationId} value={text} maxLength={AUDIENCE_TEXT_LIMIT} rows={2} onChange={event => setText(event.target.value)} placeholder="e.g. People keep asking whether this works without expensive gear" className="block w-full rounded-md border bg-background p-2 text-sm" />
