@@ -68,3 +68,21 @@ export async function withCharacterSheetFiles(jobs: unknown): Promise<unknown> {
     } catch { return raw; }   // the Mac then reports the request as invalid: nothing is half-sent
   }));
 }
+
+/** Claim time for a video job: private links to this person's latest finished turnaround and face sheets, so storyboard frames are drawn from them. Losing them only costs consistency: the photo is still used. */
+export async function withCharacterSheetReferences(jobs: unknown): Promise<unknown> {
+  if (!Array.isArray(jobs) || !jobs.some(j => j?.kind === "studio.video_assemble")) return jobs;
+  const config = readStudioR2Config();
+  if (!config) return jobs;
+  const store = createStudioR2Store(config);
+  return Promise.all(jobs.map(async raw => {
+    const job = raw as { kind?: unknown; location_id?: unknown; created_by_clerk_user_id?: unknown; payload?: Record<string, unknown> };
+    if (job?.kind !== "studio.video_assemble" || typeof job.location_id !== "string" || typeof job.created_by_clerk_user_id !== "string" || !job.payload?.storyboardFrames) return raw;
+    try {
+      const rows = await studioDb.call<Array<{ sheet: string; jobId: string }>>("studio_job_character_sheets", { p_location_id: job.location_id, p_clerk_user_id: job.created_by_clerk_user_id });
+      const characterSheets = await Promise.all(rows.filter(r => uuid.test(r.jobId) && (r.sheet === "turnaround" || r.sheet === "face")).slice(0, 2).map(async r => ({
+        name: `character-${r.sheet}.png`, url: await store.presignWorkerRead(characterSheetKey(job.location_id as string, job.created_by_clerk_user_id as string, r.jobId, "sheet-1.png"), SIGNED_SECONDS) })));
+      return characterSheets.length ? { ...job, payload: { ...job.payload, characterSheets } } : raw;
+    } catch { return raw; }
+  }));
+}

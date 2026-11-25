@@ -40,9 +40,12 @@ const payload = z.object({
   storyboardFrames: z.object({ source: z.literal("codex"), max: z.number().int().min(1).max(8) }).optional(),
   /** The creator's private storyboard photo, minted at claim time when they saved one. */
   avatar: z.object({ name: z.string().regex(/^storyboard-avatar\.(jpg|png|webp)$/), contentType: z.string().max(40), url: z.string().url().max(4000), byteSize: z.number().int().positive().max(5 * 1024 * 1024) }).optional(),
+  /** The creator's latest turnaround and face sheets, minted at claim time. Frames are drawn from these as well as the photo. */
+  characterSheets: z.array(z.object({ name: z.string().regex(/^character-(turnaround|face)\.png$/), url: z.string().url().max(4000) })).max(2).default([]),
 }).passthrough();
 
 /** The deployed server (edit-loop migration, 2026-11-23) accepts projectKept/projectName in the result. */
+const SHEET_INTRO = "Use $imagegen to create one new image. The attached images are reference sheets and a photo of the same person: keep exactly their face, hair, build and clothing in the new scene.";
 const SERVER_HAS_PROJECT_FIELDS = true;
 export interface ExportLease { jobId: string; workerId: string; leaseToken: string }
 export interface ExportApi {
@@ -106,6 +109,16 @@ async function download(url: string, file: string, expected: number, signal: Abo
   if (!response.ok || !response.body) throw new Error("download_failed");
   await pipeline(Readable.fromWeb(response.body as never), createWriteStream(file), { signal });
   if ((await stat(file)).size !== expected) throw new Error("download_incomplete");
+}
+/** A private link to a picture whose size the server does not know: https only, no redirects, capped. */
+async function downloadUpTo(url: string, file: string, max: number, signal: AbortSignal, fetcher: typeof fetch) {
+  const target = new URL(url);
+  if (target.protocol !== "https:") throw new Error("download_refused");
+  const response = await fetcher(target, { redirect: "error", signal });
+  if (!response.ok || !response.body) throw new Error("download_failed");
+  await pipeline(Readable.fromWeb(response.body as never), createWriteStream(file), { signal });
+  const size = (await stat(file)).size;
+  if (size < 8 * 1024 || size > max) { await rm(file, { force: true }); throw new Error("download_invalid"); }
 }
 async function sha256(file: string) { const hash = createHash("sha256"); await pipeline(createReadStream(file), hash); return hash.digest("hex"); }
 
@@ -191,11 +204,16 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
       // Storyboard frames, only when there is no footage (every beat is a placeholder): the creator's photo in a new scene per beat, drawn by Codex on this Mac.
       // A frame that fails costs only that frame: the beat keeps the plain photo.
       const frames: string[] = [];
+      const sheetFiles: string[] = [];
+      for (const sheet of p.characterSheets) {
+        try { await downloadUpTo(sheet.url, join(clipsDir, sheet.name), 12 * 1024 * 1024, context.signal, fetcher); sheetFiles.push(join(clipsDir, sheet.name)); }
+        catch (error) { if (context.signal.aborted) throw error; }
+      }
       if (p.storyboardFrames && avatar && deps.drawFrame && p.downloads.length === 0) {
         for (const beat of parseScript(p.script).slice(0, p.storyboardFrames.max)) {
           const name = `storyboard-frame-${beat.index}.png`;
           const { prompt } = renderShot(shotForBeat(beat, p.options.portrait), "edit", { acceptsText: false });
-          const ok = await deps.drawFrame({ prompt, references: [join(clipsDir, avatar)], out: join(clipsDir, name), signal: context.signal }).catch(error => { if (context.signal.aborted) throw error; return false; });
+          const ok = await deps.drawFrame({ prompt, references: [...sheetFiles, join(clipsDir, avatar)], out: join(clipsDir, name), signal: context.signal, ...(sheetFiles.length ? { intro: SHEET_INTRO } : {}) }).catch(error => { if (context.signal.aborted) throw error; return false; });
           if (ok) frames[beat.index] = name;
         }
       }

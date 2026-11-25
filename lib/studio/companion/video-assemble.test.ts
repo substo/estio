@@ -152,6 +152,10 @@ test("storyboard frames: Codex draws one per beat when there is no footage, with
   assert.match(a.drawn[1].prompt, /Open on the desk/);   // the beat's own visual note is its scene
   assert.deepEqual((a.seen?.frames ?? []).filter(Boolean), ["storyboard-frame-1.png", "storyboard-frame-3.png"]);   // beat 2 failed: it keeps the plain photo
   assert.equal((await run({ ...none, storyboardFrames: { source: "codex", max: 2 } })).drawn.length, 2);   // the cap
+  // Character sheets are references too: tried first, with the sheet wording; too-small downloads are ignored and the photo alone is used.
+  const sheets = await run({ ...none, characterSheets: [{ name: "character-turnaround.png", url: "https://r2.example/t" }] });
+  assert.equal(sheets.drawn[0].references.length, 1);   // "data" is under 8 KB, so the sheet is ignored: photo only
+  assert.equal((await run({ ...none, characterSheets: [{ name: "../evil.png", url: "https://r2.example/e" }] })).drawn.length, 0);   // only the fixed names are accepted
   assert.equal((await run({ avatar, storyboardFrames: { source: "codex", max: 6 } })).drawn.length, 0);      // footage present
   assert.equal((await run({ media: [], downloads: [], storyboardFrames: { source: "codex", max: 6 } })).drawn.length, 0);   // no photo
   assert.equal((await run({ media: [], downloads: [], avatar })).drawn.length, 0);                              // not chosen
