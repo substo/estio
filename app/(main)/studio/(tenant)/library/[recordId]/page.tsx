@@ -1,6 +1,9 @@
 import { AgentDraftProvider, DraftPanel } from "../../../_components/agent-workspace";
 import { agentSessionKey } from "@/lib/studio/agent-policy";
-import { agentRouteScope, getAgentConversation, latestSourceDraft } from "@/lib/studio/agent";
+import { agentRouteScope, getAgentConversation, getAgentSourceCitation, latestSourceDraft } from "@/lib/studio/agent";
+import { getKnowledgeSourceCitation } from "@/lib/studio/citation-source";
+import { proposalFocusQuery, readProposalFocus, transcriptPassage } from "@/lib/studio/citation-navigation";
+import { recordLinkId } from "@/lib/studio/record-link-policy";
 import { getCreationPage } from "@/lib/studio/creation";
 import { randomUUID } from "node:crypto";
 import Link from "next/link";
@@ -36,11 +39,13 @@ import { SourceAssistant } from "../../../_components/source-assistant";
 export const dynamic = "force-dynamic";
 const card = "scroll-mt-16 space-y-3 rounded-xl border bg-card p-4 md:p-5";
 
-export default async function StudioLibraryRecordPage({ params, searchParams }: { params: Promise<{ recordId: string }>; searchParams: Promise<{ knowledgeReview?: string; draft?: string; mode?: string; stage?: string; new?: string }> }) {
+export default async function StudioLibraryRecordPage({ params, searchParams }: { params: Promise<{ recordId: string }>; searchParams: Promise<{ knowledgeReview?: string; draft?: string; mode?: string; stage?: string; new?: string;
+  citationTurn?: string; citationProposal?: string; citationItem?: string; citationEvidence?: string;
+  proposalTurn?: string; proposalIndex?: string }> }) {
   const { locationId, recordId } = await studioRouteParams(params);
   const result = await getStudioLibraryRecord(locationId, recordId);
   if (!result) notFound();
-  const { record, links, files, uploads, findings, hasMoreFindings } = result;
+  const { access, record, links, files, uploads, findings, hasMoreFindings } = result;
   const view = libraryPresentation(record);
   const creator = validatedYoutubeCreator(record.payload.channelUrl);
   const value = (key: string) => typeof record.payload[key] === 'string' ? record.payload[key] as string : '';
@@ -48,6 +53,14 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
   const isSource = record.kind === "reference";
   const active = isSource && !record.archived;
   const query = await searchParams;
+  const focusedProposal = readProposalFocus(query.proposalTurn, query.proposalIndex);
+  const citedProposal = readProposalFocus(query.citationTurn, query.citationProposal);
+  const citationRequested = isSource && (query.citationTurn !== undefined || query.citationEvidence !== undefined);
+  const citationItem = typeof query.citationItem === "string" && /^[a-zA-Z0-9:-]{1,80}$/.test(query.citationItem) ? query.citationItem : null;
+  const agentCitation = isSource && citedProposal && citationItem
+    ? getAgentSourceCitation(locationId, recordId, citedProposal, citationItem).catch(() => null) : null;
+  const knowledgeCitation = isSource && typeof query.citationEvidence === "string" && recordLinkId(query.citationEvidence)
+    ? getKnowledgeSourceCitation(access, recordId, query.citationEvidence).catch(() => null) : null;
   const requestedDraft = links.find(link => link.id === query.draft && link.kind === "content")?.id;
   const creationData = async () => {
     if (!active) return null;
@@ -55,16 +68,18 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     const draftId = requestedDraft;
     const data = await getCreationPage(locationId, draftId, recordId) ?? (draftId ? await getCreationPage(locationId, undefined, recordId) : null);
     if (!data) return null;
-    const conversation = data.record ? await getAgentConversation(locationId, data.record.id) : { turns: [], plan: [], target: null };
+    const conversation = data.record ? await getAgentConversation(locationId, data.record.id, focusedProposal?.turnId) : { turns: [], plan: [], target: null };
     const resume = !draftId && !query.new ? await latestSourceDraft(locationId, recordId) : null;
     return { ...data, conversation, resume, scope: await agentRouteScope(locationId) };
   };
-  const [pendingUploads, latestOutline, videoStatus, knowledgeInputs, creation] = await Promise.all([
+  const [pendingUploads, latestOutline, videoStatus, knowledgeInputs, creation, fromAgent, fromKnowledge] = await Promise.all([
     listPendingStudioUploads(locationId, recordId),
     active ? getLatestKnowledgeOutline(locationId, recordId) : null,
     active && youtube ? getVideoStatus(locationId, recordId).catch(() => null) : null,
     active ? getKnowledgeExtractionInputs(locationId, recordId).catch(() => null) : null,
     creationData(),
+    agentCitation,
+    knowledgeCitation,
   ]);
   const requestedReview = query.knowledgeReview;
   const requestedOutline = active && typeof requestedReview === "string" && requestedReview !== latestOutline?.id
@@ -112,7 +127,22 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
   const basis = value('summaryBasis') === 'transcript' ? 'Based on the saved transcript excerpt (first 20,000 characters) and description.' : value('summaryBasis') === 'description' ? 'Based on the description only; the video was not watched.' : 'Basis not recorded; verify against the source.';
   const panelHead = (title: string, status: React.ReactNode, tip?: React.ReactNode, action?: React.ReactNode) => <div className="flex flex-wrap items-center gap-2"><h2 className="font-semibold">{title}</h2>{status}{tip}<div className="ml-auto flex items-center gap-2">{action}</div></div>;
 
+  const quotation = fromAgent?.quote ?? fromKnowledge?.quote;
+  const onScreen = fromAgent?.onScreen ?? fromKnowledge?.onScreen ?? false;
+  const passage = quotation && !onScreen ? transcriptPassage(value("transcript"), quotation, fromAgent?.offset ?? null) : null;
+  const returnToProposal = fromAgent ? `/studio/content/create?draft=${fromAgent.recordId}&${proposalFocusQuery(fromAgent.focus)}` : null;
+  const citationPanel = citationRequested ? <section aria-label="Cited passage" className="space-y-2 rounded-lg border bg-card p-4 text-sm">
+    <h3 className="font-medium">Cited passage</h3>
+    {passage ? <p className="whitespace-pre-wrap break-words leading-relaxed">{passage.before}<mark className="rounded bg-amber-200 text-amber-950 dark:bg-amber-400 dark:text-amber-950">{passage.quote}</mark>{passage.after}</p>
+      : quotation ? <>
+        <blockquote className="whitespace-pre-wrap break-words border-l-2 pl-3">{quotation}</blockquote>
+        <p className="text-muted-foreground">{onScreen ? "This quote was saved as on-screen text." : "The saved quote doesn’t match a single passage in the current transcript."}</p>
+      </> : <p className="text-muted-foreground">This citation is unavailable. You can still read the source below.</p>}
+    {returnToProposal ? <Link href={returnToProposal} className="inline-flex min-h-10 items-center font-medium text-primary underline">Return to proposal</Link> : null}
+  </section> : null;
+
   const transcriptPanel = <div className="space-y-4">
+    {citationPanel}
     {panelHead("Transcript", statusChip(hasTranscript, hasTranscript ? "Saved" : "Not saved"), <InfoTip label="About the transcript">A transcript is what the video actually says. Check it against the original before relying on its claims.</InfoTip>)}
     {videoStatus ? <VideoTranscriptionPanel locationId={locationId} recordId={recordId} canTranscribe status={videoStatus} hasTranscript={hasTranscript} /> : null}
     {hasTranscript ? <p className="whitespace-pre-wrap break-words rounded-lg border bg-card p-4 text-sm leading-relaxed">{value('transcript')}</p>
@@ -162,7 +192,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
         </div>
         <SourceTabs tabs={tabs} />
       </div>} />
-      <SourceAssistant canCreate={Boolean(creation)} locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} canRelated={active} archived={record.archived} knowledgeInputs={knowledgeInputs?.inputs ?? []} canTemplate={Boolean(youtube) && hasTranscript} agent={creation ? { source: { id: recordId, version: record.version, title: record.title, hasText: hasTranscript || Boolean(value('description').trim()) }, turns: creation.conversation.turns, newDraftHref: `/studio/library/${recordId}?mode=create&new=${randomUUID().slice(0, 8)}`, sessionKey, scope: creation.scope, resume: creation.resume ? { id: creation.resume.id, title: creation.resume.title, turns: creation.resume.turns, updatedAt: creation.resume.updatedAt, href: `/studio/library/${recordId}?mode=create&draft=${creation.resume.id}` } : null } : undefined} />
+      <SourceAssistant canCreate={Boolean(creation)} locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} canRelated={active} archived={record.archived} knowledgeInputs={knowledgeInputs?.inputs ?? []} canTemplate={Boolean(youtube) && hasTranscript} agent={creation ? { source: { id: recordId, version: record.version, title: record.title, hasText: hasTranscript || Boolean(value('description').trim()) }, turns: creation.conversation.turns, focusProposal: focusedProposal, newDraftHref: `/studio/library/${recordId}?mode=create&new=${randomUUID().slice(0, 8)}`, sessionKey, scope: creation.scope, resume: creation.resume ? { id: creation.resume.id, title: creation.resume.title, turns: creation.resume.turns, updatedAt: creation.resume.updatedAt, href: `/studio/library/${recordId}?mode=create&draft=${creation.resume.id}` } : null } : undefined} />
     </div>
   </main></AgentDraftProvider></SourceWorkspaceProvider>;
 }

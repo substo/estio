@@ -733,9 +733,19 @@ test("chosen and no evidence are pinned to a turn, fenced from other reads, and 
     return step({ proposals: [{ stage: "Hook", text: "New hook.", rationale: "Chosen quote.", evidenceIds: [`f:${pick.evidence}`], verify: [] }] });
   }, 2);
   assert.match(viewed.turn.result!.proposals[0].evidence[0].quote, /Visible chosen quote/);
+  const focus = { turnId: selected, index: 0 };
+  const citation = await agent.getAgentSourceCitation(loc, source, focus, `f:${pick.evidence}`);
+  assert.deepEqual(citation, { quote: "Visible chosen quote.", onScreen: false, offset: null, recordId: fresh, focus });
+  assert.equal(await agent.getAgentSourceCitation(loc, source, { ...focus, index: 1 }, `f:${pick.evidence}`), null);
+  assert.equal(await agent.getAgentSourceCitation(loc, unrelated, focus, `f:${pick.evidence}`), null);
+  assert.equal(await agent.getAgentSourceCitation(loc, source, focus, `f:${unselected.evidence}`), null);
+  try {
+    actingAs = { ...access, userId: "another-account" };
+    assert.equal(await agent.getAgentSourceCitation(loc, source, focus, `f:${pick.evidence}`), null);
+  } finally { actingAs = access; }
   assert.equal(viewed.turn.inputs.reads[0].tool, "Selected source evidence");
   const linked = await (await import("./knowledge")).getStudioKnowledgeInsight(loc, pick.insight, { evidence: 0, reviews: 0, units: 0 });
-  assert.deepEqual(linked?.selectedInDrafts.map(row => [row.id, row.cited]), [[fresh, true]]);
+  assert.deepEqual(linked?.selectedInDrafts.map(row => [row.id, row.cited, row.turn_id, row.proposal_index]), [[fresh, true, selected, 0]]);
   const suppressed = crypto.randomUUID();
   await submit(suppressed, []);
   const none = await drive(suppressed, snapshot => {

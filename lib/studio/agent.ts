@@ -12,6 +12,9 @@ import { AGENT_MAX_ROUNDS, AGENT_PROMPT, isAgentSnapshot, readAgentResult, type 
 import { runAgentTool } from "./agent-tools";
 import { SPEAKING_WPM, formatClock, lengthFit, parseDurationRequest, scriptStats, aimWords, type LengthFit } from "./script-length";
 import { agentRoundRequestId } from "./agent-request";
+import { getKnowledgeSourceCitation } from "./citation-source";
+import { recordLinkId } from "./record-link-policy";
+import { citedQuote, recordedTranscriptOffset, type ProposalFocus } from "./citation-navigation";
 
 type TurnRow = { id: string; location_id: string; record_id: string; seq: number; message: string; provider: string; status: "running" | "done" | "failed";
   rounds: Array<{ round: number; reviewId: string; tool: AgentToolCall | null; observation: AgentObservation | null }>; result: AgentFinal | null; error: string | null; created_by_clerk_user_id: string; created_at: string; target_seconds: number | null; selection: AgentSelection | null; evidence_choice: AgentItem[] | null };
@@ -48,6 +51,26 @@ async function loadTurn(access: StudioAccess, id: string) {
     FROM studio.studio_agent_turns WHERE id=${id}::uuid AND location_id=${access.locationId} AND created_by_clerk_user_id=${access.userId} AND actor_app=${access.app}`);
 }
 
+function turnEvidence(turn: TurnRow) {
+  const items = new Map<string, AgentItem>((turn.evidence_choice ?? []).map(item => [item.id, item]));
+  for (const round of turn.rounds) for (const item of round.observation?.items ?? []) items.set(item.id, item);
+  return items;
+}
+
+/** Resolve a saved citation for the Account that ran this conversation, at its original proposal. */
+export async function getAgentSourceCitation(locationId: string, sourceId: string, focus: ProposalFocus, itemId: string) {
+  const access = await requireCreationWriter(locationId);
+  const turn = await loadTurn(access, focus.turnId);
+  if (!turn || turn.status !== "done" || !turn.result?.proposals[focus.index]?.evidenceIds.includes(itemId)) return null;
+  const item = turnEvidence(turn).get(itemId);
+  if (!item?.cite || item.sourceId !== sourceId) return null;
+  const quote = citedQuote(item.id, item.text);
+  if (!quote.trim()) return null;
+  const evidenceId = item.id.startsWith("f:") ? item.id.slice(2) : null;
+  const evidence = evidenceId && recordLinkId(evidenceId) ? await getKnowledgeSourceCitation(access, sourceId, evidenceId) : null;
+  return { quote, onScreen: evidence?.onScreen ?? false, offset: recordedTranscriptOffset(sourceId, item.id), recordId: turn.record_id, focus };
+}
+
 function measure(text: string, target: number | null) {
   const stats = scriptStats(text);
   return { spokenWords: stats.spokenWords, cueWords: stats.cueWords, estimatedSeconds: stats.seconds, targetSeconds: target, fit: target ? lengthFit(target, stats.seconds) : null };
@@ -60,8 +83,7 @@ async function views(access: StudioAccess, turns: TurnRow[], pending: Map<string
   const model = new Map(models.map(m => [m.id, m]));
   return turns.map(turn => {
     const chosen = turn.evidence_choice ?? null;
-    const items = new Map<string, AgentItem>((chosen ?? []).map(item => [item.id, item]));
-    for (const round of turn.rounds) for (const item of round.observation?.items ?? []) items.set(item.id, item);
+    const items = turnEvidence(turn);
     const last = turn.rounds.at(-1);
     const run = last ? model.get(last.reviewId) : undefined;
     return { id: turn.id, seq: turn.seq, message: turn.message, provider: turn.provider as AgentTurnView["provider"], status: turn.status, error: turn.error,
@@ -96,12 +118,16 @@ export async function getAgentEvidenceChoices(locationId: string, recordId: stri
 }
 
 /** Everything the page needs to reopen a draft's conversation. Read-only; the poll route advances running turns. */
-export async function getAgentConversation(locationId: string, recordId: string) {
+export async function getAgentConversation(locationId: string, recordId: string, focusedTurnId?: string) {
   const access = await requireCreationWriter(locationId);
   const rows = await studioDb.rows<TurnRow>(Prisma.sql`
     SELECT id,location_id,record_id,seq,message,provider,status,rounds,result,error,created_by_clerk_user_id,created_at,target_seconds,selection,evidence_choice FROM (
       SELECT * FROM studio.studio_agent_turns WHERE location_id=${access.locationId} AND record_id=${recordId}::uuid
         AND actor_app=${access.app} AND created_by_clerk_user_id=${access.userId} ORDER BY seq DESC LIMIT 40) t ORDER BY seq`);
+  if (focusedTurnId && !rows.some(row => row.id === focusedTurnId)) {
+    const focused = await loadTurn(access, focusedTurnId);
+    if (focused?.record_id === recordId) rows.unshift(focused);
+  }
   const turns = await views(access, rows);
   const plan = [...turns].reverse().find(t => t.result)?.result?.plan ?? [];
   return { turns, plan, target: turns.at(-1)?.target ?? null };

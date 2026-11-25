@@ -98,21 +98,25 @@ export async function getStudioKnowledgeInsight(locationId: string, insightId: s
     studioDb.rows<KnowledgeSourceUnit>(Prisma.sql`
       select id, transcription_id, unit_index, payload from studio.studio_knowledge_source_units where location_id = ${location} and source_id = ${insight.source_id}::uuid
       order by unit_index asc, id asc limit 51 offset ${pages.units * 50}`),
-    studioDb.rows<{ id: string; title: string; cited: boolean }>(Prisma.sql`
-      select drafts.id,drafts.title,drafts.cited from (
-        select distinct on (r.id) r.id,r.title,t.created_at,
-          exists(select 1 from jsonb_array_elements(t.result->'proposals') p
-            cross join lateral jsonb_array_elements_text(p->'evidenceIds') ids(id)
-            join studio.studio_knowledge_evidence e on e.location_id=t.location_id and ids.id='f:'||e.id::text
-            where e.insight_id=${insight.id}::uuid) as cited
+    studioDb.rows<{ id: string; title: string; cited: boolean; turn_id: string; proposal_index: number | null }>(Prisma.sql`
+      select drafts.id,drafts.title,drafts.turn_id,drafts.proposal_index,drafts.proposal_index is not null as cited from (
+        select distinct on (r.id) r.id,r.title,t.created_at,t.id as turn_id,citation.proposal_index
         from studio.studio_agent_turns t
         join studio.studio_records r on r.location_id=t.location_id and r.id=t.record_id and r.kind='content' and not r.archived
+        left join lateral (
+          select (p.ordinality-1)::integer as proposal_index
+          from jsonb_array_elements(t.result->'proposals') with ordinality p(proposal, ordinality)
+          cross join lateral jsonb_array_elements_text(p.proposal->'evidenceIds') ids(id)
+          join studio.studio_knowledge_evidence e on e.location_id=t.location_id and ids.id='f:'||e.id::text
+          where e.insight_id=${insight.id}::uuid
+          order by p.ordinality limit 1
+        ) citation on true
         where t.location_id=${location} and t.actor_app=${access.app} and t.created_by_clerk_user_id=${access.userId}
           and t.status='done' and jsonb_array_length(t.evidence_choice)>0
           and exists(select 1 from jsonb_array_elements(t.evidence_choice) item
             join studio.studio_knowledge_evidence e on e.location_id=t.location_id and e.id::text=item->>'evidenceId'
             where e.insight_id=${insight.id}::uuid)
-        order by r.id,t.created_at desc,t.id
+        order by r.id,(citation.proposal_index is not null) desc,t.created_at desc,t.id
       ) drafts order by drafts.created_at desc,drafts.id limit 15`),
   ]);
   // Verified frame links for the rows on this page only (at most 51 + 51 ids).

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Search, AlertTriangle, ExternalLink, Loader2, Mic, MicOff, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AgentTurnView } from "@/lib/studio/agent";
+import { agentCitationHref, citedQuote, proposalAnchor, type ProposalFocus } from "@/lib/studio/citation-navigation";
 import { AGENT_MESSAGE_LIMIT, type AgentSelection } from "@/lib/studio/agent-policy";
 import { CREATION_STAGES, stageDraft, type CreationRecord, type CreationStage } from "@/lib/studio/creation-policy";
 import { formatClock, parseDurationRequest, scriptStats, targetWords } from "@/lib/studio/script-length";
@@ -31,9 +32,10 @@ const readRoute = (scope: string): StudioTextProvider | null => {
 };
 
 /** One conversation for a source or a blank draft. No fields to fill: say what you want, or tap a starter. */
-export function AgentChat({ locationId, source, initialTurns, provider, onProvider, newDraftHref, resume, scope, focus, scriptEditor }: {
+export function AgentChat({ locationId, source, initialTurns, provider, onProvider, newDraftHref, resume, scope, focus, scriptEditor, focusProposal }: {
   locationId: string; source: AgentSource | null; initialTurns: AgentTurnView[]; provider: StudioTextProvider; onProvider: (value: StudioTextProvider) => void; newDraftHref?: string;
   resume?: AgentResume | null; scope: string;
+  focusProposal?: ProposalFocus | null;
   focus?: { selection: AgentSelection; label: string } | null;
   scriptEditor?: { startApply: () => boolean; endApply: () => void; onApplied: (record: CreationRecord, stage: CreationStage) => void; clearFocus: () => void; onSent: () => void };
 }) {
@@ -78,10 +80,21 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   const headers = { "X-Studio-Tenant": tenant, "Content-Type": "application/json" };
   const upsert = useCallback((turn: AgentTurnView) => setTurns(previous => previous.some(item => item.id === turn.id) ? previous.map(item => item.id === turn.id ? turn : item) : [...previous, turn]), []);
 
+  const targetProposal = focusProposal ? proposalAnchor(focusProposal) : null;
+  const focusedAnchor = useRef<string | null>(null);
   useEffect(() => {
     const log = endRef.current?.parentElement;
+    if (targetProposal && focusedAnchor.current !== targetProposal) {
+      const proposal = document.getElementById(targetProposal);
+      if (proposal && log?.contains(proposal)) {
+        focusedAnchor.current = targetProposal;
+        proposal.focus({ preventScroll: true });
+        proposal.scrollIntoView({ block: "nearest" });
+        return;
+      }
+    }
     if (log) log.scrollTo({ top: log.scrollHeight, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
-  }, [turns]);
+  }, [turns, targetProposal]);
 
   // Resume: a running turn (also after a reload) is advanced one step at a time by the origin-checked command.
   const runningId = running?.id;
@@ -244,7 +257,9 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
             const patchable = Boolean(proposal.replaces && sel && savedText.slice(sel.start, sel.end) === sel.text);
             const composed = patchable && sel ? savedText.slice(0, sel.start) + /^\s*/.exec(sel.text)![0] + proposal.text + /\s*$/.exec(sel.text)![0] + savedText.slice(sel.end) : null;
             const after = composed ? scriptStats(composed) : null;
-            return <div key={index} className="space-y-2 rounded-md border bg-background p-3">
+            const anchor = proposalAnchor({ turnId: turn.id, index });
+            return <div key={index} id={anchor} tabIndex={-1}
+              className="space-y-2 rounded-md border bg-background p-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{proposal.replaces ? `Proposed edit to your ${proposal.stage}` : `Proposed ${proposal.stage}`}</p>
               {proposal.replaces ? <p className="whitespace-pre-wrap break-words rounded bg-muted/60 p-2 text-xs text-muted-foreground line-through decoration-muted-foreground/60" data-patch-before>{proposal.replaces}</p> : null}
               <p className="whitespace-pre-wrap break-words text-sm">{proposal.text}</p>
@@ -257,9 +272,14 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
                 {proposal.length.fit && proposal.length.fit.state !== "match" && !proposal.length.fit.beyondSupported && proposal.length.targetSeconds ? <Button type="button" variant="outline" className="min-h-9 text-xs" disabled={sending || Boolean(running)}
                   onClick={() => void send(`${proposal.length!.fit!.state === "short" ? "Expand" : "Tighten"} the script to about ${proposal.length!.targetSeconds! <= 180 ? `${proposal.length!.targetSeconds} seconds` : `${Math.round(proposal.length!.targetSeconds! / 6) / 10} minutes`}`)}>{proposal.length.fit.state === "short" ? "Expand it" : "Tighten it"} to about {formatClock(proposal.length.targetSeconds)}</Button> : null}
               </div> : null}
-              {proposal.evidence.length ? <ul className="space-y-1 border-l-2 pl-3 text-xs text-muted-foreground">{proposal.evidence.map(item => <li key={item.id}>
-                {item.quote.length > 220 ? <>“{quotePreview(item.quote)}” <details className="mt-0.5"><summary className="cursor-pointer text-primary">Show full quote</summary><span className="mt-1 block whitespace-pre-wrap">“{item.quote}”</span></details></> : <>“{item.quote}”</>}{item.at != null ? <span className="ml-1 tabular-nums">· {clock(item.at)}</span> : null}
-                {item.sourceId ? <Link href={`/studio/library/${item.sourceId}`} className="ml-2 inline-flex items-center gap-0.5 text-primary hover:underline">Source<ExternalLink aria-hidden="true" className="h-3 w-3" /></Link> : null}</li>)}</ul> : null}
+              {proposal.evidence.length ? <ul className="space-y-1 border-l-2 pl-3 text-xs text-muted-foreground">{proposal.evidence.map(item => {
+                const quote = citedQuote(item.id, item.quote);
+                return <li key={item.id}>
+                  {quote.length > 220 ? <>“{quotePreview(quote)}” <details className="mt-0.5"><summary className="cursor-pointer text-primary">Show full quote</summary><span className="mt-1 block whitespace-pre-wrap">“{quote}”</span></details></> : <>“{quote}”</>}{item.at != null ? <span className="ml-1 tabular-nums">· {clock(item.at)}</span> : null}
+                  {item.sourceId ? <Link href={agentCitationHref(item.sourceId, { turnId: turn.id, index }, item.id)} target="_blank" rel="noreferrer"
+                    className="ml-2 inline-flex items-center gap-0.5 text-primary hover:underline">Open cited passage (new tab)<ExternalLink aria-hidden="true" className="h-3 w-3" /></Link> : null}
+                </li>;
+              })}</ul> : null}
               {proposal.verify.length ? <ul className="list-disc space-y-0.5 pl-5 text-xs text-amber-700 dark:text-amber-400">{proposal.verify.map((item, i) => <li key={i}>Check before filming: {item}</li>)}</ul> : null}
               {proposal.replaces ? <p className="text-xs text-muted-foreground" data-patch-note>{patchable && after ? <>Only the selected words change; the rest stays exactly as saved. {proposal.stage === "Script" ? <>After applying, the whole script is about {formatClock(after.seconds)} spoken ({after.spokenWords} words).</> : null} <strong>{scriptEditor ? "Undo last script change" : "Undo last change"}</strong> restores it.</> : "The selected words changed since this edit was written, so it can't be applied. Select them again."}</p> : null}
               {replaces ? <p className="text-xs text-muted-foreground">This replaces your saved {proposal.stage}. {scriptEditor ? <><strong>Undo last script change</strong> restores it.</> : <><strong>Undo last change</strong> in the Draft panel restores it.</>}</p> : null}
