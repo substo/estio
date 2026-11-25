@@ -218,6 +218,11 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   const hasWork = record ? CREATION_STAGES.some(stage => stageDraft(record.state, stage).text.trim().length > 0) : false;
   const concept = record ? stageDraft(record.state, "Concept") : null;
   const activeIdea = concept?.approved ? readIdeaCard(concept.text) : null;
+  const currentProposal = activeIdea
+    ? [...turns].reverse().flatMap(turn => (turn.result?.proposals ?? []).map((proposal, index) => ({ turnId: turn.id, index, proposal })))
+      .find(({ proposal }) => proposal.stage === "Concept" && proposal.text === concept?.text)
+    : null;
+  const currentEvidence = currentProposal?.proposal.evidence.find(item => item.sourceId);
   const savedScript = record ? stageDraft(record.state, "Script") : null;
   const savedShootPlan = record ? stageDraft(record.state, "Shoot plan") : null;
   const startIdeas = `Give me three genuinely different video ideas for this context. ${IDEA_CARD_FORMAT}`;
@@ -349,6 +354,11 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
       {activeIdea || concept?.shortlist.length ? <details className="text-xs">
         <summary className="cursor-pointer break-words font-medium">{activeIdea ? `Current direction · ${activeIdea.Title}` : "Shortlisted ideas"}</summary>
         {activeIdea ? <p className="mt-1 break-words">{activeIdea.Premise} <strong>Payoff</strong> {activeIdea.Payoff}</p> : null}
+        {currentProposal && currentEvidence?.sourceId ? <p className="mt-1 break-words">
+          <Link href={agentCitationHref(currentEvidence.sourceId, currentProposal, currentEvidence.id)} target="_blank" rel="noreferrer"
+            className="text-primary underline">Supporting passage (new tab)</Link>
+        </p> : null}
+        {currentProposal?.proposal.verify[0] ? <p className="mt-1 break-words text-muted-foreground">Check before filming: {currentProposal.proposal.verify[0]}</p> : null}
         {concept?.shortlist.length ? <ul className="mt-1 list-disc space-y-1 break-words pl-5">{concept.shortlist.map(text => <li key={text}>{readIdeaCard(text)?.Title ?? text}</li>)}</ul> : null}
       </details> : null}
       {scriptEditor && record && stageDraft(record.state, "Script").approved && stageDraft(record.state, "Script").previous ? <Button type="button"
