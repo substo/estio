@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type MutableRefObject } from "react";
 import Link from "next/link";
 import { Check, ListChecks, Trash2, Undo2 } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -8,7 +8,7 @@ import type { AgentSelection } from "@/lib/studio/agent-policy";
 import { Button } from "@/components/ui/button";
 import { AUDIENCE_KINDS, AUDIENCE_LIMIT, AUDIENCE_ORIGINS, AUDIENCE_TEXT_LIMIT, CREATION_STAGES, stageDraft, type AudienceSignal, type CreationRecord, type CreationStage } from "@/lib/studio/creation-policy";
 import { AUDIENCE_ANALYSIS_ROUTES, AUDIENCE_BRIEF_MAX_BYTES, audienceAnalysisCommand, audienceBriefPrompt,
-  audienceObservation, readAudienceBrief, type AudienceAnalysisRoute } from "@/lib/studio/audience-brief";
+  audienceObservation, audienceSuggestionPrompt, readAudienceBrief, type AudienceAnalysisRoute } from "@/lib/studio/audience-brief";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
 
 type Draft = { recordId: string; record: CreationRecord | null; setRecord: (record: CreationRecord) => void; plan: string[]; setPlan: (plan: string[]) => void; target: number | null; setTarget: (seconds: number | null) => void;
@@ -47,16 +47,52 @@ export function useAgentDraft() {
   return value;
 }
 
-/** What the conversation has produced so far. Every change here was an explicit owner choice; nothing is a required step. */
-export function DraftPanel() {
-  const { recordId, record, setRecord, plan, sourceId, sendRef } = useAgentDraft();
-  const [picked, setPicked] = useState<AgentSelection | null>(null);
-  const [directEdit, setDirectEdit] = useState<{ selection: AgentSelection; text: string } | null>(null);
+function useDraftCommand({ startSave, endSave, onSaved }: {
+  startSave?: () => boolean; endSave?: () => void; onSaved?: () => void;
+} = {}) {
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
-  const [editing, setEditing] = useState<CreationStage | null>(null);
-  const [text, setText] = useState("");
+  const { recordId, record, setRecord } = useAgentDraft();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const saving = useRef(false);
+  const command = useCallback(async (body: Record<string, unknown>) => {
+    if (saving.current) return false;
+    if (startSave && !startSave()) {
+      setError("Wait for your script edits to finish saving, then try again.");
+      return false;
+    }
+    saving.current = true;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch("/studio/content/create/api", { method: "POST", headers: { "X-Studio-Tenant": tenant, "Content-Type": "application/json" }, signal: AbortSignal.timeout(30_000), body: JSON.stringify({ recordId, version: record?.version, ...body }) });
+      const data = await response.json();
+      if (!response.ok) { setError(data.error || "Could not save this change."); return false; }
+      setRecord(data.record); onSaved?.(); return true;
+    } catch { setError("Could not confirm the save. Reload the draft before trying again."); return false; }
+    finally { saving.current = false; setBusy(false); endSave?.(); }
+  }, [recordId, record?.version, tenant, setRecord, startSave, endSave, onSaved]);
+  return { command, busy, error };
+}
+
+export function WritingAudiencePanel({ startSave, endSave, onSaved, onPrepared }: {
+  startSave: () => boolean; endSave: () => void; onSaved: () => void; onPrepared: () => void;
+}) {
+  const { record } = useAgentDraft();
+  const { command, busy, error } = useDraftCommand({ startSave, endSave, onSaved });
+  return <section aria-label="Audience language" className="space-y-3 p-4">
+    <AudienceSignals record={record} sourceId={null} command={command} busy={busy} embedded onPrepared={onPrepared} />
+    {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+  </section>;
+}
+
+/** What the conversation has produced so far. Every change here was an explicit owner choice; nothing is a required step. */
+export function DraftPanel() {
+  const { recordId, record, plan, sourceId, sendRef } = useAgentDraft();
+  const [picked, setPicked] = useState<AgentSelection | null>(null);
+  const [directEdit, setDirectEdit] = useState<{ selection: AgentSelection; text: string } | null>(null);
+  const [editing, setEditing] = useState<CreationStage | null>(null);
+  const [text, setText] = useState("");
+  const { command, busy, error } = useDraftCommand();
   const removed = record ? CREATION_STAGES.filter(stage => { const d = stageDraft(record.state, stage); return !d.text.trim() && Boolean(d.previous?.text.trim()); }) : [];
   const filled = record ? CREATION_STAGES.filter(stage => stageDraft(record.state, stage).text.trim()) : [];
 
@@ -71,16 +107,7 @@ export function DraftPanel() {
     if (!text.trim() || text.length > 1800 || saved.slice(start, start + text.length) !== text) { setPicked(null); return; }
     setPicked({ stage, action: "rewrite", start, end: start + text.length, text });
   }
-  const command = useCallback(async (body: Record<string, unknown>) => {
-    setBusy(true); setError("");
-    try {
-      const response = await fetch("/studio/content/create/api", { method: "POST", headers: { "X-Studio-Tenant": tenant, "Content-Type": "application/json" }, signal: AbortSignal.timeout(30_000), body: JSON.stringify({ recordId, version: record?.version, ...body }) });
-      const data = await response.json();
-      if (!response.ok) { setError(data.error || "Could not save this change."); return false; }
-      setRecord(data.record); return true;
-    } catch { setError("Could not reach Studio. Nothing changed; try again."); return false; }
-    finally { setBusy(false); }
-  }, [recordId, record?.version, tenant, setRecord]);
+
 
   return <section aria-label="Draft" className="space-y-4">
     {plan.length ? <div className="space-y-2 rounded-xl border bg-card p-4">
@@ -179,7 +206,10 @@ function SelectionBar({ selection, busy, onAsk, onEdit, onClear }: { selection: 
 
 type CommentSample = { status: "ok"; size: number; fetchedAt: string; videoUrl: string; comments: Array<{ text: string; href: string }> } | { status: "unavailable"; reason: string };
 /** The owner's own audience observations. Public comments can be read here, but nothing from YouTube is saved: you write what you notice. */
-function AudienceSignals({ record, sourceId, command, busy }: { record: CreationRecord | null; sourceId: string | null; command: (body: Record<string, unknown>) => Promise<boolean>; busy: boolean }) {
+function AudienceSignals({ record, sourceId, command, busy, embedded = false, onPrepared }: {
+  record: CreationRecord | null; sourceId: string | null; command: (body: Record<string, unknown>) => Promise<boolean>; busy: boolean;
+  embedded?: boolean; onPrepared?: () => void;
+}) {
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
   const { prepareMessage } = useAgentDraft();
   const [text, setText] = useState("");
@@ -189,10 +219,11 @@ function AudienceSignals({ record, sourceId, command, busy }: { record: Creation
   const [loading, setLoading] = useState(false);
   const signals = record?.state.audience ?? [];
   const observationRef = useRef<HTMLTextAreaElement>(null);
+  const observationId = useId();
   const [brief, setBrief] = useState<ReturnType<typeof readAudienceBrief> | null>(null);
   const [briefError, setBriefError] = useState("");
   const [readingBrief, setReadingBrief] = useState(false);
-  const [opened, setOpened] = useState(false);
+  const [opened, setOpened] = useState(embedded);
   const [analysisRoute, setAnalysisRoute] = useState<AudienceAnalysisRoute>("ollama");
   const [analysisModel, setAnalysisModel] = useState("");
   const [briefStatus, setBriefStatus] = useState("");
@@ -223,10 +254,13 @@ function AudienceSignals({ record, sourceId, command, busy }: { record: Creation
     } catch { setSample({ status: "unavailable", reason: "Could not reach Studio. Try again." }); }
     finally { setLoading(false); }
   }
-  return <details className="rounded-md border p-3 text-sm" data-audience
-    onToggle={event => { if (event.currentTarget.open) setOpened(true); }}>
-    <summary className="cursor-pointer font-medium">Audience language{signals.length ? ` · ${signals.length}` : ""} <span className="font-normal text-muted-foreground">(optional)</span></summary>
-    {opened ? <div className="mt-3 space-y-3">
+  function prepareBriefMessage(message: string) {
+    const prepared = prepareMessage.current?.(message);
+    setBriefStatus(prepared ? "Added to the Assistant message. Review it and choose Process with before sending." :
+      "Finish the current Assistant message before adding this brief.");
+    if (prepared) onPrepared?.();
+  }
+  const controls = <div className="space-y-3">
       <p className="text-xs text-muted-foreground">Add what you have noticed in comments, interviews or FAQs, in your own words: a question people ask, an objection, a phrase they use. The assistant uses the wording and concerns. They are your observations, not evidence and not a claim about everyone.</p>
       <details className="space-y-2">
         <summary className="cursor-pointer text-xs font-medium">Choose an analysis model</summary>
@@ -269,9 +303,7 @@ function AudienceSignals({ record, sourceId, command, busy }: { record: Creation
           {brief.signals.length ? <div className="flex flex-wrap gap-1" aria-label="Use audience comments">
             {([["explore", "Explore angles"], ["deepen", "Deepen the draft"], ["tighten", "Tighten the draft"]] as const).map(([action, label]) =>
               <Button key={action} type="button" variant="outline" className="min-h-8 px-2 text-xs" onClick={() => {
-                const prepared = prepareMessage.current?.(audienceBriefPrompt(brief.signals, action));
-                setBriefStatus(prepared ? "Added to the Assistant message. Review it and choose Process with before sending." :
-                  "Finish the current Assistant message before adding this brief.");
+                prepareBriefMessage(audienceBriefPrompt(brief.signals, action));
               }}>{label}</Button>)}
           </div> : null}
           {briefStatus ? <p role="status" className="text-xs text-muted-foreground">{briefStatus}</p> : null}
@@ -288,7 +320,9 @@ function AudienceSignals({ record, sourceId, command, busy }: { record: Creation
                 <blockquote>“{row.text}”</blockquote>
               </li>)}</ul>
             </details>
-            <Button type="button" variant="ghost" className="min-h-8 px-2 text-xs"
+            <Button type="button" variant="outline" className="min-h-9 px-2 text-xs"
+              onClick={() => prepareBriefMessage(audienceSuggestionPrompt(item))}>Use this suggestion</Button>
+            <Button type="button" variant="ghost" className="min-h-9 px-2 text-xs"
               disabled={!record || busy || Boolean(text.trim()) || signals.length >= AUDIENCE_LIMIT}
               onClick={() => {
                 setText(audienceObservation(item));
@@ -303,8 +337,8 @@ function AudienceSignals({ record, sourceId, command, busy }: { record: Creation
         <span><span className="mr-1.5 rounded-full border px-1.5 py-0.5 text-[11px] capitalize">{item.kind}</span>{item.text}<span className="ml-1 text-xs text-muted-foreground">· {item.origin}</span></span>
         <Button type="button" variant="ghost" className="min-h-8 px-2 text-xs" disabled={busy} onClick={() => void command({ action: "audience_remove", signalId: item.id })} aria-label={`Remove observation: ${item.text.slice(0, 40)}`}>Remove</Button></li>)}</ul> : null}
       {record && signals.length < AUDIENCE_LIMIT ? <div className="space-y-2">
-        <label className="sr-only" htmlFor="audience-text">Your observation</label>
-        <textarea ref={observationRef} id="audience-text" value={text} maxLength={AUDIENCE_TEXT_LIMIT} rows={2} onChange={event => setText(event.target.value)} placeholder="e.g. People keep asking whether this works without expensive gear" className="block w-full rounded-md border bg-background p-2 text-sm" />
+        <label className="sr-only" htmlFor={observationId}>Your observation</label>
+        <textarea ref={observationRef} id={observationId} value={text} maxLength={AUDIENCE_TEXT_LIMIT} rows={2} onChange={event => setText(event.target.value)} placeholder="e.g. People keep asking whether this works without expensive gear" className="block w-full rounded-md border bg-background p-2 text-sm" />
         <div className="flex flex-wrap items-center gap-2">
           <select aria-label="Kind of observation" value={kind} onChange={event => setKind(event.target.value as AudienceSignal["kind"])} className="min-h-9 rounded-md border bg-background px-2 text-xs">{AUDIENCE_KINDS.map(k => <option key={k} value={k}>{k}</option>)}</select>
           <select aria-label="Where you saw it" value={origin} onChange={event => setOrigin(event.target.value as AudienceSignal["origin"])} className="min-h-9 rounded-md border bg-background px-2 text-xs">{AUDIENCE_ORIGINS.map(o => <option key={o} value={o}>from {o}</option>)}</select>
@@ -318,6 +352,11 @@ function AudienceSignals({ record, sourceId, command, busy }: { record: Creation
           <ul className="max-h-60 space-y-1.5 overflow-y-auto text-xs">{sample.comments.map((c, i) => <li key={i} className="rounded-md bg-muted/60 p-2"><span className="whitespace-pre-wrap break-words">{c.text}</span> <a className="ml-1 text-primary hover:underline" href={c.href} target="_blank" rel="noopener noreferrer">View comment</a></li>)}</ul>
           <p className="text-xs text-muted-foreground">Then add what you notice above, in your own words.</p></div> : null}
       </div> : null}
-    </div> : null}
+    </div>;
+  if (embedded) return controls;
+  return <details className="rounded-md border p-3 text-sm" data-audience
+    onToggle={event => { if (event.currentTarget.open) setOpened(true); }}>
+    <summary className="cursor-pointer font-medium">Audience language{signals.length ? ` · ${signals.length}` : ""} <span className="font-normal text-muted-foreground">(optional)</span></summary>
+    {opened ? <div className="mt-3">{controls}</div> : null}
   </details>;
 }

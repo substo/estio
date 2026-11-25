@@ -6,7 +6,7 @@ import { StudioCommandError } from "./command-error";
 import { StudioDbError } from "./db";
 import { resolveStudioTextCommand } from "./text-route";
 import { studioDb } from "./studio-db";
-import { applyStagePatch, expose, hasCreationState, loadRecord, loadSource, requireCreationWriter, save, type StoredRecord } from "./creation";
+import { applyStagePatch, expose, hasCreationState, loadRecord, loadSource, requireCreationWriter, save, saveInitialCreationState, type StoredRecord } from "./creation";
 import { stageDraft, stageTextLimit, type CreationStage, type CreationState } from "./creation-policy";
 import { AGENT_MAX_ROUNDS, AGENT_PROMPT, isAgentSnapshot, readAgentResult, type AgentApplyCommand, type AgentFinal, type AgentSelection, type AgentResearch, type AgentItem, type AgentObservation, type AgentProposal, type AgentSnapshot, type AgentToolCall, type readAgentSendCommand } from "./agent-policy";
 import { runAgentTool } from "./agent-tools";
@@ -150,17 +150,7 @@ export async function sendAgentMessage(locationId: string, command: ReturnType<t
     const contract = await studioDb.call<number | null>("studio_agent_contract", { p_location: access.locationId, p_app: access.app, p_actor: access.userId });
     if (contract !== 4) throw new StudioCommandError("Update and restart the Studio companion on your Mac to edit a selection from here.");
   }
-  if (!hasCreationState(row)) {
-    try {
-      row = await studioDb.call<StoredRecord>("studio_save_record", {
-        p_location_id: access.locationId, p_record_id: row.id, p_kind: "content", p_title: row.title,
-        p_payload_patch: { creation: expose(row).state }, p_expected_version: row.version, p_clerk_user_id: access.userId,
-      });
-    } catch (error) {
-      if (error instanceof StudioDbError && error.code === "40001") throw new StudioCommandError("This piece changed. Reload before continuing.", 409);
-      throw error;
-    }
-  }
+  if (!hasCreationState(row)) row = await saveInitialCreationState(access, row, expose(row).state);
   // The duration comes from the owner's own words, read here; -1 keeps the previous target, 0 clears it.
   const request = parseDurationRequest(command.message);
   const target = request?.kind === "set" ? request.seconds : request?.kind === "clear" ? 0 : -1;

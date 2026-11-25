@@ -116,6 +116,19 @@ export async function save(access: StudioAccess, id: string, version: number, ti
   return { record: expose(record) };
 }
 
+/** Seed conversation state on an existing piece without replacing its script, blocks, or other record fields. */
+export async function saveInitialCreationState(access: StudioAccess, row: StoredRecord, state: CreationState) {
+  try {
+    return await studioDb.call<StoredRecord>("studio_save_record", {
+      p_location_id: access.locationId, p_record_id: row.id, p_kind: "content", p_title: row.title,
+      p_payload_patch: { creation: state }, p_expected_version: row.version, p_clerk_user_id: access.userId,
+    });
+  } catch (error) {
+    if (error instanceof StudioDbError && error.code === "40001") throw new StudioCommandError("This piece changed. Reload before continuing.", 409);
+    throw error;
+  }
+}
+
 /** Mirrors a stage change onto the canonical record fields (title, summary, script). */
 export function applyStagePatch(row: StoredRecord, current: StageDraft, next: StageDraft, stage: CreationStage, patch: Record<string, unknown>) {
   let title = row.title;
@@ -141,7 +154,7 @@ export async function executeCreationCommand(locationId: string, command: Creati
     const title = (command.brief.trim().split(/\r?\n/)[0] || source?.title || "Untitled video").slice(0, 180);
     return save(access, recordId, version, title, { creation: state, stage: "idea", title, approved: false }, { source, template: command.templateId });
   }
-  const row = await loadRecord(access, recordId);
+  const row = await loadRecord(access, recordId, command.action === "audience_add");
   if (!row) throw missing();
   if (row.version !== version) throw new StudioCommandError("This draft changed in another view. Reload before applying an edit.", 409);
   const { state } = expose(row);
@@ -193,6 +206,7 @@ export async function executeCreationCommand(locationId: string, command: Creati
       if (list.length >= AUDIENCE_LIMIT) throw new StudioCommandError(`Keep up to ${AUDIENCE_LIMIT} audience observations. Remove one first.`);
       state.audience = [...list, { id: crypto.randomUUID(), kind: command.kind, origin: command.origin, text: command.text }];
     } else state.audience = list.filter(item => item.id !== command.signalId);
+    if (!hasCreationState(row)) return { record: expose(await saveInitialCreationState(access, row, state)) };
     return save(access, recordId, version, row.title, { creation: state });
   }
   const stage = command.stage;

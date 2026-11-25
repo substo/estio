@@ -57,11 +57,12 @@ The JSON file contains coverage and evidence with the source filename and row nu
 
 ## Use the brief in Studio
 
-Open **Create with Studio → Audience language → Open a local audience brief** and choose the JSON file. Expand **Review comment excerpts** to check each suggestion against its source. The brief stays in the browser until you choose what to save or send.
+Open **Script → Writing agent → Audience language** on an existing piece. On a phone, tap **Ask about this script** first. The same controls are available in **Create with Studio → Audience language**. Choose the JSON file in **Open a local audience brief**. Expand **Review comment excerpts** to check each suggestion against its source. The brief stays in the browser until you choose what to save or send.
 
 - **Explore angles** asks for distinct concepts with titles, spoken hooks, and payoffs.
 - **Deepen the draft** asks for a demonstration, an objection to address, and precise lines or shots to add.
 - **Tighten the draft** asks what to cut and how to deliver the title's promise sooner.
+- **Use this suggestion** prepares one draft request with a single supporting excerpt.
 - **Review as observation** lets you edit and save one observation for later chat turns.
 
-The first three actions prepare an editable Assistant message with a small selection of supporting excerpts. Review it and choose **Process with** before pressing **Send**. That dropdown controls writing and revision, independently of the analysis model on the brief. The paired-Mac route follows the native text provider and model in **Settings → Devices**. **Location AI order** follows **Settings → AI** and its configured providers. The Assistant shows the route used in **What this answer used**. Use approved Knowledge or an independent source for factual claims.
+The writing actions prepare an editable Assistant message with a small selection of supporting excerpts. Inside Script mode they return to the same composer and keep any unsent text. Review it and choose **Process with** before pressing **Send**. That dropdown controls writing and revision, independently of the analysis model on the brief. The paired-Mac route follows the native text provider and model in **Settings → Devices**. **Location AI order** follows **Settings → AI** and its configured providers. The Assistant shows the route used in **What this answer used**. Use approved Knowledge or an independent source for factual claims.
