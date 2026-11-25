@@ -37,6 +37,9 @@ test("a reloaded turn shows the real reads, cited proposal, claims to verify, qu
   assert.match(html, /Searched the saved source/);
   assert.match(html, /Proposed Hook/);
   assert.match(html, /“The opening sets the promise\.”/);
+  assert.match(html, /id="proposal-t1-0" tabindex="-1"/);
+  assert.match(html, /href="\/studio\/library\/s1\?citationTurn=t1&amp;citationProposal=0&amp;citationItem=f%3A1#transcript"/);
+  assert.match(html, /target="_blank"[^>]*>Open cited passage \(new tab\)/);
   assert.match(html, /Check before filming: Studio shows both openings/);
   assert.match(html, /Use as Hook/);
   assert.match(html, /Promote Substo to new creators/);

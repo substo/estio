@@ -1,5 +1,6 @@
 import { studioRouteParams } from "@/lib/studio/route-context";
 import Link from "next/link";
+import { knowledgeCitationHref, proposalFocusQuery } from "@/lib/studio/citation-navigation";
 import { findStudioKnowledgeTopics } from "@/lib/studio/knowledge-commands";
 import { auth } from "@clerk/nextjs/server";
 import { notFound } from "next/navigation";
@@ -68,6 +69,8 @@ export default async function StudioKnowledgeInsightPage({ params, searchParams 
             {quote ? <blockquote className="whitespace-pre-wrap border-l-2 pl-4">{quote}</blockquote> : <p className="text-sm text-muted-foreground">No quote text saved.</p>}
             <p className="text-sm text-muted-foreground">{evidenceType === "ocr" ? "On-screen text · " : evidenceType === "speech" ? "Speech · " : evidenceType === "text" ? "Saved text · " : ""}{start !== null ? `Start ${start}s` : "No start time"}{end !== null ? ` · End ${end}s` : ""}{text(entry.payload.observed_at) ? ` · Observed ${text(entry.payload.observed_at)}` : ""}</p>
             {entry.payload.origin === "hosted_extraction" ? <p className="text-sm text-muted-foreground">Saved source version {numberText(entry.payload.source_version)} · unit {text(entry.payload.unit_id)}{numberText(entry.payload.char_start)!==null ? ` · characters ${numberText(entry.payload.char_start)}–${numberText(entry.payload.char_end)} (end exclusive)` : " · time range refers to the whole cited unit"}{extractionId ? <Link href={`${root}/knowledge/extractions/${extractionId}`} className="ml-2 text-primary hover:underline">Extraction provenance</Link> : null}</p> : null}
+            {quote && record?.kind === "reference" ? <Link href={knowledgeCitationHref(record.id, entry.id)}
+              className="mr-3 text-sm text-primary hover:underline">Open cited passage</Link> : null}
             {citationUrl ? <a href={citationUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline">Open citation URL</a> : null}
             {frame && result.verifiedFrames.evidence.has(entry.id)
               // eslint-disable-next-line @next/next/no-img-element
@@ -82,8 +85,8 @@ export default async function StudioKnowledgeInsightPage({ params, searchParams 
       {result.selectedInDrafts.length ? <section className="space-y-3 rounded-xl border bg-card p-5" aria-label="Selected in your drafts">
         <h2 className="text-lg font-medium">Selected in your drafts</h2>
         <ul className="space-y-2 text-sm">{result.selectedInDrafts.map(draft => <li key={draft.id} className="flex flex-wrap gap-x-2">
-          <Link className="text-primary hover:underline" href={`${root}/content/create?draft=${draft.id}`}>{draft.title}</Link>
-          <span className="text-muted-foreground">· {draft.cited ? "Cited in a proposal" : "Supplied to the assistant"}</span>
+          <Link className="text-primary hover:underline" href={`${root}/content/create?draft=${draft.id}${draft.proposal_index !== null ? `&${proposalFocusQuery({ turnId: draft.turn_id, index: draft.proposal_index })}` : ""}`}>{draft.title}</Link>
+          <span className="text-muted-foreground">· {draft.cited ? "Open the citing proposal" : "Supplied to the assistant"}</span>
         </li>)}</ul>
       </section> : null}
       <section className="space-y-4" aria-label="Reviews">

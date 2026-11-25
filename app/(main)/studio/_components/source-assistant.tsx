@@ -12,6 +12,7 @@ import { StudioTextProviderChoice } from "./text-provider-choice";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
 import { DRAFT_FROM_FINDINGS_EVENT, useSourceWorkspace } from "./source-workspace";
 import { OPEN_TAB_EVENT } from "./source-tabs";
+import type { ProposalFocus } from "@/lib/studio/citation-navigation";
 import { AgentChat, type AgentResume, type AgentSource } from "./agent-chat";
 import type { AgentTurnView } from "@/lib/studio/agent";
 
@@ -31,7 +32,7 @@ const INTENTS: Array<{ value: Mode; label: string; hint: string }> = [
 ];
 const clock = (seconds: number) => new Date(seconds * 1000).toISOString().slice(seconds >= 3600 ? 11 : 14, 19);
 
-export function SourceAssistant({ locationId, sourceId, sourceTitle, version, canRelated, archived, hasEvidence, knowledgeInputs, canTemplate, canCreate, agent }: { agent?: { source: AgentSource; turns: AgentTurnView[]; newDraftHref: string; resume: AgentResume | null; scope: string; sessionKey: string }; knowledgeInputs: KnowledgeInput[]; canTemplate: boolean; canCreate?: boolean; locationId: string; sourceId: string; sourceTitle: string; version: number; canRelated: boolean; archived: boolean; hasEvidence: boolean }) {
+export function SourceAssistant({ locationId, sourceId, sourceTitle, version, canRelated, archived, hasEvidence, knowledgeInputs, canTemplate, canCreate, agent }: { agent?: { source: AgentSource; turns: AgentTurnView[]; focusProposal?: ProposalFocus | null; newDraftHref: string; resume: AgentResume | null; scope: string; sessionKey: string }; knowledgeInputs: KnowledgeInput[]; canTemplate: boolean; canCreate?: boolean; locationId: string; sourceId: string; sourceTitle: string; version: number; canRelated: boolean; archived: boolean; hasEvidence: boolean }) {
   const router = useRouter();
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
   const [open, setOpen] = useState(false);
@@ -258,7 +259,7 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
     {createToggle}
   </>;
   const body = (variant: string) => creating && agent
-    ? <><AgentChat key={agent.sessionKey} locationId={locationId} source={agent.source} initialTurns={agent.turns} provider={provider} onProvider={setProvider} newDraftHref={agent.newDraftHref} resume={agent.resume} scope={agent.scope} />{createToggle}</>
+    ? <><AgentChat key={agent.sessionKey} locationId={locationId} source={agent.source} initialTurns={agent.turns} focusProposal={agent.focusProposal} provider={provider} onProvider={setProvider} newDraftHref={agent.newDraftHref} resume={agent.resume} scope={agent.scope} />{createToggle}</>
     : researchBody(variant);
   const header = <div className="min-w-0"><h2 className="font-semibold">Assistant</h2><p className="truncate text-xs text-muted-foreground">{creating ? "Creating from: " : "Only this source: "}{sourceTitle}</p></div>;
   return <>
