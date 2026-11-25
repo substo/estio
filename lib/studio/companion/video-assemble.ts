@@ -210,9 +210,12 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
         catch (error) { if (context.signal.aborted) throw error; }
       }
       if (p.storyboardFrames && avatar && deps.drawFrame && p.downloads.length === 0) {
+        console.log(JSON.stringify({ at: new Date().toISOString(), event: "storyboard_references", jobId: job.id, sheets: sheetFiles.length, offered: p.characterSheets.length }));
         for (const beat of parseScript(p.script).slice(0, p.storyboardFrames.max)) {
           const name = `storyboard-frame-${beat.index}.png`;
-          const { prompt } = renderShot(shotForBeat(beat, p.options.portrait), "edit", { acceptsText: false });
+          const shot = renderShot(shotForBeat(beat, p.options.portrait), "edit", { acceptsText: false });
+          // The model ignores a separate aspect field, so the shape is part of the prompt: frames fill the video instead of leaving bars.
+          const prompt = `${shot.prompt} Compose it as a ${p.options.portrait ? "vertical 9:16 portrait" : "wide 16:9 landscape"} image that fills the whole frame.`;
           const ok = await deps.drawFrame({ prompt, references: [...sheetFiles, join(clipsDir, avatar)], out: join(clipsDir, name), signal: context.signal, ...(sheetFiles.length ? { intro: SHEET_INTRO } : {}) }).catch(error => { if (context.signal.aborted) throw error; return false; });
           if (ok) frames[beat.index] = name;
         }

@@ -149,6 +149,7 @@ test("storyboard frames: Codex draws one per beat when there is no footage, with
   const a = await run(none, 2);
   assert.equal(a.drawn.length, 3);
   assert.ok(a.drawn.every(d => d.references.length === 1 && d.references[0].endsWith("storyboard-avatar.png")));
+  assert.match(a.drawn[0].prompt, /wide 16:9 landscape image that fills the whole frame/);   // the shape is in the prompt
   assert.match(a.drawn[1].prompt, /Open on the desk/);   // the beat's own visual note is its scene
   assert.deepEqual((a.seen?.frames ?? []).filter(Boolean), ["storyboard-frame-1.png", "storyboard-frame-3.png"]);   // beat 2 failed: it keeps the plain photo
   assert.equal((await run({ ...none, storyboardFrames: { source: "codex", max: 2 } })).drawn.length, 2);   // the cap
