@@ -1,7 +1,11 @@
 "use client";
 import Link from "next/link";
-import { startTransition, useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useActionState, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessageSquare } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { stageDraft, type CreationRecord } from "@/lib/studio/creation-policy";
+import type { AgentSelection } from "@/lib/studio/agent-policy";
+import { ScriptWritingAgent, type WritingAgentData } from "./script-writing-agent";
 import { askVideoEditAction, openEditorAction, stopVideoAction } from "../../(tenant)/content/actions";
 import { ContentRecordForm } from "../content-record-form";
 import { AutoRefresh } from "../auto-refresh";
@@ -31,9 +35,35 @@ export function ContentWorkspace(props: {
   form: FormProps; uploads: AssetUpload[]; pending: PendingUpload[];
   loop: VideoLoopState | null; assembly: VideoAssemblyView | null; narration: NarrationView | null; mac: MacStatusInput; /** Every voice in the Location; the picker groups them by availability. */ voices: VoiceRow[]; availability?: Availability; /** Where music and sound effects will be made, from the Location's generation sources (labels only). */ soundSources?: { music: string; effects: string }; /** The Location's saved look for titles and callouts. */ motion?: import("@/lib/studio/video-assembly/motion-style").MotionChoice;
   /** The script's spoken beats in order, for the transcript. */ beats?: string[];
-  uploadSlot: React.ReactNode; nextSteps: React.ReactNode; detailsExtra: React.ReactNode;
+  uploadSlot: React.ReactNode; nextSteps: React.ReactNode; detailsExtra: React.ReactNode; writingAgent?: WritingAgentData | null;
 }) {
-  const { locationId, recordId, loop } = props;
+  const { locationId, recordId, loop, writingAgent } = props;
+  const router = useRouter();
+  const [writingOpen, setWritingOpen] = useState(false);
+  const [writingFocus, setWritingFocus] = useState<{ selection: AgentSelection; label: string } | null>(null);
+  const writingOrigin = useRef<HTMLElement | null>(null);
+  const editorSaved = useRef(true);
+  const applyingScript = useRef(false);
+  const [scriptLock, setScriptLock] = useState(false);
+  const [scriptRevision, setScriptRevision] = useState<{ version: number; text: string } | null>(null);
+  const showWritingAgent = (origin: HTMLElement, focus?: NonNullable<typeof writingFocus>) => {
+    writingOrigin.current = origin;
+    if (focus) setWritingFocus(focus);
+    setWritingOpen(true);
+  };
+  const startApply = () => {
+    if (!editorSaved.current || applyingScript.current) return false;
+    applyingScript.current = true;
+    setScriptLock(true);
+    return true;
+  };
+  const endApply = () => { applyingScript.current = false; setScriptLock(false); };
+  const syncProposal = (record: CreationRecord, stage: string) => {
+    if (stage === "Script") setScriptRevision({ version: record.version, text: stageDraft(record.state, "Script").text });
+    router.refresh();
+  };
+  const refreshSavedScript = useCallback(() => { router.refresh(); }, [router]);
+  const trackScriptSave = useCallback((saved: boolean) => { editorSaved.current = saved; }, []);
   const versions = loop?.versions ?? [];
   const hasVideo = versions.length > 0;
   const [mode, setMode] = useState<WorkspaceMode>(() => parseMode(props.initialMode) ?? defaultMode({ hasScript: props.hasScript, hasVideo }));
@@ -51,6 +81,7 @@ export function ContentWorkspace(props: {
     if (!parseMode(props.initialMode)) { const saved = parseMode(window.localStorage.getItem(`studio-mode:${recordId}`)); if (saved) setMode(saved); }
   }, [props.initialMode, recordId]);
   const choose = (next: WorkspaceMode) => {
+    if (next !== "script") setWritingOpen(false);
     setMode(next); window.localStorage.setItem(`studio-mode:${recordId}`, next);
     const url = new URL(window.location.href); url.searchParams.set("mode", next); window.history.replaceState(null, "", url);
   };
@@ -95,14 +126,21 @@ export function ContentWorkspace(props: {
             onKeyDown={e => { const i = workspaceModes.indexOf(mode); if (e.key === "ArrowRight") choose(workspaceModes[(i + 1) % 3]); if (e.key === "ArrowLeft") choose(workspaceModes[(i + 2) % 3]); }}
             className="min-h-11 rounded-md px-4 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 aria-selected:bg-primary aria-selected:text-primary-foreground">{modeLabels[m]}</button>)}
         </div>
+        {mode === "script" && writingAgent ? <button id={`studio-script-agent-trigger-${recordId}`} type="button" aria-haspopup="dialog" onClick={event => showWritingAgent(event.currentTarget)}
+          className="inline-flex min-h-11 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 lg:hidden"><MessageSquare aria-hidden className="size-4" />Ask about this script</button> : null}
         {openEditorLine(loop?.openEditor ?? null) ? <p role="status" className="text-sm text-muted-foreground">{openEditorLine(loop?.openEditor ?? null)}</p> : null}
         {openState.error ? <p role="alert" className="text-sm text-destructive">{openState.error}</p> : null}
       </header>
 
       {/* One form instance, never unmounted: Script and Details show their own parts of it. */}
       <div className={mode === "details" ? "mx-auto max-w-3xl space-y-6" : mode === "script" ? "grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]" : "hidden"}>
-        <div className="space-y-6"><ContentRecordForm {...props.form} visible={mode === "script" ? "script" : mode === "details" ? "details" : "none"} />{mode === "details" ? props.detailsExtra : null}</div>
-        {mode === "script" ? <div className="space-y-4">{props.nextSteps}<p className="text-xs text-muted-foreground">When the script is ready, switch to Edit and press Make video. Narration that already has up-to-date audio is reused, so only changed blocks are voiced again.</p></div> : null}
+        <div className="space-y-6"><ContentRecordForm {...props.form} scriptLock={scriptLock} scriptRevision={scriptRevision} onScriptSaved={writingAgent ? refreshSavedScript : undefined} onScriptSaveState={trackScriptSave}
+          onAskAboutBlock={writingAgent ? (selection, label, origin) => showWritingAgent(origin, { selection, label }) : undefined} visible={mode === "script" ? "script" : mode === "details" ? "details" : "none"} />{mode === "details" ? props.detailsExtra : null}</div>
+        <div hidden={mode !== "script"} className="min-w-0 space-y-4">
+          {writingAgent ? <ScriptWritingAgent locationId={locationId} data={writingAgent} active={mode === "script"} open={writingOpen} onOpenChange={setWritingOpen}
+            focus={writingFocus} returnFocus={writingOrigin} startApply={startApply} endApply={endApply} onApplied={syncProposal} onSent={refreshSavedScript} clearFocus={() => setWritingFocus(null)} /> : null}
+          {mode === "script" ? <>{props.nextSteps}<p className="text-xs text-muted-foreground">When the script is ready, switch to Edit and press Make video. Narration that already has up-to-date audio is reused, so only changed blocks are voiced again.</p></> : null}
+        </div>
       </div>
 
       {mode === "edit" ? (

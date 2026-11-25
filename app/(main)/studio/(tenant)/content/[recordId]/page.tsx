@@ -1,3 +1,7 @@
+import { auth } from "@clerk/nextjs/server";
+import { agentRouteScope, getAgentConversation } from "@/lib/studio/agent";
+import { StudioCommandError } from "@/lib/studio/command-error";
+import { expose } from "@/lib/studio/creation";
 import { scriptNextAction } from "@/lib/studio/reference-workflow";
 import { studioRouteParams } from "@/lib/studio/route-context";
 import Link from "next/link";
@@ -25,7 +29,18 @@ export default async function StudioContentRecordPage({ params, searchParams }: 
   const { mode } = await searchParams;
   const result = await getStudioContentRecord(locationId, recordId);
   if (!result) notFound();
-  const { record, links, files, uploads } = result;
+  const { access, record, links, files, uploads } = result;
+  const session = await auth();
+  const writingAgent = !record.archived && !session.actor && session.userId === access.userId
+    ? Promise.all([getAgentConversation(locationId, recordId), agentRouteScope(locationId)])
+      .then(([conversation, scope]) => ({ ...conversation, scope, record: expose(record) }))
+      .catch(error => {
+        if (!(error instanceof StudioCommandError && error.status === 403)) {
+          console.error("[studio-content] Could not load the writing conversation");
+        }
+        return null;
+      })
+    : null;
   const next = scriptNextAction(record, links);
   const inspiration = record.payload.knowledgeInspiration as { outlineId?: unknown; sourceId?: unknown } | undefined;
   const inspirationId = typeof inspiration?.outlineId === "string"
@@ -76,6 +91,6 @@ export default async function StudioContentRecordPage({ params, searchParams }: 
       uploads={assets} pending={pending} loop={loop} assembly={assembly.view} narration={assembly.narration} mac={mac} voices={allVoices} availability={availability} soundSources={soundSources} motion={motion} beats={parseScript(script).map(b => b.narration)}
       uploadSlot={<StudioUploadForm key={recordId} compact locationId={locationId} recordId={recordId} pendingUploads={pendingUploads}
         attention={assets.filter(a => a.status !== "uploaded").map(a => ({ id: a.id, name: a.name, why: "Upload did not finish" }))} />}
-      nextSteps={nextSteps} detailsExtra={detailsExtra} />
+      nextSteps={nextSteps} detailsExtra={detailsExtra} writingAgent={await writingAgent} />
   );
 }

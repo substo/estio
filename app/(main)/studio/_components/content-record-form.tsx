@@ -11,10 +11,15 @@ import type { VoiceRow } from "@/lib/studio/voices/policy";
 import { ScriptBlockEditor } from "./script-block-editor";
 
 export function ContentRecordForm({ locationId, recordId, version, title = "", payload = {}, templateOptions = [],
-  pinnedTemplateId, templateSelectionSaved, canSelectTemplate = false, visible = "all", voices = [], locked = false }: {
+  pinnedTemplateId, templateSelectionSaved, canSelectTemplate = false, visible = "all", voices = [], locked = false, scriptLock, scriptRevision, onScriptSaved, onScriptSaveState, onAskAboutBlock }:  {
   voices?: readonly VoiceRow[]; /** The piece is archived: the script is read-only. */ locked?: boolean;
   /** Which part the workspace shows. Every field stays mounted (hidden ones keep their values and are still submitted), so switching modes never loses an unsaved edit. */
   visible?: "all" | "script" | "details" | "none";
+  scriptLock?: boolean;
+  scriptRevision?: { version: number; text: string } | null;
+  onScriptSaved?: (version: number) => void;
+  onScriptSaveState?: (saved: boolean) => void;
+  onAskAboutBlock?: React.ComponentProps<typeof ScriptBlockEditor>["onAskAboutBlock"];
   locationId: string; recordId: string; version: number; title?: string; payload?: Record<string, unknown>;
   templateOptions?: readonly ScriptTemplateOption[]; pinnedTemplateId?: string | null;
   templateSelectionSaved?: boolean; canSelectTemplate?: boolean;
@@ -33,8 +38,19 @@ export function ContentRecordForm({ locationId, recordId, version, title = "", p
   const selectedTemplate = templateOptions.find(template => template.id === templateId);
   // Autosave moves the version forward; the Save button must always use the newest one.
   const [liveVersion, setLiveVersion] = useState(version);
-  useEffect(() => setLiveVersion(current => Math.max(current, version)), [version]);
-  const initialBlocks = useMemo(() => reconcileBlocks(payload), []);  // eslint-disable-line react-hooks/exhaustive-deps -- first open only: later edits live in the editor
+  const editorVersion = Math.max(version, scriptRevision?.version ?? 0);
+  const initialBlocks = useMemo(() => reconcileBlocks(scriptRevision && scriptRevision.version >= version
+    ? { ...payload, script: scriptRevision.text } : payload), [payload, scriptRevision, version]);
+  const adoptVersion = useCallback((saved: number, savedHere = true) => { setLiveVersion(saved); if (savedHere) onScriptSaved?.(saved); }, [onScriptSaved]);
+  useEffect(() => {
+    if (!scriptRevision) return;
+    setLiveVersion(current => Math.max(current, scriptRevision.version));
+    setApproved(false);
+    if (scriptRevision.text.trim()) setStage(current => current === "idea" ? "script" : current);
+    else setStage(current => current === "script" ? "idea" : current);
+  }, [scriptRevision]);
+  const editorScript = scriptRevision && scriptRevision.version >= version
+    ? scriptRevision.text : typeof payload.script === "string" ? payload.script : "";
   const initialVoiceId = typeof payload.voiceId === "string" ? payload.voiceId : "";
   const [blocksJson, setBlocksJson] = useState(() => JSON.stringify({ version: 1, blocks: initialBlocks }));
   const [voiceId, setVoiceId] = useState(initialVoiceId);
@@ -76,8 +92,10 @@ export function ContentRecordForm({ locationId, recordId, version, title = "", p
               <ScriptTemplateBeats beats={selectedTemplate.beats} />
             </details> : null}
           </div> : null}
-        <ScriptBlockEditor locationId={locationId} recordId={recordId} version={version} initialBlocks={initialBlocks} voices={voices} initialVoiceId={initialVoiceId}
-          archived={locked} onVersion={setLiveVersion} onBlocksChange={onBlocksChange} />
+        <fieldset disabled={scriptLock} className="min-w-0">
+        <ScriptBlockEditor key={scriptRevision?.version} locationId={locationId} recordId={recordId} version={editorVersion} savedScript={editorScript} initialBlocks={initialBlocks} voices={voices} initialVoiceId={initialVoiceId}
+          archived={locked} onVersion={adoptVersion} onBlocksChange={onBlocksChange} onSaveState={onScriptSaveState} onAskAboutBlock={onAskAboutBlock} />
+        </fieldset>
         <input type="hidden" name="scriptBlocks" value={blocksJson} /><input type="hidden" name="voiceId" value={voiceId} />
       </div>
       {[{ name: "summary", label: "Idea summary", rows: 3 }, { name: "notes", label: "Production notes", rows: 6 }].map(({ name, label, rows }) => (
@@ -92,7 +110,7 @@ export function ContentRecordForm({ locationId, recordId, version, title = "", p
       </div>
       <p className="text-xs text-muted-foreground">Saved source links and attachments stay linked when you edit this piece. Ready marks work for review.</p>
       {state.error ? <p role="alert" className="text-sm text-destructive">{state.error}</p> : null}
-      <button disabled={pending} type="submit" className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">{pending ? "Saving…" : "Save content piece"}</button>
+      <button disabled={pending || scriptLock} type="submit" className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">{pending ? "Saving…" : "Save content piece"}</button>
     </form>
   );
 }

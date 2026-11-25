@@ -14,8 +14,16 @@ export type StoredRecord = { id: string; title: string; version: number; payload
 type StoredRun = { id: string; model: string; snapshot: CreationSnapshot; result: unknown; status: string; last_error_message: string | null; stale: boolean };
 const missing = () => new StudioCommandError("Creation draft unavailable.", 404);
 
+export function hasCreationState(record: StoredRecord) {
+  return (record.payload.creation as CreationState | undefined)?.schema === 1;
+}
+
 export function expose(record: StoredRecord): CreationRecord {
-  const state = record.payload.creation as CreationState;
+  const state: CreationState = hasCreationState(record)
+    ? { ...(record.payload.creation as CreationState) }
+    : { schema: 1, source: null, brief: "", direction: { choice: "conversation", publisher: "", viewer: "", goal: "", angle: "", rationale: "" },
+        stages: { Title: { text: record.title, approved: false, shortlist: [] },
+          Concept: { text: typeof record.payload.summary === "string" ? record.payload.summary : "", approved: false, shortlist: [] } }, history: [] };
   const script = typeof record.payload.script === "string" ? record.payload.script : "";
   const savedScript = stageDraft(state, "Script");
   // The normal content form can also edit the canonical script.
@@ -24,10 +32,10 @@ export function expose(record: StoredRecord): CreationRecord {
   return { id: record.id, version: record.version, templateId: record.script_template_version_id, state };
 }
 
-export async function loadRecord(access: StudioAccess, id: string) {
+export async function loadRecord(access: StudioAccess, id: string, includeExistingContent = false) {
   return studioDb.one<StoredRecord>(Prisma.sql`
     SELECT id, title, version, payload, script_template_version_id FROM studio.studio_records
-    WHERE location_id=${access.locationId} AND id=${id}::uuid AND kind='content' AND NOT archived AND payload#>>'{creation,schema}'='1'`);
+    WHERE location_id=${access.locationId} AND id=${id}::uuid AND kind='content' AND NOT archived AND (${includeExistingContent} OR payload#>>'{creation,schema}'='1')`);
 }
 export async function loadSource(access: StudioAccess, id: string): Promise<CreationSource | null> {
   const row = await studioDb.one<{ id: string; title: string; version: number; transcript: string; description: string }>(Prisma.sql`

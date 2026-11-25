@@ -6,7 +6,7 @@ import { StudioCommandError } from "./command-error";
 import { StudioDbError } from "./db";
 import { resolveStudioTextCommand } from "./text-route";
 import { studioDb } from "./studio-db";
-import { applyStagePatch, expose, loadRecord, loadSource, requireCreationWriter, save, type StoredRecord } from "./creation";
+import { applyStagePatch, expose, hasCreationState, loadRecord, loadSource, requireCreationWriter, save, type StoredRecord } from "./creation";
 import { stageDraft, stageTextLimit, type CreationStage, type CreationState } from "./creation-policy";
 import { AGENT_MAX_ROUNDS, AGENT_PROMPT, isAgentSnapshot, readAgentResult, type AgentApplyCommand, type AgentFinal, type AgentSelection, type AgentResearch, type AgentItem, type AgentObservation, type AgentProposal, type AgentSnapshot, type AgentToolCall, type readAgentSendCommand } from "./agent-policy";
 import { runAgentTool } from "./agent-tools";
@@ -84,7 +84,7 @@ async function views(access: StudioAccess, turns: TurnRow[], pending: Map<string
 
 export async function getAgentEvidenceChoices(locationId: string, recordId: string | null, sourceId: string | null) {
   const access = await requireCreationWriter(locationId);
-  if (recordId && !await loadRecord(access, recordId)) throw new StudioCommandError("Creation draft unavailable.", 404);
+  if (recordId && !await loadRecord(access, recordId, true)) throw new StudioCommandError("Creation draft unavailable.", 404);
   return studioDb.rows<{ id: string; statement: string; quote: string; title: string; source_id: string }>(Prisma.sql`
     SELECT id,statement,quote,title,source_id
     FROM studio.studio_agent_evidence_options(${access.locationId},${recordId}::uuid,${sourceId}::uuid,NULL::uuid[])`);
@@ -126,7 +126,7 @@ const failTurn = (access: StudioAccess, turnId: string, message: string) => stud
 
 export async function sendAgentMessage(locationId: string, command: ReturnType<typeof readAgentSendCommand>) {
   const access = await requireCreationWriter(locationId);
-  let row = command.version === 0 ? null : await loadRecord(access, command.recordId);
+  let row = command.version === 0 ? null : await loadRecord(access, command.recordId, true);
   if (command.version > 0 && !row) throw new StudioCommandError("Creation draft unavailable.", 404);
   if (!row) {
     // A new draft needs no form: no brief, direction or goal. It starts empty and linked to the source, if any.
@@ -144,6 +144,17 @@ export async function sendAgentMessage(locationId: string, command: ReturnType<t
     if (stageDraft(expose(row).state, sel.stage).text.slice(sel.start, sel.end) !== sel.text) throw new StudioCommandError("That text changed. Select the words again.", 409);
     const contract = await studioDb.call<number | null>("studio_agent_contract", { p_location: access.locationId, p_app: access.app, p_actor: access.userId });
     if (contract !== 4) throw new StudioCommandError("Update and restart the Studio companion on your Mac to edit a selection from here.");
+  }
+  if (!hasCreationState(row)) {
+    try {
+      row = await studioDb.call<StoredRecord>("studio_save_record", {
+        p_location_id: access.locationId, p_record_id: row.id, p_kind: "content", p_title: row.title,
+        p_payload_patch: { creation: expose(row).state }, p_expected_version: row.version, p_clerk_user_id: access.userId,
+      });
+    } catch (error) {
+      if (error instanceof StudioDbError && error.code === "40001") throw new StudioCommandError("This piece changed. Reload before continuing.", 409);
+      throw error;
+    }
   }
   // The duration comes from the owner's own words, read here; -1 keeps the previous target, 0 clears it.
   const request = parseDurationRequest(command.message);
@@ -286,6 +297,14 @@ export async function applyAgentProposal(locationId: string, command: AgentApply
     const lead = /^\s*/.exec(selection.text)![0], trail = /\s*$/.exec(selection.text)![0];
     text = current.text.slice(0, selection.start) + lead + proposal.text + trail + current.text.slice(selection.end);
     if (text.length > stageTextLimit(proposal.stage)) throw new StudioCommandError(`This edit would make the ${proposal.stage} longer than its limit. Ask for a tighter version.`);
+  }
+  if (proposal.stage === "Script" && turn.rounds[0]) {
+    const basis = await studioDb.one<{ version: string | null }>(Prisma.sql`
+      SELECT snapshot#>>'{ideas,0,version}' AS version FROM studio.studio_idea_reviews
+      WHERE location_id=${access.locationId} AND id=${turn.rounds[0].reviewId}::uuid`);
+    if (basis?.version && basis.version !== String(row.version)) {
+      throw new StudioCommandError("This piece changed after that script was requested. Ask for a fresh proposal.", 409);
+    }
   }
   // The request that produced this text travels with it, so a later ask never relabels a saved script. Only Script carries a runtime;
   // a patch keeps the label of the script it edits (the measured length is always shown beside it).

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseScript } from "./video-assembly/script";
-import { audioHash, beatAudio, blockAudioStatus, blocksDoc, blocksToScript, insertBlockAfter, moveBlock, moveBlockTo, parseScriptBlocks, reconcileBlocks, removeBlock, scriptToBlocks, setBlockAudio,
+import { audioHash, beatAudio, blockAudioStatus, blocksDoc, blocksToScript, insertBlockAfter, moveBlock, moveBlockTo, parseScriptBlocks, reconcileBlocks, removeBlock, scriptBlockSpan, scriptToBlocks, setBlockAudio,
   setBlockText, setBlockType, splitBlock, type ScriptBlock } from "./script-blocks";
 
 const counter = () => { let n = 0; return () => `b${++n}`; };
@@ -77,4 +77,25 @@ test("beat n maps to the n-th narration block and only fresh audio is reused", (
   blocks = setBlockAudio(blocks, nar[0].id, { hash: audioHash(voice, "One."), uploadId: upload(1), voiceId: voice, at: "t" });
   blocks = setBlockAudio(blocks, nar[2].id, { hash: audioHash(voice, "Old three."), uploadId: upload(3), voiceId: voice, at: "t" });
   assert.deepEqual([...beatAudio(blocks, voice)], [[1, upload(1)]]);
+});
+
+
+test("writing focus locates a repeated block by position and preserves script markers", () => {
+  const blocks = [
+    { id: "heading", type: "heading", level: 2, text: "Opening" },
+    { id: "one", type: "narration", text: "Try it." },
+    { id: "empty", type: "narration", text: " " },
+    { id: "two", type: "narration", text: "Try it." },
+    { id: "cue", type: "visual", text: "Show [the] take" },
+    { id: "break", type: "break", text: "" },
+  ] as const;
+  const script = blocksToScript(blocks);
+  assert.deepEqual(scriptBlockSpan(blocks, "heading"), { start: 3, end: 10, text: "Opening" });
+  const repeated = scriptBlockSpan(blocks, "two")!;
+  assert.equal(repeated.start, script.lastIndexOf("Try it."));
+  assert.equal(script.slice(repeated.start, repeated.end), repeated.text);
+  const cue = scriptBlockSpan(blocks, "cue")!;
+  assert.equal(script.slice(cue.start - 1, cue.end + 1), `[${cue.text}]`);
+  assert.equal(scriptBlockSpan(blocks, "empty"), null);
+  assert.equal(scriptBlockSpan(blocks, "break"), null);
 });

@@ -742,3 +742,27 @@ test("chosen and no evidence are pinned to a turn, fenced from other reads, and 
   }, 1);
   assert.equal(none.turn.inputs.reads[0].tool, "No source evidence");
 });
+
+
+test("an existing content record starts writing chat in place and stale full-script proposals cannot overwrite an edit", async () => {
+  const recordId = crypto.randomUUID(), turnId = crypto.randomUUID();
+  const original = "Show the two openings.";
+  await sql(`insert into studio.studio_records(location_id,id,kind,title,payload)
+    values($1,$2::uuid,'content','Existing piece',$3::jsonb)`, loc, recordId,
+  JSON.stringify({ script: original, notes: "Keep my production notes.", stage: "script" }));
+  const command = policy.readAgentSendCommand({ recordId, turnId, version: 1, message: "Revise the whole script.", provider: "subscription", confirmSubscription: true });
+  assert.equal((await agent.sendAgentMessage(loc, command)).recordId, recordId);
+  const view = await drive(turnId, snapshot => {
+    assert.match(snapshot.draft.stages.Script.text, /Show the two openings/);
+    return step({ proposals: [{ stage: "Script", text: "Start by showing both takes.", rationale: "Lead with the example", evidenceIds: [], verify: [] }] });
+  }, 1);
+  assert.equal(view.turn.status, "done");
+  assert.equal(view.record!.id, recordId);
+  assert.equal((await agent.getAgentConversation(loc, recordId)).turns.length, 1);
+  const edited = "This is a newer manual edit.";
+  const [saved] = await sql(`update studio.studio_records set version=version+1, payload=payload || jsonb_build_object('script',$3::text)
+    where location_id=$1 and id=$2::uuid returning version::int,payload`, loc, recordId, edited);
+  assert.equal(saved.payload.notes, "Keep my production notes.");
+  await assert.rejects(agent.applyAgentProposal(loc, policy.readAgentApplyCommand({ recordId, version: saved.version, turnId, index: 0, baseText: edited })), /changed after that script was requested/);
+  assert.equal((await sql(`select payload->>'script' as script from studio.studio_records where id=$1::uuid`, recordId))[0].script, edited);
+});

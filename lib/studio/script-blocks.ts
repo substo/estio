@@ -45,6 +45,25 @@ export function blocksToScript(blocks: readonly ScriptBlock[]): string {
   }).join("\n\n");
 }
 
+/** Locate the exact contributed text of a saved block, keeping heading and visual markers outside the replacement. */
+export function scriptBlockSpan(blocks: readonly ScriptBlock[], id: string) {
+  let offset = 0;
+  for (const block of blocks) {
+    const encoded = blocksToScript([block]);
+    if (!encoded) continue;
+    if (block.id === id) {
+      if (block.type === "break") return null;
+      const leading = block.type === "heading" ? (block.level ?? 1) + 1 : block.type === "visual" ? 1 : 0;
+      const text = encoded.slice(leading, block.type === "visual" ? -1 : undefined);
+      if (!text || text.length > 1800) return null;
+      const start = offset + leading;
+      return { start, end: start + text.length, text };
+    }
+    offset += encoded.length + 2;
+  }
+  return null;
+}
+
 export const narrationBlocks = (blocks: readonly ScriptBlock[]) => blocks.filter(b => b.type === "narration" && clean(b.text).trim());
 
 /** cyrb53: a small deterministic hash so server and browser agree on staleness without shipping crypto to the client. */

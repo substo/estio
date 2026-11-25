@@ -5,7 +5,7 @@ import { Search, AlertTriangle, ExternalLink, Loader2, Mic, MicOff, Send } from 
 import { Button } from "@/components/ui/button";
 import type { AgentTurnView } from "@/lib/studio/agent";
 import { AGENT_MESSAGE_LIMIT, type AgentSelection } from "@/lib/studio/agent-policy";
-import { CREATION_STAGES, stageDraft } from "@/lib/studio/creation-policy";
+import { CREATION_STAGES, stageDraft, type CreationRecord, type CreationStage } from "@/lib/studio/creation-policy";
 import { formatClock, parseDurationRequest, scriptStats, targetWords } from "@/lib/studio/script-length";
 import { studioTextConsent, type StudioTextProvider } from "@/lib/studio/text-provider";
 import { StudioTextProviderChoice } from "./text-provider-choice";
@@ -30,9 +30,11 @@ const readRoute = (scope: string): StudioTextProvider | null => {
 };
 
 /** One conversation for a source or a blank draft. No fields to fill: say what you want, or tap a starter. */
-export function AgentChat({ locationId, source, initialTurns, provider, onProvider, newDraftHref, resume, scope }: {
+export function AgentChat({ locationId, source, initialTurns, provider, onProvider, newDraftHref, resume, scope, focus, scriptEditor }: {
   locationId: string; source: AgentSource | null; initialTurns: AgentTurnView[]; provider: StudioTextProvider; onProvider: (value: StudioTextProvider) => void; newDraftHref?: string;
   resume?: AgentResume | null; scope: string;
+  focus?: { selection: AgentSelection; label: string } | null;
+  scriptEditor?: { startApply: () => boolean; endApply: () => void; onApplied: (record: CreationRecord, stage: CreationStage) => void; clearFocus: () => void; onSent: () => void };
 }) {
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
   const { recordId, record, setRecord, setPlan, target, setTarget, sendRef, prepareMessage } = useAgentDraft();
@@ -70,7 +72,10 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   const headers = { "X-Studio-Tenant": tenant, "Content-Type": "application/json" };
   const upsert = useCallback((turn: AgentTurnView) => setTurns(previous => previous.some(item => item.id === turn.id) ? previous.map(item => item.id === turn.id ? turn : item) : [...previous, turn]), []);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ block: "end", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); }, [turns]);
+  useEffect(() => {
+    const log = endRef.current?.parentElement;
+    if (log) log.scrollTo({ top: log.scrollHeight, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  }, [turns]);
 
   // Resume: a running turn (also after a reload) is advanced one step at a time by the origin-checked command.
   const runningId = running?.id;
@@ -101,7 +106,8 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runningId]);
 
-  async function send(raw: string, selection?: AgentSelection) {
+  async function send(raw: string, selection?: AgentSelection | null) {
+    if (selection === undefined) selection = focus?.selection;
     const message = raw.trim();
     if (!message || sending || running) return;
     if (evidenceMode === "selected" && !evidenceIds.length) { setError("Choose at least one passage or change the source evidence mode."); return; }
@@ -116,23 +122,32 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
       const data = await response.json();
       if (!response.ok) { if (response.status < 500) pendingKey.current = null; setError(data.error || "The message could not be sent."); return; }
       created.current = true; pendingKey.current = null; setText(""); setEvidenceMode("automatic"); setEvidenceIds([]); { const asked = parseDurationRequest(message); if (asked) setTarget(asked.kind === "set" ? asked.seconds : null); } try { if (provider !== "openai") localStorage.setItem(ROUTE_KEY(scope), JSON.stringify(provider)); } catch { /* optional */ }
-      const url = new URL(window.location.href); url.searchParams.set("draft", recordId); url.searchParams.delete("new"); window.history.replaceState(null, "", url);
+      if (scriptEditor) { scriptEditor.clearFocus(); scriptEditor.onSent(); }
+      else { const url = new URL(window.location.href); url.searchParams.set("draft", recordId); url.searchParams.delete("new"); window.history.replaceState(null, "", url); }
       upsert({ id: data.turnId, seq: turns.length + 1, message, provider, selection: selection ?? null, target: (() => { const asked = parseDurationRequest(message); return asked?.kind === "set" ? asked.seconds : asked?.kind === "clear" ? null : target; })(), status: "running", error: null, activity: [], waiting: "queued", route: null, result: null, inputs: { reads: [], checks: [], context: [] } });
     } catch { setError("The outcome is unconfirmed. Press Send again to check this same message."); }
     finally { setSending(false); }
   }
 
-  async function use(turn: AgentTurnView, index: number) {
-    const proposal = turn.result!.proposals[index];
+  async function changeDraft(path: string, body: object, key: string, stage: CreationStage) {
     if (!record) { setError("Reload the draft before using a proposal."); return; }
-    setApplying(`${turn.id}:${index}`); setError("");
+    if (applying) return;
+    if (scriptEditor && !scriptEditor.startApply()) { setError("Wait for your script edits to finish saving before applying a proposal."); return; }
+    setApplying(key); setError("");
     try {
-      const response = await fetch(API, { method: "POST", headers, signal: AbortSignal.timeout(30_000), body: JSON.stringify({ action: "apply", recordId, version: record.version, turnId: turn.id, index, baseText: stageDraft(record.state, proposal.stage).text }) });
+      const response = await fetch(path, { method: "POST", headers, signal: AbortSignal.timeout(30_000), body: JSON.stringify({ recordId, version: record.version, ...body }) });
       const data = await response.json();
-      if (!response.ok) { setError(data.error || "Could not use this proposal."); return; }
+      if (!response.ok) { setError(data.error || "Could not save this change."); return; }
       setRecord(data.record);
-    } catch { setError("Could not reach Studio. Nothing changed; try again."); }
-    finally { setApplying(null); }
+      scriptEditor?.onApplied(data.record, stage);
+    } catch { setError("Could not confirm the change. Reload the draft before trying again."); }
+    finally { setApplying(null); scriptEditor?.endApply(); }
+  }
+
+  function use(turn: AgentTurnView, index: number) {
+    const stage = turn.result!.proposals[index].stage;
+    if (!record) return;
+    void changeDraft(API, { action: "apply", turnId: turn.id, index, baseText: stageDraft(record.state, stage).text }, `${turn.id}:${index}`, stage);
   }
 
   // The Draft panel asks for scoped edits through this same send (same route, same visible consent).
@@ -163,7 +178,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   }
   const hasWork = record ? CREATION_STAGES.some(stage => stageDraft(record.state, stage).text.trim().length > 0) : false;
   const moves: Array<[string, string]> = [["Explore alternatives", "Explore two or three genuinely different alternatives for this (a different concept, audience lens or point of view), each with its own spoken opening line."], ["Deepen", "Deepen the weakest part with a concrete example, a counterexample or filmable proof."], ["Tighten", "Tighten this: remove redundancy and keep the promise, the evidence and the payoff."]];
-  const starters = source ? ["Make something inspired by this video", "Sharpen how it opens", "Start for me"] : ["Start for me"];
+  const starters = scriptEditor && hasWork ? ["Suggest three stronger openings"] : source ? ["Make something inspired by this video", "Sharpen how it opens", "Start for me"] : ["Start for me"];
   const status = (turn: AgentTurnView) => <div role="status" className="mr-6 space-y-1 rounded-lg bg-muted p-3 text-muted-foreground">
     {turn.activity.map((line, index) => <p key={index} className="text-xs">{line}</p>)}
     <p className="flex items-center gap-2"><Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />{turn.waiting === "running" ? "Working on it…" : "Waiting for your computer or provider to pick this up…"}</p>
@@ -178,10 +193,10 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
         <p className="text-xs text-muted-foreground">Starting new never changes the earlier draft.</p>
       </div> : null}
       <div className="mr-6 space-y-2 rounded-lg bg-muted p-3">
-        <p>{source ? <>I’m looking at <strong>{source.title}</strong>. {source.hasText ? "I can read its saved text and any approved findings, and compare ideas with your draft." : "It has no saved transcript or description, so I can only work from what you tell me."} Tell me what you want to make, or start from a suggestion. Nothing goes into your draft until you choose <strong>Use</strong>.</> : <>Tell me what you want to make, or tap Start for me. I’ll ask only what I need. Nothing goes into your draft until you choose <strong>Use</strong>.</>}</p>
+        <p>{scriptEditor ? <>Ask for ideas or revisions using your saved script. Review a proposal before using it.</> : source ? <>I’m looking at <strong>{source.title}</strong>. {source.hasText ? "I can read its saved text and any approved findings, and compare ideas with your draft." : "It has no saved transcript or description, so I can only work from what you tell me."} Tell me what you want to make, or start from a suggestion. Nothing goes into your draft until you choose <strong>Use</strong>.</> : <>Tell me what you want to make, or tap Start for me. I’ll ask only what I need. Nothing goes into your draft until you choose <strong>Use</strong>.</>}</p>
         {turns.length === 0 ? <div className="flex flex-wrap gap-2">
           {starters.map(starter => <Button key={starter} type="button" variant="outline" className="h-auto min-h-9 whitespace-normal py-1.5 text-left text-xs" disabled={sending} onClick={() => void send(starter)}>{starter}</Button>)}
-          {!source ? <Button type="button" variant="outline" className="min-h-9 text-xs" onClick={() => field.current?.focus()}>I have my own idea</Button> : null}
+          {!source && !scriptEditor ? <Button type="button" variant="outline" className="min-h-9 text-xs" onClick={() => field.current?.focus()}>I have my own idea</Button> : null}
         </div> : null}
       </div>
       {turns.map(turn => <div key={turn.id} className="space-y-3">
@@ -190,7 +205,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
         {turn.status === "failed" ? <div role="alert" className="mr-6 space-y-2 rounded-lg bg-muted p-3">
           <p className="flex items-start gap-2 text-destructive"><AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />{turn.error ?? "The assistant stopped."}</p>
           <p className="text-xs text-muted-foreground">Nothing was changed. {turn.id === last?.id ? "Send it again if you still want it." : ""}</p>
-          {turn.id === last?.id ? <Button type="button" variant="outline" className="min-h-9 text-xs" disabled={sending} onClick={() => void send(turn.message)}>Send again</Button> : null}
+          {turn.id === last?.id ? <Button type="button" variant="outline" className="min-h-9 text-xs" disabled={sending} onClick={() => void send(turn.message, turn.selection)}>Send again</Button> : null}
         </div> : null}
         {turn.result ? <div className="mr-6 space-y-3 rounded-lg bg-muted p-3">
           <p className="whitespace-pre-wrap break-words">{turn.result.reply}</p>
@@ -219,9 +234,9 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
                 {item.quote.length > 220 ? <>“{quotePreview(item.quote)}” <details className="mt-0.5"><summary className="cursor-pointer text-primary">Show full quote</summary><span className="mt-1 block whitespace-pre-wrap">“{item.quote}”</span></details></> : <>“{item.quote}”</>}{item.at != null ? <span className="ml-1 tabular-nums">· {clock(item.at)}</span> : null}
                 {item.sourceId ? <Link href={`/studio/library/${item.sourceId}`} className="ml-2 inline-flex items-center gap-0.5 text-primary hover:underline">Source<ExternalLink aria-hidden="true" className="h-3 w-3" /></Link> : null}</li>)}</ul> : null}
               {proposal.verify.length ? <ul className="list-disc space-y-0.5 pl-5 text-xs text-amber-700 dark:text-amber-400">{proposal.verify.map((item, i) => <li key={i}>Check before filming: {item}</li>)}</ul> : null}
-              {proposal.replaces ? <p className="text-xs text-muted-foreground" data-patch-note>{patchable && after ? <>Only the selected words change; the rest stays exactly as saved. {proposal.stage === "Script" ? <>After applying, the whole script is about {formatClock(after.seconds)} spoken ({after.spokenWords} words).</> : null} <strong>Undo last change</strong> restores it.</> : "The selected words changed since this edit was written, so it can't be applied. Select them again."}</p> : null}
-              {replaces ? <p className="text-xs text-muted-foreground">This replaces your saved {proposal.stage}. <strong>Undo last change</strong> in the Draft panel restores it.</p> : null}
-              <Button type="button" className="min-h-10" disabled={inDraft || (proposal.replaces ? !patchable : false) || applying === `${turn.id}:${index}`} onClick={() => void use(turn, index)}>{inDraft ? "In your draft" : proposal.replaces ? "Replace selected text" : replaces ? `Replace saved ${proposal.stage}` : `Use as ${proposal.stage}`}</Button>
+              {proposal.replaces ? <p className="text-xs text-muted-foreground" data-patch-note>{patchable && after ? <>Only the selected words change; the rest stays exactly as saved. {proposal.stage === "Script" ? <>After applying, the whole script is about {formatClock(after.seconds)} spoken ({after.spokenWords} words).</> : null} <strong>{scriptEditor ? "Undo last script change" : "Undo last change"}</strong> restores it.</> : "The selected words changed since this edit was written, so it can't be applied. Select them again."}</p> : null}
+              {replaces ? <p className="text-xs text-muted-foreground">This replaces your saved {proposal.stage}. {scriptEditor ? <><strong>Undo last script change</strong> restores it.</> : <><strong>Undo last change</strong> in the Draft panel restores it.</>}</p> : null}
+              {scriptEditor && proposal.stage !== "Script" ? <Button asChild variant="outline" className="min-h-10"><Link href={`/studio/content/create?draft=${recordId}`}>Review in guided draft</Link></Button> : <Button type="button" className="min-h-10" disabled={inDraft || Boolean(proposal.replaces && !patchable) || Boolean(applying)} onClick={() => use(turn, index)}>{inDraft ? "In your draft" : proposal.replaces ? "Replace selected text" : replaces ? `Replace saved ${proposal.stage}` : `Use as ${proposal.stage}`}</Button>}
             </div>;
           })}
           {turn.result.research ? <div className="space-y-1.5 rounded-md border border-dashed p-3 text-xs" data-research-suggestion>
@@ -246,6 +261,13 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
       <div ref={endRef} />
     </div>
     <div className="space-y-2 border-t p-3">
+      {scriptEditor && record && stageDraft(record.state, "Script").approved && stageDraft(record.state, "Script").previous ? <Button type="button"
+        variant="outline" className="min-h-10 text-xs" disabled={Boolean(applying)}
+        onClick={() => void changeDraft("/studio/content/create/api", { action: "undo", stage: "Script" }, "undo", "Script")}>Undo last script change</Button> : null}
+      {focus ? <div className="flex items-center justify-between gap-2 text-xs">
+        <span className="min-w-0 truncate" title={focus.selection.text}>Focus: {focus.label} · “{focus.selection.text}”</span>
+        <Button type="button" variant="ghost" size="sm" onClick={scriptEditor?.clearFocus}>Clear focus</Button>
+      </div> : null}
       {hasWork || turns.length ? <div className="flex flex-wrap items-center gap-1.5 text-xs" data-creative-moves role="group" aria-label="Creative moves">
         {moves.map(([label, message]) => <button key={label} type="button" disabled={Boolean(running) || sending} onClick={() => void send(message)} title={message}
           className="min-h-8 rounded-full border px-2.5 hover:bg-accent disabled:opacity-50">{label}</button>)}
@@ -259,7 +281,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
         tenant={tenant} mode={evidenceMode} selected={evidenceIds} onMode={setEvidenceMode} onSelected={setEvidenceIds} disabled={sending || Boolean(running)} />
       <label htmlFor={`${fieldId}-msg`} className="sr-only">Message</label>
       <textarea ref={field} id={`${fieldId}-msg`} data-assistant-field value={text} rows={2} maxLength={AGENT_MESSAGE_LIMIT} disabled={Boolean(running)}
-        placeholder={running ? "Working on your last message…" : source ? "What do you want to make? Or give feedback." : "What do you want to make? Or give feedback."}
+        placeholder={running ? "Working on your last message…" : focus ? "What should change in this block?" : scriptEditor ? "What would you like to change in this script?" : "What do you want to make? Or give feedback."}
         onChange={event => setText(event.target.value)}
         onKeyDown={event => { if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing || event.keyCode === 229) return; event.preventDefault(); if (!event.repeat) void send(text); }}
         className="block w-full resize-none rounded-md border bg-background p-2 text-sm" />

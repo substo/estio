@@ -6,9 +6,10 @@ import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, GripVertical, Lightbulb, Loader2, Plus, Redo2, RefreshCw, Trash2, Undo2 } from "lucide-react";
 import { autosaveScriptAction, regenerateBlockAudioAction, type AutosaveResult } from "../(tenant)/content/actions";
 import {
-  BLOCK_LABELS, MAX_BLOCKS, blockAudioStatus, blocksDoc, insertBlockAfter, makeBlockId, moveBlock, moveBlockTo, narrationBlocks, removeBlock, setBlockAudio, setBlockText, setBlockType, splitBlock,
+  BLOCK_LABELS, MAX_BLOCKS, blockAudioStatus, blocksDoc, blocksToScript, scriptBlockSpan, insertBlockAfter, makeBlockId, moveBlock, moveBlockTo, narrationBlocks, removeBlock, setBlockAudio, setBlockText, setBlockType, splitBlock,
   type BlockAudio, type BlockType, type ScriptBlock,
 } from "@/lib/studio/script-blocks";
+import type { AgentSelection } from "@/lib/studio/agent-policy";
 import type { RegenerateResult } from "@/lib/studio/script-audio";
 import { providerLabels, type VoiceRow } from "@/lib/studio/voices/policy";
 
@@ -18,15 +19,19 @@ const placeholders: Record<BlockType, string> = { narration: "What you say out l
 type Save = "saved" | "unsaved" | "saving" | "error";
 
 /** Notion-style script editor. Blocks autosave through the version-fenced record save; the plain `script` is derived from them on the server. Every drag has a button and keyboard equivalent. */
-export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks, voices, initialVoiceId, archived, onVersion, onBlocksChange }: {
+export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks, voices, initialVoiceId, archived, onVersion, onBlocksChange, onSaveState, onAskAboutBlock, savedScript }: {
   locationId: string; recordId: string; version: number; initialBlocks: ScriptBlock[]; voices: readonly VoiceRow[]; initialVoiceId: string; archived: boolean;
-  onVersion: (version: number) => void; onBlocksChange: (json: string, voiceId: string) => void;
+  onVersion: (version: number, savedHere?: boolean) => void; onBlocksChange: (json: string, voiceId: string) => void;
+  onSaveState?: (saved: boolean) => void;
+  savedScript: string;
+  onAskAboutBlock?: (selection: AgentSelection, label: string, origin: HTMLElement) => void;
 }) {
   const router = useRouter();
   const [blocks, setBlocks] = useState(initialBlocks);
   const [voiceOverride, setVoiceOverride] = useState(initialVoiceId);
   const [save, setSave] = useState<Save>("saved");
   const [saveError, setSaveError] = useState("");
+  const [focusError, setFocusError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);     // block id, "all", or null while generating audio
   const [audioMessage, setAudioMessage] = useState("");
   const [slashFor, setSlashFor] = useState<string | null>(null);
@@ -37,24 +42,46 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
   const versionRef = useRef(version), lastSaved = useRef(JSON.stringify(blocksDoc(initialBlocks)) + "\n" + initialVoiceId);
   const chain = useRef<Promise<unknown>>(Promise.resolve()), conflict = useRef(false), timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fields = useRef(new Map<string, HTMLTextAreaElement | HTMLElement>()), focusNext = useRef<{ id: string; caret?: number } | null>(null);
-  useEffect(() => { versionRef.current = Math.max(versionRef.current, version); }, [version]);
+  const serverScript = useRef(savedScript);
+  useEffect(() => {
+    if (version <= versionRef.current) return;
+    if (savedScript !== serverScript.current) {
+      if (`${JSON.stringify(blocksDoc(blocksRef.current))}\n${voiceRef.current}` !== lastSaved.current) {
+        conflict.current = true;
+        setSave("error");
+        setSaveError("This piece changed while you were editing. Your edits are still here; reload the latest piece and review before saving.");
+        return;
+      }
+      serverScript.current = savedScript;
+      blocksRef.current = initialBlocks;
+      voiceRef.current = initialVoiceId;
+      lastSaved.current = `${JSON.stringify(blocksDoc(initialBlocks))}\n${initialVoiceId}`;
+      past.current = []; future.current = [];
+      setBlocks(initialBlocks); setVoiceOverride(initialVoiceId); setSave("saved"); setSaveError("");
+    }
+    versionRef.current = version;
+    onVersion(version, false);
+  }, [initialBlocks, initialVoiceId, onVersion, savedScript, version]);
 
   const effectiveVoice = voices.find(v => v.id === voiceOverride) ?? voices.find(v => v.isDefault) ?? voices[0] ?? null;
   const hosted = Boolean(effectiveVoice && effectiveVoice.provider !== "local");
   const json = JSON.stringify(blocksDoc(blocks));
   useEffect(() => { blocksRef.current = blocks; voiceRef.current = voiceOverride; onBlocksChange(json, voiceOverride); }, [blocks, voiceOverride, json, onBlocksChange]);
 
+  useEffect(() => { onSaveState?.(save === "saved" && `${json}\n${voiceOverride}` === lastSaved.current); }, [save, json, voiceOverride, onSaveState]);
+
   // ---- saving: one request at a time, always with the newest version. A stale version is refused by the database and never overwritten. ----
   const persisted = useRef(false); // legacy scripts get fresh block ids on every server read until the blocks are saved once
   const persist = useCallback((force = false): Promise<boolean> => {
     chain.current = chain.current.then(async () => {
       if (conflict.current) return false;
-      const payload = JSON.stringify(blocksDoc(blocksRef.current)), voice = voiceRef.current, key = `${payload}\n${voice}`;
+      const currentBlocks = blocksRef.current;
+      const payload = JSON.stringify(blocksDoc(currentBlocks)), voice = voiceRef.current, key = `${payload}\n${voice}`;
       if (key === lastSaved.current && !(force && !persisted.current)) { setSave(s => s === "error" ? s : "saved"); return true; }
       setSave("saving");
       const result: AutosaveResult = await autosaveScriptAction(locationId, recordId, versionRef.current, payload, voice).catch(() => ({ ok: false as const, error: "Could not reach Studio. Your edits are still here; retrying." }));
       if (result.ok) {
-        versionRef.current = result.version; lastSaved.current = key; persisted.current = true; onVersion(result.version);
+        versionRef.current = result.version; serverScript.current = blocksToScript(currentBlocks); lastSaved.current = key; persisted.current = true; onVersion(result.version);
         const stillDirty = `${JSON.stringify(blocksDoc(blocksRef.current))}\n${voiceRef.current}` !== key;
         setSave(stillDirty ? "unsaved" : "saved"); setSaveError(""); return true;
       }
@@ -128,13 +155,21 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
   };
   const stale = narrationBlocks(blocks).filter(b => blockAudioStatus(b, effectiveVoice?.id ?? null) !== "fresh");
 
-  /** Open the record's own Studio agent with this block as the thing to work on. Nothing is sent: the prompt is prefilled for the owner to review. */
-  const brainstorm = async (block: ScriptBlock) => {
-    await persist();
-    const kind = BLOCK_LABELS[block.type].toLowerCase();
-    const prompt = `Brainstorm this ${kind} from my script. Give me three different ways to do it, keeping the rest of the script as it is.\n\n"${block.text.slice(0, 1200)}"`;
-    try { sessionStorage.setItem(`studio-agent-prefill:${recordId}`, prompt); } catch { /* the agent still opens */ }
-    router.push(`/studio/content/create?draft=${recordId}`);
+  const brainstorm = async (block: ScriptBlock, index: number, origin: HTMLElement) => {
+    setFocusError("");
+    if (!onAskAboutBlock) {
+      if (!await persist()) return;
+      const prompt = `Brainstorm this ${BLOCK_LABELS[block.type].toLowerCase()} from my script. Give me three different ways to do it, keeping the rest of the script as it is.\n\n"${block.text.slice(0, 1200)}"`;
+      try { sessionStorage.setItem(`studio-agent-prefill:${recordId}`, prompt); } catch { /* the agent still opens */ }
+      router.push(`/studio/content/create?draft=${recordId}`);
+      return;
+    }
+    const before = blocksRef.current;
+    const span = scriptBlockSpan(before, block.id);
+    if (!span) { setFocusError("Split this block into smaller blocks before asking for a focused edit."); return; }
+    if (!await persist(blocksToScript(before) !== serverScript.current)) return;
+    if (before !== blocksRef.current) { setFocusError("The blocks changed while saving. Choose the block again."); return; }
+    onAskAboutBlock({ stage: "Script", action: "rewrite", ...span }, `${BLOCK_LABELS[block.type]} ${index + 1}`, origin);
   };
 
   const statusLabel = save === "saving" ? "Saving…" : save === "unsaved" ? "Unsaved changes" : save === "error" ? "Not saved" : "All changes saved";
@@ -156,7 +191,7 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
           <button type="button" className={btn} onClick={redo} aria-label="Redo" disabled={!future.current.length}><Redo2 aria-hidden className="size-4" /></button>
         </div>
       </div>
-      {save === "error" ? <p role="alert" className="text-sm text-destructive">{saveError}</p> : null}
+      {save === "error" || focusError ? <p role="alert" className="text-sm text-destructive">{saveError || focusError}</p> : null}
 
       <ol className="space-y-2" aria-label="Script blocks">
         {blocks.map((block, index) => {
@@ -184,7 +219,7 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
                 <select value={block.type} onChange={event => changeType(block.id, event.target.value as BlockType)} disabled={archived} aria-label={`Type of block ${index + 1}`} className="min-h-11 rounded-md border bg-background px-2 text-xs">
                   {TYPES.map(type => <option key={type} value={type}>{BLOCK_LABELS[type]}</option>)}
                 </select>
-                {!isBreak ? <button type="button" className={btn} onClick={() => void brainstorm(block)} disabled={archived || !block.text.trim()}><Lightbulb aria-hidden className="size-4" />Brainstorm this section</button> : null}
+                {!isBreak ? <button type="button" className={btn} onClick={event => void brainstorm(block, index, event.currentTarget)} disabled={archived || !block.text.trim()}><Lightbulb aria-hidden className="size-4" />{onAskAboutBlock ? "Ask about this block" : "Brainstorm this section"}</button> : null}
                 <button type="button" className={btn} onClick={() => { const prev = blocks[index - 1] ?? blocks[index + 1]; if (prev) focusNext.current = { id: prev.id }; commit(removeBlock(blocksRef.current, block.id)); }} disabled={archived} aria-label={`Delete ${BLOCK_LABELS[block.type]} ${index + 1}`}><Trash2 aria-hidden className="size-4" /></button>
               </div>
               {status ? <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
