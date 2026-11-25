@@ -319,12 +319,12 @@ export async function applyAgentProposal(locationId: string, command: AgentApply
     text = current.text.slice(0, selection.start) + lead + proposal.text + trail + current.text.slice(selection.end);
     if (text.length > stageTextLimit(proposal.stage)) throw new StudioCommandError(`This edit would make the ${proposal.stage} longer than its limit. Ask for a tighter version.`);
   }
-  if (proposal.stage === "Script" && turn.rounds[0]) {
+  if ((proposal.stage === "Script" || proposal.stage === "Shoot plan") && turn.rounds[0]) {
     const basis = await studioDb.one<{ version: string | null }>(Prisma.sql`
       SELECT snapshot#>>'{ideas,0,version}' AS version FROM studio.studio_idea_reviews
       WHERE location_id=${access.locationId} AND id=${turn.rounds[0].reviewId}::uuid`);
     if (basis?.version && basis.version !== String(row.version)) {
-      throw new StudioCommandError("This piece changed after that script was requested. Ask for a fresh proposal.", 409);
+      throw new StudioCommandError(`This piece changed after that ${proposal.stage === "Script" ? "script" : "checklist"} was requested. Ask for a fresh proposal.`, 409);
     }
   }
   // The request that produced this text travels with it, so a later ask never relabels a saved script. Only Script carries a runtime;

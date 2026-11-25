@@ -778,7 +778,10 @@ test("an existing content record starts writing chat in place and stale full-scr
   const view = await drive(turnId, snapshot => {
     assert.match(snapshot.draft.stages.Script.text, /Show the two openings/);
     assert.deepEqual(snapshot.audience, [{ kind: "question", origin: "comments", text: "Can I compare two takes?" }]);
-    return step({ proposals: [{ stage: "Script", text: "Start by showing both takes.", rationale: "Lead with the example", evidenceIds: [], verify: [] }] });
+    return step({ proposals: [
+      { stage: "Script", text: "Start by showing both takes.", rationale: "Lead with the example", evidenceIds: [], verify: [] },
+      { stage: "Shoot plan", text: "Film both takes from the same position.", rationale: "Keep the comparison fair", evidenceIds: [], verify: [] },
+    ] });
   }, 1);
   assert.equal(view.turn.status, "done");
   assert.equal(view.record!.id, recordId);
@@ -788,5 +791,14 @@ test("an existing content record starts writing chat in place and stale full-scr
     where location_id=$1 and id=$2::uuid returning version::int,payload`, loc, recordId, edited);
   assert.equal(saved.payload.notes, "Keep my production notes.");
   await assert.rejects(agent.applyAgentProposal(loc, policy.readAgentApplyCommand({ recordId, version: saved.version, turnId, index: 0, baseText: edited })), /changed after that script was requested/);
+  await assert.rejects(agent.applyAgentProposal(loc, policy.readAgentApplyCommand({ recordId, version: saved.version, turnId, index: 1, baseText: "" })), /changed after that checklist was requested/);
+  const checklist = crypto.randomUUID();
+  await agent.sendAgentMessage(loc, policy.readAgentSendCommand({ recordId, turnId: checklist, version: 1, message: "Is this ready to film?", provider: "subscription", confirmSubscription: true }));
+  const review = await drive(checklist, snapshot => {
+    assert.equal(snapshot.draft.stages.Script.text, edited);
+    return step({ proposals: [{ stage: "Shoot plan", text: "Capture a proof shot.", rationale: "Show the result", evidenceIds: [], verify: [] }] });
+  }, 1);
+  const applied = await agent.applyAgentProposal(loc, policy.readAgentApplyCommand({ recordId, version: review.record!.version, turnId: checklist, index: 0, baseText: "" }));
+  assert.equal(applied.record.state.stages["Shoot plan"]?.text, "Capture a proof shot.");
   assert.equal((await sql(`select payload->>'script' as script from studio.studio_records where id=$1::uuid`, recordId))[0].script, edited);
 });

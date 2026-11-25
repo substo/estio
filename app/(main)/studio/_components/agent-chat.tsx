@@ -218,6 +218,8 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   const hasWork = record ? CREATION_STAGES.some(stage => stageDraft(record.state, stage).text.trim().length > 0) : false;
   const concept = record ? stageDraft(record.state, "Concept") : null;
   const activeIdea = concept?.approved ? readIdeaCard(concept.text) : null;
+  const savedScript = record ? stageDraft(record.state, "Script") : null;
+  const savedShootPlan = record ? stageDraft(record.state, "Shoot plan") : null;
   const startIdeas = `Give me three genuinely different video ideas for this context. ${IDEA_CARD_FORMAT}`;
   const moves = [
     ["Go wider", `Explore two or three distinct directions beyond the current idea. ${IDEA_CARD_FORMAT}`],
@@ -309,7 +311,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
               {proposal.replaces ? <p className="text-xs text-muted-foreground" data-patch-note>{patchable && after ? <>Only the selected words change; the rest stays exactly as saved. {proposal.stage === "Script" ? <>After applying, the whole script is about {formatClock(after.seconds)} spoken ({after.spokenWords} words).</> : null} <strong>{scriptEditor ? "Undo last script change" : "Undo last change"}</strong> restores it.</> : "The selected words changed since this edit was written, so it can't be applied. Select them again."}</p> : null}
               {replaces ? <p className="text-xs text-muted-foreground">This replaces your saved {proposal.stage}. {scriptEditor ? <><strong>Undo last script change</strong> restores it.</> : <><strong>Undo last change</strong> in the Draft panel restores it.</>}</p> : null}
               <div className="flex flex-wrap gap-2">
-                {scriptEditor && proposal.stage !== "Script" && !idea ? <Button asChild variant="outline" className="min-h-10"><Link href={`/studio/content/create?draft=${recordId}`}>Review in guided draft</Link></Button> : <Button type="button" className="min-h-10" disabled={inDraft || Boolean(proposal.replaces && !patchable) || Boolean(applying)} onClick={() => use(turn, index)}>{inDraft ? "In your draft" : idea ? "Use this direction" : proposal.replaces ? "Replace selected text" : replaces ? `Replace saved ${proposal.stage}` : `Use as ${proposal.stage}`}</Button>}
+                {scriptEditor && proposal.stage !== "Script" && proposal.stage !== "Shoot plan" && !idea ? <Button asChild variant="outline" className="min-h-10"><Link href={`/studio/content/create?draft=${recordId}`}>Review in guided draft</Link></Button> : <Button type="button" className="min-h-10" disabled={inDraft || Boolean(proposal.replaces && !patchable) || Boolean(applying)} onClick={() => use(turn, index)}>{inDraft ? "In your draft" : idea ? "Use this direction" : proposal.stage === "Shoot plan" ? "Save filming checklist" : proposal.replaces ? "Replace selected text" : replaces ? `Replace saved ${proposal.stage}` : `Use as ${proposal.stage}`}</Button>}
                 {idea && record ? <Button type="button" variant="outline" className="min-h-10" disabled={shortlisted || Boolean(applying)}
                   onClick={() => void changeDraft("/studio/content/create/api", { action: "shortlist", stage: "Concept", text: proposal.text }, `${anchor}-shortlist`, "Concept")}>{shortlisted ? "Shortlisted" : "Shortlist"}</Button> : null}
                 {idea && turn.result!.proposals.filter(item => item.stage === "Concept" && !item.replaces && readIdeaCard(item.text)).length > 1 ?
@@ -352,6 +354,18 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
       {scriptEditor && record && stageDraft(record.state, "Script").approved && stageDraft(record.state, "Script").previous ? <Button type="button"
         variant="outline" className="min-h-10 text-xs" disabled={Boolean(applying)}
         onClick={() => void changeDraft("/studio/content/create/api", { action: "undo", stage: "Script" }, "undo", "Script")}>Undo last script change</Button> : null}
+      {savedScript?.text.trim() && !focus ? <div className="flex flex-wrap items-center gap-2 text-xs">
+        <Button type="button" variant="outline" className="min-h-10 text-xs" disabled={Boolean(running) || sending}
+          onClick={() => {
+            const estimate = formatClock(scriptStats(savedScript.text).seconds);
+            const requested = savedScript.targetSeconds ? ` Its saved target was about ${formatClock(savedScript.targetSeconds)}.` : "";
+            prepareCreativeMessage(`Is this ready to film? Review the current saved Script, using read_stage as needed. Studio estimates ${estimate} of speech.${requested} Check the complete first spoken line, whether the payoff delivers the title, runtime fit if a target exists, and any demonstration, assets or proof still needed. Explain the biggest fix and propose a short Shoot plan checklist with what I should capture and what still needs verification. If you can only review part of the script, say what you checked. Keep my script intact.`);
+          }}>Is this ready to film?</Button>
+        {savedShootPlan?.text.trim() ? <details className="min-w-0 basis-full">
+          <summary className="cursor-pointer font-medium">Saved filming checklist</summary>
+          <p className="mt-1 whitespace-pre-wrap break-words">{savedShootPlan.text}</p>
+        </details> : null}
+      </div> : null}
       {focus ? <div className="flex items-center justify-between gap-2 text-xs">
         <span className="min-w-0 truncate" title={focus.selection.text}>Focus: {focus.label} · “{focus.selection.text}”</span>
         <Button type="button" variant="ghost" size="sm" onClick={scriptEditor?.clearFocus}>Clear focus</Button>

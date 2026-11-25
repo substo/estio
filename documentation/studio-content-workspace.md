@@ -22,6 +22,8 @@ Notion-style blocks: Heading, Narration, Visual note, Section break. Stored as s
 
 **Read script** opens a scrollable rehearsal view with the current narration, including edits still in the editor. It omits headings, visual notes, section breaks and bracketed cues. **Copy narration** copies the same text for pasting into a teleprompter.
 
+**Is this ready to film?** prepares a chat review of the saved script. It asks the agent to check the spoken opening, title and payoff, runtime, and assets or proof still needed. Save the proposed checklist in the same conversation. If the piece changes before you apply the checklist, request a new review.
+
 ## Rules
 
 - Use the repo UI principles and tokens; no new palette. Keyboard focus always visible, targets >= 44px, drag always has a button alternative, reduced motion respected.
