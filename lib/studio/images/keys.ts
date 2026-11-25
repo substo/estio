@@ -59,7 +59,7 @@ export async function removeImageKey(locationId: string, platform: ImagePlatform
 
 // ---- The Location's choice and the last test of each model, in the existing Location AI settings document --------------------------------------
 const settingsRef = (locationId: string) => ({ scopeType: "LOCATION" as const, scopeId: locationId, domain: SETTINGS_DOMAINS.LOCATION_AI });
-const CHOICE = "studioImageChoice", TESTS = "studioImageTests";
+const CHOICE = "studioImageChoice", FALLBACK = "studioImageFallback", TESTS = "studioImageTests";
 export interface ImageTestRecord { ok: boolean; at: string; message: string; ms: number }
 export type ImageTests = Record<string, ImageTestRecord>;
 const testKey = (platform: string, model: string, endpoint: string) => `${platform}|${model}|${endpoint}`.slice(0, 200);
@@ -69,22 +69,27 @@ const readTests = (value: unknown): ImageTests => {
   for (const [k, v] of Object.entries(value as Record<string, unknown>).slice(0, 80)) { const r = v as Partial<ImageTestRecord>; if (r && typeof r.ok === "boolean" && typeof r.at === "string") out[k] = { ok: r.ok, at: r.at.slice(0, 40), message: String(r.message ?? "").slice(0, 240), ms: Number(r.ms) || 0 }; }
   return out;
 };
-export async function getImageSettings(locationId: string): Promise<{ choice: ImageChoice | null; tests: ImageTests }> {
+export async function getImageSettings(locationId: string): Promise<{ choice: ImageChoice | null; fallback: ImageChoice | null; tests: ImageTests }> {
   const doc = await settingsService.getDocument<Record<string, unknown>>(settingsRef(locationId)).catch(() => null);
-  return { choice: readImageChoice(doc?.payload?.[CHOICE]), tests: readTests(doc?.payload?.[TESTS]) };
+  return { choice: readImageChoice(doc?.payload?.[CHOICE]), fallback: readImageChoice(doc?.payload?.[FALLBACK]), tests: readTests(doc?.payload?.[TESTS]) };
 }
-async function writeSettings(locationId: string, mutate: (payload: Record<string, unknown>) => void) {
+export async function writeLocationAiSettings(locationId: string, mutate: (payload: Record<string, unknown>) => void) {
   const access = await requireVoiceManager(locationId);
   const current = await settingsService.getDocument<Record<string, unknown>>(settingsRef(access.locationId));
   const payload = { whatsappTranscriptRetentionDays: 90, ...(current?.payload ?? {}) } as Record<string, unknown>;
   mutate(payload);
   await settingsService.upsertDocument({ ...settingsRef(access.locationId), payload, actorUserId: await actorId(access), expectedVersion: current?.version ?? 0, schemaVersion: 1 });
 }
-export async function setImageChoice(locationId: string, choice: ImageChoice | null) {
-  const clean = choice ? readImageChoice(choice) : null;
-  if (choice && !clean) throw new VoiceSettingsError("That model is not available on that platform.");
-  await writeSettings(locationId, p => { if (clean) p[CHOICE] = clean; else delete p[CHOICE]; });
+/** The model that draws storyboard frames, and the one used if it fails. Either can be cleared. */
+export async function setImageChoices(locationId: string, primary: ImageChoice | null, fallback: ImageChoice | null) {
+  const clean = primary ? readImageChoice(primary) : null, cleanFallback = fallback ? readImageChoice(fallback) : null;
+  if ((primary && !clean) || (fallback && !cleanFallback)) throw new VoiceSettingsError("That model is not available on that platform.");
+  await writeLocationAiSettings(locationId, p => {
+    if (clean) p[CHOICE] = clean; else delete p[CHOICE];
+    if (cleanFallback && clean) p[FALLBACK] = cleanFallback; else delete p[FALLBACK];
+  });
 }
+export const setImageChoice = (locationId: string, choice: ImageChoice | null) => setImageChoices(locationId, choice, null);
 /** Model ids the platform offers for this key (OpenAI and Google only). */
 export async function discoverImageModels(locationId: string, platform: "openai" | "google"): Promise<string[]> {
   const key = await resolveImageKey(locationId, platform);
@@ -109,13 +114,14 @@ export async function testImageModel(locationId: string, platform: ImagePlatform
   try {
     const out = await generateImage(key, { platform, endpoint, model, prompt: rendered.prompt, negative: rendered.negative, aspect: "16:9", references: needsReference ? [{ data: testReferencePng(), mime: "image/png" }] : [] });
     const ms = Date.now() - started;
-    await writeSettings(locationId, p => { const t = readTests(p[TESTS]); t[testKey(platform, model.id, endpoint)] = { ok: true, at: new Date().toISOString(), message: "Made a test picture.", ms }; p[TESTS] = t; });
+    await writeLocationAiSettings(locationId, p => { const t = readTests(p[TESTS]); t[testKey(platform, model.id, endpoint)] = { ok: true, at: new Date().toISOString(), message: "Made a test picture.", ms }; p[TESTS] = t; });
     return { ok: true, message: "Made a test picture.", ms, dataUrl: `data:${out.contentType};base64,${out.bytes.toString("base64")}`, prompt: rendered.prompt, notes: rendered.notes };
   } catch (error) {
     const message = error instanceof ImageError ? error.message : "The test failed.";
     const ms = Date.now() - started;
-    await writeSettings(locationId, p => { const t = readTests(p[TESTS]); t[testKey(platform, model.id, endpoint)] = { ok: false, at: new Date().toISOString(), message, ms }; p[TESTS] = t; }).catch(() => undefined);
+    await writeLocationAiSettings(locationId, p => { const t = readTests(p[TESTS]); t[testKey(platform, model.id, endpoint)] = { ok: false, at: new Date().toISOString(), message, ms }; p[TESTS] = t; }).catch(() => undefined);
     return { ok: false, message, ms, prompt: rendered.prompt };
   }
 }
 export { testKey };
+export { settingsRef as locationAiSettingsRef };

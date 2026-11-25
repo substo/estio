@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 
 /** Settings → AI, by what is being made. Every provider key and every "which model or provider for this" choice is on one of these pages. */
 export const AI_TYPES = [
+  { href: "/settings/ai/connections", label: "Connections", hint: "Every platform and its API key" },
   { href: "/settings/ai", label: "Text and reasoning", hint: "Connections, models, fallback order and limits" },
   { href: "/settings/ai/voice", label: "Voice", hint: "Narration providers" },
   { href: "/settings/ai/audio", label: "Music and sound effects", hint: "Where audio is made, and its providers" },

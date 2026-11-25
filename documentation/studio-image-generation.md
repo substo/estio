@@ -4,7 +4,7 @@ Status (2026-11-25): the catalog, prompt builder, platform clients, key storage 
 
 ## Where it lives
 
-All provider keys and every "which provider or model makes this" choice are under **Settings → AI**, one page per type: **Text and reasoning** (`/settings/ai`), **Voice** (`/settings/ai/voice`), **Music and sound effects** (`/settings/ai/audio`) and **Images** (`/settings/ai/images`). A key shared by two types (fal.ai for audio and images, ElevenLabs for voice and sound) is entered once; the other page links to it. **Settings → Voices** is only the voice library, recording, cloning, design and "Your look".
+All provider keys live on **Settings → AI → Connections** (`/settings/ai/connections`): one uniform card per platform, a masked key with a Connected check, Check connection and Remove when connected, only the key box when not. On each connected platform the owner chooses what it is used for (text, voice, music, sound effects, images) and which of its models are allowed (`studioAiConnections`). The type pages (**Voice** `/settings/ai/voice`, **Music and sound effects** `/settings/ai/audio`, **Images** `/settings/ai/images`, and **Text and reasoning** `/settings/ai`) all share one layout: a Platforms status list, then "What makes it" with the choices, a Test and a preview, offering only what is connected, switched on and allowed. Changes show at once and save in the background (no page re-render). Images have a primary and a fallback; audio falls back to this Mac when a hosted platform fails. **Settings → Voices** is only the voice library, recording, cloning, design and "Your look".
 
 ## Platform vs model
 
