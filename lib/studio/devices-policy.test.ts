@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { defaultDeviceConfig, normalizePairingCode, readDeviceCommand, readDeviceManagementCommand, readDevicePairPoll, readDevicePairStart, safeDeviceCapabilities } from "./devices-policy";
+import { readSheetResult, defaultDeviceConfig, normalizePairingCode, readDeviceCommand, readDeviceManagementCommand, readDevicePairPoll, readDevicePairStart, safeDeviceCapabilities } from "./devices-policy";
 const requestId = "da000000-0000-4000-8000-000000000001";
 test("management commands validate pairing codes, CLI selection and setup", () => {
   assert.deepEqual(readDeviceManagementCommand({ action: "approve_pairing", userCode: "abcd-efgh", requestId }), { action: "approve_pairing", userCode: "ABCDEFGH", requestId });
@@ -180,4 +180,12 @@ test("the claim keeps the sheetReady flag as a bare boolean (without it a Mac ne
   assert.equal(readDeviceCommand("claim", { ...base, sheetReady: true }).sheetReady, true);
   assert.equal(readDeviceCommand("claim", { ...base, sheetReady: "yes" }).sheetReady, false);
   assert.equal(readDeviceCommand("claim", base).sheetReady, false);
+});
+
+test("a character sheet result is accepted exactly as the Mac sends it, and nothing else gets through", () => {
+  const base = { workerId: "mac", jobId: "11111111-1111-4111-8111-111111111111", leaseToken: "22222222-2222-4222-8222-222222222222" };
+  const done = readDeviceCommand("complete", { ...base, result: { sheet: "turnaround", files: ["sheet-1.png"] } }) as { result: unknown };
+  assert.deepEqual(done.result, { sheet: "turnaround", files: ["sheet-1.png"] });
+  for (const bad of [{ sheet: "selfie", files: ["sheet-1.png"] }, { sheet: "face", files: [] }, { sheet: "face", files: ["../sheet-1.png"] }, { sheet: "face", files: ["https://x/sheet-1.png"] }, { sheet: "face", files: ["sheet-1.png"], extra: 1 }, { sheet: "face", files: ["sheet-1.png", "sheet-2.png", "sheet-3.png", "sheet-4.png", "sheet-1.png"] }])
+    assert.throws(() => readSheetResult(bad), undefined, JSON.stringify(bad));
 });

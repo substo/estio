@@ -273,6 +273,12 @@ export function readPreviewResult(value: unknown) {
   for (const k of ["bytes", "seconds"]) valid(a[k] === undefined || typeof a[k] === "number" && Number.isFinite(a[k]) && Number(a[k]) >= 0 && Number(a[k]) <= 1e6);
   return { preview: a };
 }
+/** A character sheet: which sheet, and the names of the pictures the Mac uploaded (never a path or a link). */
+export function readSheetResult(value: unknown) {
+  const v = object(value); valid(Object.keys(v).length === 2 && ["turnaround", "expressions", "face", "outfits"].includes(String(v.sheet)));
+  valid(Array.isArray(v.files) && v.files.length >= 1 && v.files.length <= 4 && v.files.every(f => typeof f === "string" && /^sheet-[1-4]\.png$/.test(f)));
+  return { sheet: v.sheet, files: v.files };
+}
 /** Opening the kept project in Substo Video: a boolean and the folder's name, never a path. */
 export function readEditorResult(value: unknown) {
   const v = object(value); valid(Object.keys(v).length === 1);
@@ -322,7 +328,7 @@ export function readDeviceCommand(operation: DeviceOperation, value: unknown): R
   if (operation === "video_frames_verify") return { ...out, ...readFramesVerify(v) };
   if (operation === "video_export_reserve") return { ...out, ...readExportReserve(v) };
   if (operation === "video_export_verify") return out;
-  if (operation === "complete") { out.result = v.result && typeof v.result === "object" && "preview" in v.result ? readPreviewResult(v.result) : v.result && typeof v.result === "object" && "assembly" in v.result ? readAssemblyResult(v.result) : v.result && typeof v.result === "object" && "editor" in v.result ? readEditorResult(v.result) : v.result && typeof v.result === "object" && "videos" in v.result ? readDeviceYoutubeSearchResult(v.result) : v.result && typeof v.result === "object" && "outcome" in v.result ? readVideoResult(v.result) : v.result && typeof v.result === "object" && "output" in v.result && typeof v.result.output === "object" ? readDeviceTextResult(v.result) : v.result && typeof v.result === "object" && "research" in v.result ? readDeviceResearchResult(v.result) : readDeviceDiagnosticResult(v.result); }
+  if (operation === "complete") { out.result = v.result && typeof v.result === "object" && "preview" in v.result ? readPreviewResult(v.result) : v.result && typeof v.result === "object" && "sheet" in v.result ? readSheetResult(v.result) : v.result && typeof v.result === "object" && "assembly" in v.result ? readAssemblyResult(v.result) : v.result && typeof v.result === "object" && "editor" in v.result ? readEditorResult(v.result) : v.result && typeof v.result === "object" && "videos" in v.result ? readDeviceYoutubeSearchResult(v.result) : v.result && typeof v.result === "object" && "outcome" in v.result ? readVideoResult(v.result) : v.result && typeof v.result === "object" && "output" in v.result && typeof v.result.output === "object" ? readDeviceTextResult(v.result) : v.result && typeof v.result === "object" && "research" in v.result ? readDeviceResearchResult(v.result) : readDeviceDiagnosticResult(v.result); }
   if (operation === "complete" && v.routeActual !== undefined) {
     const actual = object(v.routeActual);
     valid(isProvider(actual.provider) && typeof actual.model === "string" && modelPattern.test(actual.model));
