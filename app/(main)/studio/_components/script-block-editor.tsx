@@ -162,8 +162,10 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
         {blocks.map((block, index) => {
           const status = blockAudioStatus(block, effectiveVoice?.id ?? null);
           const isBreak = block.type === "break";
+          // The nth spoken block is the nth line of the transcript, so the transcript can jump here.
+          const spoken = narrationBlocks(blocks).findIndex(b => b.id === block.id);
           return (
-            <li key={block.id} onDragOver={event => { if (dragId) { event.preventDefault(); setOverId(block.id); } }} onDragLeave={() => setOverId(o => o === block.id ? null : o)}
+            <li key={block.id} data-narration={spoken >= 0 ? spoken : undefined} onDragOver={event => { if (dragId) { event.preventDefault(); setOverId(block.id); } }} onDragLeave={() => setOverId(o => o === block.id ? null : o)}
               onDrop={event => { event.preventDefault(); if (dragId && dragId !== block.id) commit(moveBlockTo(blocksRef.current, dragId, index)); setDragId(null); setOverId(null); }}
               className={`rounded-lg border bg-background p-3 ${overId === block.id && dragId !== block.id ? "border-primary ring-1 ring-primary" : ""} ${dragId === block.id ? "opacity-50" : ""}`}>
               {isBreak ? <div ref={el => { if (el) fields.current.set(block.id, el); else fields.current.delete(block.id); }} tabIndex={0} role="separator" aria-label="Section break" className="flex items-center gap-3 py-2 text-xs uppercase tracking-wide text-muted-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"><span className="h-px flex-1 bg-border" />Section break<span className="h-px flex-1 bg-border" /></div>

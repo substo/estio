@@ -61,7 +61,7 @@ test("assets rail lists the footage only: narration lives on the script blocks a
 
 test("transcript shows each beat as a line of clickable words with a start time, and says the timing is estimated", () => {
   const lines = buildTranscript(["Stop scrolling, now.", "Watch this"], [{ s: 0, e: 4 }, { s: 65, e: 67 }])!;
-  const html = renderToStaticMarkup(<TranscriptPanel lines={lines} videoRef={{ current: null }} onEditScript={noop} />);
+  const html = renderToStaticMarkup(<TranscriptPanel lines={lines} videoRef={{ current: null }} onEditLine={noop} onComment={noop} />);
   assert.match(html, /aria-label="Transcript"/); assert.match(html, />Stop<\/button><\/span>/); assert.match(html, /<span> <button[^>]*>scrolling,<\/button>/); assert.match(html, /Play from 0:00/); assert.match(html, /Play from 1:05/);
-  assert.match(html, /Click a word to play from it/); assert.match(html, /estimated/); assert.match(html, /Edit the script/);
+  assert.match(html, /Click a word to play from it/); assert.match(html, /estimated/); assert.match(html, /Edit this line/); assert.match(html, />Comment</);
 });

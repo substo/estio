@@ -62,6 +62,14 @@ export function ContentWorkspace(props: {
   const current = versions.find(v => v.id === versionId) ?? versions[0];
   const voiceClips = current?.timeline?.tracks.find(t => t.n === "Voice")?.c ?? [];
   const transcript = useMemo(() => (props.beats?.length ? buildTranscript(props.beats, voiceClips.map(c => ({ s: c.s, e: c.e }))) : null), [props.beats, current?.timeline]);
+  // From the transcript: open the script editor on that spoken line (editing and "regenerate audio" already work there).
+  const editLine = (index: number) => { choose("script"); window.setTimeout(() => { const box = document.querySelector<HTMLElement>(`[data-narration="${index}"] textarea`); box?.scrollIntoView({ block: "center", behavior: "smooth" }); box?.focus(); }, 80); };
+  // From the transcript: start a note to the agent about this moment. Nothing is sent until the user finishes it and presses Send.
+  const commentOn = (line: { start: number; end: number; words: { text: string }[] }) => {
+    const at = `${Math.floor(line.start / 60)}:${String(Math.floor(line.start % 60)).padStart(2, "0")}`;
+    const said = line.words.map(w => w.text).join(" ").slice(0, 120);
+    setSelected(null); setDraft(`At ${at}, where it says "${said}": `); setAgentOpen(true);
+  };
   const groups = useMemo(() => groupAssets(props.uploads, props.pending), [props.uploads, props.pending]);
   const steps = jobStepper({ narration: props.narration, assembly: props.assembly });
   const busy = Boolean(loop?.busy) || steps?.some(s => s.state === "active") === true;
@@ -105,7 +113,7 @@ export function ContentWorkspace(props: {
               empty={<><p className="font-medium">No video yet</p><p className="text-muted-foreground">Add your footage on the left, then press Make video. Your Mac does the editing.</p>
                 <MakeVideoDialog locationId={locationId} recordId={recordId} voices={props.voices} availability={props.availability} soundSources={props.soundSources} motion={props.motion} disabledReason={makeBlock} busy={busy} trigger="inline" /></>} />
             {hasVideo ? <TimelineView snapshot={current?.timeline ?? null} selected={selected} onSelect={setSelected} onAction={onClipAction} canEdit={Boolean(loop?.projectKept)} busy={busy || asking} /> : null}
-            {transcript ? <TranscriptPanel lines={transcript} videoRef={videoRef} onEditScript={() => choose("script")} /> : null}
+            {transcript ? <TranscriptPanel lines={transcript} videoRef={videoRef} onEditLine={editLine} onComment={commentOn} /> : null}
           </div>
           <aside aria-label="Agent" className={`order-3 ${agentOpen ? "fixed inset-x-0 bottom-0 z-40 flex max-h-[75vh] rounded-t-2xl border bg-background p-4 shadow-lg" : "hidden"} lg:static lg:flex lg:max-h-none lg:rounded-xl lg:border lg:bg-card lg:p-4 lg:shadow-none`}>
             <div className="flex w-full min-h-0 flex-col">
