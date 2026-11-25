@@ -163,7 +163,8 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
       const next = [text.trim(), message].filter(Boolean).join("\n\n");
       if (sending || running || next.length > AGENT_MESSAGE_LIMIT) return false;
       setText(next);
-      field.current?.focus();
+      setResearchOpen(false);
+      requestAnimationFrame(() => field.current?.focus());
       return true;
     };
     return () => { prepareMessage.current = null; };

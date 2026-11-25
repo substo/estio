@@ -7,7 +7,7 @@ import { agentSessionKey, type AgentSelection } from "@/lib/studio/agent-policy"
 import type { CreationRecord, CreationStage } from "@/lib/studio/creation-policy";
 import type { StudioTextProvider } from "@/lib/studio/text-provider";
 import { AgentChat } from "../agent-chat";
-import { AgentDraftProvider } from "../agent-workspace";
+import { AgentDraftProvider, WritingAudiencePanel } from "../agent-workspace";
 
 export type WritingAgentData = { record: CreationRecord; turns: AgentTurnView[]; plan: string[]; target: number | null; scope: string };
 const desktopQuery = "(min-width: 1024px)";
@@ -33,9 +33,11 @@ export function ScriptWritingAgent({ locationId, data, active, open, onOpenChang
   clearFocus: () => void;
   onSent: () => void;
 }) {
+  const [showAudience, setShowAudience] = useState(false);
   const [provider, setProvider] = useState<StudioTextProvider>("location_order");
   const desktop = useSyncExternalStore(subscribeDesktop, isDesktop, () => false);
   const panel = useRef<HTMLDialogElement>(null);
+  const audienceToggle = useRef<HTMLButtonElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const titleId = `studio-script-agent-${data.record.id}`;
   const sessionKey = agentSessionKey(data.record.id, null);
@@ -65,23 +67,43 @@ export function ScriptWritingAgent({ locationId, data, active, open, onOpenChang
   }, [active, data.record.id, desktop, open, returnFocus]);
 
   useEffect(() => {
-    if (active && desktop && open && focus) {
-      panel.current?.querySelector<HTMLElement>("[data-assistant-field]:enabled")?.focus();
-    }
+    if (!active || !open || !focus) return;
+    setShowAudience(false);
+    if (desktop) requestAnimationFrame(() => panel.current?.querySelector<HTMLElement>("[data-assistant-field]:enabled")?.focus());
   }, [active, desktop, open, focus]);
+
+  function backToWriting(focusMessage: boolean) {
+    setShowAudience(false);
+    requestAnimationFrame(() => {
+      if (focusMessage) panel.current?.querySelector<HTMLElement>("[data-assistant-field]:enabled")?.focus();
+      else audienceToggle.current?.focus();
+    });
+  }
 
   return (
     <dialog ref={panel} role={desktop ? "complementary" : undefined} aria-labelledby={titleId}
       onCancel={event => { event.preventDefault(); onOpenChange(false); }}
       className="fixed inset-x-0 bottom-0 top-auto m-0 max-h-[88dvh] w-full max-w-none flex-col gap-0 overflow-y-auto rounded-t-xl border bg-card p-0 pb-[env(safe-area-inset-bottom)] text-card-foreground shadow-lg backdrop:bg-black/50 open:flex lg:sticky lg:inset-auto lg:top-4 lg:max-h-[calc(100dvh-2rem)] lg:rounded-xl lg:pb-0 lg:shadow-none">
-      <header className="flex shrink-0 items-center justify-between border-b px-4 py-3">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
         <h2 ref={heading} tabIndex={-1} id={titleId} className="font-semibold">Writing agent</h2>
-        <button type="button" onClick={() => onOpenChange(false)} aria-label="Close writing agent"
-          className="inline-flex size-11 items-center justify-center rounded-md hover:bg-accent focus-visible:outline focus-visible:outline-2 lg:hidden"><X aria-hidden className="size-4" /></button>
+        <div className="flex items-center gap-1">
+          <button ref={audienceToggle} type="button" aria-expanded={showAudience} aria-controls={`${titleId}-audience`}
+            onClick={() => { if (showAudience) backToWriting(false); else setShowAudience(true); }}
+            className="min-h-11 rounded-md px-2 text-xs font-medium text-primary hover:bg-accent focus-visible:outline focus-visible:outline-2">
+            {showAudience ? "Back to writing" : "Audience language"}
+          </button>
+          <button type="button" onClick={() => onOpenChange(false)} aria-label="Close writing agent"
+            className="inline-flex size-11 items-center justify-center rounded-md hover:bg-accent focus-visible:outline focus-visible:outline-2 lg:hidden"><X aria-hidden className="size-4" /></button>
+        </div>
       </header>
       <AgentDraftProvider recordId={data.record.id} sessionKey={sessionKey} initialRecord={data.record} initialPlan={data.plan} initialTarget={data.target}>
-        <AgentChat locationId={locationId} source={null} initialTurns={data.turns} provider={provider} onProvider={setProvider} scope={data.scope}
-          focus={focus} scriptEditor={{ startApply, endApply, onApplied, clearFocus, onSent }} />
+        <div className={showAudience ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
+          <AgentChat locationId={locationId} source={null} initialTurns={data.turns} provider={provider} onProvider={setProvider} scope={data.scope}
+            focus={focus} scriptEditor={{ startApply, endApply, onApplied, clearFocus, onSent }} />
+        </div>
+        <div id={`${titleId}-audience`} hidden={!showAudience} className="min-h-0 flex-1 overflow-y-auto">
+          <WritingAudiencePanel startSave={startApply} endSave={endApply} onSaved={onSent} onPrepared={() => backToWriting(true)} />
+        </div>
       </AgentDraftProvider>
     </dialog>
   );

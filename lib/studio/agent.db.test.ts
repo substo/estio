@@ -754,10 +754,20 @@ test("an existing content record starts writing chat in place and stale full-scr
   await sql(`insert into studio.studio_records(location_id,id,kind,title,payload)
     values($1,$2::uuid,'content','Existing piece',$3::jsonb)`, loc, recordId,
   JSON.stringify({ script: original, notes: "Keep my production notes.", stage: "script" }));
+  const creation = await import("./creation");
+  const { readCreationCommand } = await import("./creation-policy");
+  const add = readCreationCommand({ action: "audience_add", recordId, version: 1, kind: "question", origin: "comments", text: "Can I compare two takes?" });
+  await creation.executeCreationCommand(loc, add);
+  await assert.rejects(creation.executeCreationCommand(loc, add), /changed in another view/);
+  const [withObservation] = await sql(`select payload from studio.studio_records where id=$1::uuid`, recordId);
+  assert.equal(withObservation.payload.script, original);
+  assert.equal(withObservation.payload.notes, "Keep my production notes.");
+  assert.equal(withObservation.payload.creation.audience[0].text, "Can I compare two takes?");
   const command = policy.readAgentSendCommand({ recordId, turnId, version: 1, message: "Revise the whole script.", provider: "subscription", confirmSubscription: true });
   assert.equal((await agent.sendAgentMessage(loc, command)).recordId, recordId);
   const view = await drive(turnId, snapshot => {
     assert.match(snapshot.draft.stages.Script.text, /Show the two openings/);
+    assert.deepEqual(snapshot.audience, [{ kind: "question", origin: "comments", text: "Can I compare two takes?" }]);
     return step({ proposals: [{ stage: "Script", text: "Start by showing both takes.", rationale: "Lead with the example", evidenceIds: [], verify: [] }] });
   }, 1);
   assert.equal(view.turn.status, "done");
