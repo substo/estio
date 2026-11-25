@@ -15,9 +15,10 @@ export const FIT_TOLERANCE = 0.15;
 export const FIT_REVISE = 0.3;
 
 const words = (text: string) => (text.match(/\S+/g) ?? []).length;
+export const withoutScriptCues = (text: string) => text.replace(/\[[^\]]*\]/g, " ");
 export function scriptStats(text: string) {
   const cues = [...text.matchAll(/\[[^\]]*\]/g)].map(match => match[0]);
-  const spoken = words(text.replace(/\[[^\]]*\]/g, " "));
+  const spoken = words(withoutScriptCues(text));
   const cueWords = cues.reduce((sum, cue) => sum + words(cue), 0);
   return { spokenWords: spoken, cueWords, seconds: Math.round(spoken / SPEAKING_WPM * 60) };
 }
@@ -112,7 +113,7 @@ export function sectionStats(text: string, targetSeconds: number | null) {
     const cue = /^\s*\[\s*([A-Za-z]+)\b[^\]]*\]/.exec(line);
     const beat = cue ? BEAT_NAMES[cue[1].toLowerCase()] : undefined;
     if (beat) { current = beat; seen++; }
-    const spoken = words(line.replace(/\[[^\]]*\]/g, " "));
+    const spoken = words(withoutScriptCues(line));
     if (current && spoken) parts[current] = (parts[current] ?? 0) + spoken;
   }
   if (seen < 2) return null;

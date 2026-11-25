@@ -9,6 +9,7 @@ import {
   BLOCK_LABELS, MAX_BLOCKS, blockAudioStatus, blocksDoc, blocksToScript, scriptBlockSpan, insertBlockAfter, makeBlockId, moveBlock, moveBlockTo, narrationBlocks, removeBlock, setBlockAudio, setBlockText, setBlockType, splitBlock,
   type BlockAudio, type BlockType, type ScriptBlock,
 } from "@/lib/studio/script-blocks";
+import { ScriptReadingDialog } from "./script-reading-dialog";
 import type { AgentSelection } from "@/lib/studio/agent-policy";
 import type { RegenerateResult } from "@/lib/studio/script-audio";
 import { providerLabels, type VoiceRow } from "@/lib/studio/voices/policy";
@@ -174,7 +175,7 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
 
   const statusLabel = save === "saving" ? "Saving…" : save === "unsaved" ? "Unsaved changes" : save === "error" ? "Not saved" : "All changes saved";
   return (
-    <section aria-label="Script editor" className="space-y-4" onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z" && !(event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); if (event.shiftKey) redo(); else undo(); } }}>
+    <section aria-label="Script editor" className="space-y-4" onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z" && event.currentTarget.contains(event.target as Node) && !(event.target instanceof HTMLTextAreaElement)) { event.preventDefault(); if (event.shiftKey) redo(); else undo(); } }}>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0 space-y-1">
           {voices.length ? <label className="block text-sm font-medium">Voice for this piece
@@ -186,6 +187,7 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
           {effectiveVoice && !hosted ? <p className="text-xs text-muted-foreground">This voice runs on this Mac. Its audio is made when you make the video.</p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <ScriptReadingDialog blocks={blocks} />
           <span role="status" aria-live="polite" className={`text-xs ${save === "error" ? "text-destructive" : "text-muted-foreground"}`}>{statusLabel}</span>
           <button type="button" className={btn} onClick={undo} aria-label="Undo" disabled={!past.current.length}><Undo2 aria-hidden className="size-4" /></button>
           <button type="button" className={btn} onClick={redo} aria-label="Redo" disabled={!future.current.length}><Redo2 aria-hidden className="size-4" /></button>
