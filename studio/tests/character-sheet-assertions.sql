@@ -79,4 +79,8 @@ begin
  -- and with processing off, no Mac is ready
  if not pg_temp.fails(format('select studio.studio_request_character_sheet(%L,%L,%L,%L,%L::jsonb)',w,'substo','cs-owner','face',prof::text),'CS012') then raise exception 'Asked a Mac with processing off'; end if;
  if not pg_temp.fails(format('select studio.studio_request_character_sheet(%L,%L,%L,%L,%L::jsonb)',w2,'substo','cs-owner','face',prof::text),'42501') and false then null; end if;
+ -- a video job can find the latest finished turnaround/face sheets, only for their own person
+ if studio.studio_job_character_sheets(w,'someone-else')<>'[]'::jsonb then raise exception 'Sheets leaked to another person'; end if;
+ if exists(select 1 from jsonb_array_elements(studio.studio_job_character_sheets(w,'cs-owner')) e where e->>'sheet' not in ('turnaround','face')) then raise exception 'Unexpected sheet kind'; end if;
+ if exists(select 1 from jsonb_array_elements(studio.studio_job_character_sheets(w,'cs-owner')) e join studio.studio_jobs j on j.id=(e->>'jobId')::uuid where j.status<>'succeeded') then raise exception 'Unfinished sheet offered'; end if;
 end $$;
