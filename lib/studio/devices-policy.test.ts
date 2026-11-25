@@ -174,3 +174,10 @@ test("the character-sheet readiness flag is kept as a bare boolean and nothing e
   assert.deepEqual((safeDeviceCapabilities({ characterSheet: { ready: "yes" } }) as { characterSheet?: unknown }).characterSheet, { ready: false });
   assert.equal((safeDeviceCapabilities({ characterSheet: "x" }) as { characterSheet?: unknown }).characterSheet, undefined);
 });
+
+test("the claim keeps the sheetReady flag as a bare boolean (without it a Mac never claims a character sheet)", () => {
+  const base = { workerId: "mac", limit: 1, leaseSeconds: 120 };
+  assert.equal(readDeviceCommand("claim", { ...base, sheetReady: true }).sheetReady, true);
+  assert.equal(readDeviceCommand("claim", { ...base, sheetReady: "yes" }).sheetReady, false);
+  assert.equal(readDeviceCommand("claim", base).sheetReady, false);
+});
