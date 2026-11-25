@@ -91,3 +91,17 @@ test("a proposal for an existing Script says it replaces it (undoable); long quo
   assert.match(plain, />Use as Script</);
   assert.ok(!/This replaces your saved Script/.test(plain));
 });
+
+test("complete concept proposals render as comparable ideas and show the active direction", () => {
+  const ideaText = (title: string) => `Title: ${title}\nPremise: Test two openings.\nAudience: First-time creators.\nSpoken opening: Which shot keeps its promise?\nPayoff: See the two takes side by side.`;
+  const first = ideaText("Show the result");
+  const concept = { stage: "Concept" as const, text: first, rationale: "Two comparable takes.", verify: [], evidenceIds: [], evidence: [] };
+  const turn = { ...done, result: { ...done.result!, proposals: [concept, { ...concept, text: ideaText("Ask the question") }, { ...concept, text: "An earlier idea still renders in full." }] } };
+  const saved: CreationRecord = { ...record, state: { ...record.state, stages: { Concept: { text: first, approved: true, shortlist: [first] } } } };
+  const html = render([turn], [], {}, saved);
+  assert.match(html, /Current direction · Show the result/);
+  assert.match(html, /Spoken opening <\/dt><dd[^>]*>“Which shot keeps its promise\?”/);
+  assert.match(html, /aria-label="Compare Ask the question"/);
+  assert.match(html, /Shortlisted/);
+  assert.match(html, /An earlier idea still renders in full\./);
+});

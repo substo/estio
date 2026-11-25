@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import type { AgentTurnView } from "@/lib/studio/agent";
 import { agentCitationHref, citedQuote, proposalAnchor, type ProposalFocus } from "@/lib/studio/citation-navigation";
 import { AGENT_MESSAGE_LIMIT, type AgentSelection } from "@/lib/studio/agent-policy";
+import { IDEA_CARD_FORMAT, ideaComparisonPrompt, readIdeaCard } from "@/lib/studio/idea-cards";
 import { CREATION_STAGES, stageDraft, type CreationRecord, type CreationStage } from "@/lib/studio/creation-policy";
 import { formatClock, parseDurationRequest, scriptStats, targetWords } from "@/lib/studio/script-length";
 import { studioTextConsent, type StudioTextProvider } from "@/lib/studio/text-provider";
@@ -43,6 +44,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   const { recordId, record, setRecord, setPlan, target, setTarget, sendRef, prepareMessage } = useAgentDraft();
   const [turns, setTurns] = useState(initialTurns);
   const [text, setText] = useState("");
+  const [comparison, setComparison] = useState<{ turnId: string; indices: number[] } | null>(null);
   // "Brainstorm this section" in the script editor leaves a prompt for this piece: show it for review once; nothing is sent until the owner does.
   useEffect(() => {
     if (!recordId) return;
@@ -182,6 +184,11 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
     };
     return () => { prepareMessage.current = null; };
   }, [text, sending, running, prepareMessage]);
+  function prepareCreativeMessage(message: string) {
+    if (!prepareMessage.current?.(message)) setError("Make room in your message before adding this suggestion.");
+    else setError("");
+  }
+
   const last = turns.at(-1);
   const workspace = useOptionalSourceWorkspace();
   /** One click into the existing Related videos search with the assistant's phrase; the owner stays in control of picking, saving and transcribing. */
@@ -209,8 +216,15 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
     setEvidenceFocus({ id, title });
   }
   const hasWork = record ? CREATION_STAGES.some(stage => stageDraft(record.state, stage).text.trim().length > 0) : false;
-  const moves: Array<[string, string]> = [["Explore alternatives", "Explore two or three genuinely different alternatives for this (a different concept, audience lens or point of view), each with its own spoken opening line."], ["Deepen", "Deepen the weakest part with a concrete example, a counterexample or filmable proof."], ["Tighten", "Tighten this: remove redundancy and keep the promise, the evidence and the payoff."]];
-  const starters = scriptEditor && hasWork ? ["Suggest three stronger openings"] : source ? ["Make something inspired by this video", "Sharpen how it opens", "Start for me"] : ["Start for me"];
+  const concept = record ? stageDraft(record.state, "Concept") : null;
+  const activeIdea = concept?.approved ? readIdeaCard(concept.text) : null;
+  const startIdeas = `Give me three genuinely different video ideas for this context. ${IDEA_CARD_FORMAT}`;
+  const moves = [
+    ["Go wider", `Explore two or three distinct directions beyond the current idea. ${IDEA_CARD_FORMAT}`],
+    ["Go deeper", "Develop the current direction with one stronger example, one filmable demonstration, and what the viewer gets from it."],
+    ["Simplify", "Keep the strongest promise and payoff. Show the simplest way to film it and suggest what I can cut."],
+  ];
+  const starters = scriptEditor && hasWork ? ["Suggest three stronger openings"] : source ? ["Suggest video ideas", "Sharpen how it opens", "Start for me"] : ["Start for me"];
   const status = (turn: AgentTurnView) => <div role="status" className="mr-6 space-y-1 rounded-lg bg-muted p-3 text-muted-foreground">
     {turn.activity.map((line, index) => <p key={index} className="text-xs">{line}</p>)}
     <p className="flex items-center gap-2"><Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />{turn.waiting === "running" ? "Working on it…" : "Waiting for your computer or provider to pick this up…"}</p>
@@ -235,7 +249,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
       <div className="mr-6 space-y-2 rounded-lg bg-muted p-3">
         <p>{scriptEditor ? <>Ask for ideas or revisions using your saved script. Review a proposal before using it.</> : source ? <>I’m looking at <strong>{source.title}</strong>. {source.hasText ? "I can read its saved text and any approved findings, and compare ideas with your draft." : "It has no saved transcript or description, so I can only work from what you tell me."} Tell me what you want to make, or start from a suggestion. Nothing goes into your draft until you choose <strong>Use</strong>.</> : <>Tell me what you want to make, or tap Start for me. I’ll ask only what I need. Nothing goes into your draft until you choose <strong>Use</strong>.</>}</p>
         {turns.length === 0 ? <div className="flex flex-wrap gap-2">
-          {starters.map(starter => <Button key={starter} type="button" variant="outline" className="h-auto min-h-9 whitespace-normal py-1.5 text-left text-xs" disabled={sending} onClick={() => void send(starter)}>{starter}</Button>)}
+          {starters.map(starter => <Button key={starter} type="button" variant="outline" className="h-auto min-h-9 whitespace-normal py-1.5 text-left text-xs" disabled={sending} onClick={() => starter === "Suggest video ideas" || starter === "Start for me" ? prepareCreativeMessage(startIdeas) : prepareCreativeMessage(starter)}>{starter}</Button>)}
           {!source && !scriptEditor ? <Button type="button" variant="outline" className="min-h-9 text-xs" onClick={() => field.current?.focus()}>I have my own idea</Button> : null}
         </div> : null}
       </div>
@@ -258,11 +272,22 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
             const composed = patchable && sel ? savedText.slice(0, sel.start) + /^\s*/.exec(sel.text)![0] + proposal.text + /\s*$/.exec(sel.text)![0] + savedText.slice(sel.end) : null;
             const after = composed ? scriptStats(composed) : null;
             const anchor = proposalAnchor({ turnId: turn.id, index });
+            const idea = proposal.stage === "Concept" && !proposal.replaces ? readIdeaCard(proposal.text) : null;
+            const compared = comparison?.turnId === turn.id ? comparison.indices : [];
+            const shortlisted = concept?.shortlist.includes(proposal.text) ?? false;
             return <div key={index} id={anchor} tabIndex={-1}
               className="space-y-2 rounded-md border bg-background p-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{proposal.replaces ? `Proposed edit to your ${proposal.stage}` : `Proposed ${proposal.stage}`}</p>
               {proposal.replaces ? <p className="whitespace-pre-wrap break-words rounded bg-muted/60 p-2 text-xs text-muted-foreground line-through decoration-muted-foreground/60" data-patch-before>{proposal.replaces}</p> : null}
-              <p className="whitespace-pre-wrap break-words text-sm">{proposal.text}</p>
+              {idea ? <div className="space-y-2 break-words text-sm">
+                <h3 className="font-semibold">{idea.Title}</h3>
+                <p>{idea.Premise}</p>
+                <dl className="space-y-1 text-xs">
+                  <div><dt className="inline font-medium">Audience </dt><dd className="inline">{idea.Audience}</dd></div>
+                  <div><dt className="inline font-medium">Spoken opening </dt><dd className="inline">“{idea["Spoken opening"]}”</dd></div>
+                  <div><dt className="inline font-medium">Payoff </dt><dd className="inline">{idea.Payoff}</dd></div>
+                </dl>
+              </div> : <p className="whitespace-pre-wrap break-words text-sm">{proposal.text}</p>}
               <p className="text-xs text-muted-foreground">{proposal.rationale}</p>
               {proposal.length ? <div className="space-y-1.5 text-xs" data-length-check>
                 <p className="text-muted-foreground">Estimated about {formatClock(proposal.length.estimatedSeconds)} spoken · {proposal.length.spokenWords} spoken words{proposal.length.cueWords ? ` (+${proposal.length.cueWords} cue words not counted)` : ""}{proposal.length.targetSeconds ? ` · requested about ${formatClock(proposal.length.targetSeconds)}` : ""}</p>
@@ -283,9 +308,20 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
               {proposal.verify.length ? <ul className="list-disc space-y-0.5 pl-5 text-xs text-amber-700 dark:text-amber-400">{proposal.verify.map((item, i) => <li key={i}>Check before filming: {item}</li>)}</ul> : null}
               {proposal.replaces ? <p className="text-xs text-muted-foreground" data-patch-note>{patchable && after ? <>Only the selected words change; the rest stays exactly as saved. {proposal.stage === "Script" ? <>After applying, the whole script is about {formatClock(after.seconds)} spoken ({after.spokenWords} words).</> : null} <strong>{scriptEditor ? "Undo last script change" : "Undo last change"}</strong> restores it.</> : "The selected words changed since this edit was written, so it can't be applied. Select them again."}</p> : null}
               {replaces ? <p className="text-xs text-muted-foreground">This replaces your saved {proposal.stage}. {scriptEditor ? <><strong>Undo last script change</strong> restores it.</> : <><strong>Undo last change</strong> in the Draft panel restores it.</>}</p> : null}
-              {scriptEditor && proposal.stage !== "Script" ? <Button asChild variant="outline" className="min-h-10"><Link href={`/studio/content/create?draft=${recordId}`}>Review in guided draft</Link></Button> : <Button type="button" className="min-h-10" disabled={inDraft || Boolean(proposal.replaces && !patchable) || Boolean(applying)} onClick={() => use(turn, index)}>{inDraft ? "In your draft" : proposal.replaces ? "Replace selected text" : replaces ? `Replace saved ${proposal.stage}` : `Use as ${proposal.stage}`}</Button>}
+              <div className="flex flex-wrap gap-2">
+                {scriptEditor && proposal.stage !== "Script" && !idea ? <Button asChild variant="outline" className="min-h-10"><Link href={`/studio/content/create?draft=${recordId}`}>Review in guided draft</Link></Button> : <Button type="button" className="min-h-10" disabled={inDraft || Boolean(proposal.replaces && !patchable) || Boolean(applying)} onClick={() => use(turn, index)}>{inDraft ? "In your draft" : idea ? "Use this direction" : proposal.replaces ? "Replace selected text" : replaces ? `Replace saved ${proposal.stage}` : `Use as ${proposal.stage}`}</Button>}
+                {idea && record ? <Button type="button" variant="outline" className="min-h-10" disabled={shortlisted || Boolean(applying)}
+                  onClick={() => void changeDraft("/studio/content/create/api", { action: "shortlist", stage: "Concept", text: proposal.text }, `${anchor}-shortlist`, "Concept")}>{shortlisted ? "Shortlisted" : "Shortlist"}</Button> : null}
+                {idea && turn.result!.proposals.filter(item => item.stage === "Concept" && !item.replaces && readIdeaCard(item.text)).length > 1 ?
+                  <Button type="button" variant="outline" className="min-h-10" aria-pressed={compared.includes(index)}
+                    aria-label={`Compare ${idea.Title}`} disabled={!compared.includes(index) && compared.length === 2}
+                    onClick={() => setComparison({ turnId: turn.id, indices: compared.includes(index) ? compared.filter(item => item !== index) : [...compared, index] })}>Compare</Button> : null}
+              </div>
             </div>;
           })}
+          {comparison?.turnId === turn.id && comparison.indices.length === 2 ?
+            <Button type="button" variant="outline" className="min-h-10" disabled={Boolean(running) || sending}
+              onClick={() => prepareCreativeMessage(ideaComparisonPrompt(comparison.indices.map(index => turn.result!.proposals[index].text)))}>Compare these two ideas</Button> : null}
           {turn.result.research ? <div className="space-y-1.5 rounded-md border border-dashed p-3 text-xs" data-research-suggestion>
             <p><strong>Worth looking for:</strong> “{turn.result.research.query}” — {turn.result.research.reason}</p>
             <p className="text-muted-foreground">Save a result to this draft, then review its transcript and approve findings before choosing passages.</p>
@@ -308,6 +344,11 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
       <div ref={endRef} />
     </div>
     <div hidden={researchOpen} className="space-y-2 border-t p-3">
+      {activeIdea || concept?.shortlist.length ? <details className="text-xs">
+        <summary className="cursor-pointer break-words font-medium">{activeIdea ? `Current direction · ${activeIdea.Title}` : "Shortlisted ideas"}</summary>
+        {activeIdea ? <p className="mt-1 break-words">{activeIdea.Premise} <strong>Payoff</strong> {activeIdea.Payoff}</p> : null}
+        {concept?.shortlist.length ? <ul className="mt-1 list-disc space-y-1 break-words pl-5">{concept.shortlist.map(text => <li key={text}>{readIdeaCard(text)?.Title ?? text}</li>)}</ul> : null}
+      </details> : null}
       {scriptEditor && record && stageDraft(record.state, "Script").approved && stageDraft(record.state, "Script").previous ? <Button type="button"
         variant="outline" className="min-h-10 text-xs" disabled={Boolean(applying)}
         onClick={() => void changeDraft("/studio/content/create/api", { action: "undo", stage: "Script" }, "undo", "Script")}>Undo last script change</Button> : null}
@@ -316,7 +357,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
         <Button type="button" variant="ghost" size="sm" onClick={scriptEditor?.clearFocus}>Clear focus</Button>
       </div> : null}
       {hasWork || turns.length ? <div className="flex flex-wrap items-center gap-1.5 text-xs" data-creative-moves role="group" aria-label="Creative moves">
-        {moves.map(([label, message]) => <button key={label} type="button" disabled={Boolean(running) || sending} onClick={() => void send(message)} title={message}
+        {moves.map(([label, message]) => <button key={label} type="button" disabled={Boolean(running) || sending} onClick={() => prepareCreativeMessage(message)}
           className="min-h-8 rounded-full border px-2.5 hover:bg-accent disabled:opacity-50">{label}</button>)}
       </div> : null}
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground" data-length-target>
