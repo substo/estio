@@ -44,3 +44,11 @@ Honest limit: editing models change one picture at a time, so a long sequence ca
 ## Tests
 
 `lib/studio/images/*.test.ts` cover the catalog, every dialect, each platform's request shape (URL, auth header, fields, references), host allow-lists for returned links, error classification with keys redacted, and the generated test picture. Real generation is untested until keys are entered.
+
+## Your character (Settings → AI → Character)
+
+Storyboard frames show the creator in new scenes, so the same person has to appear in every frame. The Character tab keeps, per person and Location (private, never shown to anyone else), up to **five photos** with a role each (face front-on, face at an angle, full body, an outfit to keep, one more) and a **character card**: aspects (hair, facial hair, glasses, build, skin and age, clothing, accessories, style) each **locked** (repeated in every picture) or **free** (changes per scene, usually clothing), plus free notes. Photos are stored in private storage under keys derived from a hash of the user id; the card is a small manifest beside them. Photo 1 is also the stand-in picture the video flow already used.
+
+Research basis (mostly vendor tutorials, so only practices several repeat): lock identity first and change one thing at a time; describe from the photos and then edit that description; a few good, varied photos beat many for reference-based editing (trained identities need 15 to 20); stage the sheets (turnaround, expressions, outfits) on a plain neutral background with even light; fix drift one panel at a time. Reference-based editing holds a face less reliably than a trained identity over a long series, so each sheet is reviewed.
+
+Built: photo storage, the card editor, and the sheet builder (`lib/studio/images/character-sheet.ts`: card, turnaround, expressions, face and outfit prompts, single views, safe agent edits). The turnaround prompt was verified on the owner's Mac with Codex (five views in one row, one background, same proportions). Not built yet: generating the sheets from the photos as a Mac job (needs a new job kind and an upload path for the pictures), choosing the sheet frames are drawn from, and the agent chat that edits the card and regenerates only what changed.

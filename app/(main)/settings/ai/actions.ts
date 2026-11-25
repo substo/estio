@@ -9,6 +9,9 @@ import { GENERATION_KINDS, type GenerationKind, type SourceChoice } from "@/lib/
 import { IMAGE_PLATFORM_IDS, type ImagePlatformId } from "@/lib/studio/images/catalog";
 import { discoverImageModels, setImageChoices, testImageModel, type ImageTestResult } from "@/lib/studio/images/keys";
 import { testSound } from "@/lib/studio/ai/sound-test";
+import { StudioCommandError } from "@/lib/studio/command-error";
+import { removeCharacterPhoto, saveCharacterPhoto, saveCharacterProfile } from "@/lib/studio/character";
+import { cleanProfile } from "@/lib/studio/character-profile";
 
 type State = { error?: string; notice?: string };
 const failure = (e: unknown, fallback: string): State => ({ error: e instanceof VoiceSettingsError || e instanceof StudioAiSettingsError ? e.message : fallback });
@@ -75,4 +78,21 @@ export async function setConnectionPrefsAction(locationId: string, platform: str
 export async function testSoundAction(locationId: string, kind: string, provider: string): Promise<{ ok: boolean; message: string; ms: number; dataUrl?: string }> {
   if ((kind !== "music" && kind !== "effects") || !isHostedSoundProvider(provider)) return { ok: false, message: "Unknown choice.", ms: 0 };
   try { return await testSound(locationId, kind, provider); } catch (e) { return { ok: false, message: e instanceof VoiceSettingsError ? e.message : "The test could not run.", ms: 0 }; }
+}
+
+// ---- Your character: up to five photos and the character card. Each person only ever changes their own. -----------------------------------------
+const characterFailure = (e: unknown, fallback: string): State => ({ error: e instanceof StudioCommandError ? e.message : fallback });
+export async function saveCharacterPhotoAction(locationId: string, n: number, role: string, form: FormData): Promise<State> {
+  const file = form.get("photo");
+  if (!(file instanceof File) || !file.size) return { error: "Choose a photo." };
+  try { await saveCharacterPhoto(locationId, n, role, file); } catch (e) { return characterFailure(e, "Could not save the photo. Try again."); }
+  return { notice: "Photo saved." };
+}
+export async function removeCharacterPhotoAction(locationId: string, n: number): Promise<State> {
+  try { await removeCharacterPhoto(locationId, n); } catch (e) { return characterFailure(e, "Could not remove the photo. Try again."); }
+  return { notice: "Photo removed." };
+}
+export async function saveCharacterProfileAction(locationId: string, aspects: unknown, notes: string): Promise<State> {
+  try { await saveCharacterProfile(locationId, cleanProfile({ aspects, notes })); } catch (e) { return characterFailure(e, "Could not save. Try again."); }
+  return { notice: "Saved." };
 }

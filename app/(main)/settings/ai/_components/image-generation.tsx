@@ -50,7 +50,7 @@ export function ImageActions({ locationId, canManage, offers, choice, fallback, 
       {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     </div>
     <div className="space-y-2"><h3 className="text-sm font-semibold">Models you can use</h3>
-      <p className="text-xs text-muted-foreground">Only connected platforms and the models you allowed on Connections. Test makes one real picture (a few cents) so a key and an endpoint are proven, not assumed. &quot;Test with my photo&quot; draws you in a new scene from your saved photo, to check that the face stays the same; your photo is sent only to that platform, only when you press it. Add or change your photo in <Link href="/settings/voices" className="text-primary hover:underline">Settings → Voices → Your look</Link>.</p>
+      <p className="text-xs text-muted-foreground">Only connected platforms and the models you allowed on Connections. Test makes one real picture (a few cents) so a key and an endpoint are proven, not assumed. &quot;Test with my photo&quot; draws you in a new scene from your saved photo, to check that the face stays the same; your photo is sent only to that platform, only when you press it. Add or change your photo in <Link href="/settings/ai/character" className="text-primary hover:underline">Settings → AI → Character</Link>.</p>
       <ul className="space-y-2">{offers.map(o => { const k = keyOf(o), m = imageModel(o.model)!, e = m.endpoints.find(x => x.platform === o.platform)!, r = results[k];
         const last = tests[`${o.platform}|${o.model}|${endpointOf(o)}`]; const sample = renderShot(SAMPLE_SHOT, m.dialect, { acceptsText: m.text, negative: m.negative });
         return <li key={k} className="space-y-2 rounded-md border p-3">

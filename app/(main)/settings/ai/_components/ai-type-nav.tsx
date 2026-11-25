@@ -9,6 +9,7 @@ export const AI_TYPES = [
   { href: "/settings/ai/voice", label: "Voice", hint: "Narration providers" },
   { href: "/settings/ai/audio", label: "Music and sound effects", hint: "Where audio is made, and its providers" },
   { href: "/settings/ai/images", label: "Images", hint: "Storyboard frames: platforms, keys and models" },
+  { href: "/settings/ai/character", label: "Character", hint: "Your photos and the character card every storyboard frame is drawn from" },
 ] as const;
 
 export function AiTypeNav() {

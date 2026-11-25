@@ -1,7 +1,5 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { removeAvatar, setAvatar } from "@/lib/studio/avatar";
-import { StudioCommandError } from "@/lib/studio/command-error";
 import { isHostedProvider } from "@/lib/studio/voices/policy";
 import { VoiceSettingsError } from "@/lib/studio/voices/keys";
 import { deleteVoice, ensureLocalVoices, refreshProviderVoices, setDefaultVoice } from "@/lib/studio/voices/service";
@@ -32,15 +30,4 @@ export async function deleteVoiceAction(locationId: string, voiceId: string, _p:
   } catch (e) { return failure(e, "Could not remove the voice."); }
 }
 
-/** The signed-in user's own storyboard photo. Not a manager setting: every member keeps their own. */
-export async function saveAvatarAction(locationId: string, _p: State, form: FormData): Promise<State> {
-  const file = form.get("photo");
-  if (!(file instanceof File) || !file.size) return { error: "Choose a photo." };
-  try { await setAvatar(locationId, file); } catch (e) { return e instanceof StudioCommandError ? { error: e.message } : { error: "Could not save the photo. Try again." }; }
-  revalidatePath("/settings/voices"); return { notice: "Photo saved." };
-}
-export async function removeAvatarAction(locationId: string, _p: State): Promise<State> {
-  try { await removeAvatar(locationId); } catch (e) { return e instanceof StudioCommandError ? { error: e.message } : { error: "Could not remove the photo. Try again." }; }
-  revalidatePath("/settings/voices"); return { notice: "Photo removed." };
-}
 

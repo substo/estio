@@ -6,6 +6,7 @@ const SUBSTO_SETTINGS_PAGES = new Set([
   "/settings/ai/voice",
   "/settings/ai/audio",
   "/settings/ai/images",
+  "/settings/ai/character",
   "/settings/computer",
   "/settings/voices",
   "/settings/general",

@@ -125,7 +125,7 @@ export async function testImageModel(locationId: string, platform: ImagePlatform
   if (withPhoto) {
     if (model.references < 1) return { ok: false, message: `${model.label} does not take a reference photo, so it cannot keep your face. Pick a model that does.`, ms: 0 };
     photo = await avatarReference(locationId, access.userId);
-    if (!photo) return { ok: false, message: "Save your photo first (Settings → Voices → Your look).", ms: 0 };
+    if (!photo) return { ok: false, message: "Save your photo first (Settings → AI → Character).", ms: 0 };
   }
   // Without a photo: a neutral shot with no person (models that only edit get a plain gradient). With it: the storyboard shot, the same person in a new scene.
   const rendered = photo
