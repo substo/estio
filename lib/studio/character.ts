@@ -85,3 +85,6 @@ export async function saveCharacterProfile(locationId: string, profile: Characte
   const store = storeOrThrow(deps.store), manifestKey = characterManifestKey(access.locationId, access.userId);
   await writeManifest(store, manifestKey, { ...(await loadManifest(store, manifestKey)), profile });
 }
+
+/** For the claim hook and the sheet pages: one person's manifest, read with the given store. */
+export const readCharacterManifest = (store: Pick<StudioR2Store, "presignRead">, locationId: string, userId: string) => loadManifest(store as Store, characterManifestKey(locationId, userId));

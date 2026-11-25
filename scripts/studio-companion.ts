@@ -1,5 +1,6 @@
 #!/usr/bin/env tsx
 import { createCodexFrameDrawer } from "../lib/studio/companion/codex-image";
+import { createCharacterSheetHandler } from "../lib/studio/companion/character-sheet";
 import { createLocalSoundMaker } from "../lib/studio/companion/local-sound";
 import { catalogModel } from "../lib/studio/local-models";
 import { createSubscriptionTextRunHandler } from "../lib/studio/companion/text-run";
@@ -120,9 +121,11 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
         .catch(() => log({ event: "model_reconcile_failed" }));
     };
     await models.refresh().catch(() => {});
-    const capabilities = () => ({ instanceId, modelStates: models.states(), platform: os.platform(), arch: os.arch(), version, knowledgeOutlineVersion: 2, knowledgeCurationVersion: 1, stagedCreationVersion: 1, studioAgentVersion: 4, videoTemplateVersion: 1, sourceAssistVersion: 1, textRouteVersion: TEXT_ROUTE_VERSION, deviceAiRouteVersion: 1, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble"], videoAssembly: { ready: assemblyReady(), missing: assembly.missing }, voicePreview: { ready: previewReady() }, youtubeSearch: { ready: youtubeReady(), signedIn: youtubeSignedIn, rank: researchReady() }, ...providers, ...discovery, video: videoTools.report,
+    const capabilities = () => ({ instanceId, modelStates: models.states(), platform: os.platform(), arch: os.arch(), version, knowledgeOutlineVersion: 2, knowledgeCurationVersion: 1, stagedCreationVersion: 1, studioAgentVersion: 4, videoTemplateVersion: 1, sourceAssistVersion: 1, textRouteVersion: TEXT_ROUTE_VERSION, deviceAiRouteVersion: 1, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble", "studio.character_sheet"], videoAssembly: { ready: assemblyReady(), missing: assembly.missing }, voicePreview: { ready: previewReady() }, characterSheet: { ready: sheetReady() }, youtubeSearch: { ready: youtubeReady(), signedIn: youtubeSignedIn, rank: researchReady() }, ...providers, ...discovery, video: videoTools.report,
       nativeSubscriptionVersion: 1, nativeRetryAt: nativeRetryAt(), capacity: capacity(), usage: tracker.snapshot(), processingBlocked: gate().reasons.filter(reason => reason in DEVICE_BLOCK_REASONS) });
     const researchReady = () => gate().processing && Object.values(capacity()).some(Boolean);
+    /** Character sheets are drawn with the Codex CLI on this Mac's ChatGPT login: installed, signed in, and the gate allows processing. */
+    const sheetReady = () => gate().processing && providers.codex.ready && providers.codex.authenticated;
 
     const youtubeReady = () => (chromePath !== null || researchReady()) && gate().processing;
     let assembly: AssemblyTools = { ready: false, missing: ["substo", "ffprobe", "Claude sign-in"] };
@@ -151,7 +154,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
         .finally(() => active.delete(cmd.provider));
       active.set(cmd.provider, task);
     };
-    const inner = createDeviceStudioQueue(credentials, { capabilities, textReady: () => settings.config.features.text && gate().processing, summaryReady: () => settings.config.features.text && gate().processing, researchReady: () => gate().processing, videoReady, youtubeReady, assembleReady: assemblyReady, previewReady, configAck: () => settings.pendingAck,
+    const inner = createDeviceStudioQueue(credentials, { capabilities, textReady: () => settings.config.features.text && gate().processing, summaryReady: () => settings.config.features.text && gate().processing, researchReady: () => gate().processing, videoReady, youtubeReady, assembleReady: assemblyReady, previewReady, sheetReady, configAck: () => settings.pendingAck,
       onHeartbeat: (state, sentAck) => {
         if (settings.update(state, sentAck)) { log({ event: "config_applied", version: settings.appliedVersion, status: settings.pendingAck?.status }); pulse(); void reconcileModels(); }
         if (state && !once) for (const cmd of state.commands) runCommand(cmd);
@@ -199,7 +202,8 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const openEditor = createOpenEditorHandler(loopDeps);
     const voicePreview = createVoicePreviewHandler({ enabled: () => gate().processing, ready: async speaker => speaker.startsWith("clone-") ? localCloneReady() : localTtsReady(), reference: (ref, signal) => ensureVoiceReference(ref, { signal }),
       synth: (speaker, text, signal, reference) => reference ? synthesizeLocalClone({ text, refAudio: reference.audio, refText: reference.text, signal }) : synthesizeLocal({ text, voice: speaker, signal }) });
-    const handlers: Record<string, StudioJobHandler> = { "studio.voice_preview": withShutdown(voicePreview), "studio.video_assemble": withShutdown(videoAssemble), "studio.video_edit": withShutdown(videoEdit), "studio.open_editor": withShutdown(openEditor), "studio.video_transcribe": withShutdown(video), "studio.youtube_search": withShutdown(youtubeSearch), "studio.text_run": withShutdown(textRun), "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
+    const characterSheet = createCharacterSheetHandler({ enabled: () => gate().processing, ready: sheetReady, draw: createCodexFrameDrawer() });
+    const handlers: Record<string, StudioJobHandler> = { "studio.character_sheet": withShutdown(characterSheet), "studio.voice_preview": withShutdown(voicePreview), "studio.video_assemble": withShutdown(videoAssemble), "studio.video_edit": withShutdown(videoEdit), "studio.open_editor": withShutdown(openEditor), "studio.video_transcribe": withShutdown(video), "studio.youtube_search": withShutdown(youtubeSearch), "studio.text_run": withShutdown(textRun), "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
     const report = { instanceId, handlers: Object.keys(handlers) };
     if (once) {
       const startedAt = new Date();

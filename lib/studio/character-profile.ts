@@ -10,6 +10,9 @@ export const EMPTY_MANIFEST: CharacterManifest = { photos: [], profile: { aspect
 /** Derived from the Location and a hash of the user id, never from user input; the first photo is also the stand-in picture the video flow already uses. */
 const folder = (locationId: string, userId: string) => `${locationId}/character/${createHash("sha256").update(userId).digest("hex").slice(0, 40)}`;
 export const characterPhotoKey = (locationId: string, userId: string, n: number) => `${folder(locationId, userId)}/photo-${n}`;
+/** One sheet picture made by one job. The job id and file name are validated by the caller; they are never taken from the Mac's report. */
+export const SHEET_FILE = /^sheet-[1-4]\.png$/;
+export const characterSheetKey = (locationId: string, userId: string, jobId: string, name: string) => `${folder(locationId, userId)}/sheets/${jobId}/${name}`;
 export const characterManifestKey = (locationId: string, userId: string) => `${folder(locationId, userId)}/profile.json`;
 
 const isoOk = (v: unknown): v is string => typeof v === "string" && !Number.isNaN(Date.parse(v));

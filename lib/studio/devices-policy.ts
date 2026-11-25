@@ -15,12 +15,12 @@ export type DeviceProvider = "codex" | "claude";
 /** A device counts as running while its last heartbeat is this recent (same window as hosted workers). */
 export const DEVICE_ONLINE_SECONDS = 90;
 /** Work a paired computer may run. Mac checks are always allowed; the others are granted while processing is On. */
-export const DEVICE_WORK_KINDS = ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble", "studio.video_edit", "studio.open_editor", "studio.voice_preview"] as const;
+export const DEVICE_WORK_KINDS = ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble", "studio.video_edit", "studio.open_editor", "studio.voice_preview", "studio.character_sheet"] as const;
 export type DeviceWorkKind = typeof DEVICE_WORK_KINDS[number];
 export const ONBOARDING_RESEARCH_KIND: DeviceWorkKind = "studio.onboarding_research";
 export const deviceWorkLabels: Record<DeviceWorkKind, string> = {
   "studio.text_run": "Knowledge, idea reviews and script briefs", "studio.diagnostic": "Mac checks", "studio.library_summary": "Library summaries", "studio.onboarding_research": "Business research", "studio.video_transcribe": "Video transcription (YouTube audio, captions, slides)", "studio.youtube_search": "Related YouTube search in your Mac's browser", "studio.video_assemble": "Script to edited video",
-  "studio.video_edit": "Agent edits to a made video", "studio.open_editor": "Open the edit in Substo Video", "studio.voice_preview": "Voice previews",
+  "studio.video_edit": "Agent edits to a made video", "studio.open_editor": "Open the edit in Substo Video", "studio.voice_preview": "Voice previews", "studio.character_sheet": "Character sheets",
 };
 /** Local reasons a running companion is holding processing back (reported in its heartbeat). */
 export const DEVICE_BLOCK_REASONS = {

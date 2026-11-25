@@ -12,6 +12,8 @@ import { testSound } from "@/lib/studio/ai/sound-test";
 import { StudioCommandError } from "@/lib/studio/command-error";
 import { removeCharacterPhoto, saveCharacterPhoto, saveCharacterProfile } from "@/lib/studio/character";
 import { cleanProfile } from "@/lib/studio/character-profile";
+import { getCharacterSheets, requestCharacterSheet, type SheetView } from "@/lib/studio/character-sheets";
+import type { SheetKind } from "@/lib/studio/images/character-sheet";
 
 type State = { error?: string; notice?: string };
 const failure = (e: unknown, fallback: string): State => ({ error: e instanceof VoiceSettingsError || e instanceof StudioAiSettingsError ? e.message : fallback });
@@ -96,3 +98,12 @@ export async function saveCharacterProfileAction(locationId: string, aspects: un
   try { await saveCharacterProfile(locationId, cleanProfile({ aspects, notes })); } catch (e) { return characterFailure(e, "Could not save. Try again."); }
   return { notice: "Saved." };
 }
+
+const SHEETS: readonly string[] = ["turnaround", "expressions", "face", "outfits"];
+/** Asks your own Mac to draw one sheet. The Mac does one at a time, so asking for several queues them. */
+export async function requestCharacterSheetAction(locationId: string, sheet: string): Promise<State> {
+  if (!SHEETS.includes(sheet)) return { error: "Choose a sheet to draw." };
+  try { const r = await requestCharacterSheet(locationId, sheet as SheetKind); return { notice: r.reused ? "That sheet is already being drawn." : "Sent to your Mac." }; }
+  catch (e) { return characterFailure(e, "Could not send this to your Mac. Try again."); }
+}
+export async function getCharacterSheetsAction(locationId: string): Promise<SheetView[]> { return getCharacterSheets(locationId).catch(() => []); }

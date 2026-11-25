@@ -49,6 +49,8 @@ export interface StudioR2Store extends StudioObjectStore {
   presignUpload(input: { key: string; contentType: string; byteSize: number }): Promise<string>;
   headObject(key: string): Promise<{ byteSize: number; contentType: string | null } | null>;
   presignWorkerRead(key: string, seconds?: number): Promise<string>;
+  /** Upload link for the paired Mac: only the content type is signed (the picture's size is not known in advance), so the size is checked after the upload. */
+  presignWorkerUpload(key: string, contentType: string, seconds?: number): Promise<string>;
   /** Remove one object (an on-device voice reference when its voice is deleted). A missing object is not an error. */
   deleteObject(key: string): Promise<void>;
 }
@@ -156,6 +158,10 @@ export function createStudioR2Store(config: StudioR2Config, client?: Sender, max
     return getSignedUrl(signer, new GetObjectCommand({ Bucket, Key: key }), { expiresIn: seconds });
   }
 
+  async function presignWorkerUpload(key: string, contentType: string, seconds = 3600) {
+    return getSignedUrl(signer, new PutObjectCommand({ Bucket, Key: key, ContentType: contentType }), { expiresIn: seconds, signableHeaders: new Set(["content-type"]) });
+  }
+
   async function deleteObject(key: string) {
     try { await s3.send(new DeleteObjectCommand({ Bucket, Key: key })); }
     catch (error) { if (statusOf(error) === 404 || nameOf(error) === "NoSuchKey") return; throw new StudioMediaStoreError("stored_object_delete_failed"); }
@@ -166,5 +172,5 @@ export function createStudioR2Store(config: StudioR2Config, client?: Sender, max
     catch { throw new StudioMediaStoreError("media_bucket_unavailable"); }
   }
 
-  return { checkBucket, bucket: Bucket, readDigest, uploadCreateOnly, presignRead, presignUpload, headObject, presignWorkerRead, deleteObject };
+  return { checkBucket, bucket: Bucket, readDigest, uploadCreateOnly, presignRead, presignUpload, headObject, presignWorkerRead, presignWorkerUpload, deleteObject };
 }

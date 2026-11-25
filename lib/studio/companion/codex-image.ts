@@ -8,7 +8,7 @@ import { nativeLoginEnvironment, runNativeProcess, type ProcessRunner } from "./
  * to a pay-as-you-go account and no API key is involved. The creator's photo is attached as the reference so the same person
  * appears in the new scene. Anything that goes wrong returns false: the caller keeps the plain placeholder.
  */
-export type FrameDrawer = (request: { prompt: string; references: string[]; out: string; signal?: AbortSignal }) => Promise<boolean>;
+export type FrameDrawer = (request: { prompt: string; references: string[]; out: string; signal?: AbortSignal; /** Replaces the default opening sentence (frames edit one photo; sheets are built from several). */ intro?: string }) => Promise<boolean>;
 
 const MAX_BYTES = 12 * 1024 * 1024, MIN_BYTES = 8 * 1024;
 /** A real picture: PNG or JPEG magic bytes and a plausible size. */
@@ -22,10 +22,10 @@ async function looksLikeImage(file: string): Promise<boolean> {
 
 export function createCodexFrameDrawer(deps: { run?: ProcessRunner; command?: string; timeoutMs?: number } = {}): FrameDrawer {
   const run = deps.run ?? runNativeProcess, command = deps.command ?? "codex";
-  return async ({ prompt, references, out, signal }) => {
+  return async ({ prompt, references, out, signal, intro }) => {
     const cwd = dirname(out), name = basename(out);
     await rm(out, { force: true });
-    const text = `Use $imagegen to edit the attached reference photo into one new image. ${prompt} Save the final image as ./${name} in the current directory. Print only the file name.`;
+    const text = `${intro ?? "Use $imagegen to edit the attached reference photo into one new image."} ${prompt} Save the final image as ./${name} in the current directory. Print only the file name.`;
     // "--" ends the attachment list so the prompt is not read as another image file.
     const args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--ephemeral", "-C", cwd, ...references.flatMap(r => ["-i", r]), "--", text];
     try {
