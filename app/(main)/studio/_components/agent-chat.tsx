@@ -13,7 +13,8 @@ import { useStudioTenantHeaders } from "./studio-tenant-context";
 import { SectionFit, useAgentDraft } from "./agent-workspace";
 import { OPEN_TAB_EVENT } from "./source-tabs";
 import { useOptionalSourceWorkspace } from "./source-workspace";
-import { AgentEvidenceChoice, type EvidenceMode } from "./agent-evidence-choice";
+import { AgentEvidenceChoice, type EvidenceMode, type EvidenceSourceFocus } from "./agent-evidence-choice";
+import { RelatedYoutubeVideos } from "./related-youtube-videos";
 import { useDictation } from "./use-dictation";
 
 const API = "/studio/assistant/agent/api";
@@ -52,6 +53,11 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   const pendingKey = useRef<{ input: string; turnId: string } | null>(null);
   const [evidenceMode, setEvidenceMode] = useState<EvidenceMode>("automatic");
   const [evidenceIds, setEvidenceIds] = useState<string[]>([]);
+  const [evidenceFocus, setEvidenceFocus] = useState<EvidenceSourceFocus | null>(null);
+  const [researchPhrase, setResearchPhrase] = useState("");
+  const [researchOpen, setResearchOpen] = useState(false);
+  const researchHeading = useRef<HTMLHeadingElement>(null);
+  const researchOrigin = useRef<HTMLButtonElement | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const fieldId = useId();
@@ -121,7 +127,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
         version: created.current ? 1 : 0, sourceId: created.current ? null : source?.id ?? null, sourceVersion: created.current ? null : source?.version ?? null, message, ...(chosen === null ? {} : { evidenceIds: chosen }), ...(selection ? { selection } : {}), ...studioTextConsent(provider, true) }) });
       const data = await response.json();
       if (!response.ok) { if (response.status < 500) pendingKey.current = null; setError(data.error || "The message could not be sent."); return; }
-      created.current = true; pendingKey.current = null; setText(""); setEvidenceMode("automatic"); setEvidenceIds([]); { const asked = parseDurationRequest(message); if (asked) setTarget(asked.kind === "set" ? asked.seconds : null); } try { if (provider !== "openai") localStorage.setItem(ROUTE_KEY(scope), JSON.stringify(provider)); } catch { /* optional */ }
+      created.current = true; pendingKey.current = null; setText(""); setEvidenceMode("automatic"); setEvidenceIds([]); setEvidenceFocus(null); { const asked = parseDurationRequest(message); if (asked) setTarget(asked.kind === "set" ? asked.seconds : null); } try { if (provider !== "openai") localStorage.setItem(ROUTE_KEY(scope), JSON.stringify(provider)); } catch { /* optional */ }
       if (scriptEditor) { scriptEditor.clearFocus(); scriptEditor.onSent(); }
       else { const url = new URL(window.location.href); url.searchParams.set("draft", recordId); url.searchParams.delete("new"); window.history.replaceState(null, "", url); }
       upsert({ id: data.turnId, seq: turns.length + 1, message, provider, selection: selection ?? null, target: (() => { const asked = parseDurationRequest(message); return asked?.kind === "set" ? asked.seconds : asked?.kind === "clear" ? null : target; })(), status: "running", error: null, activity: [], waiting: "queued", route: null, result: null, inputs: { reads: [], checks: [], context: [] } });
@@ -165,7 +171,14 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   const last = turns.at(-1);
   const workspace = useOptionalSourceWorkspace();
   /** One click into the existing Related videos search with the assistant's phrase; the owner stays in control of picking, saving and transcribing. */
-  function openRelated(query: string) {
+  useEffect(() => { if (researchOpen) researchHeading.current?.focus(); }, [researchOpen, researchPhrase]);
+  function openRelated(query: string, origin: HTMLButtonElement) {
+    if (record) {
+      researchOrigin.current = origin;
+      setResearchPhrase(query);
+      setResearchOpen(true);
+      return;
+    }
     workspace?.setCreating(false);
     const url = new URL(window.location.href); url.searchParams.delete("mode"); window.history.replaceState(null, "", url);
     window.setTimeout(() => {
@@ -176,6 +189,11 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
       }, 60);
     }, 120);
   }
+  function chooseResearchEvidence(id: string, title: string) {
+    setResearchOpen(false);
+    setEvidenceMode("selected");
+    setEvidenceFocus({ id, title });
+  }
   const hasWork = record ? CREATION_STAGES.some(stage => stageDraft(record.state, stage).text.trim().length > 0) : false;
   const moves: Array<[string, string]> = [["Explore alternatives", "Explore two or three genuinely different alternatives for this (a different concept, audience lens or point of view), each with its own spoken opening line."], ["Deepen", "Deepen the weakest part with a concrete example, a counterexample or filmable proof."], ["Tighten", "Tighten this: remove redundancy and keep the promise, the evidence and the payoff."]];
   const starters = scriptEditor && hasWork ? ["Suggest three stronger openings"] : source ? ["Make something inspired by this video", "Sharpen how it opens", "Start for me"] : ["Start for me"];
@@ -185,7 +203,15 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   </div>;
 
   return <>
-    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3" role="log" aria-live="polite" aria-label="Conversation">
+    {record && researchPhrase ? <div hidden={!researchOpen} className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 ref={researchHeading} tabIndex={-1} className="font-semibold">Research for this draft</h2>
+        <Button type="button" variant="outline" className="min-h-10"
+          onClick={() => { setResearchOpen(false); requestAnimationFrame(() => researchOrigin.current?.focus()); }}>Back to writing</Button>
+      </div>
+      <RelatedYoutubeVideos anchorId={recordId} draftResearch={{ phrase: researchPhrase, onChooseEvidence: chooseResearchEvidence }} />
+    </div> : null}
+    <div hidden={researchOpen} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3" role="log" aria-live="polite" aria-label="Conversation">
       {resume && !resumeDismissed && turns.length === 0 && !record ? <div className="mr-6 space-y-2 rounded-lg border border-primary/40 bg-background p-3" role="group" aria-label="Earlier draft from this source">
         <p><strong>You already started a draft from this source:</strong> {resume.title}. {resume.turns ? `${resume.turns} earlier ${resume.turns === 1 ? "exchange" : "exchanges"}. ` : ""}Last changed {new Date(resume.updatedAt).toLocaleDateString()}.</p>
         <div className="flex flex-wrap gap-2"><Button asChild className="min-h-10"><Link href={resume.href}>Resume that draft</Link></Button>
@@ -241,8 +267,8 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
           })}
           {turn.result.research ? <div className="space-y-1.5 rounded-md border border-dashed p-3 text-xs" data-research-suggestion>
             <p><strong>Worth looking for:</strong> “{turn.result.research.query}” — {turn.result.research.reason}</p>
-            <p className="text-muted-foreground">Nothing from related videos has been saved or read yet. To use one as evidence, pick it, save it, transcribe it and approve its findings.</p>
-            {source ? <Button type="button" variant="outline" className="min-h-9 text-xs" onClick={() => openRelated(turn.result!.research!.query)}><Search aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />Search related videos for this</Button> : null}
+            <p className="text-muted-foreground">Save a result to this draft, then review its transcript and approve findings before choosing passages.</p>
+            {record || source ? <Button type="button" variant="outline" className="min-h-9 text-xs" onClick={event => openRelated(turn.result!.research!.query, event.currentTarget)}><Search aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" />Search related videos for this</Button> : null}
           </div> : null}
           {turn.inputs.checks.length ? <p className="text-xs text-muted-foreground" data-length-outcome>{turn.inputs.checks.join(" · ")}</p> : null}
           {turn.result.decisions.length ? <p className="text-xs text-muted-foreground">Noted: {turn.result.decisions.map(d => `${d.key} — ${d.value}`).join("; ")}</p> : null}
@@ -260,7 +286,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
       {error ? <p role="alert" className="mr-6 rounded-lg bg-muted p-3 text-destructive">{error}</p> : null}
       <div ref={endRef} />
     </div>
-    <div className="space-y-2 border-t p-3">
+    <div hidden={researchOpen} className="space-y-2 border-t p-3">
       {scriptEditor && record && stageDraft(record.state, "Script").approved && stageDraft(record.state, "Script").previous ? <Button type="button"
         variant="outline" className="min-h-10 text-xs" disabled={Boolean(applying)}
         onClick={() => void changeDraft("/studio/content/create/api", { action: "undo", stage: "Script" }, "undo", "Script")}>Undo last script change</Button> : null}
@@ -278,7 +304,8 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
           onClick={() => { setText(previous => `${previous.trim() ? previous.trim() + " " : ""}Make it ${phrase}.`.slice(0, AGENT_MESSAGE_LIMIT)); field.current?.focus(); }}>{label}</button>)}
       </div>
       <AgentEvidenceChoice key={record?.id ?? source?.id ?? "fresh"} recordId={record?.id ?? (initialTurns.length ? recordId : null)} sourceId={source?.id ?? null}
-        tenant={tenant} mode={evidenceMode} selected={evidenceIds} onMode={setEvidenceMode} onSelected={setEvidenceIds} disabled={sending || Boolean(running)} />
+        tenant={tenant} mode={evidenceMode} selected={evidenceIds} onMode={setEvidenceMode} onSelected={setEvidenceIds}
+        focusedSource={evidenceFocus} onClearFocus={() => setEvidenceFocus(null)} disabled={sending || Boolean(running)} />
       <label htmlFor={`${fieldId}-msg`} className="sr-only">Message</label>
       <textarea ref={field} id={`${fieldId}-msg`} data-assistant-field value={text} rows={2} maxLength={AGENT_MESSAGE_LIMIT} disabled={Boolean(running)}
         placeholder={running ? "Working on your last message…" : focus ? "What should change in this block?" : scriptEditor ? "What would you like to change in this script?" : "What do you want to make? Or give feedback."}

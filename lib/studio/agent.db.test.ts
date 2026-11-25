@@ -710,6 +710,10 @@ test("chosen and no evidence are pinned to a turn, fenced from other reads, and 
   const earlier = crypto.randomUUID();
   await submit(earlier, null, 0, "EARLIER-HISTORY-MARKER");
   await drive(earlier, () => step({ reply: "Earlier reply." }), 1);
+  assert.deepEqual(await agent.getAgentEvidenceChoices(loc, fresh, null, source), choice);
+  const unrelated = crypto.randomUUID();
+  await sql("insert into studio.studio_records(location_id,id,kind,title,payload) values($1,$2::uuid,'content','Unrelated script','{}')", loc, unrelated);
+  assert.deepEqual(await agent.getAgentEvidenceChoices(loc, unrelated, null, source), []);
   await assert.rejects(submit(crypto.randomUUID(), [stale.evidence]), /no longer available/);
   await assert.rejects(submit(crypto.randomUUID(), [crypto.randomUUID()]), /no longer available/);
 

@@ -102,8 +102,14 @@ test("related YouTube selection saves and links atomically, reuses bookmarks and
     select count(*)::int as count from studio.studio_record_link_events where location_id = ${location}
       and source_id = ${record}::uuid and target_id = ${selection.recordId}::uuid`))?.count, 1);
   const missing = "ab000000-0000-4000-8000-0000000000c3";
-  await assert.rejects(save(missing, { ...selection, recordId: "ab000000-0000-4000-8000-0000000000c4", videoId: "Zyx9876abcd" }), /active source or idea/);
+  await assert.rejects(save(missing, { ...selection, recordId: "ab000000-0000-4000-8000-0000000000c4", videoId: "Zyx9876abcd" }), /active source or content piece/);
   assert.equal(await db.one(Prisma.sql`select record_id from studio.studio_youtube_bookmarks where location_id = ${location} and video_id = 'Zyx9876abcd'`), null);
+  const script = "ab000000-0000-4000-8000-0000000000c5";
+  await db.call("studio_save_record", { p_location_id: location, p_record_id: script, p_kind: "content",
+    p_title: "Existing script", p_payload_patch: { stage: "script", script: "Keep this script." }, p_expected_version: 0, p_clerk_user_id: access.userId });
+  assert.equal(await save(script), selection.recordId);
+  assert.equal((await db.one(Prisma.sql`select 1 as linked from studio.studio_record_links
+    where location_id=${location} and source_id=${script}::uuid and target_id=${selection.recordId}::uuid`)) != null, true);
   await assert.rejects(save(selection.recordId), /already the starting source/);
 });
 

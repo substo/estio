@@ -82,12 +82,17 @@ async function views(access: StudioAccess, turns: TurnRow[], pending: Map<string
   });
 }
 
-export async function getAgentEvidenceChoices(locationId: string, recordId: string | null, sourceId: string | null) {
+export async function getAgentEvidenceChoices(locationId: string, recordId: string | null, sourceId: string | null, linkedSourceId: string | null = null) {
   const access = await requireCreationWriter(locationId);
   if (recordId && !await loadRecord(access, recordId, true)) throw new StudioCommandError("Creation draft unavailable.", 404);
   return studioDb.rows<{ id: string; statement: string; quote: string; title: string; source_id: string }>(Prisma.sql`
     SELECT id,statement,quote,title,source_id
-    FROM studio.studio_agent_evidence_options(${access.locationId},${recordId}::uuid,${sourceId}::uuid,NULL::uuid[])`);
+    FROM studio.studio_agent_evidence_options(
+      ${access.locationId},${linkedSourceId ? null : recordId}::uuid,${linkedSourceId ?? sourceId}::uuid,NULL::uuid[])
+    WHERE (${linkedSourceId}::uuid IS NULL OR EXISTS (
+      SELECT 1 FROM studio.studio_record_links
+      WHERE location_id=${access.locationId} AND source_id=${recordId}::uuid AND target_id=${linkedSourceId}::uuid
+    ))`);
 }
 
 /** Everything the page needs to reopen a draft's conversation. Read-only; the poll route advances running turns. */

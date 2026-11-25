@@ -39,8 +39,9 @@ export const GET = withStudioRoute(async (request, { params }) => {
   try {
     if (query.has("evidenceRecord") || query.has("evidenceSource")) {
       const record = query.get("evidenceRecord"), source = query.get("evidenceSource");
-      if (Boolean(record) === Boolean(source) || !recordLinkId(record ?? source ?? "")) return reply({ error: "Draft or source unavailable." }, 404);
-      return reply({ choices: await getAgentEvidenceChoices(locationId, record, source) }, 200);
+      const linkedSource = query.get("evidenceLinkedSource");
+      if (Boolean(record) === Boolean(source) || !recordLinkId(record ?? source ?? "") || (linkedSource !== null && (!record || !recordLinkId(linkedSource)))) return reply({ error: "Draft or source unavailable." }, 404);
+      return reply({ choices: await getAgentEvidenceChoices(locationId, record, source, linkedSource) }, 200);
     }
     if (!recordLinkId(id)) return reply({ error: "Message unavailable." }, 404);
     const turn = await readAgentTurn(locationId, id);

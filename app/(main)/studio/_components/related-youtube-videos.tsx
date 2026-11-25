@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import type { YoutubeVideo } from "@/lib/google/youtube-api";
 import type { VideoQueueResult } from "@/lib/studio/video-transcription";
@@ -16,15 +16,19 @@ type Polled = { status: "pending" } | { status: "failed"; message: string } | ({
 const POLL_MS = 2000, GIVE_UP_MS = 3 * 60_000, SLOW_MS = 20_000;
 type Saved = { recordId: string; transcription: VideoQueueResult };
 
-export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
+export function RelatedYoutubeVideos({ anchorId, draftResearch }: { anchorId: string;
+  draftResearch?: { phrase: string; onChooseEvidence: (sourceId: string, title: string) => void };
+}) {
   const router = useRouter();
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
+  const queryId = useId();
   const section = useRef<HTMLElement>(null);
   const started = useRef(false);
   const previewTrigger = useRef<HTMLButtonElement | null>(null);
+  const draftPreview = useRef<HTMLElement>(null);
   const [result, setResult] = useState<SearchResult | null>(null);
-  const [query, setQuery] = useState("");
-  const [expanded, setExpanded] = useState(false);
+  const [query, setQuery] = useState(draftResearch?.phrase ?? "");
+  const [expanded, setExpanded] = useState(Boolean(draftResearch));
   const [loading, setLoading] = useState(false);
   const [slow, setSlow] = useState(false);
   const [viaDevice, setViaDevice] = useState(false);
@@ -76,8 +80,16 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
 
   useEffect(() => () => { run.current++; }, []);
 
+  const draftPhrase = draftResearch?.phrase;
+  const inDraft = Boolean(draftResearch);
+  useEffect(() => { if (inDraft && preview) draftPreview.current?.focus(); }, [inDraft, preview]);
   useEffect(() => {
-    if (started.current || !section.current) return;
+    if (!draftPhrase) return;
+    setQuery(draftPhrase);
+  }, [draftPhrase]);
+
+  useEffect(() => {
+    if (inDraft || started.current || !section.current) return;
     const observer = new IntersectionObserver(([entry]) => {
       if (!entry.isIntersecting || started.current) return;
       started.current = true;
@@ -86,9 +98,10 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
     }, { rootMargin: "240px" });
     observer.observe(section.current);
     return () => observer.disconnect();
-  }, [search]);
+  }, [inDraft, search]);
 
   useEffect(() => {
+    if (inDraft) return;
     const onAsk = (event: Event) => {
       const phrase = (event as CustomEvent<{ phrase?: string }>).detail?.phrase?.trim();
       if (!phrase) return;
@@ -96,7 +109,7 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
     };
     window.addEventListener("studio:related-search", onAsk);
     return () => window.removeEventListener("studio:related-search", onAsk);
-  }, [search]);
+  }, [inDraft, search]);
 
   function explore() {
     started.current = true;
@@ -144,7 +157,12 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
           {video.score != null && video.band !== "unranked" && <p className="break-words text-xs"><span className="font-medium">Relevance {video.score}/100</span>{video.reason ? ` · ${video.reason}` : ""}</p>}
               {video.description && <p className="break-words text-xs text-muted-foreground"><span className="sr-only">Publisher description. </span>{video.description}</p>}
           {selection ? <div role="status" className="space-y-1">
-            <Link className="font-medium text-primary underline" href={`/studio/library/${selection.recordId}`}>Open linked reference</Link>
+            <Link className="block font-medium text-primary underline" href={`/studio/library/${selection.recordId}${draftResearch ? "#knowledge" : ""}`}
+              target={draftResearch ? "_blank" : undefined} rel={draftResearch ? "noreferrer" : undefined}>
+              {draftResearch ? "Review transcript and findings (new tab)" : "Open linked reference"}
+            </Link>
+            {draftResearch ? <button type="button" className="min-h-9 text-left text-xs font-medium text-primary underline"
+              onClick={() => draftResearch.onChooseEvidence(selection.recordId, video.title)}>Choose approved passages</button> : null}
             {selection.transcription.status === "not_queued" && <p className="text-xs text-muted-foreground">{selection.transcription.message}</p>}
             {["queued", "reused"].includes(selection.transcription.status) && <p className="text-xs text-muted-foreground">Mac transcription queued.</p>}
           </div> : <div className="flex flex-wrap items-center gap-3">
@@ -154,6 +172,11 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
         </div>
       </article>;
   };
+  const player = preview ? <>
+    <iframe title={`YouTube player for ${preview.title}`} className="aspect-video w-full rounded-md bg-black"
+      src={`https://www.youtube-nocookie.com/embed/${preview.id}`} allow="encrypted-media; picture-in-picture" allowFullScreen />
+    <a className="text-sm text-primary underline" href={`https://www.youtube.com/watch?v=${preview.id}`} target="_blank" rel="noreferrer">Open on YouTube</a>
+  </> : null;
   const grid = (items: Candidate[]) => <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">{items.map(renderCard)}</div>;
   return (
     <section ref={section} aria-label="Related YouTube videos" className="space-y-4">
@@ -162,9 +185,9 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
         {!expanded && <button type="button" className="text-sm text-primary underline disabled:opacity-50" onClick={explore} disabled={loading}>Explore more</button>}
       </div>
       {expanded && <form className="space-y-2" onSubmit={event => { event.preventDefault(); void search(true, query); }}>
-        <label htmlFor={`related-query-${anchorId}`} className="text-sm font-medium">Search YouTube</label>
+        <label htmlFor={queryId} className="text-sm font-medium">Search YouTube</label>
         <div className="flex flex-wrap gap-2">
-          <input id={`related-query-${anchorId}`} className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm" value={query} onChange={event => setQuery(event.target.value)} maxLength={160} required />
+          <input id={queryId} className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm" value={query} onChange={event => setQuery(event.target.value)} maxLength={160} required />
           <button type="submit" className="rounded-md border px-3 py-2 text-sm disabled:opacity-50" disabled={loading}>Search</button>
         </div>
         {result?.alternateQuery && <button type="button" className="text-left text-sm text-primary underline disabled:opacity-50" disabled={loading} onClick={() => void search(true, result.alternateQuery ?? undefined)}>Try “{result.alternateQuery}”</button>}
@@ -176,6 +199,14 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
       {result && !videos.length && !loading ? <p className="text-sm text-muted-foreground">
         {result.videos.length ? "You skipped all results for this search." : "No other public videos found. Try a different search."}
       </p> : null}
+      {draftResearch && preview ? <section ref={draftPreview} tabIndex={-1} aria-label="Video preview" className="space-y-2 rounded-lg border p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="break-words font-medium">{preview.title}</h3>
+          <button type="button" className="min-h-10 text-sm text-primary underline"
+            onClick={() => { setPreview(null); previewTrigger.current?.focus(); }}>Close preview</button>
+        </div>
+        {player}
+      </section> : null}
       {result?.ranked ? <>
         {relevant.length ? grid(relevant) : !loading ? <p className="text-sm text-muted-foreground">No videos scored as relevant to this source. Try Explore more or a different search.</p> : null}
         {less.length > 0 && <details className="space-y-3"><summary className="cursor-pointer text-sm text-muted-foreground">Less relevant ({less.length})</summary>{grid(less)}</details>}
@@ -184,14 +215,13 @@ export function RelatedYoutubeVideos({ anchorId }: { anchorId: string }) {
         <details className="space-y-3"><summary className="cursor-pointer text-sm text-muted-foreground">Show {unchecked.length} unchecked results anyway</summary>{grid(unchecked)}</details>
       </div> : null}
       {result?.runId ? <p className="text-xs"><Link className="text-primary underline" href={`/studio/related-history/${anchorId}`}>How these were chosen</Link></p> : null}
-      <Dialog open={Boolean(preview)} onOpenChange={open => { if (!open) setPreview(null); }}>
+      {!draftResearch ? <Dialog open={Boolean(preview)} onOpenChange={open => { if (!open) setPreview(null); }}>
         {preview && <DialogContent className="max-h-[90dvh] max-w-2xl overflow-y-auto" onCloseAutoFocus={event => { event.preventDefault(); previewTrigger.current?.focus(); }}>
           <DialogTitle className="break-words pr-7">{preview.title}</DialogTitle>
           <DialogDescription>{preview.channelTitle}</DialogDescription>
-          <iframe title={`YouTube player for ${preview.title}`} className="aspect-video w-full rounded-md bg-black" src={`https://www.youtube-nocookie.com/embed/${preview.id}`} allow="encrypted-media; picture-in-picture" allowFullScreen />
-          <a className="text-sm text-primary underline" href={`https://www.youtube.com/watch?v=${preview.id}`} target="_blank" rel="noreferrer">Open on YouTube</a>
+          {player}
         </DialogContent>}
-      </Dialog>
+      </Dialog> : null}
     </section>
   );
 }

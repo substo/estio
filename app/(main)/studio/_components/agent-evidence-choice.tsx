@@ -1,40 +1,59 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 
 export type EvidenceMode = "automatic" | "selected" | "none";
+export type EvidenceSourceFocus = { id: string; title: string };
 type Choice = { id: string; statement: string; quote: string; title: string };
 
-export function AgentEvidenceChoice({ recordId, sourceId, tenant, mode, selected, onMode, onSelected, disabled }: {
+export function AgentEvidenceChoice({ recordId, sourceId, tenant, mode, selected, onMode, onSelected, disabled, focusedSource = null, onClearFocus }: {
   recordId: string | null; sourceId: string | null; tenant: string;
   mode: EvidenceMode; selected: string[]; onMode: (mode: EvidenceMode) => void;
   onSelected: (ids: string[]) => void; disabled: boolean;
+  focusedSource?: EvidenceSourceFocus | null; onClearFocus?: () => void;
 }) {
   const [choices, setChoices] = useState<Choice[] | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
+  const details = useRef<HTMLDetailsElement>(null);
+  const request = useRef(0);
+  const [loadedSource, setLoadedSource] = useState<string | null>(null);
   const canChoose = Boolean(recordId || sourceId);
   const visible = (choices ?? []).filter(item => !query.trim() || `${item.title} ${item.statement} ${item.quote}`.toLowerCase().includes(query.trim().toLowerCase()));
 
-  async function load() {
+  const load = useCallback(async (linkedId: string | null = null) => {
+    const generation = ++request.current;
     setPending(true);
     setError("");
     try {
       const params = new URLSearchParams(recordId ? { evidenceRecord: recordId } : { evidenceSource: sourceId ?? "" });
+      if (recordId && linkedId) params.set("evidenceLinkedSource", linkedId);
       const response = await fetch(`/studio/assistant/agent/api?${params}`, { headers: { "X-Studio-Tenant": tenant }, cache: "no-store", signal: AbortSignal.timeout(15_000) });
       const data = await response.json();
       if (!response.ok || !Array.isArray(data.choices)) throw new Error();
       const rows = data.choices as Choice[];
+      if (generation !== request.current) return;
       setChoices(rows);
-      onSelected(selected.filter(id => rows.some(row => row.id === id)));
+      setLoadedSource(linkedId);
     } catch {
-      setError("Could not load approved passages. Try refreshing.");
-    } finally { setPending(false); }
-  }
+      if (generation === request.current) setError("Could not load approved passages. Try refreshing.");
+    } finally { if (generation === request.current) setPending(false); }
+  }, [recordId, sourceId, tenant]);
 
-  return <details className="text-xs">
+  useEffect(() => {
+    if (!focusedSource || !recordId) return;
+    setQuery("");
+    setChoices(null);
+    if (details.current) {
+      details.current.open = true;
+      details.current.querySelector("summary")?.focus();
+    }
+    void load(focusedSource.id);
+  }, [focusedSource, load, recordId]);
+
+  return <details ref={details} className="text-xs">
     <summary className="cursor-pointer text-muted-foreground">Source evidence for this message · {
       mode === "automatic" ? "Automatic" : mode === "none" ? "None" : `${selected.length} selected`
     }</summary>
@@ -45,7 +64,11 @@ export function AgentEvidenceChoice({ recordId, sourceId, tenant, mode, selected
           onChange={event => {
             const next = event.target.value as EvidenceMode;
             onMode(next);
-            if (next === "selected" && !choices && !pending) void load();
+            if (next !== "selected" && focusedSource) { onClearFocus?.(); setChoices(null); ++request.current; setPending(false); }
+            if (next === "selected" && !pending && (!choices || loadedSource !== (focusedSource?.id ?? null))) {
+              setChoices(null);
+              void load(focusedSource?.id);
+            }
           }}>
           <option value="automatic">Automatic</option>
           <option value="selected" disabled={!canChoose}>Selected passages</option>
@@ -54,6 +77,11 @@ export function AgentEvidenceChoice({ recordId, sourceId, tenant, mode, selected
       </label>
       {mode !== "automatic" ? <p className="text-muted-foreground">The assistant uses your message and current draft. Earlier chat and additional source reads are skipped for this message.</p> : null}
       {mode === "selected" ? <>
+        {focusedSource ? <div className="flex flex-wrap items-center gap-2">
+          <p>Passages from <strong>{focusedSource.title}</strong></p>
+          <Button type="button" variant="ghost" size="sm" disabled={disabled}
+            onClick={() => { onClearFocus?.(); setChoices(null); void load(); }}>Show all linked sources</Button>
+        </div> : null}
         {pending ? <p role="status">Loading approved passages…</p> : null}
         {error ? <p role="alert" className="text-destructive">{error}</p> : null}
         {choices?.length ? <>
@@ -69,10 +97,11 @@ export function AgentEvidenceChoice({ recordId, sourceId, tenant, mode, selected
             </label></li>)}
             {visible.length === 0 ? <li>No passages match this filter.</li> : null}
           </ul>
-        </> : choices ? <p>No approved passages are available from this draft’s linked sources.</p> : null}
+        </> : choices ? <p>{focusedSource ? "No approved passages are ready for this source. Review its saved transcript, approve findings, then refresh." : "No approved passages are available from this draft’s linked sources."}</p> : null}
         <div className="flex items-center gap-2">
           <p className="text-muted-foreground">{selected.length} of 4 selected</p>
-          <Button type="button" variant="ghost" size="sm" disabled={pending || disabled} onClick={() => void load()}>Refresh passages</Button>
+          {selected.length ? <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => onSelected([])}>Clear selection</Button> : null}
+          <Button type="button" variant="ghost" size="sm" disabled={pending || disabled} onClick={() => void load(focusedSource?.id)}>Refresh passages</Button>
         </div>
       </> : null}
     </div>

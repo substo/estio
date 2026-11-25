@@ -16,15 +16,15 @@ export function saveYoutubeSelection(store: StudioDb, access: YoutubeAuthority, 
 }
 
 export async function relatedAnchor(store: StudioDb, locationId: string, anchorId: unknown, lock = false) {
-  if (typeof anchorId !== "string" || !recordLinkId(anchorId)) throw new YoutubeError("invalid_anchor", "Choose a saved source or idea.");
+  if (typeof anchorId !== "string" || !recordLinkId(anchorId)) throw new YoutubeError("invalid_anchor", "Choose a saved source or content piece.");
   const record = await store.one<{ id: string; kind: string; title: string; version: number; source_url: string | null; topic: string | null }>(Prisma.sql`
     select id, kind, title, version, source_url,
       left(coalesce(nullif(payload->>'aiSummary',''), nullif(payload->>'description',''),
         nullif(payload->>'summary',''), payload->>'transcript'), 2400) as topic
     from studio.studio_records where location_id = ${locationId} and id = ${anchorId}::uuid and not archived
-      and (kind = 'reference' or (kind = 'content' and payload->>'stage' = 'idea'))
+      and kind in ('reference', 'content')
     ${lock ? Prisma.sql`for no key update` : Prisma.empty}`);
-  if (!record) throw new YoutubeError("invalid_anchor", "Choose an active source or idea in this Location.");
+  if (!record) throw new YoutubeError("invalid_anchor", "Choose an active source or content piece in this Location.");
   return record;
 }
 
