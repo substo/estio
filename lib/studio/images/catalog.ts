@@ -20,6 +20,8 @@ export interface ImagePlatform {
   keyUrl: string;
   /** The key is shared with another part of the product, so it is entered once there. */
   sharedKey?: string;
+  /** Where that shared key is entered (path and label), so the Images page can link to it. */
+  sharedKeyHref?: string; sharedKeyLabel?: string;
   /** Plain description of how it is billed. */
   billing: string;
   /** How the key is checked for free before it is stored (or "request" when a deliberately empty request is used). */
@@ -27,9 +29,9 @@ export interface ImagePlatform {
 }
 
 export const IMAGE_PLATFORMS: Record<ImagePlatformId, ImagePlatform> = {
-  fal: { id: "fal", label: "fal.ai", keyUrl: "https://fal.ai/dashboard/keys", sharedKey: "The same fal.ai key also makes music and sound effects: enter it once in Settings → Voices.", billing: "Pay as you go, per image. One key reaches many models (FLUX, Qwen-Image, Ideogram, Stable Diffusion).", freeCheck: "empty-request" },
-  google: { id: "google", label: "Google AI (Gemini)", keyUrl: "https://aistudio.google.com/apikey", sharedKey: "Uses the Google AI key already set for this Location in Settings → AI.", billing: "Per image through the Gemini API; roughly $0.04 per image on the 2.5 Flash Image model.", freeCheck: "models-list" },
-  openai: { id: "openai", label: "OpenAI", keyUrl: "https://platform.openai.com/api-keys", sharedKey: "Uses the OpenAI key already set for this Location in Settings → AI.", billing: "Per image by quality and size; reference-image edits cost extra input tokens.", freeCheck: "models-list" },
+  fal: { id: "fal", label: "fal.ai", keyUrl: "https://fal.ai/dashboard/keys", sharedKey: "The same fal.ai key also makes music and sound effects: it is entered once, under Music and sound effects.", sharedKeyHref: "/settings/ai/audio", sharedKeyLabel: "Settings → AI → Music and sound effects", billing: "Pay as you go, per image. One key reaches many models (FLUX, Qwen-Image, Ideogram, Stable Diffusion).", freeCheck: "empty-request" },
+  google: { id: "google", label: "Google AI (Gemini)", keyUrl: "https://aistudio.google.com/apikey", sharedKey: "Uses the Google AI key already set for this Location (Text and reasoning).", sharedKeyHref: "/settings/ai", sharedKeyLabel: "Settings → AI → Text and reasoning", billing: "Per image through the Gemini API; roughly $0.04 per image on the 2.5 Flash Image model.", freeCheck: "models-list" },
+  openai: { id: "openai", label: "OpenAI", keyUrl: "https://platform.openai.com/api-keys", sharedKey: "Uses the OpenAI key already set for this Location (Text and reasoning).", sharedKeyHref: "/settings/ai", sharedKeyLabel: "Settings → AI → Text and reasoning", billing: "Per image by quality and size; reference-image edits cost extra input tokens.", freeCheck: "models-list" },
   replicate: { id: "replicate", label: "Replicate", keyUrl: "https://replicate.com/account/api-tokens", billing: "Pay as you go, per image. Hosts the same FLUX, Ideogram and Stable Diffusion models as fal.ai.", freeCheck: "account" },
   bfl: { id: "bfl", label: "Black Forest Labs (FLUX, direct)", keyUrl: "https://dashboard.bfl.ai", billing: "Credits (1 credit = $0.01). FLUX.1 Kontext pro is about 4 credits an image; FLUX.2 is billed by megapixel.", freeCheck: "credits" },
   ideogram: { id: "ideogram", label: "Ideogram (direct)", keyUrl: "https://ideogram.ai/manage-api", billing: "Per image by rendering speed. Best for images that contain readable text.", freeCheck: "empty-request" },

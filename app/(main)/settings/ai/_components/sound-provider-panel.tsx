@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { hostedOptions, pickHostedSound, soundProvider, type HostedSoundProvider, type SoundKeys, type SoundKind } from "@/lib/studio/voices/sound-providers";
-import { removeFalKeyAction, saveFalKeyAction, setSoundProviderAction } from "./actions";
+import { removeFalKeyAction, saveFalKeyAction, setSoundProviderAction } from "../actions";
 
 type State = { error?: string; notice?: string };
 const kindWord: Record<SoundKind, string> = { music: "music", effects: "sound effects" };
@@ -57,6 +57,6 @@ export function SoundProviderPanel({ locationId, kind, effective, canManage, cho
     {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
     {active === null && !keys.fal ? <p className="text-xs text-muted-foreground">No hosted key yet: add one below, or the Mac makes it instead.</p> : null}
     {canManage ? <FalKeyForm locationId={locationId} hint={falHint} /> : null}
-    {!keys.elevenlabs ? <p className="text-xs text-muted-foreground">An ElevenLabs key is added in <Link className="text-primary hover:underline" href="/settings/ai">Settings → AI</Link>.</p> : null}
+    {!keys.elevenlabs ? <p className="text-xs text-muted-foreground">An ElevenLabs key is added in <Link className="text-primary hover:underline" href="/settings/ai/voice">Settings → AI → Voice</Link>.</p> : null}
   </div>;
 }

@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { IMAGE_MODELS, IMAGE_PLATFORMS, UNSUPPORTED_IMAGE_MODELS, type ImageChoice, type ImageModel, type ImagePlatformId } from "@/lib/studio/images/catalog";
 import { SAMPLE_SHOT, renderShot } from "@/lib/studio/images/prompts";
 import type { ImagePlatformState, ImageTests } from "@/lib/studio/images/keys";
-import { discoverImageModelsAction, removeImageKeyAction, saveImageKeyAction, setImageChoiceAction, testImageAction } from "./actions";
+import { discoverImageModelsAction, removeImageKeyAction, saveImageKeyAction, setImageChoiceAction, testImageAction } from "../actions";
 
 type State = { error?: string; notice?: string };
 const dialectWord = { natural: "Flowing description", edit: "Instruction to an editing model", tags: "Short phrases plus a negative prompt", ideogram: "Quoted text first" } as const;
@@ -67,7 +67,7 @@ function ModelRow({ locationId, model, hasKey, choice, tests, canManage, discove
   </li>;
 }
 
-/** Settings → Voices: which platforms hold your keys and which models draw the storyboard frames. Off until a model is chosen. */
+/** Settings → AI → Images: which platforms hold your keys and which models draw the storyboard frames. Off until a model is chosen. */
 export function ImageGenerationCard({ locationId, canManage, platforms, choice, tests, discovered }: {
   locationId: string; canManage: boolean; platforms: ImagePlatformState[]; choice: ImageChoice | null; tests: ImageTests; discovered: Record<string, string[]>;
 }) {
@@ -85,7 +85,7 @@ export function ImageGenerationCard({ locationId, canManage, platforms, choice, 
       <ul className="space-y-2">{platforms.map(p => { const info = IMAGE_PLATFORMS[p.id]; return <li key={p.id} className="space-y-2 rounded-md border p-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2"><p className="font-medium">{info.label}</p><p className="text-xs">{p.hint ? <span className="text-emerald-600">Key ending {p.hint}</span> : <span className="text-muted-foreground">No key</span>}</p></div>
         <p className="text-xs text-muted-foreground">{info.billing}</p>
-        {p.shared ? <p className="text-xs text-muted-foreground">{info.sharedKey} <Link href="/settings/ai" className="underline underline-offset-2">Settings → AI</Link></p>
+        {p.shared ? <p className="text-xs text-muted-foreground">{info.sharedKey} <Link href={info.sharedKeyHref ?? "/settings/ai"} className="underline underline-offset-2">{info.sharedKeyLabel ?? "Settings → AI"}</Link></p>
           : canManage ? <KeyForm locationId={locationId} platform={p.id} hint={p.hint} /> : <p className="text-xs text-muted-foreground">Only an owner or admin can change keys.</p>}
         <a href={info.keyUrl} target="_blank" rel="noreferrer" className="text-xs text-primary hover:underline">Where to get a key</a>
       </li>; })}</ul>

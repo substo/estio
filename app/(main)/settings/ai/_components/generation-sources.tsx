@@ -2,7 +2,7 @@
 import { useState, useTransition } from "react";
 import { GENERATION_KINDS, hostedProviderLabel, kindLabels, resolveSource, type GenerationKind, type GenerationSources, type SourceChoice } from "@/lib/studio/voices/sources";
 import type { HostedSoundProvider, SoundKeys, SoundProviderChoices } from "@/lib/studio/voices/sound-providers";
-import { setGenerationSourceAction } from "./actions";
+import { setGenerationSourceAction } from "../actions";
 import { SoundProviderPanel } from "./sound-provider-panel";
 
 export interface SoundPanelData { choices: SoundProviderChoices; keys: SoundKeys; falHint: string | null; models: { music: boolean; effects: boolean } }

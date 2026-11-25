@@ -32,7 +32,7 @@ export async function requestVideoAssembly(locationId: string, recordId: string,
     }
     const hostedVoice = voice && isHostedProvider(voice.provider) ? voice : undefined;
     if (voice && !hostedVoice) sqlOptions.voice = { voiceId };
-    // Music and the whoosh are made on this Mac unless the Location chose a hosted provider for that kind (Settings -> Voices -> Generation sources).
+    // Music and the whoosh are made on this Mac unless the Location chose a hosted provider for that kind (Settings -> AI -> Music and sound effects).
     // Only then does the server render them, with the Location's own ElevenLabs key, which takes a while: same background path as hosted narration.
     const sources = options.music ? await getGenerationSources(access.locationId).catch(() => ({} as GenerationSources)) : {};
     const wantsHosted = options.music && (sources.music === "hosted" || sources.effects === "hosted");

@@ -39,7 +39,7 @@ export function MakeVideoDialog({ locationId, recordId, voices, availability, so
           <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="voiceover" checked={voiceover} onChange={e => setVoiceover(e.target.checked)} /> Generate the voiceover from the script</label>
           {voiceover ? <div className="pl-6"><VoicePicker locationId={locationId} voices={voices} availability={avail} value={voiceId} onChange={setVoiceId} /></div> : null}
           <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="music" checked={music} onChange={e => setMusic(e.target.checked)} /> Add a music bed and sound effects</label>
-          {music && soundSources ? <p className="pl-6 text-xs text-muted-foreground">{soundSources.music}. {soundSources.effects}. <Link href="/settings/voices" className="underline underline-offset-2">Change</Link></p> : null}
+          {music && soundSources ? <p className="pl-6 text-xs text-muted-foreground">{soundSources.music}. {soundSources.effects}. <Link href="/settings/ai/audio" className="underline underline-offset-2">Change</Link></p> : null}
           <fieldset className="space-y-2 rounded-md border p-3">
             <legend className="px-1 text-xs font-medium text-muted-foreground">Look of titles and callouts</legend>
             <div className="flex flex-wrap items-center gap-2">

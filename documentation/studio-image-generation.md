@@ -1,6 +1,10 @@
 # Storyboard images: platforms, models and prompts
 
-Status (2026-11-25): the catalog, prompt builder, platform clients, key storage and the Settings → Voices "Storyboard images" card are built. The storyboard itself (a frame for each beat without footage, drawn from the creator's photo, reviewed before use) is the next step and is not built yet. Nothing is generated until an owner chooses a model and presses Test or Generate.
+Status (2026-11-25): the catalog, prompt builder, platform clients, key storage and the Settings → AI → Images card are built. The storyboard itself (a frame for each beat without footage, drawn from the creator's photo, reviewed before use) is the next step and is not built yet. Nothing is generated until an owner chooses a model and presses Test or Generate.
+
+## Where it lives
+
+All provider keys and every "which provider or model makes this" choice are under **Settings → AI**, one page per type: **Text and reasoning** (`/settings/ai`), **Voice** (`/settings/ai/voice`), **Music and sound effects** (`/settings/ai/audio`) and **Images** (`/settings/ai/images`). A key shared by two types (fal.ai for audio and images, ElevenLabs for voice and sound) is entered once; the other page links to it. **Settings → Voices** is only the voice library, recording, cloning, design and "Your look".
 
 ## Platform vs model
 
@@ -8,10 +12,10 @@ A **platform** holds the key and the bill. A **model** draws the picture. Severa
 
 | Platform | Key | Models it runs here |
 |---|---|---|
-| fal.ai | the fal.ai key already used for music and sound effects (Settings → Voices) | FLUX Kontext, FLUX.2, Qwen-Image Edit, Ideogram 3, Stable Diffusion 3.5, SDXL |
+| fal.ai | the fal.ai key already used for music and sound effects (Settings → AI → Music and sound effects) | FLUX Kontext, FLUX.2, Qwen-Image Edit, Ideogram 3, Stable Diffusion 3.5, SDXL |
 | Google AI (Gemini) | the Google AI key in Settings → AI | Gemini image ("Nano Banana") |
 | OpenAI | the OpenAI key in Settings → AI | GPT Image (the id is picked from OpenAI's own model list: gpt-image-1 was retired on 23 Oct 2026) |
-| Replicate | its own key, entered in Settings → Voices | FLUX Kontext, FLUX.2 pro, Qwen-Image Edit, Ideogram 3, Stable Diffusion 3.5, SDXL |
+| Replicate | its own key, entered in Settings → AI → Images | FLUX Kontext, FLUX.2 pro, Qwen-Image Edit, Ideogram 3, Stable Diffusion 3.5, SDXL |
 | Black Forest Labs (direct) | its own key | FLUX Kontext, FLUX.2 |
 | Ideogram (direct) | its own key | Ideogram 3 |
 | Stability AI (direct) | its own key | Stable Diffusion 3.5 |
