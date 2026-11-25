@@ -166,3 +166,11 @@ test("voice preview: bounded audio result, previewReady claim flag, capability p
   assert.throws(() => readPreviewResult({ preview: { audioBase64: audio, speaker: "ryan", extra: 1 } }));
   assert.deepEqual(safeDeviceCapabilities({ voicePreview: { ready: true, junk: 1 } }).voicePreview, { ready: true });
 });
+
+test("the character-sheet readiness flag is kept as a bare boolean and nothing else from it", () => {
+  const kept = safeDeviceCapabilities({ handlers: ["studio.character_sheet", "studio.bogus"], characterSheet: { ready: true, path: "/Users/x/.codex", token: "secret" } }) as { handlers?: string[]; characterSheet?: unknown };
+  assert.deepEqual(kept.handlers, ["studio.character_sheet"]);
+  assert.deepEqual(kept.characterSheet, { ready: true });
+  assert.deepEqual((safeDeviceCapabilities({ characterSheet: { ready: "yes" } }) as { characterSheet?: unknown }).characterSheet, { ready: false });
+  assert.equal((safeDeviceCapabilities({ characterSheet: "x" }) as { characterSheet?: unknown }).characterSheet, undefined);
+});
