@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import type { AgentTurnView } from "@/lib/studio/agent";
 import { agentCitationHref, citedQuote, proposalAnchor, type ProposalFocus } from "@/lib/studio/citation-navigation";
 import { AGENT_MESSAGE_LIMIT, type AgentSelection } from "@/lib/studio/agent-policy";
-import { IDEA_CARD_FORMAT, ideaComparisonPrompt, readIdeaCard } from "@/lib/studio/idea-cards";
+import { IDEA_CARD_FORMAT, ideaComparisonPrompt, ideaLabel, readIdeaCard } from "@/lib/studio/idea-cards";
 import { CREATION_STAGES, stageDraft, type CreationRecord, type CreationStage } from "@/lib/studio/creation-policy";
 import { formatClock, parseDurationRequest, scriptStats, targetWords } from "@/lib/studio/script-length";
 import { studioTextConsent, type StudioTextProvider } from "@/lib/studio/text-provider";
@@ -217,8 +217,9 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   }
   const hasWork = record ? CREATION_STAGES.some(stage => stageDraft(record.state, stage).text.trim().length > 0) : false;
   const concept = record ? stageDraft(record.state, "Concept") : null;
-  const activeIdea = concept?.approved ? readIdeaCard(concept.text) : null;
-  const currentProposal = activeIdea
+  const activeConceptText = concept?.approved ? concept.text.trim() : "";
+  const activeIdea = activeConceptText ? readIdeaCard(activeConceptText) : null;
+  const currentProposal = activeConceptText
     ? [...turns].reverse().flatMap(turn => (turn.result?.proposals ?? []).map((proposal, index) => ({ turnId: turn.id, index, proposal })))
       .find(({ proposal }) => proposal.stage === "Concept" && proposal.text === concept?.text)
     : null;
@@ -279,7 +280,8 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
             const composed = patchable && sel ? savedText.slice(0, sel.start) + /^\s*/.exec(sel.text)![0] + proposal.text + /\s*$/.exec(sel.text)![0] + savedText.slice(sel.end) : null;
             const after = composed ? scriptStats(composed) : null;
             const anchor = proposalAnchor({ turnId: turn.id, index });
-            const idea = proposal.stage === "Concept" && !proposal.replaces ? readIdeaCard(proposal.text) : null;
+            const isIdea = proposal.stage === "Concept" && !proposal.replaces;
+            const idea = isIdea ? readIdeaCard(proposal.text) : null;
             const compared = comparison?.turnId === turn.id ? comparison.indices : [];
             const shortlisted = concept?.shortlist.includes(proposal.text) ?? false;
             return <div key={index} id={anchor} tabIndex={-1}
@@ -316,12 +318,12 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
               {proposal.replaces ? <p className="text-xs text-muted-foreground" data-patch-note>{patchable && after ? <>Only the selected words change; the rest stays exactly as saved. {proposal.stage === "Script" ? <>After applying, the whole script is about {formatClock(after.seconds)} spoken ({after.spokenWords} words).</> : null} <strong>{scriptEditor ? "Undo last script change" : "Undo last change"}</strong> restores it.</> : "The selected words changed since this edit was written, so it can't be applied. Select them again."}</p> : null}
               {replaces ? <p className="text-xs text-muted-foreground">This replaces your saved {proposal.stage}. {scriptEditor ? <><strong>Undo last script change</strong> restores it.</> : <><strong>Undo last change</strong> in the Draft panel restores it.</>}</p> : null}
               <div className="flex flex-wrap gap-2">
-                {scriptEditor && proposal.stage !== "Script" && proposal.stage !== "Shoot plan" && !idea ? <Button asChild variant="outline" className="min-h-10"><Link href={`/studio/content/create?draft=${recordId}`}>Review in guided draft</Link></Button> : <Button type="button" className="min-h-10" disabled={inDraft || Boolean(proposal.replaces && !patchable) || Boolean(applying)} onClick={() => use(turn, index)}>{inDraft ? "In your draft" : idea ? "Use this direction" : proposal.stage === "Shoot plan" ? "Save filming checklist" : proposal.replaces ? "Replace selected text" : replaces ? `Replace saved ${proposal.stage}` : `Use as ${proposal.stage}`}</Button>}
-                {idea && record ? <Button type="button" variant="outline" className="min-h-10" disabled={shortlisted || Boolean(applying)}
+                {scriptEditor && proposal.stage !== "Script" && proposal.stage !== "Shoot plan" && !isIdea ? <Button asChild variant="outline" className="min-h-10"><Link href={`/studio/content/create?draft=${recordId}`}>Review in guided draft</Link></Button> : <Button type="button" className="min-h-10" disabled={inDraft || Boolean(proposal.replaces && !patchable) || Boolean(applying)} onClick={() => use(turn, index)}>{inDraft ? "In your draft" : isIdea ? "Use this direction" : proposal.stage === "Shoot plan" ? "Save filming checklist" : proposal.replaces ? "Replace selected text" : replaces ? `Replace saved ${proposal.stage}` : `Use as ${proposal.stage}`}</Button>}
+                {isIdea && record ? <Button type="button" variant="outline" className="min-h-10" disabled={shortlisted || Boolean(applying)}
                   onClick={() => void changeDraft("/studio/content/create/api", { action: "shortlist", stage: "Concept", text: proposal.text }, `${anchor}-shortlist`, "Concept")}>{shortlisted ? "Shortlisted" : "Shortlist"}</Button> : null}
-                {idea && turn.result!.proposals.filter(item => item.stage === "Concept" && !item.replaces && readIdeaCard(item.text)).length > 1 ?
+                {isIdea && turn.result!.proposals.filter(item => item.stage === "Concept" && !item.replaces).length > 1 ?
                   <Button type="button" variant="outline" className="min-h-10" aria-pressed={compared.includes(index)}
-                    aria-label={`Compare ${idea.Title}`} disabled={!compared.includes(index) && compared.length === 2}
+                    aria-label={`Compare ${ideaLabel(proposal.text)}`} disabled={!compared.includes(index) && compared.length === 2}
                     onClick={() => setComparison({ turnId: turn.id, indices: compared.includes(index) ? compared.filter(item => item !== index) : [...compared, index] })}>Compare</Button> : null}
               </div>
             </div>;
@@ -351,15 +353,16 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
       <div ref={endRef} />
     </div>
     <div hidden={researchOpen} className="space-y-2 border-t p-3">
-      {activeIdea || concept?.shortlist.length ? <details className="text-xs">
-        <summary className="cursor-pointer break-words font-medium">{activeIdea ? `Current direction · ${activeIdea.Title}` : "Shortlisted ideas"}</summary>
+      {activeConceptText || concept?.shortlist.length ? <details className="text-xs">
+        <summary className="cursor-pointer break-words font-medium">{activeConceptText ? `Current direction · ${ideaLabel(activeConceptText)}` : "Shortlisted ideas"}</summary>
         {activeIdea ? <p className="mt-1 break-words">{activeIdea.Premise} <strong>Payoff</strong> {activeIdea.Payoff}</p> : null}
+        {activeConceptText && !activeIdea ? <p className="mt-1 whitespace-pre-wrap break-words">{activeConceptText}</p> : null}
         {currentProposal && currentEvidence?.sourceId ? <p className="mt-1 break-words">
           <Link href={agentCitationHref(currentEvidence.sourceId, currentProposal, currentEvidence.id)} target="_blank" rel="noreferrer"
             className="text-primary underline">Supporting passage (new tab)</Link>
         </p> : null}
         {currentProposal?.proposal.verify[0] ? <p className="mt-1 break-words text-muted-foreground">Check before filming: {currentProposal.proposal.verify[0]}</p> : null}
-        {concept?.shortlist.length ? <ul className="mt-1 list-disc space-y-1 break-words pl-5">{concept.shortlist.map(text => <li key={text}>{readIdeaCard(text)?.Title ?? text}</li>)}</ul> : null}
+        {concept?.shortlist.length ? <ul className="mt-1 list-disc space-y-1 break-words pl-5">{concept.shortlist.map(text => <li key={text}>{ideaLabel(text)}</li>)}</ul> : null}
       </details> : null}
       {scriptEditor && record && stageDraft(record.state, "Script").approved && stageDraft(record.state, "Script").previous ? <Button type="button"
         variant="outline" className="min-h-10 text-xs" disabled={Boolean(applying)}

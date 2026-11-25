@@ -14,6 +14,11 @@ export function readIdeaCard(text: string): Record<IdeaField, string> | null {
   return { Title: values[0], Premise: values[1], Audience: values[2], "Spoken opening": values[3], Payoff: values[4] };
 }
 
+export function ideaLabel(text: string) {
+  const firstLine = readIdeaCard(text)?.Title ?? text.trim().split(/\r?\n/, 1)[0];
+  return firstLine.length <= 100 ? firstLine : `${firstLine.slice(0, 99).trimEnd()}…`;
+}
+
 export function ideaComparisonPrompt(ideas: readonly string[]) {
-  return `Compare these two ideas on how immediately the opening delivers the title, strength of payoff, and what I can film. Name the trade-off and suggest which to develop.\n\n${ideas.map((idea, index) => `Idea ${index + 1}\n${idea}`).join("\n\n")}`;
+  return `Compare these two ideas on how immediately the opening delivers the title, strength of payoff, and what I can film. Name the trade-off and suggest which to develop.\n\n${ideas.map((idea, index) => `Idea ${index + 1}\n${idea.length > 875 ? `${idea.slice(0, 875).trimEnd()}…` : idea}`).join("\n\n")}`;
 }

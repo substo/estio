@@ -104,4 +104,6 @@ test("complete concept proposals render as comparable ideas and show the active 
   assert.match(html, /aria-label="Compare Ask the question"/);
   assert.match(html, /Shortlisted/);
   assert.match(html, /An earlier idea still renders in full\./);
+  assert.match(html, /aria-label="Compare An earlier idea still renders in full\."/);
+  assert.equal((html.match(/>Shortlist</g) ?? []).length, 2);
 });
