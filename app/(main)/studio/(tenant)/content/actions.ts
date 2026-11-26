@@ -103,10 +103,10 @@ export async function makeVideoAction(locationId: string, recordId: string, _pre
 }
 
 /** Ask the signed-in user's own Mac to draw one picture per beat of the saved script. Nothing is paid for: the Mac draws with the creator's ChatGPT login. */
-export async function drawStoryboardAction(locationId: string, recordId: string, portrait: boolean): Promise<{ error?: string; notice?: string }> {
+export async function drawStoryboardAction(locationId: string, recordId: string, portrait: boolean, only?: number[]): Promise<{ error?: string; notice?: string }> {
   if (!await getStudioAccess(locationId)) notFound();
   try {
-    const result = await requestStoryboard(locationId, recordId, portrait);
+    const result = await requestStoryboard(locationId, recordId, portrait, Array.isArray(only) ? only.filter(n => Number.isInteger(n) && n >= 1 && n <= 40) : undefined);
     revalidatePath(`/studio/content/${recordId}`);
     return { notice: result.reused ? "The storyboard is already being drawn." : "Sent to your Mac. The pictures appear here as they finish." };
   } catch (error) {

@@ -11,12 +11,12 @@ const payload = z.object({
   sheet: z.enum(["turnaround", "expressions", "face", "outfits", "storyboard"]),
   profile: z.object({ aspects: z.array(z.object({ key: z.string().max(40), value: z.string().max(200), locked: z.boolean() })).max(12), notes: z.string().max(400).optional() }).passthrough().optional(),
   /** Storyboard only: one picture per script beat, each with the scene text to draw. */
-  beats: z.array(z.object({ n: z.number().int().min(1).max(6), prompt: z.string().min(1).max(1500) }).passthrough()).min(1).max(6).optional(),
+  beats: z.array(z.object({ n: z.number().int().min(1).max(40), prompt: z.string().min(1).max(1500) }).passthrough()).min(1).max(40).optional(),
   /** Storyboard only, added at claim time: the creator's latest turnaround and face sheets, when they have them. */
   characterSheets: z.array(z.object({ name: z.string().regex(/^character-(turnaround|face)\.png$/), url: z.string().url().max(4000) })).max(2).optional(),
   /** Added at claim time: short-lived private links to this person's own photos (the face first) and one upload link per picture. */
   photos: z.array(z.object({ name: z.string().regex(/^photo-[1-5]\.(jpg|png|webp)$/), url: z.string().url().max(4000) })).min(1).max(3),
-  uploads: z.array(z.object({ name: z.string().regex(/^(?:sheet-[1-4]|frame-[1-6])\.png$/), url: z.string().url().max(4000) })).min(1).max(6),
+  uploads: z.array(z.object({ name: z.string().regex(/^(?:sheet-[1-4]|frame-(?:[1-9]|[1-3][0-9]|40))\.png$/), url: z.string().url().max(4000) })).min(1).max(40),
 }).passthrough();
 
 const MAX_PHOTO = 8 * 1024 * 1024, MAX_SHEET = 12 * 1024 * 1024;

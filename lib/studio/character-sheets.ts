@@ -75,7 +75,7 @@ export async function withCharacterSheetFiles(jobs: unknown): Promise<unknown> {
         url: await store.presignWorkerRead(characterPhotoKey(job.location_id as string, job.created_by_clerk_user_id as string, p.n), SIGNED_SECONDS) })));
       const storyboard = job.payload?.sheet === "storyboard";
       const names = storyboard
-        ? (Array.isArray(job.payload?.beats) ? job.payload.beats as Array<{ n?: unknown }> : []).map(b => Number(b?.n)).filter(n => Number.isInteger(n) && n >= 1 && n <= 6).slice(0, 6).map(n => `frame-${n}.png`)
+        ? (Array.isArray(job.payload?.beats) ? job.payload.beats as Array<{ n?: unknown }> : []).map(b => Number(b?.n)).filter(n => Number.isInteger(n) && n >= 1 && n <= 40).slice(0, 40).map(n => `frame-${n}.png`)
         : ["sheet-1.png"];
       const uploads = await Promise.all(names.map(async name => ({ name, url: await store.presignWorkerUpload(characterSheetKey(job.location_id as string, job.created_by_clerk_user_id as string, job.id as string, name), "image/png", SIGNED_SECONDS) })));
       const characterSheets = storyboard ? await latestSheetLinks(store, job.location_id, job.created_by_clerk_user_id) : [];

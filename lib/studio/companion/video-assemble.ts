@@ -39,7 +39,7 @@ const payload = z.object({
   /** Added at claim time when the Location chose Codex on the Mac for storyboard frames: draw one per beat when there is no footage. */
   storyboardFrames: z.object({ source: z.literal("codex"), max: z.number().int().min(1).max(8) }).optional(),
   /** Added at claim time: the pictures the creator already drew and approved in the Storyboard step, for beats whose script has not changed since. They are used as they are; nothing is drawn for those beats. */
-  storyboardPreviews: z.array(z.object({ beat: z.number().int().min(1).max(6), name: z.string().regex(/^storyboard-frame-[1-6]\.png$/), url: z.string().url().max(4000) })).max(6).default([]),
+  storyboardPreviews: z.array(z.object({ beat: z.number().int().min(1).max(40), name: z.string().regex(/^storyboard-frame-(?:[1-9]|[1-3][0-9]|40)\.png$/), url: z.string().url().max(4000) })).max(40).default([]),
   /** The creator's private storyboard photo, minted at claim time when they saved one. */
   avatar: z.object({ name: z.string().regex(/^storyboard-avatar\.(jpg|png|webp)$/), contentType: z.string().max(40), url: z.string().url().max(4000), byteSize: z.number().int().positive().max(5 * 1024 * 1024) }).optional(),
   /** The creator's latest turnaround and face sheets, minted at claim time. Frames are drawn from these as well as the photo. */

@@ -12,8 +12,8 @@ import { createStudioR2Store, readStudioR2Config } from "./media-r2";
 import { studioDb } from "./studio-db";
 import { parseScript, type Beat } from "./video-assembly/script";
 
-/** How many beats get a picture: the first six, so the cost and the time of one drawing stay small and predictable. */
-export const STORYBOARD_MAX = 6;
+/** A safety ceiling per drawing, not a creative limit: the creator and the agent decide which beats get a picture. */
+export const STORYBOARD_MAX = 40;
 const messages: Record<string, string> = {
   SB001: "The storyboard could not be built from this script. Save the script and try again.", SB002: "This piece could not be found.",
   CS011: "Pair a Mac in Setup to draw the storyboard. Nothing was sent to a paid service.", CS012: "Turn Mac processing on in Setup to draw the storyboard.",
@@ -26,14 +26,15 @@ const identity = (a: { locationId: string; app: string; userId: string }) => ({ 
 export const beatHash = (beat: Pick<Beat, "narration" | "direction">) => createHash("sha256").update(`${beat.narration}\n${beat.direction ?? ""}`).digest("hex");
 
 /** Ask the signed-in user's own Mac to draw one picture per beat of the saved script. */
-export async function requestStoryboard(locationId: string, recordId: string, portrait: boolean): Promise<{ jobId: string; reused: boolean }> {
+export async function requestStoryboard(locationId: string, recordId: string, portrait: boolean, only?: number[]): Promise<{ jobId: string; reused: boolean }> {
   const access = await getStudioAccess(locationId);
   if (!access || (await auth()).actor) throw new StudioCommandError("The storyboard can only be drawn from your own account.", 403);
   const record = await getStudioContentRecord(locationId, recordId);
   if (!record) throw new StudioCommandError("This piece could not be found.", 404);
   const script = typeof record.record.payload.script === "string" ? record.record.payload.script : "";
-  const beats = parseScript(script).slice(0, STORYBOARD_MAX);
-  if (!beats.length) throw new StudioCommandError("Save a script first, then draw the storyboard.");
+  const chosen = only ? new Set(only) : null;
+  const beats = parseScript(script).slice(0, STORYBOARD_MAX).filter(b => !chosen || chosen.has(b.index));
+  if (!beats.length) throw new StudioCommandError(chosen ? "Choose at least one beat to draw." : "Save a script first, then draw the storyboard.");
   const wide = portrait ? "vertical 9:16 portrait" : "wide 16:9 landscape";
   const payload = beats.map(b => ({ n: b.index, h: beatHash(b),
     prompt: `${renderShot(shotForBeat(b, portrait), "edit", { acceptsText: false }).prompt} Compose it as a ${wide} image that fills the whole frame.`.slice(0, 1500) }));
@@ -54,13 +55,19 @@ export interface StoryboardView {
   drawnAt: string | null; truncated: boolean;
 }
 
-type Raw = { latest: { jobId: string; status: string; error: string | null; finishedAt: string | null } | null; ready: { jobId: string; files: unknown; beats: unknown; finishedAt: string | null } | null };
+type Drawing = { jobId: string; files: unknown; beats: unknown; finishedAt: string | null };
+type Raw = { latest: { jobId: string; status: string; error: string | null; finishedAt: string | null } | null; ready: Drawing[] | null };
+/** Each beat's newest picture across the latest finished drawings (newest first), so redrawing a few beats keeps the rest. */
 const framesOf = (ready: Raw["ready"]) => {
-  const out = new Map<number, { name: string; h: string }>();
-  const hashes = new Map<number, string>(Array.isArray(ready?.beats) ? (ready.beats as Array<{ n?: unknown; h?: unknown }>).filter(b => Number.isInteger(b?.n) && typeof b?.h === "string").map(b => [b.n as number, b.h as string]) : []);
-  for (const f of Array.isArray(ready?.files) ? ready.files : []) {
-    const m = typeof f === "string" && SHEET_FILE.test(f) ? /^frame-([1-6])\.png$/.exec(f) : null;
-    if (m && hashes.has(Number(m[1]))) out.set(Number(m[1]), { name: m[0], h: hashes.get(Number(m[1])) as string });
+  const out = new Map<number, { jobId: string; name: string; h: string }>();
+  for (const drawing of Array.isArray(ready) ? ready : []) {
+    if (!uuid.test(String(drawing?.jobId))) continue;
+    const hashes = new Map<number, string>(Array.isArray(drawing.beats) ? (drawing.beats as Array<{ n?: unknown; h?: unknown }>).filter(b => Number.isInteger(b?.n) && typeof b?.h === "string").map(b => [b.n as number, b.h as string]) : []);
+    for (const f of Array.isArray(drawing.files) ? drawing.files : []) {
+      const m = typeof f === "string" && SHEET_FILE.test(f) ? /^frame-(\d{1,2})\.png$/.exec(f) : null;
+      const n = m ? Number(m[1]) : 0;
+      if (m && n >= 1 && hashes.has(n) && !out.has(n)) out.set(n, { jobId: drawing.jobId, name: m[0], h: hashes.get(n) as string });
+    }
   }
   return out;
 };
@@ -72,16 +79,16 @@ export async function getStoryboard(locationId: string, recordId: string, script
   const all = parseScript(script), beats = all.slice(0, STORYBOARD_MAX);
   const raw = await studioDb.call<Raw>("studio_storyboard_state", { ...identity(access), p_record_id: recordId }).catch(() => null);
   const frames = framesOf(raw?.ready ?? null);
-  const config = readStudioR2Config(), store = config && raw?.ready && uuid.test(raw.ready.jobId) ? createStudioR2Store(config) : null;
+  const config = readStudioR2Config(), store = config && frames.size ? createStudioR2Store(config) : null;
   const rows = await Promise.all(beats.map(async b => {
     const f = frames.get(b.index);
-    const url = f && store && raw?.ready ? await store.presignRead({ key: characterSheetKey(access.locationId, access.userId, raw.ready.jobId, f.name), contentType: "image/png", contentDisposition: "inline" }).catch(() => null) : null;
+    const url = f && store ? await store.presignRead({ key: characterSheetKey(access.locationId, access.userId, f.jobId, f.name), contentType: "image/png", contentDisposition: "inline" }).catch(() => null) : null;
     return { n: b.index, narration: b.narration, direction: b.direction ?? null, url, stale: Boolean(url && f && f.h !== beatHash(b)) };
   }));
   const latest = raw?.latest ?? null;
   const active = latest?.status === "queued" || latest?.status === "running";
   const status: StoryboardView["status"] = active ? latest.status as "queued" | "running" : rows.some(r => r.url) ? "ready" : latest?.status === "failed" || latest?.status === "cancelled" ? latest.status : "none";
-  return { status, error: latest && (latest.status === "failed" || latest.status === "cancelled") ? latest.error : null, beats: rows, drawnAt: raw?.ready?.finishedAt ?? null, truncated: all.length > beats.length };
+  return { status, error: latest && (latest.status === "failed" || latest.status === "cancelled") ? latest.error : null, beats: rows, drawnAt: raw?.ready?.[0]?.finishedAt ?? null, truncated: all.length > beats.length };
 }
 
 const SIGNED_SECONDS = 3600;
@@ -97,12 +104,12 @@ export async function withStoryboardPreviews(jobs: unknown): Promise<unknown> {
     if (job?.kind !== "studio.video_assemble" || typeof job.location_id !== "string" || typeof job.created_by_clerk_user_id !== "string" || typeof recordId !== "string" || !uuid.test(recordId) || typeof script !== "string") return raw;
     try {
       const state = await studioDb.call<Raw>("studio_storyboard_for", { p_location_id: job.location_id, p_clerk_user_id: job.created_by_clerk_user_id, p_record_id: recordId });
-      if (!state?.ready || !uuid.test(state.ready.jobId)) return raw;
-      const frames = framesOf(state.ready);
+      const frames = framesOf(state?.ready ?? null);
+      if (!frames.size) return raw;
       const previews = (await Promise.all(parseScript(script).slice(0, STORYBOARD_MAX).map(async b => {
         const f = frames.get(b.index);
         if (!f || f.h !== beatHash(b)) return null;
-        return { beat: b.index, name: `storyboard-frame-${b.index}.png`, url: await store.presignWorkerRead(characterSheetKey(job.location_id as string, job.created_by_clerk_user_id as string, state.ready!.jobId, f.name), SIGNED_SECONDS) };
+        return { beat: b.index, name: `storyboard-frame-${b.index}.png`, url: await store.presignWorkerRead(characterSheetKey(job.location_id as string, job.created_by_clerk_user_id as string, f.jobId, f.name), SIGNED_SECONDS) };
       }))).filter((p): p is { beat: number; name: string; url: string } => p !== null);
       return previews.length ? { ...job, payload: { ...job.payload, storyboardPreviews: previews } } : raw;
     } catch { return raw; }

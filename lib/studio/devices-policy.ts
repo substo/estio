@@ -277,7 +277,7 @@ export function readPreviewResult(value: unknown) {
 export function readSheetResult(value: unknown) {
   const v = object(value); valid(Object.keys(v).length === 2 && ["turnaround", "expressions", "face", "outfits", "storyboard"].includes(String(v.sheet)));
   const storyboard = v.sheet === "storyboard";
-  valid(Array.isArray(v.files) && v.files.length >= 1 && v.files.length <= (storyboard ? 6 : 4) && v.files.every(f => typeof f === "string" && (storyboard ? /^frame-[1-6]\.png$/ : /^sheet-[1-4]\.png$/).test(f)));
+  valid(Array.isArray(v.files) && v.files.length >= 1 && v.files.length <= (storyboard ? 40 : 4) && v.files.every(f => typeof f === "string" && (storyboard ? /^frame-(?:[1-9]|[1-3][0-9]|40)\.png$/ : /^sheet-[1-4]\.png$/).test(f)));
   return { sheet: v.sheet, files: v.files };
 }
 /** Opening the kept project in Substo Video: a boolean and the folder's name, never a path. */
