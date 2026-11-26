@@ -30,8 +30,8 @@ export async function localCloneReady(python = venvPython(), hub = hubDirectory(
   if (!await detectModel(cloneEntry, hub)) return false;
   try { await execFileAsync(python, ["-c", "import mlx_audio"], { timeout: 30_000 }); return true; } catch { return false; }
 }
-/** Qwen3-TTS makes about 12.5 tokens a second and people speak about 2.6 words a second, so 5 tokens a word is natural pace. Twice that, plus a little, leaves room for slow speech but stops a run that never ends (a 3 second sentence once produced 11 minutes of audio and 15 GB of memory). */
-export const ttsMaxTokens = (text: string) => Math.min(9000, Math.max(100, text.trim().split(/\s+/).filter(Boolean).length * 10 + 60));
+/** Qwen3-TTS makes about 12.5 tokens a second and people speak about 2.6 words a second, so 5 tokens a word is natural pace. 7 a word plus a little leaves room for slow speech but stops a run that never ends (a 3 second sentence once produced 11 minutes of audio and 15 GB of memory). */
+export const ttsMaxTokens = (text: string) => Math.min(9000, Math.max(100, text.trim().split(/\s+/).filter(Boolean).length * 7 + 50));
 /** Speak with an on-device cloned voice: mlx-audio's --ref_audio/--ref_text zero-shot cloning on the Base model. The transcript must be the exact words in the reference. */
 export async function synthesizeLocalClone({ text, refAudio, refText, model = cloneModel, python = venvPython(), signal }: { text: string; refAudio: string; refText: string; model?: string; python?: string; signal?: AbortSignal }): Promise<Buffer> {
   if (!modelPattern.test(model)) throw new Error("invalid_model");
