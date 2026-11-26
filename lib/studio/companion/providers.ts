@@ -7,6 +7,7 @@ import { z } from "zod";
 import { NATIVE_REJECTION_BACKOFF_MS } from "../subscription-readiness";
 import { StudioProviderRejectedError } from "../worker/handlers";
 import { runNativeProcess, type ProcessRunner } from "./process";
+import { observeCompanionMetricUnits } from "./metrics";
 
 export type LocalProvider = "codex" | "claude";
 export type LoginMethod = "chatgpt" | "api_key" | "claudeai" | "console" | "unknown";
@@ -134,6 +135,14 @@ export function createLocalTextAdapter(provider: LocalProvider, run: ProcessRunn
         let value: unknown;
         try {
           const events = stdout.trim().split("\n").filter(Boolean).map(line => object.parse(JSON.parse(line)));
+          const usageEvents = events.flatMap(event => {
+            const usage = event.usage && typeof event.usage === "object" && !Array.isArray(event.usage) ? event.usage as Record<string, unknown>
+              : event.message && typeof event.message === "object" && !Array.isArray(event.message) && (event.message as Record<string, unknown>).usage && typeof (event.message as Record<string, unknown>).usage === "object"
+                ? (event.message as Record<string, unknown>).usage as Record<string, unknown> : null;
+            const tokens = usage?.output_tokens;
+            return typeof tokens === "number" && Number.isFinite(tokens) && tokens > 0 ? [tokens] : [];
+          });
+          if (usageEvents.length) observeCompanionMetricUnits("tokens", Math.max(...usageEvents));
           if (provider === "codex") {
             if (!events.some(e => e.type === "turn.completed") || events.some(e => e.type === "turn.failed" || e.type === "error")) throw new Error();
             const messages = events.filter(e => e.type === "item.completed" && object.safeParse(e.item).success)

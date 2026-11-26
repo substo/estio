@@ -1,5 +1,6 @@
 import { StudioProviderRejectedError } from "../worker/handlers";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { observeCompanionPeakMemoryMb } from "./metrics";
 
 export class CompanionProcessError extends Error {
   constructor(public readonly code: "cli_unavailable" | "cli_failed" | "cli_timeout" | "cli_cancelled" | "cli_output_limit") {
@@ -55,6 +56,13 @@ export const runNativeProcess: ProcessRunner = request => new Promise((resolve, 
   if (request.signal?.aborted) return reject(new CompanionProcessError("cli_cancelled"));
   const child = spawn(request.command, request.args, { cwd: request.cwd, env: nativeLoginEnvironment(request.env),
     shell: false, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+  // Cheap, best-effort RSS sampling for the direct native child (MLX, ffmpeg, Codex/Claude or substo).
+  // It never delays or fails the job; descendants are intentionally not crawled.
+  const sampleMemory = () => { if (!child.pid) return; execFile("/bin/ps", ["-o", "rss=", "-p", String(child.pid)], { timeout: 1000, maxBuffer: 4096 }, (error, stdout) => {
+    if (error) return; const kb = Number(stdout.trim()); if (Number.isFinite(kb) && kb > 0) observeCompanionPeakMemoryMb(kb / 1024);
+  }); };
+  sampleMemory();
+  const memoryTimer = setInterval(sampleMemory, 1000); memoryTimer.unref();
   let failure: CompanionProcessError | undefined; let satisfied = false;
   let stdout = "", stderr = "", size = 0;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -79,7 +87,7 @@ export const runNativeProcess: ProcessRunner = request => new Promise((resolve, 
   }
   child.stdin.on("error", () => {}); // An early CLI exit may close stdin before the prompt is written.
   if (request.until) child.stdin.write(request.input ?? ""); else child.stdin.end(request.input ?? "");
-  const cleanup = () => { clearTimeout(timer); clearTimeout(killTimer); request.signal?.removeEventListener("abort", abort); killGroup("SIGKILL"); };
+  const cleanup = () => { clearInterval(memoryTimer); sampleMemory(); clearTimeout(timer); clearTimeout(killTimer); request.signal?.removeEventListener("abort", abort); killGroup("SIGKILL"); };
   child.once("error", () => { cleanup(); reject(new CompanionProcessError("cli_unavailable")); });
   child.once("close", code => { cleanup(); if (failure) reject(failure);
     else if (request.until) { if (satisfied) resolve({ stdout, stderr }); else reject(new CompanionProcessError("cli_failed")); }

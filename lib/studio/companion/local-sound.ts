@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runNativeProcess, type ProcessRunner } from "./process";
 import { videoProcessEnvironment, type VideoTools } from "./video-tools";
+import { measureCompanionFeature } from "./metrics";
 
 export type SoundRole = "music" | "sfx";
 /** Rough spoken length of a script in seconds (about 2.5 words a second plus a lead-in and tail), so the bed covers the video. */
@@ -28,7 +29,7 @@ export function createLocalSoundMaker(deps: { tools: () => Promise<VideoTools>; 
   /** The Hugging Face repo of the installed model for this role (fixed catalog value), or null when it is not installed. */
   model?: (role: SoundRole) => Promise<string | null>; modelPython?: string }) {
   const run = deps.run ?? runNativeProcess;
-  return async (role: SoundRole, seconds: number, outFile: string, signal?: AbortSignal): Promise<boolean> => {
+  return async (role: SoundRole, seconds: number, outFile: string, signal?: AbortSignal): Promise<boolean> => measureCompanionFeature(role === "music" ? "music" : "sound_effects", async () => {
     const tools = await deps.tools();
     const { ffmpeg } = tools.paths;
     const python = tools.paths.python ?? "python3";
@@ -53,6 +54,6 @@ export function createLocalSoundMaker(deps: { tools: () => Promise<VideoTools>; 
       return true;
     } catch { if (signal?.aborted) throw new Error("aborted"); return false; }   // a missing sound only costs the video that sound
     finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
-  };
+  }, { unit: "audio_seconds", units: role === "music" ? seconds : 1.5 });
 }
 export type LocalSoundMaker = ReturnType<typeof createLocalSoundMaker>;

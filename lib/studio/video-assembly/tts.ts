@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { detectModel, hubDirectory, modelVenv } from "../companion/model-manager";
 import { catalogModel } from "../local-models";
+import { runNativeProcess } from "../companion/process";
 
 const execFileAsync = promisify(execFile);
 /** Eleven v3 steers delivery with audio tags like [excited]; Fish S2 takes the same bracketed natural-language tags. */
@@ -38,7 +39,7 @@ export async function synthesizeLocalClone({ text, refAudio, refText, model = cl
   if (!text.trim() || text.length > 4500 || !refText.trim() || refText.length > 1500) throw new Error("invalid_speech_text");
   const dir = await mkdtemp(join(tmpdir(), "studio-tts-"));
   try {
-    await execFileAsync(python, ["-m", "mlx_audio.tts.generate", "--model", model, "--text", text, "--max_tokens", String(ttsMaxTokens(text)), "--ref_audio", refAudio, "--ref_text", refText, "--output_path", dir, "--file_prefix", "speech", "--audio_format", "mp3", "--lang_code", "a"], { timeout: 10 * 60_000, signal, maxBuffer: 1 << 20 });
+    await runNativeProcess({ command: python, args: ["-m", "mlx_audio.tts.generate", "--model", model, "--text", text, "--max_tokens", String(ttsMaxTokens(text)), "--ref_audio", refAudio, "--ref_text", refText, "--output_path", dir, "--file_prefix", "speech", "--audio_format", "mp3", "--lang_code", "a"], cwd: dir, timeoutMs: 10 * 60_000, signal, maxOutputBytes: 1 << 20 });
     const file = (await readdir(dir)).find(f => f.startsWith("speech") && f.endsWith(".mp3"));
     if (!file) throw new Error("local_tts_no_output");
     const bytes = await readFile(join(dir, file));
@@ -54,7 +55,7 @@ export async function synthesizeLocal({ text, model = localModel, voice = localE
   if (!text.trim() || text.length > 4500) throw new Error("invalid_speech_text");
   const dir = await mkdtemp(join(tmpdir(), "studio-tts-"));
   try {
-    await execFileAsync(python, ["-m", "mlx_audio.tts.generate", "--model", model, "--voice", voice, "--text", text, "--max_tokens", String(ttsMaxTokens(text)), "--output_path", dir, "--file_prefix", "speech", "--audio_format", "mp3", "--lang_code", "a"], { timeout: 10 * 60_000, signal, maxBuffer: 1 << 20 });
+    await runNativeProcess({ command: python, args: ["-m", "mlx_audio.tts.generate", "--model", model, "--voice", voice, "--text", text, "--max_tokens", String(ttsMaxTokens(text)), "--output_path", dir, "--file_prefix", "speech", "--audio_format", "mp3", "--lang_code", "a"], cwd: dir, timeoutMs: 10 * 60_000, signal, maxOutputBytes: 1 << 20 });
     const file = (await readdir(dir)).find(f => f.startsWith("speech") && f.endsWith(".mp3"));
     if (!file) throw new Error("local_tts_no_output");
     const bytes = await readFile(join(dir, file));

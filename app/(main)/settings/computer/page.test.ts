@@ -153,6 +153,22 @@ test("Devices is read-only for Location members", async () => {
   assert.doesNotMatch(html, /Turn processing off|>Remove Mac<|>Save setup</);
 });
 
+test("Devices shows bounded recent Mac work, throughput, memory pressure and a slow hint", async () => {
+  const now = Date.now();
+  const device: StudioDeviceSummary = { ...offline, online: true, capabilities: { metrics: { version: 1, memory: { swapUsedMb: 2560, freePercent: 7.4 }, recent: [
+    { feature: "voice_preview", status: "succeeded", outcome: "succeeded", startedAtMs: now - 42_000, durationMs: 42_000, typicalDurationMs: 40_000, unit: "audio_seconds", units: 4, ratePerSecond: 0.1 },
+    { feature: "make_video", status: "running", outcome: "running", startedAtMs: now - 400_000, durationMs: 400_000, typicalDurationMs: 100_000, slow: true, stages: { prepare: 12_000 } },
+  ] } } };
+  const html = await renderSettings({ app: "substo", role: "ADMIN", devices: [device] });
+  assert.match(html, /Recent work on this Mac/);
+  assert.match(html, /Voice preview/);
+  assert.match(html, /0\.1 audio s\/s/);
+  assert.match(html, /10\.0× real-time factor/);
+  assert.match(html, /High memory pressure/);
+  assert.match(html, /Running longer than usual/);
+  assert.match(html, /prepare 12 s/);
+});
+
 
 test("The mobile filter preserves the originating product and limits the relay inventory to Estio admins", async () => {
   const admin = await renderSettings({ app: "estio", role: "ADMIN", devices: [], type: "mobile" });

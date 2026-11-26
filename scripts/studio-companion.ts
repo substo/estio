@@ -43,8 +43,9 @@ import { ensureVoiceReference } from "../lib/studio/companion/voice-profiles";
 import { createVoicePreviewHandler } from "../lib/studio/companion/voice-preview";
 import { detectModel, hubDirectory, ModelManager, modelVenv } from "../lib/studio/companion/model-manager";
 import { createPlaywrightYoutubeBrowser, createYoutubeSearchHandler, findChrome, openYoutubeLogin, youtubeBrowserProfile } from "../lib/studio/companion/youtube-search";
+import { CompanionMetrics, featureForStudioJob } from "../lib/studio/companion/metrics";
 
-const version = "studio-companion-16";
+const version = "studio-companion-17";
 const rediscoverMs = 10 * 60_000;
 const usage = "Usage: npm run start:studio-companion -- pair --origin <https origin> [--name 'My Mac'] | start [--once] | readiness | youtube-login\nRun in the background: bash scripts/studio-companion-launchagent.sh install";
 const messages: Record<string, string> = {
@@ -90,6 +91,9 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const { config, credentials, migrated } = await loadCredentials().catch(error => {
       throw error instanceof Error && error.message === "keychain_write_failed" ? error : new Error("not_paired"); });
     const log = (event: Record<string, unknown>) => console.log(JSON.stringify({ at: new Date().toISOString(), ...event }));
+    let pulse: () => void = () => {};
+    const metrics = new CompanionMetrics({ file: join(os.homedir(), "Library", "Logs", "Estio", "studio-metrics.jsonl"), onChange: () => pulse() });
+    await metrics.load();
     const reportRoute: ReportLocalRoute = (jobId, { provider, model, firstLocalStep, switchReason }) => log({
       event: "local_text_route", jobId, provider, model: model ?? "native-default", firstLocalStep, switchReason,
     });
@@ -121,7 +125,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
         .catch(() => log({ event: "model_reconcile_failed" }));
     };
     await models.refresh().catch(() => {});
-    const capabilities = () => ({ instanceId, modelStates: models.states(), platform: os.platform(), arch: os.arch(), version, knowledgeOutlineVersion: 2, knowledgeCurationVersion: 1, stagedCreationVersion: 1, studioAgentVersion: 4, videoTemplateVersion: 1, sourceAssistVersion: 1, textRouteVersion: TEXT_ROUTE_VERSION, deviceAiRouteVersion: 1, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble", "studio.character_sheet"], videoAssembly: { ready: assemblyReady(), missing: assembly.missing, sourceClips: 1 }, voicePreview: { ready: previewReady() }, characterSheet: { ready: sheetReady() }, transcribeUpload: { ready: Boolean(videoTools.paths.python && videoTools.paths.ffmpeg && videoTools.report.tools.model === "downloaded") }, youtubeSearch: { ready: youtubeReady(), signedIn: youtubeSignedIn, rank: researchReady() }, ...providers, ...discovery, video: videoTools.report,
+    const capabilities = () => ({ instanceId, modelStates: models.states(), platform: os.platform(), arch: os.arch(), version, metrics: metrics.summary(), knowledgeOutlineVersion: 2, knowledgeCurationVersion: 1, stagedCreationVersion: 1, studioAgentVersion: 4, videoTemplateVersion: 1, sourceAssistVersion: 1, textRouteVersion: TEXT_ROUTE_VERSION, deviceAiRouteVersion: 1, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble", "studio.character_sheet"], videoAssembly: { ready: assemblyReady(), missing: assembly.missing, sourceClips: 1 }, voicePreview: { ready: previewReady() }, characterSheet: { ready: sheetReady() }, transcribeUpload: { ready: Boolean(videoTools.paths.python && videoTools.paths.ffmpeg && videoTools.report.tools.model === "downloaded") }, youtubeSearch: { ready: youtubeReady(), signedIn: youtubeSignedIn, rank: researchReady() }, ...providers, ...discovery, video: videoTools.report,
       nativeSubscriptionVersion: 1, nativeRetryAt: nativeRetryAt(), capacity: capacity(), usage: tracker.snapshot(), processingBlocked: gate().reasons.filter(reason => reason in DEVICE_BLOCK_REASONS) });
     const researchReady = () => gate().processing && Object.values(capacity()).some(Boolean);
     /** Character sheets are drawn with the Codex CLI on this Mac's ChatGPT login: installed, signed in, and the gate allows processing. */
@@ -141,7 +145,6 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
 
     // Provider login/logout commands arrive with heartbeats; one at a time per provider.
     const handled = new Set<string>(); const active = new Map<LocalProvider, Promise<void>>();
-    let pulse: () => void = () => {};
     const runCommand = (cmd: ProviderCommand) => {
       if (handled.has(cmd.id) || active.has(cmd.provider) || controller.signal.aborted) return;
       handled.add(cmd.id);
@@ -205,7 +208,8 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const voicePreview = createVoicePreviewHandler({ enabled: () => gate().processing, ready: async speaker => speaker.startsWith("clone-") ? localCloneReady() : localTtsReady(), reference: (ref, signal) => ensureVoiceReference(ref, { signal, transcribe: transcribeReference }),
       synth: (speaker, text, signal, reference) => reference ? synthesizeLocalClone({ text, refAudio: reference.audio, refText: reference.text, signal }) : synthesizeLocal({ text, voice: speaker, signal }) });
     const characterSheet = createCharacterSheetHandler({ enabled: () => gate().processing, ready: sheetReady, draw: createCodexFrameDrawer(), transcribe: createFootageTranscriber({ tools: async () => { videoTools = await discoverVideoTools(); return videoTools; }, scriptsDir: fileURLToPath(new URL("./studio-video", import.meta.url)) }) });
-    const handlers: Record<string, StudioJobHandler> = { "studio.character_sheet": withShutdown(characterSheet), "studio.voice_preview": withShutdown(voicePreview), "studio.video_assemble": withShutdown(videoAssemble), "studio.video_edit": withShutdown(videoEdit), "studio.open_editor": withShutdown(openEditor), "studio.video_transcribe": withShutdown(video), "studio.youtube_search": withShutdown(youtubeSearch), "studio.text_run": withShutdown(textRun), "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
+    const rawHandlers: Record<string, StudioJobHandler> = { "studio.character_sheet": withShutdown(characterSheet), "studio.voice_preview": withShutdown(voicePreview), "studio.video_assemble": withShutdown(videoAssemble), "studio.video_edit": withShutdown(videoEdit), "studio.open_editor": withShutdown(openEditor), "studio.video_transcribe": withShutdown(video), "studio.youtube_search": withShutdown(youtubeSearch), "studio.text_run": withShutdown(textRun), "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
+    const handlers = Object.fromEntries(Object.entries(rawHandlers).map(([kind, handler]) => [kind, metrics.wrap(featureForStudioJob, handler)]));
     const report = { instanceId, handlers: Object.keys(handlers) };
     if (once) {
       const startedAt = new Date();
@@ -223,7 +227,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
       refreshing = true; void Promise.all([readiness(), discover(), discoverVideoTools(), findChrome()]).then(([p, d, v, c]) => { providers = p; discovery = d; videoTools = v; chromePath = c; }).catch(() => {}).finally(() => { refreshing = false; });
     } }, rediscoverMs);
     const modelTick = setInterval(() => { void reconcileModels(); }, 60_000);
-    const quick = setInterval(() => { if (!refreshing) void Promise.all([discoverPowerAndDisk().then(v => { discovery = { ...discovery, hardware: { ...discovery.hardware, ...v } }; }), tracker.usage()]).catch(() => {}); }, 60_000);
+    const quick = setInterval(() => { if (!refreshing) void Promise.all([discoverPowerAndDisk().then(v => { discovery = { ...discovery, hardware: { ...discovery.hardware, ...v } }; }), tracker.usage(), metrics.refreshMemory()]).then(() => pulse()).catch(() => {}); }, 60_000);
     try { await runStudioWorker({ queue, handlers, workerId, release: version, report, concurrency: 1,
       // Sign-in commands ride on heartbeats, so they stay at 30s; an idle Mac claims at most once a minute.
       heartbeatMs: 30_000, idlePollMaxMs: 60_000, signal: controller.signal, log }); }

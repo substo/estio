@@ -5,6 +5,7 @@ import { readFramesReserve, readFramesVerify, readTranscriptChunk, readVideoResu
 import { NATIVE_REJECTION_BACKOFF_MS, reportedSubscriptionLimit } from "./subscription-readiness";
 import { usageSpec } from "../build/contract";
 import { readDesiredModels, readReportedModels } from "./local-models";
+import { COMPANION_METRIC_FEATURES, COMPANION_METRIC_STAGES, COMPANION_METRIC_UNITS } from "./device-metrics";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const modelPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
 export const deviceOperations = ["heartbeat", "claim", "extend", "complete", "fail", "command", "video_transcript_chunk", "video_frames_reserve", "video_frames_verify", "video_export_reserve", "video_export_verify"] as const;
@@ -101,6 +102,35 @@ function compact(value: Record<string, unknown>) {
   return value;
 }
 const REPORT_LIMIT = 16384;
+function safeMetricNumber(value: unknown, max: number, decimals = 1) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= max ? Math.round(value * 10 ** decimals) / 10 ** decimals : undefined;
+}
+/** Numeric/code-only recent Mac work. Never accepts text, paths, URLs or arbitrary keys from the device. */
+function safeDeviceMetrics(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const v = value as Record<string, unknown>;
+  if (v.version !== 1 || !Array.isArray(v.recent)) return undefined;
+  const memory = v.memory && typeof v.memory === "object" && !Array.isArray(v.memory) ? v.memory as Record<string, unknown> : null;
+  const safeMemory = memory ? compact({ swapUsedMb: safeMetricNumber(memory.swapUsedMb, 1_000_000), freePercent: safeMetricNumber(memory.freePercent, 100) }) : undefined;
+  const recent = v.recent.slice(0, 12).flatMap(item => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const row = item as Record<string, unknown>;
+    if (!(COMPANION_METRIC_FEATURES as readonly string[]).includes(String(row.feature)) || !["running", "succeeded", "failed"].includes(String(row.status))
+      || typeof row.outcome !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(row.outcome)
+      || !Number.isSafeInteger(row.startedAtMs) || Number(row.startedAtMs) < 1_577_836_800_000 || Number(row.startedAtMs) > Date.now() + 300_000) return [];
+    const stages = row.stages && typeof row.stages === "object" && !Array.isArray(row.stages)
+      ? compact(Object.fromEntries(COMPANION_METRIC_STAGES.map(key => [key, safeMetricNumber((row.stages as Record<string, unknown>)[key], 7 * 24 * 60 * 60_000, 0)]))) : undefined;
+    return [compact({
+      feature: row.feature, status: row.status, outcome: row.outcome, startedAtMs: row.startedAtMs,
+      durationMs: safeMetricNumber(row.durationMs, 7 * 24 * 60 * 60_000, 0), typicalDurationMs: safeMetricNumber(row.typicalDurationMs, 7 * 24 * 60 * 60_000, 0),
+      unit: (COMPANION_METRIC_UNITS as readonly string[]).includes(String(row.unit)) ? row.unit : undefined, units: safeMetricNumber(row.units, 1_000_000_000, 2),
+      ratePerSecond: safeMetricNumber(row.ratePerSecond, 1_000_000_000, 2), typicalRatePerSecond: safeMetricNumber(row.typicalRatePerSecond, 1_000_000_000, 2),
+      peakMemoryMb: safeMetricNumber(row.peakMemoryMb, 1_000_000), slow: typeof row.slow === "boolean" ? row.slow : undefined,
+      stages: stages && Object.keys(stages).length ? stages : undefined,
+    })];
+  });
+  return { version: 1, ...(safeMemory && Object.keys(safeMemory).length === 2 ? { memory: safeMemory } : {}), recent };
+}
 /** Whitelist capability fields. Provider tokens, environment and arbitrary report keys never persist. */
 export function safeDeviceCapabilities(value: unknown): Record<string, unknown> {
   const v = object(value); const result: Record<string, unknown> = {};
@@ -132,6 +162,8 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
     const usage = usageSpec.safeParse(Object.fromEntries(Object.entries(v.usage as Record<string, unknown>).filter(([k]) => k === "codex" || k === "claudeAgent")));
     if (usage.success && Object.keys(usage.data).length) result.usage = usage.data;
   }
+  const metrics = safeDeviceMetrics(v.metrics);
+  if (metrics) result.metrics = metrics;
   if (Array.isArray(v.handlers)) result.handlers = v.handlers.filter((x, i, all) => (DEVICE_WORK_KINDS as readonly unknown[]).includes(x) && all.indexOf(x) === i);
   if (v.capacity && typeof v.capacity === "object" && !Array.isArray(v.capacity)) {
     const c = v.capacity as Record<string, unknown>;

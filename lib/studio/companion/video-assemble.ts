@@ -19,6 +19,7 @@ import { renderShot } from "../images/prompts";
 import { shotForBeat } from "../images/storyboard";
 import type { FrameDrawer } from "./codex-image";
 import { soundSeconds, type LocalSoundMaker } from "./local-sound";
+import { measureCompanionFeature, measureCompanionStage, observeCompanionMetricUnits, observeCompanionStageDuration } from "./metrics";
 const payload = z.object({
   recordId: z.string().uuid(), script: z.string().min(1).max(20000),
   options: z.object({ voiceover: z.boolean(), music: z.boolean(), portrait: z.boolean() }).strict(),
@@ -183,6 +184,7 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
     const need = [...p.downloads, ...p.voiceDownloads].reduce((n, d) => n + d.byteSize, 0) * 2 + 2_000_000_000;
     if (await freeBytes(deps.projectsRoot).catch(() => Infinity) < need) throw new StudioJobError("disk_low", "This Mac does not have enough free disk space to keep this project. Free some space, then make the video again.", false);
     try {
+      const preparationStarted = Date.now();
       await mkdir(clipsDir, { recursive: true });
       const used = new Set<string>();
       const footageNames = new Map<string, string>();
@@ -221,16 +223,24 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
       // With approved pictures nothing more is drawn: the creator chose these, and a beat without one keeps the plain photo.
       if (p.storyboardFrames && avatar && deps.drawFrame && !p.storyboardPreviews.length) {
         console.log(JSON.stringify({ at: new Date().toISOString(), event: "storyboard_references", jobId: job.id, sheets: sheetFiles.length, offered: p.characterSheets.length }));
-        for (const beat of parseScript(p.script).slice(0, p.storyboardFrames.max)) {
-          const name = `storyboard-frame-${beat.index}.png`;
-          const shot = renderShot(shotForBeat(beat, p.options.portrait), "edit", { acceptsText: false });
-          // The model ignores a separate aspect field, so the shape is part of the prompt: frames fill the video instead of leaving bars.
-          const prompt = `${shot.prompt} Compose it as a ${p.options.portrait ? "vertical 9:16 portrait" : "wide 16:9 landscape"} image that fills the whole frame.`;
-          const ok = await deps.drawFrame({ prompt, references: [...sheetFiles, join(clipsDir, avatar)], out: join(clipsDir, name), signal: context.signal, ...(sheetFiles.length ? { intro: SHEET_INTRO } : {}) }).catch(error => { if (context.signal.aborted) throw error; return false; });
-          if (ok) frames[beat.index] = name;
-        }
+        const storyboardStarted = Date.now();
+        await measureCompanionFeature("storyboard", async () => {
+          let pictures = 0;
+          for (const beat of parseScript(p.script).slice(0, p.storyboardFrames!.max)) {
+            const name = `storyboard-frame-${beat.index}.png`;
+            const shot = renderShot(shotForBeat(beat, p.options.portrait), "edit", { acceptsText: false });
+            // The model ignores a separate aspect field, so the shape is part of the prompt: frames fill the video instead of leaving bars.
+            const prompt = `${shot.prompt} Compose it as a ${p.options.portrait ? "vertical 9:16 portrait" : "wide 16:9 landscape"} image that fills the whole frame.`;
+            const ok = await deps.drawFrame!({ prompt, references: [...sheetFiles, join(clipsDir, avatar)], out: join(clipsDir, name), signal: context.signal, ...(sheetFiles.length ? { intro: SHEET_INTRO } : {}) }).catch(error => { if (context.signal.aborted) throw error; return false; });
+            if (ok) { frames[beat.index] = name; pictures++; }
+          }
+          if (pictures) observeCompanionMetricUnits("pictures", pictures);
+          return pictures > 0;
+        });
+        observeCompanionStageDuration("storyboard", Date.now() - storyboardStarted);
       }
       // Anything the server did not supply is made here on the Mac (the default): a music bed sized to the script and a whoosh.
+      const soundsStarted = Date.now();
       if (p.options.music && deps.makeSound) {
         const words = parseScript(p.script).reduce((n, b) => n + b.narration.split(/\s+/).filter(Boolean).length, 0);
         for (const role of ["music", "sfx"] as const) {
@@ -239,6 +249,7 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
           if (await deps.makeSound(role, soundSeconds(words), join(clipsDir, name), context.signal).catch(error => { if (context.signal.aborted) throw error; return false; })) sounds[role] = name;
         }
       }
+      if (p.options.music) observeCompanionStageDuration("sounds", Date.now() - soundsStarted);
       const narration: string[] = [];
       for (const [i, item] of p.voiceDownloads.entries()) {
         const name = `narration-${String(i + 1).padStart(3, "0")}.mp3`; narration.push(name);
@@ -249,11 +260,12 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
       const projectFile = await nextProjectFile(projectDir), startedAt = Date.now();
       const reference = clone && p.voiceReference && deps.reference
         ? await deps.reference(p.voiceReference, context.signal).catch(() => { throw new StudioJobError("voice_reference_unavailable", "The Mac could not fetch this cloned voice. Make the video again.", false); }) : undefined;
+      observeCompanionStageDuration("prepare", Date.now() - preparationStarted);
       let result: AssembleResult;
       try {
-        result = await deps.assemble({ transcribeFootage: deps.transcribeFootage, script: p.script, clipsDir, footageNames, projectDir, projectFile, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape", sounds, motion: readMotionChoice(p.motionStyle), ...(avatar ? { avatar } : {}), ...(frames.some(Boolean) ? { frames } : {}),
+        result = await measureCompanionStage("assemble", () => deps.assemble({ transcribeFootage: deps.transcribeFootage, script: p.script, clipsDir, footageNames, projectDir, projectFile, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape", sounds, motion: readMotionChoice(p.motionStyle), ...(avatar ? { avatar } : {}), ...(frames.some(Boolean) ? { frames } : {}),
           voiceover: p.options.voiceover, music: p.options.music, model: deps.model, signal: context.signal,
-          voice: !p.options.voiceover ? undefined : p.voice?.engine === "local" ? { engine: "local", speaker: p.voice.speaker, model: p.voice.model, ...(reference ? { reference } : {}) } : p.voice?.engine === "hosted" ? { engine: "prerendered", files: narration } : undefined });
+          voice: !p.options.voiceover ? undefined : p.voice?.engine === "local" ? { engine: "local", speaker: p.voice.speaker, model: p.voice.model, ...(reference ? { reference } : {}) } : p.voice?.engine === "hosted" ? { engine: "prerendered", files: narration } : undefined }));
       } catch (error) {
         if (context.signal.aborted) throw error;
         throw new StudioJobError("video_assembly_failed", "The Mac could not finish editing this video. It was not retried.", false);
@@ -267,7 +279,7 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
       }
       // The edit is kept from here on, whether or not the upload below succeeds.
       await deps.projects.set(p.recordId, { dir: projectDir, file: result.projectFile }).catch(() => {});
-      const uploadId = await saveExport(deps.api, lease, exported, context.signal);
+      const uploadId = await measureCompanionStage("upload", () => saveExport(deps.api, lease, exported, context.signal));
       const timeline = await snapshotTimeline(result.projectFile, projectDir, deps.run, context.signal);
       const mb = (exported.size / 1_000_000).toFixed(1);
       return { assembly: { exportName: exported.name.slice(0, 200), bytes: exported.size, beats: result.beats, clips: result.clips.length, voiced: result.voiceFiles.length, uploadId, exportSaved: true, ...timelineField(timeline), ...(SERVER_HAS_PROJECT_FIELDS ? { projectKept: true, projectName: projectFolderName(title, p.recordId) } : {}),

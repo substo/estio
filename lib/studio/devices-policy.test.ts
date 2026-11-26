@@ -49,6 +49,18 @@ test("heartbeat persists only safe capability metadata", () => {
   assert.deepEqual(safeDeviceCapabilities({ token: "secret", env: { key: "secret" }, codex: { authenticated: true, token: "secret", models: ["gpt-5", "--bad"] }, handlers: ["studio.diagnostic", "studio.script_brief"] }),
     { codex: { authenticated: true, models: ["gpt-5"] }, handlers: ["studio.diagnostic"] });
 });
+
+test("heartbeat whitelists only bounded numeric Mac work summaries", () => {
+  const now = Date.now();
+  const capabilities = safeDeviceCapabilities({ metrics: { version: 1, token: "secret", memory: { swapUsedMb: 2304.44, freePercent: 7.77, path: "/private" }, recent: [
+    { feature: "voice_preview", status: "succeeded", outcome: "succeeded", startedAtMs: now - 40_000, durationMs: 40_000, typicalDurationMs: 42_000, unit: "audio_seconds", units: 4, ratePerSecond: 0.1, prompt: "private", stages: { prepare: 100, secret: 9 } },
+    { feature: "made_up", status: "succeeded", outcome: "ok", startedAtMs: now },
+  ] } });
+  assert.deepEqual(capabilities.metrics, { version: 1, memory: { swapUsedMb: 2304.4, freePercent: 7.8 }, recent: [
+    { feature: "voice_preview", status: "succeeded", outcome: "succeeded", startedAtMs: now - 40_000, durationMs: 40_000, typicalDurationMs: 42_000, unit: "audio_seconds", units: 4, ratePerSecond: 0.1, stages: { prepare: 100 } },
+  ] });
+  assert.doesNotMatch(JSON.stringify(capabilities), /secret|private|prompt/);
+});
 test("queue bounds and failure shape are validated", () => {
   assert.throws(() => readDeviceCommand("complete", { workerId: "mac", jobId: requestId, leaseToken: requestId, result: { token: "secret" } }));
   assert.throws(() => readDeviceCommand("claim", { workerId: "mac", limit: 51, leaseSeconds: 60 }));

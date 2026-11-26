@@ -7,6 +7,7 @@ import { prepareSourceQuotes } from "./source-quotes";
 import { MAX_SOURCE_QUOTES } from "../script-source-quotes";
 import { agentEnv, runEditingAgent } from "./agent";
 import { localCloneSpeech, localSpeech, type SpeechEngine } from "./tts";
+import { measureCompanionFeature, observeCompanionMetricUnits } from "../companion/metrics";
 
 const videoExtensions = new Set([".mp4", ".mov", ".m4v", ".mkv", ".webm", ".mp3", ".wav", ".m4a"]);
 export interface AssembleOptions {
@@ -59,24 +60,32 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
   if (!o.dryRun) for (const f of frameFiles) if (f) await copyFile(join(o.clipsDir, f), join(o.projectDir, f));
   if (!o.dryRun) for (const role of ["music", "sfx"] as const) { const f = o.sounds?.[role]; if (f && o.music !== false) { await copyFile(join(o.clipsDir, f), join(o.projectDir, f)); soundFiles[role] = f; } }
   const voiceFiles: string[] = [];
+  const timings: number[] = [];
+  let at = 0;
   if (o.voiceover) {
     if (!o.voice && !o.speak) throw new Error("Choose a voice for the voiceover.");
     if (o.voice?.engine === "prerendered" && o.voice.files.length !== beats.length) throw new Error("The rendered narration does not match the script. Make the video again.");
     const engine = o.speak ?? (o.voice?.engine === "local" ? (o.voice.reference ? localCloneSpeech(o.voice.reference.audio, o.voice.reference.text) : localSpeech(o.voice.speaker ?? "ryan", o.voice.model)) : null);
-    for (const b of beats) {
-      const name = `voice-${String(b.index).padStart(2, "0")}.mp3`;
-      if (!o.dryRun) {
-        if (engine) { log(`Voicing beat ${b.index}/${beats.length} (${engine.label})`); await writeFile(join(o.projectDir, name), await engine.speak(b.narration, o.signal)); }
-        else await copyFile(join(o.clipsDir, (o.voice as { files: string[] }).files[b.index - 1]), join(o.projectDir, name));
+    const voiceWork = async () => {
+      for (const b of beats) {
+        const name = `voice-${String(b.index).padStart(2, "0")}.mp3`;
+        if (!o.dryRun) {
+          if (engine) { log(`Voicing beat ${b.index}/${beats.length} (${engine.label})`); await writeFile(join(o.projectDir, name), await engine.speak(b.narration, o.signal)); }
+          else await copyFile(join(o.clipsDir, (o.voice as { files: string[] }).files[b.index - 1]), join(o.projectDir, name));
+        }
+        voiceFiles.push(name);
       }
-      voiceFiles.push(name);
-    }
+      let narrationSeconds = 0;
+      if (!o.dryRun) for (const f of voiceFiles) { const beforeBeat = timings.length + 1;
+        at += prepared.quotes.filter(quote => quote.beforeBeat === beforeBeat).reduce((total, quote) => total + quote.seconds, 0);
+        timings.push(Number(at.toFixed(2))); const seconds = await durationOf(join(o.projectDir, f), run, o.projectDir); narrationSeconds += seconds; at += seconds + BEAT_GAP;
+      }
+      if (engine && narrationSeconds > 0) observeCompanionMetricUnits("audio_seconds", narrationSeconds);
+    };
+    if (engine && !o.dryRun) await measureCompanionFeature(o.voice?.engine === "local" && o.voice.reference ? "voice_clone" : "narration", voiceWork);
+    else await voiceWork();
   }
   /** Where each voiced beat starts on the timeline, so captions and titles can be placed even where the editor can't transcribe (it needs macOS 26). */
-  const timings: number[] = []; let at = 0;
-  if (!o.dryRun) for (const f of voiceFiles) { const beforeBeat = timings.length + 1;
-    at += prepared.quotes.filter(quote => quote.beforeBeat === beforeBeat).reduce((total, quote) => total + quote.seconds, 0);
-    timings.push(Number(at.toFixed(2))); at += await durationOf(join(o.projectDir, f), run, o.projectDir) + BEAT_GAP; }
   const cwd = o.projectDir, env = agentEnv();
   if (!o.dryRun) await run({ command: "substo", args: ["new", projectFile, ...(o.orientation === "portrait" ? ["--portrait"] : [])], cwd, env, timeoutMs: 120_000, maxOutputBytes: 64 * 1024, signal: o.signal });
   const footageTranscripts: { file: string; lines: string }[] = [];

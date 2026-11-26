@@ -227,6 +227,68 @@ function TaskChecklist({ device, canManage }: { device: StudioDeviceSummary; can
   </section>;
 }
 
+type WorkMetric = {
+  feature: string; status: "running" | "succeeded" | "failed"; outcome: string; startedAtMs: number;
+  durationMs?: number; typicalDurationMs?: number; unit?: string; units?: number; ratePerSecond?: number; typicalRatePerSecond?: number;
+  peakMemoryMb?: number; slow?: boolean; stages?: Record<string, number>;
+};
+const featureLabel: Record<string, string> = {
+  voice_preview: "Voice preview", voice_clone: "Voice cloning", narration: "On-device narration", music: "Music", sound_effects: "Sound effects",
+  transcription: "Transcription", storyboard: "Storyboard pictures", text_turn: "Codex or Claude text", make_video: "Make video", video_edit: "Video edit", open_editor: "Open editor", mac_check: "Mac check",
+};
+export function metricDuration(ms: number) {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 1) return "under 1 s";
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.floor(seconds / 60), rest = seconds % 60;
+  return `${minutes}m${rest ? ` ${rest}s` : ""}`;
+}
+function metricSpeed(item: WorkMetric) {
+  const rate = item.ratePerSecond ?? item.typicalRatePerSecond;
+  if (!rate || rate <= 0) return null;
+  if (item.unit === "pictures") return `${metricDuration(1000 / rate)} per picture`;
+  if (item.unit === "tokens") return `${rate.toFixed(rate >= 10 ? 0 : 1)} tokens/s`;
+  if (item.unit === "media_seconds") return `${rate.toFixed(1)} media s/s`;
+  if (item.unit === "audio_seconds") {
+    const base = `${rate.toFixed(1)} audio s/s`;
+    return ["voice_preview", "voice_clone", "narration"].includes(item.feature) ? `${base} · ${(1 / rate).toFixed(1)}× real-time factor` : base;
+  }
+  return null;
+}
+function RecentWork({ device }: { device: StudioDeviceSummary }) {
+  const report = record(device.capabilities.metrics);
+  const recent = Array.isArray(report.recent) ? report.recent.filter((item): item is WorkMetric => Boolean(item && typeof item === "object")) : [];
+  if (!recent.length) return null; // No idle telemetry block before this Mac has meaningful work.
+  const memory = record(report.memory);
+  const swap = typeof memory.swapUsedMb === "number" ? memory.swapUsedMb : null;
+  const free = typeof memory.freePercent === "number" ? memory.freePercent : null;
+  const pressure = swap !== null && swap >= 2048 || free !== null && free < 10;
+  return <section aria-label="Recent work on this Mac" className="space-y-2 rounded-lg border p-3">
+    <div className="flex flex-wrap items-baseline justify-between gap-2">
+      <h5 className="font-medium">Recent work on this Mac</h5>
+      {swap !== null && free !== null ? <p className={pressure ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground"}>
+        {pressure ? "High memory pressure · " : ""}{swap >= 1024 ? `${(swap / 1024).toFixed(1)} GB` : `${Math.round(swap)} MB`} swap · {Math.round(free)}% free
+      </p> : null}
+    </div>
+    <ul className="divide-y">{recent.map(item => {
+      const duration = typeof item.durationMs === "number" ? metricDuration(item.durationMs) : null;
+      const typical = typeof item.typicalDurationMs === "number" ? metricDuration(item.typicalDurationMs) : null;
+      const speed = metricSpeed(item);
+      const outcome = item.status === "running" ? "Running" : item.status === "succeeded" ? "Finished" : `Failed: ${item.outcome.replaceAll("_", " ")}`;
+      const stages = item.feature === "make_video" && item.stages ? Object.entries(item.stages).filter((entry): entry is [string, number] => typeof entry[1] === "number") : [];
+      return <li key={`${item.feature}-${item.startedAtMs}`} className="py-2 first:pt-0 last:pb-0">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <span className="font-medium">{featureLabel[item.feature] ?? item.feature}</span>
+          <span className={item.slow ? "font-medium text-amber-700 dark:text-amber-300" : "text-muted-foreground"}>{outcome}{duration ? ` · ${duration}` : ""}</span>
+        </div>
+        <p className="text-muted-foreground">{[typical ? `Usually about ${typical}` : null, speed, typeof item.peakMemoryMb === "number" ? `Peak child memory ${item.peakMemoryMb >= 1024 ? `${(item.peakMemoryMb / 1024).toFixed(1)} GB` : `${Math.round(item.peakMemoryMb)} MB`}` : null].filter(Boolean).join(" · ")}</p>
+        {item.slow ? <p className="font-medium text-amber-700 dark:text-amber-300">Running longer than usual — it may be stuck or slowed by memory pressure.</p> : null}
+        {stages.length ? <p className="text-muted-foreground">Stages: {stages.map(([name, ms]) => `${name.replaceAll("_", " ")} ${metricDuration(ms)}`).join(" · ")}</p> : null}
+      </li>;
+    })}</ul>
+  </section>;
+}
+
 function DeviceCard({ device, canManage }: { device: StudioDeviceSummary; canManage: boolean }) {
   const id = `computer-${device.id}`;
   const identity = `${device.name} · paired ${when(device.created_at)} · ${device.id.slice(-8)}`;
@@ -249,6 +311,7 @@ function DeviceCard({ device, canManage }: { device: StudioDeviceSummary; canMan
         ? `No recent heartbeat · last seen ${sinceText(device.last_seen_at)} (${when(device.last_seen_at)})`
         : "Paired, but the companion has never connected"}</p>
     <p>Processing: <span className="font-medium">{device.processingEnabled ? "On" : "Off"}</span>{device.paused ? " · Paused" : device.busy ? " · Busy" : ""}</p>
+    <RecentWork device={device} />
     <details className="space-y-3 rounded-lg border p-3">
       <summary className="cursor-pointer font-medium">Setup and checks</summary>
       {!device.online && device.processingEnabled ? <div id={`companion-${device.id}`} role="status" className="scroll-mt-4 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
