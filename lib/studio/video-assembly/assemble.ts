@@ -91,7 +91,11 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
       let narrationSeconds = 0;
       if (!o.dryRun) for (const f of voiceFiles) { const beforeBeat = timings.length + 1;
         at += prepared.quotes.filter(quote => quote.beforeBeat === beforeBeat).reduce((total, quote) => total + quote.seconds, 0);
-        timings.push(Number(at.toFixed(2))); const seconds = await durationOf(join(o.projectDir, f), run, o.projectDir); narrationSeconds += seconds; at += seconds + BEAT_GAP;
+        timings.push(Number(at.toFixed(2))); const filmed = shotFiles[beforeBeat];
+        // A beat with its own filmed clip is as long as that clip (its sound carries the narration), so the generated voice must not reserve a longer, empty slot.
+        const seconds = await durationOf(join(o.projectDir, f), run, o.projectDir);
+        if (!filmed) narrationSeconds += seconds;
+        at += (filmed ? await durationOf(join(o.projectDir, filmed), run, o.projectDir).catch(() => seconds) : seconds) + BEAT_GAP;
       }
       if (engine && narrationSeconds > 0) observeCompanionMetricUnits("audio_seconds", narrationSeconds);
     };
