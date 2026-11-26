@@ -76,6 +76,12 @@ export async function resolveLocationAiRoute(locationId: string, operation: AiRo
   only?: readonly AiConnectionKind[]; first?: AiConnectionKind | null } = {}): Promise<AiRouteDecision> {
   const access = options.access ?? await requireAccess(locationId);
   const [{ settings: saved }, ai, budget] = await Promise.all([readRouting(access.locationId), getAiConnections(access.locationId), getLocationAiBudget(access.locationId)]);
+  let settings = saved;
+  if (options.only) {
+    const chain = settings.chain.filter(s => options.only!.includes(s.kind));
+    const lead = chain.find(s => s.kind === options.first);
+    settings = { ...settings, chain: lead ? [lead, ...chain.filter(s => s !== lead)] : chain };
+  }
   return resolveAiRoute({ operation, settings, connections: ai.connections ?? [] as AiConnection[], requester: options.background ? null : { userId: access.userId },
     budget: { capMicros: budget.capMicros, usedMicros: budget.spentMicros + budget.heldMicros, estimateMicros: options.estimateMicros ?? DEFAULT_PAID_ESTIMATE_MICROS } });
 }
