@@ -2,6 +2,8 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import type { StudioAccess } from "./access";
 import { studioDb } from "./studio-db";
+import { canonicalYoutubeVideo, type TranscriptSegment } from "./video-transcription-policy";
+import { matchTimedSourceQuote } from "./script-source-quotes";
 
 /** The Library page has already authorized this source in the caller's Location. */
 export async function getKnowledgeSourceCitation(access: StudioAccess, sourceId: string, evidenceId: string) {
@@ -26,4 +28,21 @@ export async function getSourceClipMetadata(access: StudioAccess, sourceId: stri
     left join studio.studio_knowledge_evidence e on e.location_id=r.location_id and e.source_id=r.id and e.id=${evidenceId}::uuid
       and (e.payload->>'source_version' is null or e.payload->>'source_version'=r.version::text)
     where r.location_id=${access.locationId} and r.id=${sourceId}::uuid and r.kind='reference' and not r.archived`);
+}
+
+/** Read the latest completed transcript for the same saved source and the same YouTube video. */
+export async function getVerifiedQuoteTiming(access: StudioAccess, sourceId: string, url: string | null, quote: string) {
+  const youtube = canonicalYoutubeVideo(url);
+  if (!youtube) return null;
+  const chunks = await studioDb.rows<{ segments: TranscriptSegment[] }>(Prisma.sql`
+    select c.segments
+    from studio.studio_video_transcript_chunks c
+    where c.location_id=${access.locationId} and c.transcription_id=(
+      select t.id from studio.studio_video_transcriptions t
+      where t.location_id=${access.locationId} and t.record_id=${sourceId}::uuid
+        and t.video_id=${youtube.videoId} and t.status in ('ready','partial')
+      order by t.completed_at desc nulls last, t.id desc limit 1
+    )
+    order by c.chunk_index`);
+  return matchTimedSourceQuote(quote, chunks.flatMap(chunk => chunk.segments));
 }

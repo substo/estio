@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { citationClipRange, sourceQuoteCue } from "./script-source-quotes";
+import { citationClipRange, matchTimedSourceQuote, sourceClipPlayback, sourceQuoteCue } from "./script-source-quotes";
 import { parseScriptTimeline, sameScriptNarration } from "./video-assembly/script";
 
 test("only a recorded speech range prefills both ends; a frame never creates a timed clip", () => {
@@ -27,4 +27,29 @@ test("saving a proposal with single-newline cues preserves citations after the e
   assert.equal(parseScriptTimeline(saved).beats.length, 2);
   assert.ok(sameScriptNarration(proposal, saved));
   assert.equal(sameScriptNarration(proposal, saved.replace("emphasis", "pause")), false);
+});
+
+test("an official preview links to the timestamp and rounds playback bounds outwards", () => {
+  const clip = sourceClipPlayback("https://youtu.be/9DBJXRy5dvk?t=4", 125.75, 134.25);
+  assert.equal(clip?.watch, "https://www.youtube.com/watch?v=9DBJXRy5dvk&t=125s");
+  const embed = new URL(clip!.embed);
+  assert.equal(embed.origin + embed.pathname, "https://www.youtube-nocookie.com/embed/9DBJXRy5dvk");
+  assert.equal(embed.searchParams.get("start"), "125");
+  assert.equal(embed.searchParams.get("end"), "135");
+  assert.equal(new URL(sourceClipPlayback(clip!.watch, 125.75, null)!.embed).searchParams.has("end"), false);
+  assert.equal(new URL(sourceClipPlayback(clip!.watch, null, null)!.embed).searchParams.has("start"), false);
+  assert.equal(sourceClipPlayback("https://youtube.com.example/watch?v=9DBJXRy5dvk", 5, 8), null);
+});
+
+test("untimed quotes recover a bounded range only from a unique timed transcript match", () => {
+  const segments = [
+    { text: "The titles don’t live in a vacuum.", start: 325.125, end: 328 },
+    { text: "It has to lead into the content.", start: 328, end: 331.75 },
+  ];
+  const quote = "titles don't live in a vacuum.\nIt has to lead into the content";
+  assert.deepEqual(matchTimedSourceQuote(quote, segments), { start: 325.125, end: 331.75 });
+  assert.equal(matchTimedSourceQuote(quote, [...segments, ...segments]), null);
+  assert.equal(matchTimedSourceQuote("itles don't live in a vacuum", segments), null);
+  assert.equal(matchTimedSourceQuote("the content", segments), null);
+  assert.equal(matchTimedSourceQuote(quote, []), null);
 });

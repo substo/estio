@@ -15,7 +15,7 @@ import { agentRoundRequestId } from "./agent-request";
 import { sameScriptNarration } from "./video-assembly/script";
 import { safeStudioSourceUrl } from "./library-policy";
 import { citationClipRange, type SourceClipReference } from "./script-source-quotes";
-import { getKnowledgeSourceCitation, getSourceClipMetadata } from "./citation-source";
+import { getKnowledgeSourceCitation, getSourceClipMetadata, getVerifiedQuoteTiming } from "./citation-source";
 import { recordLinkId } from "./record-link-policy";
 import { agentCitationHref, citedQuote, recordedTranscriptOffset, type ProposalFocus } from "./citation-navigation";
 
@@ -86,8 +86,11 @@ export async function getAgentSourceClipReference(locationId: string, recordId: 
   const metadata = await getSourceClipMetadata(access, sourceId, evidenceId);
   if (!metadata) return null;
   const url = safeStudioSourceUrl(metadata.url);
-  const range = citationClipRange(metadata.at, metadata.until, metadata.onScreen);
-  return { key: `${turn.id}:${focus.index}:${itemId}`, title: metadata.title, quote: citedQuote(item.id, item.text),
+  const quote = citedQuote(item.id, item.text);
+  const savedRange = citationClipRange(metadata.at, metadata.until, metadata.onScreen);
+  const range = savedRange.start === null && !metadata.onScreen
+    ? await getVerifiedQuoteTiming(access, sourceId, url, quote) ?? savedRange : savedRange;
+  return { key: `${turn.id}:${focus.index}:${itemId}`, title: metadata.title, quote,
     url: url?.startsWith("https://") && url.length <= 500 ? url : null, passageHref: agentCitationHref(sourceId, focus, itemId),
     ...range, onScreen: metadata.onScreen, frameHref: metadata.frame ? `/studio/knowledge-media/evidence/${evidenceId}` : null };
 }

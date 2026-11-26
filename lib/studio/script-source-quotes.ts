@@ -1,3 +1,4 @@
+import { canonicalYoutubeVideo } from "./video-transcription-policy";
 import { recordLinkId } from "./record-link-policy";
 
 export type SourceQuote = { asset: string; start: number; end: number; credit: string; url?: string };
@@ -48,4 +49,54 @@ export function citationClipRange(start: unknown, end: unknown, onScreen: boolea
     ? Math.round(value * 1000) / 1000 : null;
   const from = seconds(start), to = seconds(end);
   return { start: from, end: !onScreen && from !== null && to !== null && to - from >= 0.25 && to - from <= 120 ? to : null };
+}
+
+/** A preview uses whole seconds. Keep the saved cut bounds at their original precision. */
+export function sourceClipPlayback(url: string | null, start: number | null, end: number | null) {
+  const video = canonicalYoutubeVideo(url);
+  if (!video) return null;
+  const watch = new URL(video.url);
+  const params = new URLSearchParams({ autoplay: "1", playsinline: "1", rel: "0" });
+  const range = citationClipRange(start, end, false);
+  if (range.start !== null) {
+    const at = String(Math.floor(range.start));
+    watch.searchParams.set("t", at + "s");
+    params.set("start", at);
+  }
+  if (range.end !== null) params.set("end", String(Math.ceil(range.end)));
+  return { watch: watch.href, embed: `https://www.youtube-nocookie.com/embed/${video.videoId}?${params}` };
+}
+
+/** Recover a segment range for a legacy quote only when it uniquely matches the timed transcript. */
+export function matchTimedSourceQuote(quote: string, segments: readonly { text: string; start: number; end: number }[]) {
+  const normalize = (value: string) => value.normalize("NFC").replace(/[’‘]/g, "'").replace(/\s+/g, " ").trim().toLowerCase();
+  const needle = normalize(quote);
+  if (needle.length < 24) return null;
+  const pieces: string[] = [];
+  const offsets: { from: number; to: number; start: number; end: number }[] = [];
+  let cursor = 0;
+  for (const segment of segments) {
+    const part = normalize(segment.text);
+    if (!part) continue;
+    offsets.push({ from: cursor, to: cursor + part.length, start: segment.start, end: segment.end });
+    pieces.push(part);
+    cursor += part.length + 1;
+  }
+  const text = pieces.join(" ");
+  const word = /[\p{L}\p{N}]/u;
+  let index = text.indexOf(needle);
+  let match = -1;
+  while (index !== -1) {
+    if ((!word.test(needle[0]) || !word.test(text[index - 1] ?? "")) &&
+        (!word.test(needle.at(-1) ?? "") || !word.test(text[index + needle.length] ?? ""))) {
+      if (match !== -1) return null;
+      match = index;
+    }
+    index = text.indexOf(needle, index + 1);
+  }
+  if (match === -1) return null;
+  const first = offsets.find(unit => unit.from <= match && match < unit.to);
+  const last = offsets.find(unit => unit.from < match + needle.length && match + needle.length <= unit.to);
+  const range = citationClipRange(first?.start, last?.end, false);
+  return range.start !== null && range.end !== null ? range : null;
 }
