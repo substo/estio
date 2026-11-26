@@ -56,3 +56,16 @@ test("approving a suggestion adds one source clip block right after the line, an
   assert.equal(addSuggestedClip(blocks, { blockId: "a", uploadId: UP, start: 5, end: 5.1, credit: "x" }), null);
   assert.equal(defaultCredit("a [b].mov"), "a b");
 });
+
+test("real speech-to-text timings: neighbouring lines each get their own moment, and a paraphrase still finds it", () => {
+  const real: ClipSource = { uploadId: UP, name: "TEST-speaking-clip.mp4", segments: [
+    { start: 0, end: 5.36, text: "I tested two openings for my first video and one of them doubled how long people watched." },
+    { start: 5.36, end: 8.64, text: "The winner started with the problem, not my name." },
+    { start: 8.64, end: 10.56, text: "Here is exactly what I changed." },
+  ] };
+  const script = [n("a", "I tested two openings for my first video, and one of them doubled how long people watched."), n("b", "The winner started with the problem, not my name."), n("c", "The old opening kept 12 percent of viewers to the end.")];
+  const found = suggestClips(script, [real]);
+  assert.deepEqual(found.map(f => f.blockId), ["a", "b"]);   // the third line is not said in the video
+  assert.ok(found[0].end <= 5.7 && found[1].start >= 5);
+  assert.equal(suggestClips([n("p", "The opening I led with the problem about my first video doubled watch time for people watching.")], [real]).length, 1);
+});

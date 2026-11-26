@@ -43,16 +43,16 @@ export function suggestClips(blocks: readonly ScriptBlock[], sources: readonly C
     if (next && readSourceQuoteCue(next.text)) continue;
     const mine = words(withoutSpeakerCues(block.text));
     if (mine.length < MIN_SHARED) continue;
-    let best: ClipSuggestion | null = null;
+    let best: ClipSuggestion | null = null, bestRaw = { start: 0, end: 0 };
     for (const { source, windows: list } of pool) for (const w of list) {
       if (taken.some(t => t.uploadId === source.uploadId && w.start < t.end && w.end > t.start)) continue;
       const shared = mine.filter(t => w.tokens.includes(t)).length;
       if (shared < MIN_SHARED || !w.tokens.length) continue;
       // Shared specific words relative to both texts; a longer window needs proportionally more to win, so the tightest good match is chosen.
       const score = shared / Math.sqrt(mine.length * w.tokens.length);
-      if (score >= MIN_SCORE && (!best || score > best.score)) best = { blockId: block.id, beat, uploadId: source.uploadId, name: source.name, start: round(Math.max(0, w.start - PAD)), end: round(w.end + PAD), quote: w.text.slice(0, 240), score: round(score * 100) / 100 };
+      if (score >= MIN_SCORE && (!best || score > best.score)) best = { blockId: block.id, beat, uploadId: source.uploadId, name: source.name, start: round(Math.max(0, w.start - PAD)), end: round(w.end + PAD), quote: w.text.slice(0, 240), score: round(score * 100) / 100 }, bestRaw = { start: w.start, end: w.end };
     }
-    if (best) { found.push(best); taken.push({ uploadId: best.uploadId, start: best.start, end: best.end }); }
+    if (best) { found.push(best); taken.push({ uploadId: best.uploadId, ...bestRaw }); }
   }
   return found.sort((a, b) => b.score - a.score).slice(0, max).sort((a, b) => a.beat - b.beat);
 }
