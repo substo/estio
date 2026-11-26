@@ -20,6 +20,8 @@ Default mode: no script -> Script; script but no video -> Script; video exists -
 
 Notion-style blocks: Heading, Narration, Visual note, Section break. Stored as structured JSON on the record (`scriptBlocks`), with the plain `script` kept derived so existing consumers work. Drag handles **and** Move up/Move down buttons and keyboard shortcuts (WCAG 2.2 dragging alternative). Each Narration block shows voice status (Fresh / Changed since audio) with a per-block **Regenerate audio** and a batch **Regenerate changed**; selecting text offers Regenerate selection. A piece-level **Voice** dropdown (Location default, per-piece override) sits in the top bar of this mode. **Brainstorm this section** opens the agent focused on that block (reuse the record-scoped Studio agent).
 
+**Add speaker label** puts a name or role above a narration block. Studio carries that credit into the editing brief and separates it from the words used for voice generation. Existing roles like HOST and GUEST are recognised in scripts. The piece’s chosen voice still controls generated narration.
+
 **Read script** opens a scrollable rehearsal view with the current narration, including edits still in the editor. It omits headings, visual notes, section breaks and bracketed cues. **Copy narration** copies the same text for pasting into a teleprompter.
 
 **Is this ready to film?** prepares a chat review of the saved script. It asks the agent to check the spoken opening, title and payoff, runtime, and assets or proof still needed. Save the proposed checklist in the same conversation. If the piece changes before you apply the checklist, request a new review.

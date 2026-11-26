@@ -5,13 +5,14 @@ import { BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { narrationBlocks, type ScriptBlock } from "@/lib/studio/script-blocks";
+import { withoutSpeakerCues } from "@/lib/studio/script-speakers";
 import { formatClock, scriptStats, withoutScriptCues } from "@/lib/studio/script-length";
 
 export function ScriptReadingDialog({ blocks }: { blocks: readonly ScriptBlock[] }) {
   const reading = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState("");
   const paragraphs = narrationBlocks(blocks)
-    .map(block => ({ id: block.id, text: withoutScriptCues(block.text).split("\n").map(line => line.trim().replace(/[ \t]{2,}/g, " ")).join("\n").trim() }))
+    .map(block => ({ id: block.id, speaker: block.speaker, text: withoutScriptCues(withoutSpeakerCues(block.text)).split("\n").map(line => line.trim().replace(/[ \t]{2,}/g, " ")).join("\n").trim() }))
     .filter(block => block.text);
   if (!paragraphs.length) return null;
 
@@ -44,7 +45,10 @@ export function ScriptReadingDialog({ blocks }: { blocks: readonly ScriptBlock[]
       </div>
       <div ref={reading} role="region" aria-label="Narration" tabIndex={0}
         className="min-h-0 space-y-5 overflow-y-auto overscroll-contain rounded-md border p-3 text-lg leading-relaxed focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring sm:p-5 sm:text-xl">
-        {paragraphs.map(block => <p key={block.id} className="whitespace-pre-wrap [overflow-wrap:anywhere]">{block.text}</p>)}
+        {paragraphs.map(block => <div key={block.id}>
+          {block.speaker ? <p className="text-sm font-medium text-muted-foreground">{block.speaker}</p> : null}
+          <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{block.text}</p>
+        </div>)}
       </div>
     </DialogContent>
   </Dialog>;

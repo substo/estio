@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseScript } from "./video-assembly/script";
-import { audioHash, beatAudio, blockAudioStatus, blocksDoc, blocksToScript, insertBlockAfter, moveBlock, moveBlockTo, parseScriptBlocks, reconcileBlocks, removeBlock, scriptBlockSpan, scriptToBlocks, setBlockAudio,
+import { audioHash, beatAudio, blockAudioStatus, blocksDoc, blocksToScript, insertBlockAfter, moveBlock, moveBlockTo, parseScriptBlocks, reconcileBlocks, removeBlock, scriptBlockSpan, scriptToBlocks, setBlockAudio, setBlockSpeaker,
   setBlockText, setBlockType, splitBlock, type ScriptBlock } from "./script-blocks";
 
 const counter = () => { let n = 0; return () => `b${++n}`; };
@@ -98,4 +98,23 @@ test("writing focus locates a repeated block by position and preserves script ma
   assert.equal(script.slice(cue.start - 1, cue.end + 1), `[${cue.text}]`);
   assert.equal(scriptBlockSpan(blocks, "empty"), null);
   assert.equal(scriptBlockSpan(blocks, "break"), null);
+});
+
+
+test("speaker credits survive round trips and are omitted from narration and voice cache keys", () => {
+  const old = "HOST\n\nLet’s compare two openings.\n\nGUEST: I’ll take the second.\n# Results\nNARRATOR\nWatch what happens.";
+  const blocks = scriptToBlocks(old, counter());
+  const spoken = parseScript(blocksToScript(blocks));
+  assert.deepEqual(spoken.map(b => [b.speaker, b.narration]), [
+    ["HOST", "Let’s compare two openings."], ["GUEST", "I’ll take the second."], ["NARRATOR", "Watch what happens."],
+  ]);
+  assert.deepEqual(parseScript(old).map(b => [b.speaker, b.narration]), spoken.map(b => [b.speaker, b.narration]));
+  const named = setBlockSpeaker(blocks, blocks[1].id, "Maya");
+  const stored = parseScriptBlocks(blocksDoc(named));
+  assert.equal(stored?.blocks[1].speaker, "Maya");
+  const span = scriptBlockSpan(named, blocks[1].id)!;
+  assert.equal(blocksToScript(named).slice(span.start, span.end), "I’ll take the second.");
+  assert.equal(audioHash("v", "HOST: Let’s compare two openings."), audioHash("v", "Let’s compare two openings."));
+  assert.equal(parseScript("HOST\n\nSubscribe if you enjoyed it!")[0].narration, "Subscribe if you enjoyed it!");
+  assert.equal(parseScript("STOP! Take a closer look.")[0].narration, "STOP! Take a closer look.");
 });

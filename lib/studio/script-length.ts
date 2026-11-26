@@ -1,3 +1,5 @@
+import { withoutSpeakerCues } from "./script-speakers";
+
 /**
  * Approximate spoken length. Pace: 150 words per minute, a common on-camera narration rate (slower for explanation,
  * faster for energetic delivery); the estimate ignores pauses and cutaways, so it is a planning figure, not a stopwatch.
@@ -18,7 +20,7 @@ const words = (text: string) => (text.match(/\S+/g) ?? []).length;
 export const withoutScriptCues = (text: string) => text.replace(/\[[^\]]*\]/g, " ");
 export function scriptStats(text: string) {
   const cues = [...text.matchAll(/\[[^\]]*\]/g)].map(match => match[0]);
-  const spoken = words(withoutScriptCues(text));
+  const spoken = words(withoutSpeakerCues(withoutScriptCues(text)));
   const cueWords = cues.reduce((sum, cue) => sum + words(cue), 0);
   return { spokenWords: spoken, cueWords, seconds: Math.round(spoken / SPEAKING_WPM * 60) };
 }
@@ -113,7 +115,7 @@ export function sectionStats(text: string, targetSeconds: number | null) {
     const cue = /^\s*\[\s*([A-Za-z]+)\b[^\]]*\]/.exec(line);
     const beat = cue ? BEAT_NAMES[cue[1].toLowerCase()] : undefined;
     if (beat) { current = beat; seen++; }
-    const spoken = words(withoutScriptCues(line));
+    const spoken = words(withoutSpeakerCues(withoutScriptCues(line)));
     if (current && spoken) parts[current] = (parts[current] ?? 0) + spoken;
   }
   if (seen < 2) return null;

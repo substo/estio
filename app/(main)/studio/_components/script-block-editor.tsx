@@ -6,10 +6,11 @@ import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, GripVertical, Lightbulb, Loader2, Plus, Redo2, RefreshCw, Trash2, Undo2 } from "lucide-react";
 import { autosaveScriptAction, regenerateBlockAudioAction, type AutosaveResult } from "../(tenant)/content/actions";
 import {
-  BLOCK_LABELS, MAX_BLOCKS, blockAudioStatus, blocksDoc, blocksToScript, scriptBlockSpan, insertBlockAfter, makeBlockId, moveBlock, moveBlockTo, narrationBlocks, removeBlock, setBlockAudio, setBlockText, setBlockType, splitBlock,
+  BLOCK_LABELS, MAX_BLOCKS, blockAudioStatus, blocksDoc, blocksToScript, scriptBlockSpan, insertBlockAfter, makeBlockId, moveBlock, moveBlockTo, narrationBlocks, removeBlock, setBlockAudio, setBlockSpeaker, setBlockText, setBlockType, splitBlock,
   type BlockAudio, type BlockType, type ScriptBlock,
 } from "@/lib/studio/script-blocks";
 import { ScriptReadingDialog } from "./script-reading-dialog";
+import { MAX_SCRIPT_SPEAKER } from "@/lib/studio/script-speakers";
 import type { AgentSelection } from "@/lib/studio/agent-policy";
 import type { RegenerateResult } from "@/lib/studio/script-audio";
 import { providerLabels, type VoiceRow } from "@/lib/studio/voices/policy";
@@ -205,6 +206,16 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
             <li key={block.id} data-narration={spoken >= 0 ? spoken : undefined} onDragOver={event => { if (dragId) { event.preventDefault(); setOverId(block.id); } }} onDragLeave={() => setOverId(o => o === block.id ? null : o)}
               onDrop={event => { event.preventDefault(); if (dragId && dragId !== block.id) commit(moveBlockTo(blocksRef.current, dragId, index)); setDragId(null); setOverId(null); }}
               className={`rounded-lg border bg-background p-3 ${overId === block.id && dragId !== block.id ? "border-primary ring-1 ring-primary" : ""} ${dragId === block.id ? "opacity-50" : ""}`}>
+              {block.type === "narration" ? <details className="px-2 text-xs text-muted-foreground">
+                <summary className="min-h-8 cursor-pointer py-2">{block.speaker ? `Speaker · ${block.speaker}` : "Add speaker label"}</summary>
+                <label className="flex flex-wrap items-center gap-2">
+                  Speaker for block {index + 1}
+                  <input type="text" value={block.speaker ?? ""} maxLength={MAX_SCRIPT_SPEAKER} disabled={archived}
+                    onChange={event => commit(setBlockSpeaker(blocksRef.current, block.id, event.target.value), `speaker:${block.id}`)}
+                    placeholder="Host or guest name" className="min-h-10 min-w-0 rounded-md border bg-background px-2 text-foreground" />
+                </label>
+                <p className="mt-1">Shown as a credit. The voice reads only the narration.</p>
+              </details> : null}
               {isBreak ? <div ref={el => { if (el) fields.current.set(block.id, el); else fields.current.delete(block.id); }} tabIndex={0} role="separator" aria-label="Section break" className="flex items-center gap-3 py-2 text-xs uppercase tracking-wide text-muted-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"><span className="h-px flex-1 bg-border" />Section break<span className="h-px flex-1 bg-border" /></div>
                 : <textarea ref={el => { if (el) { fields.current.set(block.id, el); el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; } else fields.current.delete(block.id); }}
                   aria-label={`${BLOCK_LABELS[block.type]} ${index + 1}`} value={block.text} rows={1} maxLength={4500} disabled={archived} placeholder={placeholders[block.type]}

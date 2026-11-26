@@ -1,7 +1,9 @@
+import { MAX_SCRIPT_SPEAKER, readSpeakerCue, scriptSpeaker, withoutSpeakerCues } from "./script-speakers";
+
 /** Structured script blocks. The record keeps `scriptBlocks` (this document) and a plain `script` derived from it on every save, so the script snapshot, Make video's parser and the agent keep reading text. Pure and client-safe. */
 export type BlockType = "heading" | "narration" | "visual" | "break";
 export interface BlockAudio { hash: string; uploadId: string; voiceId: string; at: string }
-export interface ScriptBlock { id: string; type: BlockType; text: string; level?: 1 | 2 | 3; audio?: BlockAudio }
+export interface ScriptBlock { id: string; type: BlockType; text: string; level?: 1 | 2 | 3; speaker?: string; audio?: BlockAudio }
 export interface ScriptBlocksDoc { version: 1; blocks: ScriptBlock[] }
 
 export const MAX_BLOCKS = 500;
@@ -16,19 +18,30 @@ const clean = (text: string) => text.replace(/\r\n/g, "\n").replace(/\n[ \t]*\n+
 /** Plain script -> blocks, without losing a line: `# x` heading, `# ---` break, `[x]` / `(x)` visual note, everything else narration. */
 export function scriptToBlocks(script: string, id: () => string = makeBlockId): ScriptBlock[] {
   const blocks: ScriptBlock[] = [];
+  let speaker = "";
   for (const paragraph of script.replace(/\r\n/g, "\n").split(/\n\s*\n/)) {
     let spoken: string[] = [];
-    const flush = () => { if (spoken.length) { blocks.push({ id: id(), type: "narration", text: spoken.join("\n") }); spoken = []; } };
+    const flush = () => {
+      if (spoken.length) blocks.push({ id: id(), type: "narration", text: spoken.join("\n"), ...(speaker ? { speaker } : {}) });
+      spoken = [];
+    };
     for (const raw of paragraph.split("\n")) {
       const line = raw.trim();
       if (!line) continue;
+      const cue = readSpeakerCue(line);
+      if (cue) {
+        flush();
+        speaker = cue.speaker;
+        if (cue.text) spoken.push(cue.text);
+        continue;
+      }
       const heading = /^(#{1,3})\s+(.*)$/.exec(line);
       const visual = /^\[([^\]]+)\]$|^\(([^)]+)\)$/.exec(line);
       if (heading) { flush(); const text = heading[2].trim(); blocks.push(text === "---" ? { id: id(), type: "break", text: "" } : { id: id(), type: "heading", text, level: heading[1].length as 1 | 2 | 3 }); }
       else if (visual) { flush(); blocks.push({ id: id(), type: "visual", text: (visual[1] ?? visual[2]).trim() }); }
       else spoken.push(line);
     }
-    flush();
+    if (spoken.length) { flush(); speaker = ""; }
   }
   return blocks.slice(0, MAX_BLOCKS);
 }
@@ -41,7 +54,8 @@ export function blocksToScript(blocks: readonly ScriptBlock[]): string {
     if (!text) return [];
     if (block.type === "heading") return [`${"#".repeat(block.level ?? 1)} ${text.replace(/\n/g, " ")}`];
     if (block.type === "visual") return [`[${text.replace(/[\[\]\n]/g, " ")}]`];
-    return [text];
+    const speaker = scriptSpeaker(block.speaker ?? "");
+    return [speaker ? `[Speaker: ${speaker}]\n${text}` : text];
   }).join("\n\n");
 }
 
@@ -53,7 +67,7 @@ export function scriptBlockSpan(blocks: readonly ScriptBlock[], id: string) {
     if (!encoded) continue;
     if (block.id === id) {
       if (block.type === "break") return null;
-      const leading = block.type === "heading" ? (block.level ?? 1) + 1 : block.type === "visual" ? 1 : 0;
+      const leading = block.type === "heading" ? (block.level ?? 1) + 1 : block.type === "visual" ? 1 : block.speaker ? encoded.indexOf("\n") + 1 : 0;
       const text = encoded.slice(leading, block.type === "visual" ? -1 : undefined);
       if (!text || text.length > 1800) return null;
       const start = offset + leading;
@@ -64,7 +78,7 @@ export function scriptBlockSpan(blocks: readonly ScriptBlock[], id: string) {
   return null;
 }
 
-export const narrationBlocks = (blocks: readonly ScriptBlock[]) => blocks.filter(b => b.type === "narration" && clean(b.text).trim());
+export const narrationBlocks = (blocks: readonly ScriptBlock[]) => blocks.filter(b => b.type === "narration" && clean(withoutSpeakerCues(b.text)).trim());
 
 /** cyrb53: a small deterministic hash so server and browser agree on staleness without shipping crypto to the client. */
 function cyrb53(input: string): string {
@@ -74,10 +88,10 @@ function cyrb53(input: string): string {
   h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, "0");
 }
-export const audioHash = (voiceId: string, text: string) => cyrb53(`${voiceId}\n${clean(text).trim().replace(/\s+/g, " ")}`);
+export const audioHash = (voiceId: string, text: string) => cyrb53(`${voiceId}\n${clean(withoutSpeakerCues(text)).trim().replace(/\s+/g, " ")}`);
 export type AudioStatus = "none" | "fresh" | "stale";
 export function blockAudioStatus(block: ScriptBlock, voiceId: string | null): AudioStatus | null {
-  if (block.type !== "narration" || !clean(block.text).trim()) return null;
+  if (block.type !== "narration" || !clean(withoutSpeakerCues(block.text)).trim()) return null;
   if (!block.audio) return "none";
   return voiceId && block.audio.hash === audioHash(voiceId, block.text) && block.audio.voiceId === voiceId ? "fresh" : "stale";
 }
@@ -102,10 +116,13 @@ export const removeBlock = (blocks: readonly ScriptBlock[], id: string) => block
 export function setBlockText(blocks: readonly ScriptBlock[], id: string, text: string): ScriptBlock[] {
   return blocks.map(b => b.id === id ? { ...b, text: text.slice(0, MAX_BLOCK_TEXT) } : b);
 }
+export function setBlockSpeaker(blocks: readonly ScriptBlock[], id: string, speaker: string): ScriptBlock[] {
+  return blocks.map(block => block.id === id && block.type === "narration" ? { ...block, speaker: speaker.slice(0, MAX_SCRIPT_SPEAKER) } : block);
+}
 export function setBlockType(blocks: readonly ScriptBlock[], id: string, type: BlockType): ScriptBlock[] {
   return blocks.map(b => {
     if (b.id !== id) return b;
-    const { audio: _audio, level: _level, ...rest } = b;
+    const { audio: _audio, level: _level, speaker: _speaker, ...rest } = b;
     return { ...rest, type, ...(type === "heading" ? { level: 1 as const } : {}), ...(type === "break" ? { text: "" } : {}) };
   });
 }
@@ -114,7 +131,7 @@ export function splitBlock(blocks: readonly ScriptBlock[], id: string, caret: nu
   const i = at(blocks, id); if (i < 0 || blocks.length >= MAX_BLOCKS) return [...blocks];
   const block = blocks[i], head = block.text.slice(0, caret), tail = block.text.slice(caret);
   const next = [...blocks];
-  next.splice(i, 1, { ...block, text: head }, { id: newId, type: block.type === "heading" ? "narration" : block.type, text: tail });
+  next.splice(i, 1, { ...block, text: head }, { id: newId, type: block.type === "heading" ? "narration" : block.type, text: tail, ...(block.speaker ? { speaker: block.speaker } : {}) });
   return next;
 }
 export function setBlockAudio(blocks: readonly ScriptBlock[], id: string, audio: BlockAudio | undefined): ScriptBlock[] {
@@ -136,6 +153,10 @@ export function parseScriptBlocks(value: unknown): ScriptBlocksDoc | null {
     seen.add(b.id);
     const block: ScriptBlock = { id: b.id, type: b.type, text: b.text };
     if (b.type === "heading") block.level = b.level === 2 || b.level === 3 ? b.level : 1;
+    if (b.type === "narration" && typeof b.speaker === "string") {
+      const speaker = scriptSpeaker(b.speaker);
+      if (speaker) block.speaker = speaker;
+    }
     const a = b.audio as Record<string, unknown> | undefined;
     if (a && b.type === "narration") {
       if (typeof a.hash !== "string" || !/^[0-9a-f]{14}$/.test(a.hash) || typeof a.uploadId !== "string" || !uuid.test(a.uploadId)

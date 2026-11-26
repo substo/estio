@@ -17,15 +17,18 @@ test("script paragraphs become beats and directions attach to the next beat", ()
 test("assembly voices each beat, creates the project and runs the agent with substo only", async () => {
   const clips = await mkdtemp(join(tmpdir(), "clips-")), project = await mkdtemp(join(tmpdir(), "proj-"));
   await writeFile(join(clips, "a.mov"), "x"); await writeFile(join(clips, "notes.txt"), "x");
-    const calls: { command: string; args: string[]; input?: string }[] = [];
-  const result = await assembleVideo({ script: "One.\n\nTwo.", clipsDir: clips, projectDir: project, editorDocs: "/docs", voiceover: true, music: true,
-    speak: { label: "test", speak: async () => Buffer.alloc(2000) }, run: async r => { calls.push(r); return { stdout: r.command === "ffprobe" ? "2.0" : "done", stderr: "" }; } });
+  const spoken: string[] = [];
+  const calls: { command: string; args: string[]; input?: string }[] = [];
+  const result = await assembleVideo({ script: "HOST\nOne.\n\n[Speaker: Maya]\nTwo.", clipsDir: clips, projectDir: project, editorDocs: "/docs", voiceover: true, music: true,
+    speak: { label: "test", speak: async text => { spoken.push(text); return Buffer.alloc(2000); } }, run: async r => { calls.push(r); return { stdout: r.command === "ffprobe" ? "2.0" : "done", stderr: "" }; } });
+  assert.deepEqual(spoken, ["One.", "Two."]);
   assert.deepEqual(result.timings, [0, 2.35]);
   assert.deepEqual(result.voiceFiles, ["voice-01.mp3", "voice-02.mp3"]);
   assert.deepEqual((await readdir(project)).sort(), ["a.mov", "voice-01.mp3", "voice-02.mp3"]);
   const agent = calls.find(c => c.command === "claude")!;
   assert.ok(calls.some(c => c.command === "substo"));
   assert.ok(agent.args.includes("Bash(substo:*),Read,Edit(./batch-*.json),Edit(./graphic-*.html)"));
+  assert.match(agent.input!, /speaker: "Maya"; on-screen credit only/);
   assert.match(agent.input!, /voice-02\.mp3/);
   assert.match(agent.input!, /place at 2.35s/);
   assert.match(agent.input!, /music bed/);

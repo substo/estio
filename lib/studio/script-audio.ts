@@ -1,4 +1,5 @@
 import "server-only";
+import { withoutSpeakerCues } from "./script-speakers";
 import { StudioCommandError } from "./command-error";
 import { getStudioContentRecord, saveStudioContentRecord } from "./content";
 import { studioDb } from "./studio-db";
@@ -36,7 +37,7 @@ export async function regenerateBlockAudio(locationId: string, recordId: string,
   let failure: string | null = null;
   for (const [index, block] of targets.entries()) {
     try {
-      const uploadId = await renderBlockNarration(locationId, recordId, voice, block.text, `${String(index + 1).padStart(2, "0")} ${block.id}`);
+      const uploadId = await renderBlockNarration(locationId, recordId, voice, withoutSpeakerCues(block.text).trim(), `${String(index + 1).padStart(2, "0")} ${block.id}`);
       audio[block.id] = { hash: audioHash(voice.id, block.text), uploadId, voiceId: voice.id, at: new Date().toISOString() };
       blocks = setBlockAudio(blocks, block.id, audio[block.id]);
     } catch (error) {

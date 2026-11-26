@@ -30,13 +30,13 @@ export function buildBrief(i: BriefInput): string {
   const placeholder = i.avatarFile
     ? `a clearly labelled storyboard placeholder that shows the creator: run \`substo media --refresh\`, find ${i.avatarFile} in \`substo media\`, and place it with placeMedia on the B-roll track for the beat's duration (fill the frame without stretching or altering the photo), then add a lower caption text clip on the Text track reading "FOOTAGE NEEDED: <the beat's visual note>" so it is clear which shot to film. Use only this photo, never another person's picture`
     : `a clearly labelled placeholder: a solid-colour or title-card clip for the beat's duration showing the beat's words and "FOOTAGE NEEDED: <the beat's visual note>"`;
-  const beats = i.beats.map((b, n) => `${b.index}. "${b.narration}"${b.direction ? `  [visual: ${b.direction}]` : ""}${i.frameFiles?.[b.index] ? `  [storyboard frame: ${i.frameFiles[b.index]}]` : ""}${i.voiceFiles[n] ? `  (voiceover: ${i.voiceFiles[n]}${i.timings[n] !== undefined ? `, place at ${i.timings[n]}s` : ""})` : ""}`).join("\n");
+  const beats = i.beats.map((b, n) => `${b.index}. "${b.narration}"${b.speaker ? ` [speaker: ${JSON.stringify(b.speaker)}; on-screen credit only]` : ""}${b.direction ? `  [visual: ${b.direction}]` : ""}${i.frameFiles?.[b.index] ? `  [storyboard frame: ${i.frameFiles[b.index]}]` : ""}${i.voiceFiles[n] ? `  (voiceover: ${i.voiceFiles[n]}${i.timings[n] !== undefined ? `, place at ${i.timings[n]}s` : ""})` : ""}`).join("\n");
   return `You are editing a finished video from a script. The current directory is a Substo Video project folder (already created with \`substo new\`). Use ONLY the \`substo\` command; read ${i.editorDocs}/AGENTS.md, then agents/cutting.md, agents/broll-and-titles.md, agents/sound.md, agents/shorts.md and agents/motion-graphics.md as needed. Pass --author claude and --project "${i.projectFile}" on every command.
 
 Canvas: ${i.orientation}. Footage the creator shot (already in this folder): ${i.clips.join(", ") || "none"}.
 ${i.hasVoiceover ? "Generated voiceover files (one per beat, in this folder) are the narration: place them back to back on the Voice track in order." : "The footage carries the narration: transcribe it (`substo wait transcript`) and cut to the script. Files named voice-NN.mp3 in this folder are leftovers from an earlier version: do not place them, and remove any that an earlier revision left on the Voice track."}
 
-Script beats:
+Script beats (speaker labels are credits, never spoken words or part of their captions):
 ${beats}
 ${i.footageTranscripts?.length ? `\nFootage transcripts (seconds in the file; the editor cannot transcribe on this Mac, so use these times for cuts, search and captions, not substo transcribe):\n${i.footageTranscripts.map(t => `[${t.file}]\n${t.lines}`).join("\n")}` : ""}
 
