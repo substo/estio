@@ -2,7 +2,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import type { StudioAccess } from "./access";
 import { studioDb } from "./studio-db";
-import { canonicalYoutubeVideo, type TranscriptSegment } from "./video-transcription-policy";
+import { type TranscriptSegment } from "./video-transcription-policy";
 import { matchTimedSourceQuote } from "./script-source-quotes";
 
 /** The Library page has already authorized this source in the caller's Location. */
@@ -18,8 +18,8 @@ export async function getKnowledgeSourceCitation(access: StudioAccess, sourceId:
 
 /** Read only the authorized source's original evidence metadata. A verified frame link refers to a private stored object. */
 export async function getSourceClipMetadata(access: StudioAccess, sourceId: string, evidenceId: string | null) {
-  return studioDb.one<{ title: string; url: string | null; at: unknown; until: unknown; onScreen: boolean; frame: boolean }>(Prisma.sql`
-    select r.title, coalesce(e.payload->>'source_url',r.source_url,r.payload->>'url') as url,
+  return studioDb.one<{ title: string; url: string | null; sourceUrl: string | null; at: unknown; until: unknown; onScreen: boolean; frame: boolean }>(Prisma.sql`
+    select r.title, coalesce(e.payload->>'source_url',r.source_url,r.payload->>'url') as url, r.source_url as "sourceUrl",
       e.payload->'start_sec' as at, e.payload->'end_sec' as until,
       coalesce(e.payload->>'evidence_type'='ocr',false) as "onScreen",
       exists(select 1 from studio.studio_knowledge_media_links m where m.location_id=r.location_id
@@ -30,19 +30,11 @@ export async function getSourceClipMetadata(access: StudioAccess, sourceId: stri
     where r.location_id=${access.locationId} and r.id=${sourceId}::uuid and r.kind='reference' and not r.archived`);
 }
 
-/** Read the latest completed transcript for the same saved source and the same YouTube video. */
-export async function getVerifiedQuoteTiming(access: StudioAccess, sourceId: string, url: string | null, quote: string) {
-  const youtube = canonicalYoutubeVideo(url);
-  if (!youtube) return null;
+/** Read the completed transcript already scoped to this Location, source and video. */
+export async function getVerifiedQuoteTiming(access: StudioAccess, transcriptionId: string, quote: string) {
   const chunks = await studioDb.rows<{ segments: TranscriptSegment[] }>(Prisma.sql`
-    select c.segments
-    from studio.studio_video_transcript_chunks c
-    where c.location_id=${access.locationId} and c.transcription_id=(
-      select t.id from studio.studio_video_transcriptions t
-      where t.location_id=${access.locationId} and t.record_id=${sourceId}::uuid
-        and t.video_id=${youtube.videoId} and t.status in ('ready','partial')
-      order by t.completed_at desc nulls last, t.id desc limit 1
-    )
-    order by c.chunk_index`);
+    select segments from studio.studio_video_transcript_chunks
+    where location_id=${access.locationId} and transcription_id=${transcriptionId}::uuid
+    order by chunk_index`);
   return matchTimedSourceQuote(quote, chunks.flatMap(chunk => chunk.segments));
 }

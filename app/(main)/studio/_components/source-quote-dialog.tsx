@@ -1,20 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { sourceClipPlayback, sourceQuoteSeconds, validateSourceQuote, type SourceQuote, type SourceClipReference } from "@/lib/studio/script-source-quotes";
 
 const control = "mt-1 min-h-11 w-full rounded-md border bg-background px-2";
 
-export function SourceQuoteDialog({ media, initial, reference, positions = [], atCapacity = false, onSave, onClose }: {
-  media: readonly { id: string; name: string }[]; initial?: SourceQuote;
+export function SourceQuoteDialog({ locationId, media, initial, reference, positions = [], atCapacity = false, onSave, onClose }: {
+  locationId: string; media: readonly { id: string; name: string }[]; initial?: SourceQuote;
   reference?: SourceClipReference; positions?: readonly { id: string; label: string }[]; atCapacity?: boolean;
   onSave: (quote: SourceQuote, after?: string) => void; onClose: () => void;
 }) {
   const [asset, setAsset] = useState(initial?.asset ?? (reference ? "" : media[0]?.id ?? ""));
-  const [start, setStart] = useState(String(initial?.start ?? reference?.start ?? ""));
-  const [end, setEnd] = useState(String(initial?.end ?? reference?.end ?? ""));
+  const [startEdit, setStart] = useState<string>();
+  const [endEdit, setEnd] = useState<string>();
+  const start = startEdit ?? String(initial?.start ?? reference?.start ?? "");
+  const end = endEdit ?? String(initial?.end ?? reference?.end ?? "");
   const [credit, setCredit] = useState(initial?.credit ?? reference?.title.replace(/[\[\]\u0000-\u001f\u007f]/g, " ").slice(0, 120) ?? "");
   const [url, setUrl] = useState(initial?.url ?? reference?.url ?? "");
   const [after, setAfter] = useState("");
@@ -22,6 +25,61 @@ export function SourceQuoteDialog({ media, initial, reference, positions = [], a
   const [showPreview, setShowPreview] = useState(false);
   const playback = reference ? sourceClipPlayback(reference.url, reference.start, reference.end) : null;
   const selected = media.find(file => file.id === asset);
+
+  const router = useRouter();
+  const timingSource = reference?.timing?.sourceId;
+  const timingStatus = reference?.timing?.status;
+  const attempted = useRef(false);
+  const [requesting, setRequesting] = useState(false);
+  const [awaitingStatus, setAwaitingStatus] = useState(false);
+  const [timingError, setTimingError] = useState<string | null>(null);
+  const requestTiming = useCallback(async (retry: boolean) => {
+    if (!timingSource) return;
+    setRequesting(true);
+    setTimingError(null);
+    try {
+      const response = await fetch("/api/studio/video-transcription", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Studio-Tenant": locationId },
+        body: JSON.stringify({ recordId: timingSource, requestKey: crypto.randomUUID(), purpose: retry ? "retry_citation_timing" : "citation_timing" }),
+      });
+      const result = await response.json();
+      if (!response.ok || result.status === "not_queued") {
+        setTimingError(result.message ?? result.error ?? "Could not start transcription on your Mac.");
+        return;
+      }
+      setAwaitingStatus(true);
+      router.refresh();
+    } catch {
+      setTimingError("Could not reach Studio. Retry when you’re connected.");
+    } finally {
+      setRequesting(false);
+    }
+  }, [locationId, router, timingSource]);
+
+  useEffect(() => {
+    if (timingStatus !== "needed" || attempted.current) return;
+    attempted.current = true;
+    void requestTiming(false);
+  }, [requestTiming, timingStatus]);
+
+  useEffect(() => {
+    setAwaitingStatus(false);
+  }, [timingStatus]);
+
+  const waitingForTiming = timingStatus === "queued" || timingStatus === "running" || awaitingStatus;
+  useEffect(() => {
+    if (!waitingForTiming) return;
+    const interval = window.setInterval(() => { if (!document.hidden) router.refresh(); }, 8000);
+    return () => window.clearInterval(interval);
+  }, [router, waitingForTiming]);
+
+  const timingMessage = timingError ?? (requesting ? "Requesting a timed transcript on your Mac…"
+    : timingStatus === "queued" || awaitingStatus ? "Queued on your Mac. Keep it online to find the quote."
+    : timingStatus === "running" ? "Your Mac is transcribing the video. The clip times will fill in when Studio finds the quote."
+    : timingStatus === "failed" ? "The Mac couldn’t finish the timed transcript."
+    : timingStatus === "unmatched" ? "Studio found no unique match in the timed transcript. Try another citation."
+    : timingStatus === "needed" ? "Studio will find this quote using a timed transcript." : null);
 
   function save() {
     const quote = validateSourceQuote({ asset, start: sourceQuoteSeconds(start), end: sourceQuoteSeconds(end), credit, url: url.trim() || undefined });
@@ -39,10 +97,13 @@ export function SourceQuoteDialog({ media, initial, reference, positions = [], a
       {reference ? <section aria-label="Evidence used by the script" className="space-y-2 rounded-lg border p-3 text-sm">
         <p className="font-medium">{reference.title}</p>
         <blockquote className="max-h-36 overflow-y-auto whitespace-pre-wrap border-l-2 pl-3">{reference.quote}</blockquote>
-        <p className="text-muted-foreground">{reference.start === null ? "This finding has no verified time range. You can open the original video to locate the moment." :
+        {timingMessage ? <p role={timingError ? "alert" : "status"} className="text-muted-foreground">{timingMessage}</p> : null}
+        {(timingError || timingStatus === "failed") && !awaitingStatus ? <Button type="button" variant="outline" disabled={requesting}
+          onClick={() => void requestTiming(timingStatus === "failed")}>Retry transcription</Button> : null}
+        {!timingMessage || reference.start !== null ? <p className="text-muted-foreground">{reference.start === null ? "No verified time range is available for this finding." :
           reference.onScreen ? `On-screen evidence at ${reference.start}s. Choose the end after viewing the video.` :
           reference.end === null ? `Saved start at ${reference.start}s. Choose the end after viewing the video.` :
-          `Saved transcript range: ${reference.start}s–${reference.end}s. Review the excerpt and trim it if needed.`}</p>
+          `Saved transcript range: ${reference.start}s–${reference.end}s. Review the excerpt and trim it if needed.`}</p> : null}
         {playback && showPreview ? <div className="aspect-video min-h-[200px] overflow-hidden rounded-md bg-black">
           <iframe title={`Preview: ${reference.title}`} className="h-full min-h-[200px] w-full"
             src={playback.embed} allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen />
@@ -80,7 +141,7 @@ export function SourceQuoteDialog({ media, initial, reference, positions = [], a
           </select>
         </label> : null}
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-        <Button type="button" className="min-h-11" disabled={atCapacity} onClick={save}>{initial ? "Save source clip" : "Insert source clip"}</Button>
+        <Button type="button" className="min-h-11" disabled={atCapacity || ((requesting || waitingForTiming) && (!start || !end))} onClick={save}>{initial ? "Save source clip" : "Insert source clip"}</Button>
       </> : <p className="text-sm">Upload the source video under Assets in Edit mode, then return here to choose the excerpt.</p>}
     </DialogContent>
   </Dialog>;

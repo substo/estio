@@ -7,6 +7,7 @@ import { StudioDbError } from "./db";
 import { StudioCommandError } from "./command-error";
 import { createStudioR2Store, readStudioR2Config } from "./media-r2";
 import { deviceOnline } from "./devices-policy";
+import { canonicalYoutubeVideo } from "./video-transcription-policy";
 import { runVideoFrameOperation } from "./video-frames";
 
 export type VideoOrigin = "paste" | "search" | "suggestion";
@@ -41,6 +42,32 @@ export async function enqueueVideoTranscription(locationId: string, command: { r
   }
 }
 export const videoRequestKey = (prefix: string, ...parts: string[]) => `${prefix}:${createHash("sha256").update(parts.join("\u0000")).digest("hex").slice(0, 40)}`;
+
+/** Find reusable timings first, then any open or failed attempt for this source/video. */
+export async function getCitationTranscription(locationId: string, recordId: string, videoId: string) {
+  return studioDb.one<{ id: string; status: "ready" | "partial" | "queued" | "running" | "failed" | "cancelled" }>(Prisma.sql`
+    select id, status from studio.studio_video_transcriptions
+    where location_id=${locationId} and record_id=${recordId}::uuid and video_id=${videoId}
+      and status in ('ready','partial','queued','running','failed','cancelled')
+    order by case when status in ('ready','partial') then 0 when status in ('queued','running') then 1 else 2 end,
+      created_at desc, id desc limit 1`);
+}
+
+export async function ensureCitationTranscription(locationId: string, recordId: string, retry: boolean): Promise<VideoQueueResult> {
+  const access = await getStudioAccess(locationId);
+  if (!access) throw new StudioCommandError("Studio access denied.", 403);
+  const source = await studioDb.one<{ source_url: string | null }>(Prisma.sql`
+    select source_url from studio.studio_records
+    where location_id=${access.locationId} and id=${recordId}::uuid and kind='reference' and not archived`);
+  const youtube = canonicalYoutubeVideo(source?.source_url);
+  if (!youtube) throw new StudioCommandError("The YouTube source is unavailable.", 404);
+  const prior = await getCitationTranscription(access.locationId, recordId, youtube.videoId);
+  if (prior?.status === "ready" || prior?.status === "partial") return { status: "skipped_existing" };
+  if (prior && (prior.status === "queued" || prior.status === "running" || !retry)) return { status: "reused", transcriptionId: prior.id };
+  return enqueueVideoTranscription(access.locationId, {
+    recordId, origin: "suggestion", requestKey: videoRequestKey("clip-timing", recordId, youtube.videoId, prior?.id ?? "first"),
+  });
+}
 
 export interface VideoTranscriptionView {
   id: string; status: "suggested" | "queued" | "running" | "ready" | "partial" | "failed" | "cancelled" | "skipped";

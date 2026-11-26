@@ -16,6 +16,8 @@ import { sameScriptNarration } from "./video-assembly/script";
 import { safeStudioSourceUrl } from "./library-policy";
 import { citationClipRange, type SourceClipReference } from "./script-source-quotes";
 import { getKnowledgeSourceCitation, getSourceClipMetadata, getVerifiedQuoteTiming } from "./citation-source";
+import { getCitationTranscription } from "./video-transcription";
+import { canonicalYoutubeVideo } from "./video-transcription-policy";
 import { recordLinkId } from "./record-link-policy";
 import { agentCitationHref, citedQuote, recordedTranscriptOffset, type ProposalFocus } from "./citation-navigation";
 
@@ -88,11 +90,23 @@ export async function getAgentSourceClipReference(locationId: string, recordId: 
   const url = safeStudioSourceUrl(metadata.url);
   const quote = citedQuote(item.id, item.text);
   const savedRange = citationClipRange(metadata.at, metadata.until, metadata.onScreen);
-  const range = savedRange.start === null && !metadata.onScreen
-    ? await getVerifiedQuoteTiming(access, sourceId, url, quote) ?? savedRange : savedRange;
+  let range = savedRange;
+  let timing: SourceClipReference["timing"];
+  const video = canonicalYoutubeVideo(url);
+  if (range.end === null && !metadata.onScreen && video && video.videoId === canonicalYoutubeVideo(metadata.sourceUrl)?.videoId) {
+    const transcript = await getCitationTranscription(access.locationId, sourceId, video.videoId);
+    const status = transcript?.status;
+    if (transcript && (status === "ready" || status === "partial")) {
+      const match = await getVerifiedQuoteTiming(access, transcript.id, quote);
+      if (match) range = match;
+      else timing = { sourceId, status: "unmatched" };
+    } else {
+      timing = { sourceId, status: status === "queued" || status === "running" ? status : status ? "failed" : "needed" };
+    }
+  }
   return { key: `${turn.id}:${focus.index}:${itemId}`, title: metadata.title, quote,
     url: url?.startsWith("https://") && url.length <= 500 ? url : null, passageHref: agentCitationHref(sourceId, focus, itemId),
-    ...range, onScreen: metadata.onScreen, frameHref: metadata.frame ? `/studio/knowledge-media/evidence/${evidenceId}` : null };
+    ...range, timing, onScreen: metadata.onScreen, frameHref: metadata.frame ? `/studio/knowledge-media/evidence/${evidenceId}` : null };
 }
 
 function measure(text: string, target: number | null) {

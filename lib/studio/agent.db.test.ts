@@ -808,3 +808,36 @@ test("an existing content record starts writing chat in place and stale full-scr
   assert.equal(applied.record.state.stages["Shoot plan"]?.text, "Capture a proof shot.");
   assert.equal((await sql(`select payload->>'script' as script from studio.studio_records where id=$1::uuid`, recordId))[0].script, edited);
 });
+
+test("clip timing queues once, rejoins active work and reuses the resulting timed transcript", async () => {
+  const { ensureCitationTranscription, getCitationTranscription } = await import("./video-transcription");
+  const { getVerifiedQuoteTiming } = await import("./citation-source");
+  const recordId = crypto.randomUUID();
+  const videoId = "cItAtI0n123";
+  await sql(`insert into studio.studio_records(location_id,id,kind,title,payload)
+    values($1,$2::uuid,'reference','Legacy clip source',jsonb_build_object('url',$3::text,'transcript','An existing transcript without timecodes.'))`, loc, recordId, `https://www.youtube.com/watch?v=${videoId}`);
+  await sql(`update studio.studio_devices set desired_config=jsonb_set(desired_config,'{features,transcription}','true'),
+    report=report || '{"video":{"ready":true}}' || jsonb_build_object('handlers', (report->'handlers') || '["studio.video_transcribe"]'::jsonb)
+    where location_id=$1 and created_by=$2`, loc, user);
+  assert.equal(await getCitationTranscription(loc, recordId, videoId), null);
+
+  const [first, concurrent] = await Promise.all([
+    ensureCitationTranscription(loc, recordId, false),
+    ensureCitationTranscription(loc, recordId, false),
+  ]);
+  assert.ok("transcriptionId" in first && first.transcriptionId);
+  const id = first.transcriptionId;
+  assert.ok("transcriptionId" in concurrent && concurrent.transcriptionId === id);
+  assert.deepEqual(await getCitationTranscription(loc, recordId, videoId), { id, status: "queued" });
+  await sql("update studio.studio_video_transcriptions set status='failed' where id=$1::uuid", id);
+  assert.deepEqual(await ensureCitationTranscription(loc, recordId, false), { status: "reused", transcriptionId: id });
+
+  const retry = await ensureCitationTranscription(loc, recordId, true);
+  assert.ok("transcriptionId" in retry && retry.transcriptionId && retry.transcriptionId !== id);
+  await sql(`insert into studio.studio_video_transcript_chunks(location_id,transcription_id,chunk_index,segments)
+    values($1,$2::uuid,0,'[{"text":"An existing transcript, now with timestamps.","start":1599.25,"end":1602.5}]')`, loc, retry.transcriptionId);
+  await sql("update studio.studio_video_transcriptions set status='partial',segment_count=1 where id=$1::uuid", retry.transcriptionId);
+  assert.deepEqual(await getVerifiedQuoteTiming(access, retry.transcriptionId, "An existing transcript now with timestamps"), { start: 1599.25, end: 1602.5 });
+  assert.deepEqual(await ensureCitationTranscription(loc, recordId, false), { status: "skipped_existing" });
+  assert.deepEqual(await ensureCitationTranscription(loc, recordId, true), { status: "skipped_existing" });
+});

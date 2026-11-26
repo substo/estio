@@ -282,7 +282,8 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
         <button type="button" className={btn} disabled={archived || blocks.length >= MAX_BLOCKS || blocks.filter(b => readSourceQuoteCue(b.text)).length >= MAX_SOURCE_QUOTES}
           onClick={event => { quoteTrigger.current = event.currentTarget; setQuoteDialog({}); }}>Source clip</button>
       </div>
-      {quoteDialog ? <SourceQuoteDialog media={quoteMedia} reference={quoteDialog.reference}
+      {quoteDialog ? <SourceQuoteDialog key={quoteDialog.reference?.key ?? quoteDialog.block?.id ?? "new"} locationId={locationId}
+        media={quoteMedia} reference={clipReference?.key === quoteDialog.reference?.key ? clipReference ?? undefined : quoteDialog.reference}
         positions={narrationBlocks(blocks).map((block, index) => ({ id: block.id, label: `Beat ${index + 1} · ${block.text.slice(0, 78)}` }))}
         atCapacity={!quoteDialog.block && (blocks.length >= MAX_BLOCKS || blocks.filter(block => readSourceQuoteCue(block.text)).length >= MAX_SOURCE_QUOTES)} initial={quoteDialog.block ? readSourceQuoteCue(quoteDialog.block.text) ?? undefined : undefined}
         onClose={closeQuote}

@@ -39,9 +39,12 @@ export function readSourceQuoteCue(text: string): SourceQuote | null {
 export const sourceQuoteCue = (quote: SourceQuote) => SOURCE_QUOTE_PREFIX + JSON.stringify(quote);
 
 /** A saved citation can point to a whole transcript unit, a frame, or text without timing. */
+export type SourceClipTimingStatus = "needed" | "queued" | "running" | "failed" | "unmatched";
+
 export type SourceClipReference = {
   key: string; title: string; quote: string; url: string | null; passageHref: string;
   start: number | null; end: number | null; frameHref: string | null; onScreen: boolean;
+  timing?: { sourceId: string; status: SourceClipTimingStatus };
 };
 
 export function citationClipRange(start: unknown, end: unknown, onScreen: boolean) {
