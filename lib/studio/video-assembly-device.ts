@@ -27,14 +27,14 @@ export async function withAssemblyDownloads(jobs: unknown, store?: Pick<StudioR2
       const rows = wanted.length ? await studioDb.rows<{ id: string; original_filename: string; object_key: string; byte_size: string }>(Prisma.sql`
         select u.id, u.original_filename, m.object_key, u.byte_size::text as byte_size from studio.studio_uploads u
         join studio.studio_media_objects m on m.id = u.media_object_id and m.location_id = u.location_id
-        where u.location_id = ${job.location_id} and u.record_id = ${job.payload.recordId}::uuid and u.id = any(${wanted}::uuid[]) and u.status = 'uploaded'`) : [];
+        where u.location_id = ${job.location_id} and u.record_id = ${job.payload.recordId}::uuid and u.id = any(${wanted}::uuid[]) and u.status = 'uploaded' and u.deleted_at is null`) : [];
       const byId = new Map(rows.map(r => [r.id, r]));
       return Promise.all(wanted.flatMap(id => byId.has(id) ? [byId.get(id)!] : []).map(async row => ({ uploadId: row.id, name: row.original_filename, byteSize: Number(row.byte_size), url: await r2.presignWorkerRead(row.object_key, EXPORT_PRESIGN_SECONDS) })));
     };
     const downloads: AssemblyDownload[] = await link(ids);
     const voiceDownloads: AssemblyDownload[] = await link(voiceIds);   // beat order = uploadIds order
     const soundRows = job.payload?.options?.music === true && uuid(job.payload?.recordId) ? await studioDb.rows<{ id: string; original_filename: string }>(Prisma.sql`
-      select id, original_filename from studio.studio_uploads where location_id = ${job.location_id} and record_id = ${job.payload.recordId}::uuid and status = 'uploaded'
+      select id, original_filename from studio.studio_uploads where location_id = ${job.location_id} and record_id = ${job.payload.recordId}::uuid and status = 'uploaded' and deleted_at is null
         and original_filename like 'Narration sound-%' and created_at > now() - make_interval(hours => ${Prisma.raw(String(Math.trunc(SOUND_WINDOW_HOURS)))}) order by created_at desc`) : [];
     const newest = (role: "music" | "sfx") => soundRows.find(r => r.original_filename.startsWith(`Narration sound-${role} `))?.id;
     const wanted = (["music", "sfx"] as const).flatMap(role => { const id = newest(role); return id ? [{ role, id }] : []; });

@@ -14,7 +14,7 @@ export async function getStudioRecordRelations(access: StudioAccess, recordId: s
       btrim(left(coalesce(nullif(r.payload->>'transcript',''),nullif(r.payload->>'notes',''),r.summary,''),600)) <> '' as "hasScriptEvidence"
     from studio.studio_record_links l
     join studio.studio_records r on r.id = case when ${includeIncoming} and l.target_id = ${recordId}::uuid then l.source_id else l.target_id end and r.location_id = l.location_id
-    where l.location_id = ${locationId} and (l.source_id = ${recordId}::uuid or (${includeIncoming} and l.target_id = ${recordId}::uuid)) order by r.id asc limit 100`);
+    where l.location_id = ${locationId} and r.deleted_at is null and (l.source_id = ${recordId}::uuid or (${includeIncoming} and l.target_id = ${recordId}::uuid)) order by r.id asc limit 100`);
   const files = await studioDb.rows<{ id: string; payload: Record<string, unknown>; media_object_id: string | null }>(Prisma.sql`
     select id, payload, media_object_id from studio.studio_legacy_files
     where location_id = ${locationId} and record_id = ${recordId}::uuid order by id asc`);

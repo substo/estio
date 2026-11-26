@@ -55,7 +55,7 @@ export async function regenerateBlockAudio(locationId: string, recordId: string,
 export async function ownedUploadIds(locationId: string, recordId: string, ids: readonly string[]): Promise<Set<string>> {
   if (!ids.length) return new Set();
   const rows = await studioDb.rows<{ id: string }>(
-    (await import("@prisma/client")).Prisma.sql`select id from studio.studio_uploads where location_id = ${locationId} and record_id = ${recordId}::uuid and status = 'uploaded' and id = any(${ids as string[]}::uuid[])`);
+    (await import("@prisma/client")).Prisma.sql`select id from studio.studio_uploads where location_id = ${locationId} and record_id = ${recordId}::uuid and status = 'uploaded' and deleted_at is null and id = any(${ids as string[]}::uuid[])`);
   return new Set(rows.map(r => r.id));
 }
 

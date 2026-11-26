@@ -400,7 +400,7 @@ export async function latestSourceDraft(locationId: string, sourceId: string) {
       (SELECT count(*)::int FROM studio.studio_agent_turns t WHERE t.location_id=c.location_id AND t.record_id=c.id
         AND t.actor_app=${access.app} AND t.created_by_clerk_user_id=${access.userId} AND t.status='done') AS turns
     FROM studio.studio_records c JOIN studio.studio_record_links l ON l.location_id=c.location_id AND l.source_id=c.id
-    WHERE c.location_id=${access.locationId} AND c.kind='content' AND NOT c.archived AND c.payload#>>'{creation,schema}'='1'
+    WHERE c.location_id=${access.locationId} AND c.kind='content' AND NOT c.archived AND c.deleted_at IS NULL AND c.payload#>>'{creation,schema}'='1'
       AND l.target_id=${sourceId}::uuid
     -- Prefer a draft with real work (a saved stage or script, or a completed exchange of this account); a draft that only has failed
     -- or empty attempts is offered only when nothing better exists. The other drafts stay reachable from the source's Script tab.

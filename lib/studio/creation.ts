@@ -35,7 +35,7 @@ export function expose(record: StoredRecord): CreationRecord {
 export async function loadRecord(access: StudioAccess, id: string, includeExistingContent = false) {
   return studioDb.one<StoredRecord>(Prisma.sql`
     SELECT id, title, version, payload, script_template_version_id FROM studio.studio_records
-    WHERE location_id=${access.locationId} AND id=${id}::uuid AND kind='content' AND NOT archived AND (${includeExistingContent} OR payload#>>'{creation,schema}'='1')`);
+    WHERE location_id=${access.locationId} AND id=${id}::uuid AND kind='content' AND NOT archived AND deleted_at IS NULL AND (${includeExistingContent} OR payload#>>'{creation,schema}'='1')`);
 }
 export async function loadSource(access: StudioAccess, id: string): Promise<CreationSource | null> {
   const row = await studioDb.one<{ id: string; title: string; version: number; transcript: string; description: string }>(Prisma.sql`
@@ -67,7 +67,7 @@ export async function getCreationPage(locationId: string, id?: string, sourceId?
   const linkedDrafts = id ? await studioDb.rows<LinkedDraft>(Prisma.sql`
     SELECT s.id,s.version,s.title FROM studio.studio_record_links l
     JOIN studio.studio_records s ON s.location_id=l.location_id AND s.id=l.target_id
-    WHERE l.location_id=${access.locationId} AND l.source_id=${id}::uuid AND s.kind='content' AND NOT s.archived
+    WHERE l.location_id=${access.locationId} AND l.source_id=${id}::uuid AND s.kind='content' AND NOT s.archived AND s.deleted_at IS NULL
       AND nullif(btrim(s.payload->>'script'),'') IS NOT NULL
     ORDER BY s.updated_at DESC,s.id LIMIT 30`) : [];
   return { record, source, publisher: access.locationName, runs, linkedDrafts };

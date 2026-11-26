@@ -41,7 +41,7 @@ export async function requestVideoAssembly(locationId: string, recordId: string,
         if (mac?.source_clips !== "1") return { ok: false, message: "Update and restart the video companion on your paired Mac to make a video with source clips." };
         const available = await studioDb.rows<{ id: string; content_type: string }>(Prisma.sql`
           select id, content_type from studio.studio_uploads
-          where location_id = ${access.locationId} and record_id = ${recordId}::uuid and status = 'uploaded'
+          where location_id = ${access.locationId} and record_id = ${recordId}::uuid and status = 'uploaded' and deleted_at is null
             and media_object_id is not null and (content_type like 'audio/%' or content_type like 'video/%')
             and original_filename !~ '^Edited video ' order by created_at limit 40`);
         if (quotes.some(quote => !available.some(asset => asset.id === quote.asset && asset.content_type.startsWith("video/")))) {

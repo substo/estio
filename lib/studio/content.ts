@@ -34,7 +34,7 @@ export async function getStudioContentRecord(locationId: string, recordId: strin
   if (!access || !uuid.test(recordId)) return null;
   const record = await studioDb.one<StudioContentRecord>(Prisma.sql`
     select id, title, version, updated_at, approved, archived, payload, script_template_version_id, script_template_selected from studio.studio_records
-    where location_id = ${access.locationId} and id = ${recordId}::uuid and kind = 'content'`);
+    where location_id = ${access.locationId} and id = ${recordId}::uuid and kind = 'content' and deleted_at is null`);
   if (!record) return null;
   const { links, files, uploads } = await getStudioRecordRelations(access, recordId);
   return { access, record, links, files, uploads };

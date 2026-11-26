@@ -54,7 +54,7 @@ export async function studioUploadRedirectResponse(locationId: string, uploadId:
   const location = access.locationId;
   const upload = await studioDb.one<{ media_object_id: string | null }>(Prisma.sql`
     select media_object_id from studio.studio_uploads
-    where location_id = ${location} and id = ${uploadId}::uuid and status = 'uploaded'`);
+    where location_id = ${location} and id = ${uploadId}::uuid and status = 'uploaded' and deleted_at is null`);
   if (!upload?.media_object_id) return notFound();
   return mediaObjectRedirect(location, upload.media_object_id, wantInline);
 }

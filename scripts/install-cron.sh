@@ -205,6 +205,9 @@ fi
 # them, and each tick is a database prune plus a due-schedules read (free-plan egress).
 (crontab -l 2>/dev/null | grep -v -E "run-cron-endpoint\.sh studio-schedules|api/cron/studio-schedules"; echo "*/5 * * * * ${SCRIPT_DIR}/run-cron-endpoint.sh studio-schedules 110") | crontab -
 
+# Studio Bin: permanently removes items binned more than 30 days ago (R2 files first, then rows). Nightly at 03:30.
+(crontab -l 2>/dev/null | grep -v -E "run-cron-endpoint\.sh studio-bin-purge|api/cron/studio-bin-purge"; echo "30 3 * * * ${SCRIPT_DIR}/run-cron-endpoint.sh studio-bin-purge 280") | crontab -
+
 # Remove retired schedules that must never be reinstalled.
 (crontab -l 2>/dev/null \
     | grep -v -E "api/cron/whatsapp-reconciliation|api/cron/contact-sync|api/cron/scheduled-tasks") \
@@ -236,6 +239,7 @@ echo "   - Check logs: tail -f ${APP_DIR}/logs/sync-feeds-cron.log"
 echo "   - Check logs: tail -f ${APP_DIR}/logs/task-sync-cron.log"
 echo "   - Check logs: tail -f ${APP_DIR}/logs/sms-relay-outbox-cron.log"
 echo "   - Check logs: tail -f ${APP_DIR}/logs/studio-schedules-cron.log"
+echo "   - Check logs: tail -f ${APP_DIR}/logs/studio-bin-purge-cron.log"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-gmail-sync.sh"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-outlook-sync.sh"
 echo "   - Test manually: ${SCRIPT_DIR}/cron-ai-automations.sh"
@@ -252,5 +256,6 @@ echo "   - Test manually: ${SCRIPT_DIR}/run-cron-endpoint.sh sync-feeds 300"
 echo "   - Test manually: ${SCRIPT_DIR}/run-cron-endpoint.sh task-sync 120"
 echo "   - Test manually: ${SCRIPT_DIR}/run-cron-endpoint.sh sms-relay-outbox 120"
 echo "   - Test manually: ${SCRIPT_DIR}/run-cron-endpoint.sh studio-schedules 110"
+echo "   - Test manually: ${SCRIPT_DIR}/run-cron-endpoint.sh studio-bin-purge 280"
 echo ""
 echo "🔐 Don't forget to set CRON_SECRET in your environment!"

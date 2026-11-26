@@ -62,7 +62,7 @@ export function contentListQuery(locationId: string, showArchived: boolean): Pri
   return Prisma.sql`select id, title, version, updated_at, summary, approved, archived,
       payload->>'stage' as stage, payload->>'level' as level, payload->'pillar' as pillar
     from studio.studio_records
-    where location_id = ${locationId} and kind = 'content'${showArchived ? Prisma.empty : Prisma.sql` and archived = false`}
+    where location_id = ${locationId} and kind = 'content' and deleted_at is null${showArchived ? Prisma.empty : Prisma.sql` and archived = false`}
     order by updated_at desc, id asc limit 10000`;
 }
 

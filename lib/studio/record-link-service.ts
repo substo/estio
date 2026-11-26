@@ -25,7 +25,7 @@ export function createRecordLinkService<Access extends { locationId: string; app
           where location_id = ${location} and source_id = ${sourceId}::uuid
           order by target_id asc limit 21 offset ${pages.links * 20}`),
         db.rows<RecordLinkSummary>(Prisma.sql`select id, title, kind, archived from studio.studio_records
-          where location_id = ${location} and id <> ${sourceId}::uuid
+          where location_id = ${location} and id <> ${sourceId}::uuid and deleted_at is null
           ${kind === "all" ? Prisma.empty : Prisma.sql`and kind = ${kind}`}
           order by title asc, id asc limit 21 offset ${pages.candidates * 20}`),
       ]);

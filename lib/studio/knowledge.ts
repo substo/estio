@@ -102,7 +102,7 @@ export async function getStudioKnowledgeInsight(locationId: string, insightId: s
       select drafts.id,drafts.title,drafts.turn_id,drafts.proposal_index,drafts.proposal_index is not null as cited from (
         select distinct on (r.id) r.id,r.title,t.created_at,t.id as turn_id,citation.proposal_index
         from studio.studio_agent_turns t
-        join studio.studio_records r on r.location_id=t.location_id and r.id=t.record_id and r.kind='content' and not r.archived
+        join studio.studio_records r on r.location_id=t.location_id and r.id=t.record_id and r.kind='content' and not r.archived and r.deleted_at is null
         left join lateral (
           select (p.ordinality-1)::integer as proposal_index
           from jsonb_array_elements(t.result->'proposals') with ordinality p(proposal, ordinality)

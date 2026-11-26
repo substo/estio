@@ -73,7 +73,7 @@ export interface StudioRecordUpload {
 
 /** Call only after resolving the record inside this authorized workspace. */
 export async function listStudioRecordUploads(locationId: string, recordId: string): Promise<StudioRecordUpload[]> {
-  const uploads = await studioDb.rows<StudioRecordUpload>(Prisma.sql`select id,original_filename,content_type,byte_size,status,created_at,transcription_job_id from studio.studio_uploads t where location_id = ${locationId} and record_id = ${recordId}::uuid and status = ${'uploaded'} order by created_at desc limit 20`);
+  const uploads = await studioDb.rows<StudioRecordUpload>(Prisma.sql`select id,original_filename,content_type,byte_size,status,created_at,transcription_job_id from studio.studio_uploads t where location_id = ${locationId} and record_id = ${recordId}::uuid and status = ${'uploaded'} and deleted_at is null order by created_at desc limit 20`);
   if (!uploads.length) return [];
   const ids = uploads.map(u => u.id).join(",");
   const jobIds = uploads.map(u => u.transcription_job_id).filter(Boolean).join(",");

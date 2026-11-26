@@ -18,6 +18,7 @@ import { describeMac, type MacStatusInput } from "@/lib/studio/workspace/mac-sta
 import { defaultMode, modeLabels, parseMode, workspaceModes, type WorkspaceMode } from "@/lib/studio/workspace/modes";
 import { jobStepper } from "@/lib/studio/workspace/stepper";
 import { AgentDock } from "./agent-dock";
+import { BinDeleteButton } from "../bin-delete-button";
 import { AssetsRail } from "./assets-rail";
 import { MacChip } from "./mac-chip";
 import { MakeVideoDialog } from "./make-video-dialog";
@@ -123,6 +124,7 @@ export function ContentWorkspace(props: {
             <MacChip status={mac} />
             {props.hasScript && !props.archived ? <Link href={`/studio/content/${recordId}/shoot`} className="inline-flex min-h-11 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"><Video aria-hidden className="size-4" />Shoot</Link> : null}
             {loop?.projectKept ? <form action={open}><button type="submit" disabled={opening || editorPending} className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm font-medium hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60">{editorPending ? "Opening…" : "Open in editor"}</button></form> : null}
+            <BinDeleteButton locationId={locationId} kind="content" id={recordId} name={props.title} afterDelete="/studio/content" />
             <MakeVideoDialog locationId={locationId} recordId={recordId} voices={props.voices} availability={props.availability} soundSources={props.soundSources} motion={props.motion} disabledReason={makeBlock} busy={busy} />
           </div>
         </div>
@@ -152,7 +154,7 @@ export function ContentWorkspace(props: {
 
       {mode === "edit" ? (
         <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)_340px]">
-          <div className="order-2 lg:order-1"><AssetsRail groups={groups} uploadSlot={props.uploadSlot} /></div>
+          <div className="order-2 lg:order-1"><AssetsRail locationId={locationId} groups={groups} uploadSlot={props.uploadSlot} /></div>
           <div className="order-1 min-w-0 space-y-4 lg:order-2">
             <PlayerStage versions={versions} versionId={versionId} onVersion={setVersionId} steps={steps} onStop={busy ? onStop : undefined} stopping={stopping} videoRef={videoRef}
               empty={<><p className="font-medium">No video yet</p><p className="text-muted-foreground">Add your footage on the left, then press Make video. Your Mac does the editing.</p>

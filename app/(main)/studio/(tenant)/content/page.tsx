@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { listStudioContent } from "@/lib/studio/content";
 import { CONTENT_STAGES, contentStageForDisplay, contentStageLabel, filterContentSummaries, readContentFilters } from "@/lib/studio/content-policy";
+import { BinDeleteButton } from "../../_components/bin-delete-button";
 import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +30,7 @@ export default async function StudioContentPage({ params, searchParams }: {
       <Link href={`${root}/content/idea-reviews`} className="inline-block text-sm text-primary hover:underline">Review saved ideas with AI</Link>
       <Link href={`${root}/content/script-briefs`} className="ml-4 inline-block text-sm text-primary hover:underline">Recent script briefs</Link>
       <Link href={`${root}/content/templates`} className="ml-4 inline-block text-sm text-primary hover:underline">Script templates</Link>
+      <Link href={`${root}/bin`} className="ml-4 inline-block text-sm text-primary hover:underline">Bin</Link>
       <form key={JSON.stringify(filters)} method="get" className="flex flex-wrap items-end gap-4 rounded-lg border p-4" aria-label="Content pipeline filters">
         <label className="flex-1 text-sm font-medium">Search titles and summaries<input type="search" name="q" defaultValue={search} maxLength={200} className="mt-1 w-full rounded-md border bg-background px-3 py-2" /></label>
         <label className="text-sm font-medium">Stage<select name="stage" defaultValue={selectedStage} className="mt-1 block rounded-md border bg-background px-3 py-2">
@@ -49,6 +51,7 @@ export default async function StudioContentPage({ params, searchParams }: {
               <h3 className="font-medium"><Link href={`${root}/content/${record.id}`} className="hover:underline">{record.title}</Link></h3>
               {record.summary ? <p className="line-clamp-3 whitespace-pre-wrap text-sm text-muted-foreground">{record.summary}</p> : null}
               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">{record.level ? <span>{record.level}</span> : null}{record.pillar ? <span>Pillar {record.pillar}</span> : null}<span>{record.approved ? "Approved" : "Needs review"}</span>{record.archived ? <span>Archived</span> : null}</div>
+              <BinDeleteButton locationId={locationId} kind="content" id={record.id} name={record.title} className="inline-flex min-h-11 items-center text-xs text-destructive hover:underline focus-visible:outline focus-visible:outline-2" />
             </article>)}
             {!items.length ? <p className="text-sm text-muted-foreground">No content matches these filters.</p> : null}
           </section>;
