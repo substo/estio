@@ -11,7 +11,7 @@ import type { VoiceRow } from "@/lib/studio/voices/policy";
 import { ScriptBlockEditor } from "./script-block-editor";
 
 export function ContentRecordForm({ locationId, recordId, version, title = "", payload = {}, templateOptions = [],
-  pinnedTemplateId, templateSelectionSaved, canSelectTemplate = false, visible = "all", voices = [], locked = false, scriptLock, scriptRevision, onScriptSaved, onScriptSaveState, onAskAboutBlock, quoteMedia }:  {
+  pinnedTemplateId, templateSelectionSaved, canSelectTemplate = false, visible = "all", voices = [], locked = false, scriptLock, scriptRevision, onScriptSaved, onScriptSaveState, onAskAboutBlock, quoteMedia, clipReference }:  {
   voices?: readonly VoiceRow[]; /** The piece is archived: the script is read-only. */ locked?: boolean;
   /** Which part the workspace shows. Every field stays mounted (hidden ones keep their values and are still submitted), so switching modes never loses an unsaved edit. */
   visible?: "all" | "script" | "details" | "none";
@@ -19,6 +19,7 @@ export function ContentRecordForm({ locationId, recordId, version, title = "", p
   scriptRevision?: { version: number; text: string } | null;
   onScriptSaved?: (version: number) => void;
   onScriptSaveState?: (saved: boolean) => void;
+  clipReference?: React.ComponentProps<typeof ScriptBlockEditor>["clipReference"];
   quoteMedia?: React.ComponentProps<typeof ScriptBlockEditor>["quoteMedia"];
   onAskAboutBlock?: React.ComponentProps<typeof ScriptBlockEditor>["onAskAboutBlock"];
   locationId: string; recordId: string; version: number; title?: string; payload?: Record<string, unknown>;
@@ -95,7 +96,7 @@ export function ContentRecordForm({ locationId, recordId, version, title = "", p
           </div> : null}
         <fieldset disabled={scriptLock} className="min-w-0">
         <ScriptBlockEditor key={scriptRevision?.version} locationId={locationId} recordId={recordId} version={editorVersion} savedScript={editorScript} initialBlocks={initialBlocks} voices={voices} initialVoiceId={initialVoiceId}
-          archived={locked} quoteMedia={quoteMedia} onVersion={adoptVersion} onBlocksChange={onBlocksChange} onSaveState={onScriptSaveState} onAskAboutBlock={onAskAboutBlock} />
+          archived={locked} quoteMedia={quoteMedia} clipReference={clipReference} onVersion={adoptVersion} onBlocksChange={onBlocksChange} onSaveState={onScriptSaveState} onAskAboutBlock={onAskAboutBlock} />
         </fieldset>
         <input type="hidden" name="scriptBlocks" value={blocksJson} /><input type="hidden" name="voiceId" value={voiceId} />
       </div>

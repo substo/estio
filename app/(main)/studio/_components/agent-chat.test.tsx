@@ -107,3 +107,12 @@ test("complete concept proposals render as comparable ideas and show the active 
   assert.match(html, /aria-label="Compare An earlier idea still renders in full\."/);
   assert.equal((html.match(/>Shortlist</g) ?? []).length, 2);
 });
+
+test("a citation on the saved script can become a supporting clip", () => {
+  const script = "Compare the first two shots.";
+  const turn = { ...done, result: { ...done.result!, proposals: [{ ...done.result!.proposals[0], stage: "Script" as const, text: script }] } };
+  const saved: CreationRecord = { ...record, state: { ...record.state, stages: { Script: { text: script, approved: true, shortlist: [] } } } };
+  const html = render([turn], [], {}, saved);
+  assert.match(html, /href="\/studio\/content\/r1\?mode=script&amp;clipTurn=t1&amp;clipProposal=0&amp;clipSource=s1&amp;clipItem=f%3A1"[^>]*>Plan supporting clip/);
+  assert.doesNotMatch(render([turn]), /Plan supporting clip/);
+});

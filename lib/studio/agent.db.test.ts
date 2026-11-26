@@ -697,7 +697,7 @@ test("chosen and no evidence are pinned to a turn, fenced from other reads, and 
     const evidence = crypto.randomUUID(), insight = crypto.randomUUID();
     await sql("insert into studio.studio_knowledge_insights(location_id,id,source_id,status,statement,payload) values($1,$2::uuid,$3::uuid,'approved',$4,'{}')", loc, insight, source, quote);
     await sql("insert into studio.studio_knowledge_evidence(location_id,id,insight_id,source_id,payload) values($1,$2::uuid,$3::uuid,$4::uuid,$5::jsonb)",
-      loc, evidence, insight, source, JSON.stringify({ source_version: index === 2 ? 0 : Number(current.version), quote, evidence_type: "speech", start_sec: 2 }));
+      loc, evidence, insight, source, JSON.stringify({ source_version: index === 2 ? 0 : Number(current.version), quote, evidence_type: "speech", start_sec: 2, end_sec: 5 }));
     return { evidence, insight };
   }));
   const [pick, unselected, stale] = seeds;
@@ -730,11 +730,17 @@ test("chosen and no evidence are pinned to a turn, fenced from other reads, and 
     assert.deepEqual(snapshot.observations[0].result.items.map((item: any) => item.id), [`f:${pick.evidence}`]);
     if (snapshot.operation.round===1) return step({ step: "tool", reply: null, tool: { name: "search_knowledge", query: "unselected", sourceId: null, offset: null, stage: null, skill: null } });
     assert.match(snapshot.observations[1].result.error, /restricted source evidence/);
-    return step({ proposals: [{ stage: "Hook", text: "New hook.", rationale: "Chosen quote.", evidenceIds: [`f:${pick.evidence}`], verify: [] }] });
+    return step({ proposals: [{ stage: "Script", text: "Use what works in the first take.", rationale: "Chosen quote.", evidenceIds: [`f:${pick.evidence}`], verify: [] }] });
   }, 2);
   assert.match(viewed.turn.result!.proposals[0].evidence[0].quote, /Visible chosen quote/);
   const focus = { turnId: selected, index: 0 };
   const citation = await agent.getAgentSourceCitation(loc, source, focus, `f:${pick.evidence}`);
+  const script = "Use what works in the first take.";
+  const clip = await agent.getAgentSourceClipReference(loc, fresh, source, focus, `f:${pick.evidence}`, script);
+  assert.deepEqual(clip && [clip.start, clip.end, clip.quote], [2, 5, "Visible chosen quote."]);
+  assert.equal(await agent.getAgentSourceClipReference(loc, unrelated, source, focus, `f:${pick.evidence}`, script), null);
+  assert.equal(await agent.getAgentSourceClipReference(loc, fresh, source, focus, `f:${unselected.evidence}`, script), null);
+  assert.equal(await agent.getAgentSourceClipReference(loc, fresh, source, focus, `f:${pick.evidence}`, "Rewritten script."), null);
   assert.deepEqual(citation, { quote: "Visible chosen quote.", onScreen: false, offset: null, recordId: fresh, focus });
   assert.equal(await agent.getAgentSourceCitation(loc, source, { ...focus, index: 1 }, `f:${pick.evidence}`), null);
   assert.equal(await agent.getAgentSourceCitation(loc, unrelated, focus, `f:${pick.evidence}`), null);

@@ -10,7 +10,7 @@ import {
   type BlockAudio, type BlockType, type ScriptBlock,
 } from "@/lib/studio/script-blocks";
 import { SourceQuoteDialog } from "./source-quote-dialog";
-import { MAX_SOURCE_QUOTES, readSourceQuoteCue, sourceQuoteCue } from "@/lib/studio/script-source-quotes";
+import { MAX_SOURCE_QUOTES, readSourceQuoteCue, sourceQuoteCue, type SourceClipReference } from "@/lib/studio/script-source-quotes";
 import { ScriptReadingDialog } from "./script-reading-dialog";
 import { MAX_SCRIPT_SPEAKER } from "@/lib/studio/script-speakers";
 import type { AgentSelection } from "@/lib/studio/agent-policy";
@@ -23,11 +23,12 @@ const placeholders: Record<BlockType, string> = { narration: "What you say out l
 type Save = "saved" | "unsaved" | "saving" | "error";
 
 /** Notion-style script editor. Blocks autosave through the version-fenced record save; the plain `script` is derived from them on the server. Every drag has a button and keyboard equivalent. */
-export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks, voices, initialVoiceId, archived, onVersion, onBlocksChange, onSaveState, onAskAboutBlock, savedScript, quoteMedia = [] }: {
+export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks, voices, initialVoiceId, archived, onVersion, onBlocksChange, onSaveState, onAskAboutBlock, savedScript, quoteMedia = [], clipReference }: {
   locationId: string; recordId: string; version: number; initialBlocks: ScriptBlock[]; voices: readonly VoiceRow[]; initialVoiceId: string; archived: boolean;
   onVersion: (version: number, savedHere?: boolean) => void; onBlocksChange: (json: string, voiceId: string) => void;
   onSaveState?: (saved: boolean) => void;
   savedScript: string;
+  clipReference?: SourceClipReference | null;
   quoteMedia?: readonly { id: string; name: string }[];
   onAskAboutBlock?: (selection: AgentSelection, label: string, origin: HTMLElement) => void;
 }) {
@@ -40,7 +41,23 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
   const [busy, setBusy] = useState<string | null>(null);     // block id, "all", or null while generating audio
   const [audioMessage, setAudioMessage] = useState("");
   const [slashFor, setSlashFor] = useState<string | null>(null);
-  const [quoteDialog, setQuoteDialog] = useState<{ block?: ScriptBlock } | null>(null);
+  const [quoteDialog, setQuoteDialog] = useState<{ block?: ScriptBlock; reference?: SourceClipReference } | null>(null);
+  const handledReference = useRef<string | null>(null);
+  useEffect(() => {
+    if (archived || !clipReference) { handledReference.current = null; return; }
+    if (handledReference.current === clipReference.key) return;
+    handledReference.current = clipReference.key;
+    setQuoteDialog({ reference: clipReference });
+  }, [archived, clipReference]);
+  function closeQuote() {
+    setQuoteDialog(null);
+    if (quoteDialog?.reference) {
+      const url = new URL(window.location.href);
+      for (const field of ["clipTurn", "clipProposal", "clipSource", "clipItem"]) url.searchParams.delete(field);
+      router.replace(`${url.pathname}${url.search}${url.hash}`, { scroll: false });
+    }
+    requestAnimationFrame(() => quoteTrigger.current?.focus());
+  }
   const quoteTrigger = useRef<HTMLButtonElement | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
@@ -265,14 +282,15 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
         <button type="button" className={btn} disabled={archived || blocks.length >= MAX_BLOCKS || blocks.filter(b => readSourceQuoteCue(b.text)).length >= MAX_SOURCE_QUOTES}
           onClick={event => { quoteTrigger.current = event.currentTarget; setQuoteDialog({}); }}>Source clip</button>
       </div>
-      {quoteDialog ? <SourceQuoteDialog media={quoteMedia} initial={quoteDialog.block ? readSourceQuoteCue(quoteDialog.block.text) ?? undefined : undefined}
-        onClose={() => { setQuoteDialog(null); requestAnimationFrame(() => quoteTrigger.current?.focus()); }}
-        onSave={quote => {
+      {quoteDialog ? <SourceQuoteDialog media={quoteMedia} reference={quoteDialog.reference}
+        positions={narrationBlocks(blocks).map((block, index) => ({ id: block.id, label: `Beat ${index + 1} · ${block.text.slice(0, 78)}` }))}
+        atCapacity={!quoteDialog.block && (blocks.length >= MAX_BLOCKS || blocks.filter(block => readSourceQuoteCue(block.text)).length >= MAX_SOURCE_QUOTES)} initial={quoteDialog.block ? readSourceQuoteCue(quoteDialog.block.text) ?? undefined : undefined}
+        onClose={closeQuote}
+        onSave={(quote, after) => {
           const cue = sourceQuoteCue(quote);
           if (quoteDialog.block) commit(setBlockText(blocksRef.current, quoteDialog.block.id, cue));
-          else commit(insertBlockAfter(blocksRef.current, blocksRef.current.at(-1)?.id ?? null, "visual", makeBlockId(), cue));
-          setQuoteDialog(null);
-          requestAnimationFrame(() => quoteTrigger.current?.focus());
+          else commit(insertBlockAfter(blocksRef.current, after ?? blocksRef.current.at(-1)?.id ?? null, "visual", makeBlockId(), cue));
+          closeQuote();
         }} /> : null}
       <p className="text-xs text-muted-foreground">Enter splits a block, Backspace on an empty block removes it, type / to change a block's type, Alt+↑/↓ moves it, Ctrl/⌘+Z undoes.</p>
 

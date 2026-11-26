@@ -36,3 +36,16 @@ export function readSourceQuoteCue(text: string): SourceQuote | null {
 }
 
 export const sourceQuoteCue = (quote: SourceQuote) => SOURCE_QUOTE_PREFIX + JSON.stringify(quote);
+
+/** A saved citation can point to a whole transcript unit, a frame, or text without timing. */
+export type SourceClipReference = {
+  key: string; title: string; quote: string; url: string | null; passageHref: string;
+  start: number | null; end: number | null; frameHref: string | null; onScreen: boolean;
+};
+
+export function citationClipRange(start: unknown, end: unknown, onScreen: boolean) {
+  const seconds = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 43_200
+    ? Math.round(value * 1000) / 1000 : null;
+  const from = seconds(start), to = seconds(end);
+  return { start: from, end: !onScreen && from !== null && to !== null && to - from >= 0.25 && to - from <= 120 ? to : null };
+}

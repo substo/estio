@@ -4,10 +4,11 @@ import Link from "next/link";
 import { Search, AlertTriangle, ExternalLink, Loader2, Mic, MicOff, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AgentTurnView } from "@/lib/studio/agent";
-import { agentCitationHref, citedQuote, proposalAnchor, type ProposalFocus } from "@/lib/studio/citation-navigation";
+import { agentCitationClipHref, agentCitationHref, citedQuote, proposalAnchor, type ProposalFocus } from "@/lib/studio/citation-navigation";
 import { AGENT_MESSAGE_LIMIT, type AgentSelection } from "@/lib/studio/agent-policy";
 import { IDEA_CARD_FORMAT, ideaComparisonPrompt, ideaLabel, readIdeaCard } from "@/lib/studio/idea-cards";
 import { CREATION_STAGES, stageDraft, type CreationRecord, type CreationStage } from "@/lib/studio/creation-policy";
+import { sameScriptNarration } from "@/lib/studio/video-assembly/script";
 import { formatClock, parseDurationRequest, scriptStats, targetWords } from "@/lib/studio/script-length";
 import { studioTextConsent, type StudioTextProvider } from "@/lib/studio/text-provider";
 import { StudioTextProviderChoice } from "./text-provider-choice";
@@ -38,7 +39,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   resume?: AgentResume | null; scope: string;
   focusProposal?: ProposalFocus | null;
   focus?: { selection: AgentSelection; label: string } | null;
-  scriptEditor?: { startApply: () => boolean; endApply: () => void; onApplied: (record: CreationRecord, stage: CreationStage) => void; clearFocus: () => void; onSent: () => void };
+  scriptEditor?: { startApply: () => boolean; endApply: () => void; onApplied: (record: CreationRecord, stage: CreationStage) => void; clearFocus: () => void; onSent: () => void; onPlanClip?: () => void };
 }) {
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
   const { recordId, record, setRecord, setPlan, target, setTarget, sendRef, prepareMessage } = useAgentDraft();
@@ -312,6 +313,9 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
                   {quote.length > 220 ? <>“{quotePreview(quote)}” <details className="mt-0.5"><summary className="cursor-pointer text-primary">Show full quote</summary><span className="mt-1 block whitespace-pre-wrap">“{quote}”</span></details></> : <>“{quote}”</>}{item.at != null ? <span className="ml-1 tabular-nums">· {clock(item.at)}</span> : null}
                   {item.sourceId ? <Link href={agentCitationHref(item.sourceId, { turnId: turn.id, index }, item.id)} target="_blank" rel="noreferrer"
                     className="ml-2 inline-flex items-center gap-0.5 text-primary hover:underline">Open cited passage (new tab)<ExternalLink aria-hidden="true" className="h-3 w-3" /></Link> : null}
+                  {proposal.stage === "Script" && !proposal.replaces && item.sourceId && sameScriptNarration(proposal.text, savedText) ? <Link
+                    href={agentCitationClipHref(recordId, item.sourceId, { turnId: turn.id, index }, item.id)} onClick={scriptEditor?.onPlanClip}
+                    className="ml-2 inline-flex min-h-9 items-center font-medium text-primary hover:underline">Plan supporting clip</Link> : null}
                 </li>;
               })}</ul> : null}
               {proposal.verify.length ? <ul className="list-disc space-y-0.5 pl-5 text-xs text-amber-700 dark:text-amber-400">{proposal.verify.map((item, i) => <li key={i}>Check before filming: {item}</li>)}</ul> : null}
@@ -374,6 +378,8 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
             const requested = savedScript.targetSeconds ? ` Its saved target was about ${formatClock(savedScript.targetSeconds)}.` : "";
             prepareCreativeMessage(`Is this ready to film? Review the current saved Script, using read_stage as needed. Studio estimates ${estimate} of speech.${requested} Check the complete first spoken line, whether the payoff delivers the title, runtime fit if a target exists, and any demonstration, assets or proof still needed. Explain the biggest fix and propose a short Shoot plan checklist with what I should capture and what still needs verification. If you can only review part of the script, say what you checked. Keep my script intact.`);
           }}>Is this ready to film?</Button>
+        <Button type="button" variant="outline" className="min-h-10 text-xs" disabled={Boolean(running) || sending}
+          onClick={() => prepareCreativeMessage("Look for another perspective, counterexample or demonstration that would improve this script. Reuse an approved Library finding if you can. If another video would help, suggest one focused Related videos search and explain exactly what the footage could add. Cite only evidence you actually read.")}>Find another perspective</Button>
         {savedShootPlan?.text.trim() ? <details className="min-w-0 basis-full">
           <summary className="cursor-pointer font-medium">Saved filming checklist</summary>
           <p className="mt-1 whitespace-pre-wrap break-words">{savedShootPlan.text}</p>

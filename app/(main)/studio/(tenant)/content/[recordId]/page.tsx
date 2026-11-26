@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { agentRouteScope, getAgentConversation } from "@/lib/studio/agent";
+import { agentRouteScope, getAgentConversation, getAgentSourceClipReference } from "@/lib/studio/agent";
 import { StudioCommandError } from "@/lib/studio/command-error";
 import { expose } from "@/lib/studio/creation";
 import { scriptNextAction } from "@/lib/studio/reference-workflow";
@@ -9,6 +9,8 @@ import { listPendingStudioUploads } from "@/lib/studio/uploads";
 import { notFound } from "next/navigation";
 import { StudioAttachments } from "../../../_components/studio-attachments";
 import { StudioUploadForm } from "../../../_components/studio-upload-form";
+import { readProposalFocus } from "@/lib/studio/citation-navigation";
+import { recordLinkId } from "@/lib/studio/record-link-policy";
 import { getStudioContentRecord } from "@/lib/studio/content";
 import { getStudioScriptTemplateChoices } from "@/lib/studio/script-templates";
 import { ContentWorkspace } from "../../../_components/workspace/content-workspace";
@@ -27,13 +29,21 @@ import { RelatedYoutubeVideos } from "../../../_components/related-youtube-video
 
 export const dynamic = "force-dynamic";
 
-export default async function StudioContentRecordPage({ params, searchParams }: { params: Promise<{ recordId: string }>; searchParams: Promise<{ mode?: string }> }) {
+export default async function StudioContentRecordPage({ params, searchParams }: { params: Promise<{ recordId: string }>; searchParams: Promise<{ mode?: string; clipTurn?: string; clipProposal?: string; clipSource?: string; clipItem?: string }> }) {
   const { locationId, recordId } = await studioRouteParams(params);
-  const { mode } = await searchParams;
+  const { mode, clipTurn, clipProposal, clipSource, clipItem } = await searchParams;
   const result = await getStudioContentRecord(locationId, recordId);
   if (!result) notFound();
   const { access, record, links, files, uploads } = result;
   const session = await auth();
+  const clipFocus = readProposalFocus(clipTurn, clipProposal);
+  const clipReference = !record.archived && !session.actor && session.userId === access.userId && mode === "script" && clipFocus &&
+    typeof clipSource === "string" && recordLinkId(clipSource) && typeof clipItem === "string" && /^[a-zA-Z0-9:-]{1,80}$/.test(clipItem)
+    ? await getAgentSourceClipReference(locationId, recordId, clipSource, clipFocus, clipItem, typeof record.payload.script === "string" ? record.payload.script : "").catch(error => {
+      if (error instanceof StudioCommandError && error.status === 403) return null;
+      throw error;
+    })
+    : null;
   const writingAgent = !record.archived && !session.actor && session.userId === access.userId
     ? Promise.all([getAgentConversation(locationId, recordId), agentRouteScope(locationId)])
       .then(([conversation, scope]) => ({ ...conversation, scope, record: expose(record) }))
@@ -92,11 +102,11 @@ export default async function StudioContentRecordPage({ params, searchParams }: 
   return (
     <ContentWorkspace locationId={locationId} recordId={recordId} title={record.title} archived={record.archived} hasScript={Boolean(script.trim())} initialMode={mode ?? null}
       form={{ locationId, recordId, version: record.version, title: record.title, payload: record.payload, templateOptions: templates.options, pinnedTemplateId: record.script_template_version_id,
-        templateSelectionSaved: record.script_template_selected, canSelectTemplate: templates.canSelect && !record.archived, voices: allVoices, locked: record.archived,
+        templateSelectionSaved: record.script_template_selected, canSelectTemplate: templates.canSelect && !record.archived, voices: allVoices, locked: record.archived, clipReference,
         quoteMedia: assets.filter(file => file.status === "uploaded" && file.contentType.startsWith("video/") && classifyUpload(file.name) === "footage").map(({ id, name }) => ({ id, name })) }}
       uploads={assets} pending={pending} loop={loop} assembly={assembly.view} narration={assembly.narration} mac={mac} voices={allVoices} availability={availability} soundSources={soundSources} motion={motion} beats={parseScript(script).map(b => b.narration)}
       uploadSlot={<StudioUploadForm key={recordId} compact locationId={locationId} recordId={recordId} pendingUploads={pendingUploads}
         attention={assets.filter(a => a.status !== "uploaded").map(a => ({ id: a.id, name: a.name, why: "Upload did not finish" }))} />}
-      nextSteps={nextSteps} detailsExtra={detailsExtra} writingAgent={await writingAgent} storyboard={storyboard} clips={clips} />
+      nextSteps={mode === "script" && clipTurn && !clipReference ? <><p role="status" className="text-sm text-muted-foreground">This clip reference is unavailable. You can still add an uploaded excerpt in Script.</p>{nextSteps}</> : nextSteps} detailsExtra={detailsExtra} writingAgent={await writingAgent} storyboard={storyboard} clips={clips} />
   );
 }

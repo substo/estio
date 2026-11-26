@@ -12,9 +12,12 @@ import { AGENT_MAX_ROUNDS, AGENT_PROMPT, isAgentSnapshot, readAgentResult, type 
 import { runAgentTool } from "./agent-tools";
 import { SPEAKING_WPM, formatClock, lengthFit, parseDurationRequest, scriptStats, aimWords, type LengthFit } from "./script-length";
 import { agentRoundRequestId } from "./agent-request";
-import { getKnowledgeSourceCitation } from "./citation-source";
+import { sameScriptNarration } from "./video-assembly/script";
+import { safeStudioSourceUrl } from "./library-policy";
+import { citationClipRange, type SourceClipReference } from "./script-source-quotes";
+import { getKnowledgeSourceCitation, getSourceClipMetadata } from "./citation-source";
 import { recordLinkId } from "./record-link-policy";
-import { citedQuote, recordedTranscriptOffset, type ProposalFocus } from "./citation-navigation";
+import { agentCitationHref, citedQuote, recordedTranscriptOffset, type ProposalFocus } from "./citation-navigation";
 
 type TurnRow = { id: string; location_id: string; record_id: string; seq: number; message: string; provider: string; status: "running" | "done" | "failed";
   rounds: Array<{ round: number; reviewId: string; tool: AgentToolCall | null; observation: AgentObservation | null }>; result: AgentFinal | null; error: string | null; created_by_clerk_user_id: string; created_at: string; target_seconds: number | null; selection: AgentSelection | null; evidence_choice: AgentItem[] | null };
@@ -69,6 +72,24 @@ export async function getAgentSourceCitation(locationId: string, sourceId: strin
   const evidenceId = item.id.startsWith("f:") ? item.id.slice(2) : null;
   const evidence = evidenceId && recordLinkId(evidenceId) ? await getKnowledgeSourceCitation(access, sourceId, evidenceId) : null;
   return { quote, onScreen: evidence?.onScreen ?? false, offset: recordedTranscriptOffset(sourceId, item.id), recordId: turn.record_id, focus };
+}
+
+/** Plan an optional clip from evidence the agent actually cited in this draft's Script proposal. */
+export async function getAgentSourceClipReference(locationId: string, recordId: string, sourceId: string, focus: ProposalFocus, itemId: string, savedScript: string): Promise<SourceClipReference | null> {
+  const access = await requireCreationWriter(locationId);
+  const turn = await loadTurn(access, focus.turnId);
+  const proposal = turn?.result?.proposals[focus.index];
+  if (!turn || turn.record_id !== recordId || turn.status !== "done" || proposal?.stage !== "Script" || proposal.replaces || !proposal.evidenceIds.includes(itemId) || !sameScriptNarration(proposal.text, savedScript)) return null;
+  const item = turnEvidence(turn).get(itemId);
+  if (!item?.cite || item.sourceId !== sourceId) return null;
+  const evidenceId = itemId.startsWith("f:") && recordLinkId(itemId.slice(2)) ? itemId.slice(2) : null;
+  const metadata = await getSourceClipMetadata(access, sourceId, evidenceId);
+  if (!metadata) return null;
+  const url = safeStudioSourceUrl(metadata.url);
+  const range = citationClipRange(metadata.at, metadata.until, metadata.onScreen);
+  return { key: `${turn.id}:${focus.index}:${itemId}`, title: metadata.title, quote: citedQuote(item.id, item.text),
+    url: url?.startsWith("https://") && url.length <= 500 ? url : null, passageHref: agentCitationHref(sourceId, focus, itemId),
+    ...range, onScreen: metadata.onScreen, frameHref: metadata.frame ? `/studio/knowledge-media/evidence/${evidenceId}` : null };
 }
 
 function measure(text: string, target: number | null) {

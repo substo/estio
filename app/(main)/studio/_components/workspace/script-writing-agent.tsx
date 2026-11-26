@@ -109,7 +109,7 @@ export function ScriptWritingAgent({ locationId, data, active, open, onOpenChang
         <StarterBridge starter={starter} />
         <div className={showAudience ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
           <AgentChat locationId={locationId} source={null} initialTurns={data.turns} provider={provider} onProvider={setProvider} scope={data.scope}
-            focus={focus} scriptEditor={{ startApply, endApply, onApplied, clearFocus, onSent }} />
+            focus={focus} scriptEditor={{ startApply, endApply, onApplied, clearFocus, onSent, onPlanClip: () => onOpenChange(false) }} />
         </div>
         <div id={`${titleId}-audience`} hidden={!showAudience} className="min-h-0 flex-1 overflow-y-auto">
           <WritingAudiencePanel startSave={startApply} endSave={endApply} onSaved={onSent} onPrepared={() => backToWriting(true)} />

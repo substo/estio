@@ -54,3 +54,9 @@ export function transcriptPassage(transcript: string, quote: string, offset: num
   return { before: (from > 0 ? "…" : "") + transcript.slice(from, at),
     quote: transcript.slice(at, end), after: transcript.slice(end, to) + (to < transcript.length ? "…" : "") };
 }
+
+
+export function agentCitationClipHref(recordId: string, sourceId: string, focus: ProposalFocus, itemId: string) {
+  const query = new URLSearchParams({ mode: "script", clipTurn: focus.turnId, clipProposal: String(focus.index), clipSource: sourceId, clipItem: itemId });
+  return `/studio/content/${recordId}?${query}`;
+}

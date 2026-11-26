@@ -46,3 +46,11 @@ export function parseScriptTimeline(text: string) {
 }
 
 export const parseScript = (text: string) => parseScriptTimeline(text).beats;
+
+
+export function sameScriptNarration(original: string, current: string) {
+  if (original === current) return Boolean(current.trim());
+  const lines = (value: string) => parseScript(value).map(beat => beat.narration);
+  const expected = lines(original);
+  return expected.length > 0 && JSON.stringify(expected) === JSON.stringify(lines(current));
+}
