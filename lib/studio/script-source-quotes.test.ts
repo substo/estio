@@ -46,7 +46,7 @@ test("untimed quotes recover a bounded range only from a unique timed transcript
     { text: "The titles don’t live in a vacuum.", start: 325.125, end: 328 },
     { text: "It has to lead into the content.", start: 328, end: 331.75 },
   ];
-  const quote = "titles don't live in a vacuum.\nIt has to lead into the content";
+  const quote = "titles don't live in a vacuum\nIt has to lead into the content";
   assert.deepEqual(matchTimedSourceQuote(quote, segments), { start: 325.125, end: 331.75 });
   assert.equal(matchTimedSourceQuote(quote, [...segments, ...segments]), null);
   assert.equal(matchTimedSourceQuote("itles don't live in a vacuum", segments), null);

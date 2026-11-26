@@ -69,7 +69,8 @@ export function sourceClipPlayback(url: string | null, start: number | null, end
 
 /** Recover a segment range for a legacy quote only when it uniquely matches the timed transcript. */
 export function matchTimedSourceQuote(quote: string, segments: readonly { text: string; start: number; end: number }[]) {
-  const normalize = (value: string) => value.normalize("NFC").replace(/[’‘]/g, "'").replace(/\s+/g, " ").trim().toLowerCase();
+  const normalize = (value: string) => (value.normalize("NFC").replace(/[’‘]/g, "'").toLowerCase()
+    .match(/[\p{L}\p{M}\p{N}]+(?:'[\p{L}\p{M}\p{N}]+)*/gu) ?? []).join(" ");
   const needle = normalize(quote);
   if (needle.length < 24) return null;
   const pieces: string[] = [];
@@ -82,19 +83,10 @@ export function matchTimedSourceQuote(quote: string, segments: readonly { text: 
     pieces.push(part);
     cursor += part.length + 1;
   }
-  const text = pieces.join(" ");
-  const word = /[\p{L}\p{N}]/u;
-  let index = text.indexOf(needle);
-  let match = -1;
-  while (index !== -1) {
-    if ((!word.test(needle[0]) || !word.test(text[index - 1] ?? "")) &&
-        (!word.test(needle.at(-1) ?? "") || !word.test(text[index + needle.length] ?? ""))) {
-      if (match !== -1) return null;
-      match = index;
-    }
-    index = text.indexOf(needle, index + 1);
-  }
-  if (match === -1) return null;
+  const text = ` ${pieces.join(" ")} `;
+  const phrase = ` ${needle} `;
+  const match = text.indexOf(phrase);
+  if (match === -1 || text.indexOf(phrase, match + 1) !== -1) return null;
   const first = offsets.find(unit => unit.from <= match && match < unit.to);
   const last = offsets.find(unit => unit.from < match + needle.length && match + needle.length <= unit.to);
   const range = citationClipRange(first?.start, last?.end, false);
