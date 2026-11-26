@@ -63,3 +63,9 @@ test("storyboard frames are named on their beat lines and the agent is told to u
   assert.match(withFrames, /FOOTAGE NEEDED caption small and in the lower third[\s\S]*never at the same time and place as a title or callout/);
   assert.doesNotMatch(buildBrief(base), /\[storyboard frame:/);
 });
+
+test("the brief requires voice files on unfilmed beats and a pre-export track check", () => {
+  const brief = buildBrief({ projectFile: "Video.substo", editorDocs: "/docs", orientation: "landscape", beats: [{ index: 1, narration: "One." }], voiceFiles: ["voice-01.mp3"], timings: [0], clips: [], hasVoiceover: true, music: true, soundFiles: { music: "music-bed.mp3" } });
+  assert.match(brief, /Every other beat MUST have its voice file on the Voice track/);
+  assert.match(brief, /Before exporting[\s\S]*music bed is on the Music track/);
+});
