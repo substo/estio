@@ -132,7 +132,7 @@ test("the creator's storyboard photo is downloaded under its fixed name and pass
   assert.equal((await run({ avatar: { name: "../../evil.png", contentType: "image/png", url: "https://r2.example/a", byteSize: 4 } }))?.avatar, undefined);   // only the fixed names are accepted
 });
 
-test("storyboard frames: Codex draws one per beat when there is no footage, with the creator's photo attached; a failed frame costs only that frame; with footage, or without the photo, none are drawn", async () => {
+test("storyboard frames: Codex draws one per beat when there is no footage, with the creator's photo attached; a failed frame costs only that frame; with or without footage; none without the photo", async () => {
   const avatar = { name: "storyboard-avatar.png", contentType: "image/png", url: "https://r2.example/a", byteSize: 4 };
   const script = "One line.\n\n[Open on the desk]\nTwo lines here.\n\nThree.";
   const run = async (extra: Record<string, unknown>, failBeat = 0) => {
@@ -157,7 +157,7 @@ test("storyboard frames: Codex draws one per beat when there is no footage, with
   const sheets = await run({ ...none, characterSheets: [{ name: "character-turnaround.png", url: "https://r2.example/t" }] });
   assert.equal(sheets.drawn[0].references.length, 1);   // "data" is under 8 KB, so the sheet is ignored: photo only
   assert.equal((await run({ ...none, characterSheets: [{ name: "../evil.png", url: "https://r2.example/e" }] })).drawn.length, 0);   // only the fixed names are accepted
-  assert.equal((await run({ avatar, storyboardFrames: { source: "codex", max: 6 } })).drawn.length, 0);      // footage present
+  assert.equal((await run({ avatar, storyboardFrames: { source: "codex", max: 6 } })).drawn.length, 3);      // footage present: frames still drawn for beats it does not cover
   assert.equal((await run({ media: [], downloads: [], storyboardFrames: { source: "codex", max: 6 } })).drawn.length, 0);   // no photo
   assert.equal((await run({ media: [], downloads: [], avatar })).drawn.length, 0);                              // not chosen
 });

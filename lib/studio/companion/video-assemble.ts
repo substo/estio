@@ -201,7 +201,7 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
         try { await download(p.avatar.url, join(clipsDir, p.avatar.name), p.avatar.byteSize, context.signal, fetcher); avatar = p.avatar.name; }
         catch (error) { if (context.signal.aborted) throw error; }
       }
-      // Storyboard frames, only when there is no footage (every beat is a placeholder): the creator's photo in a new scene per beat, drawn by Codex on this Mac.
+      // Storyboard frames for every beat, with or without footage (the editing agent uses a frame only where no footage fits that beat): the creator in a new scene, drawn by Codex on this Mac.
       // A frame that fails costs only that frame: the beat keeps the plain photo.
       const frames: string[] = [];
       const sheetFiles: string[] = [];
@@ -209,7 +209,7 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
         try { await downloadUpTo(sheet.url, join(clipsDir, sheet.name), 12 * 1024 * 1024, context.signal, fetcher); sheetFiles.push(join(clipsDir, sheet.name)); }
         catch (error) { if (context.signal.aborted) throw error; }
       }
-      if (p.storyboardFrames && avatar && deps.drawFrame && p.downloads.length === 0) {
+      if (p.storyboardFrames && avatar && deps.drawFrame) {
         console.log(JSON.stringify({ at: new Date().toISOString(), event: "storyboard_references", jobId: job.id, sheets: sheetFiles.length, offered: p.characterSheets.length }));
         for (const beat of parseScript(p.script).slice(0, p.storyboardFrames.max)) {
           const name = `storyboard-frame-${beat.index}.png`;
