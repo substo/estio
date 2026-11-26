@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { assembleLocationAiConnections, toClientConnection, type AiConnectionInputs } from "./connections-model";
-import { DEFAULT_AI_ROUTING, aiRoutingSettingsSchema, nextAiRoute, readAiRoutingSettings, resolveAiRoute, type AiRoutingSettings } from "./routing";
+import { DEFAULT_AI_ROUTING, aiRoutingSettingsSchema, describeTextRoute, nextAiRoute, readAiRoutingSettings, resolveAiRoute, type AiRoutingSettings } from "./routing";
 
 const now = Date.parse("2026-11-20T10:00:00Z"), recent = "2026-11-20T09:59:30Z";
 const signedIn = (login: string) => ({ installed: true, authenticated: true, ready: true, loginMethod: login });
@@ -123,4 +123,14 @@ test("source assist reports the Mac disk block, missing Claude and unsupported h
   assert.match(result.stopReason!, /Codex: low disk space \(18.2 GB free\)/);
   assert.match(result.stopReason!, /Claude isn't set up on your Mac/);
   assert.match(result.stopReason!, /Location ChatGPT isn't supported for source assist/);
+});
+
+test("the UI sentence names the route and why Codex was skipped, and a Mac-only order never reaches a paid step", () => {
+  const usage = { codex: { remaining: 0, windows: [{ label: "5h", remaining: 0, resetsAt: "2026-11-20T12:00:00Z" }], at: "2026-11-20T09:58:00Z" } };
+  const list = connections([mac("d1", "user_me", { codex: false, claude: true }, { usage })]);
+  const r = resolveAiRoute({ operation: "script_brief", settings: chain("device_codex", "device_claude"), connections: list, requester: me, budget });
+  assert.equal(describeTextRoute(r), "Codex: limit reached. Using Claude on your Mac instead.");
+  assert.ok(r.candidates.every(c => !c.paid));
+  const ok = resolveAiRoute({ operation: "script_brief", settings: chain("device_codex"), connections: connections([mac("d1", "user_me", { codex: true })]), requester: me, budget });
+  assert.equal(describeTextRoute(ok), "Using Codex on your Mac.");
 });

@@ -9,7 +9,7 @@ import { aiRoutingDocument, getLocationAiBudget, readLocationAiRouting, type AiR
 import { getAiConnections } from "./connections";
 import { toClientConnection, type AiClientConnection, type AiConnection } from "./connections-model";
 import { aiRoutingSettingsSchema, resolveAiRoute, type AiRouteDecision, type AiRoutingSettings } from "./routing";
-import type { AiRoutedOperation } from "./workflow-capabilities";
+import type { AiConnectionKind, AiRoutedOperation } from "./workflow-capabilities";
 
 /**
  * Location AI routing for both apps (Estio CRM and Studio share one Location settings model). Reads are for Location
@@ -71,9 +71,11 @@ export const DEFAULT_PAID_ESTIMATE_MICROS = 10_000;
  * Route one operation for the signed-in requester (or `background` for work with no requesting person). Feature phases call
  * this before admission and pass `toStudioTextRoute(decision)` (or their operation's equivalent) to the atomic SQL admission.
  */
-export async function resolveLocationAiRoute(locationId: string, operation: AiRoutedOperation, options: { background?: boolean; estimateMicros?: number; access?: StudioAccess } = {}): Promise<AiRouteDecision> {
+export async function resolveLocationAiRoute(locationId: string, operation: AiRoutedOperation, options: { background?: boolean; estimateMicros?: number; access?: StudioAccess;
+  /** Only these connection kinds, in the Location order; `first` is tried before the rest. Used for "my Mac subscription", which never reaches a paid or hosted step. */
+  only?: readonly AiConnectionKind[]; first?: AiConnectionKind | null } = {}): Promise<AiRouteDecision> {
   const access = options.access ?? await requireAccess(locationId);
-  const [{ settings }, ai, budget] = await Promise.all([readRouting(access.locationId), getAiConnections(access.locationId), getLocationAiBudget(access.locationId)]);
+  const [{ settings: saved }, ai, budget] = await Promise.all([readRouting(access.locationId), getAiConnections(access.locationId), getLocationAiBudget(access.locationId)]);
   return resolveAiRoute({ operation, settings, connections: ai.connections ?? [] as AiConnection[], requester: options.background ? null : { userId: access.userId },
     budget: { capMicros: budget.capMicros, usedMicros: budget.spentMicros + budget.heldMicros, estimateMicros: options.estimateMicros ?? DEFAULT_PAID_ESTIMATE_MICROS } });
 }

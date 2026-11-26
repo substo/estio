@@ -237,6 +237,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
   const status = (turn: AgentTurnView) => <div role="status" className="mr-6 space-y-1 rounded-lg bg-muted p-3 text-muted-foreground">
     {turn.activity.map((line, index) => <p key={index} className="text-xs">{line}</p>)}
     <p className="flex items-center gap-2"><Loader2 aria-hidden="true" className="h-4 w-4 animate-spin" />{turn.waiting === "running" ? "Working on it…" : "Waiting for your computer or provider to pick this up…"}</p>
+    {turn.route ? <p className="text-xs" data-route>{turn.route}</p> : null}
   </div>;
 
   return <>
@@ -343,6 +344,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
           {turn.inputs.checks.length ? <p className="text-xs text-muted-foreground" data-length-outcome>{turn.inputs.checks.join(" · ")}</p> : null}
           {turn.result.decisions.length ? <p className="text-xs text-muted-foreground">Noted: {turn.result.decisions.map(d => `${d.key} — ${d.value}`).join("; ")}</p> : null}
           {turn.id === last?.id && turn.result.choices.length ? <div className="flex flex-wrap gap-2">{turn.result.choices.map(choice => <Button key={choice} type="button" variant="outline" className="h-auto min-h-9 whitespace-normal py-1.5 text-left text-xs" disabled={sending} onClick={() => void send(choice)}>{choice}</Button>)}</div> : null}
+          {turn.route?.includes("→") ? <p className="text-xs text-muted-foreground" data-route>{turn.route}</p> : null}
           <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">What this answer used</summary>
             <div className="mt-1 space-y-1">
               <p>{turn.route ?? "Route not recorded"}</p>

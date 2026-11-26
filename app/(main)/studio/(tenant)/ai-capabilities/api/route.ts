@@ -7,6 +7,8 @@ import { deviceTextReadiness } from "@/lib/studio/text-readiness";
 import { settingsService } from "@/lib/settings/service";
 import { SETTINGS_DOMAINS, SETTINGS_SECRET_KEYS } from "@/lib/settings/constants";
 import { resolveLocationAiRoute } from "@/lib/ai/routing-service";
+import { describeTextRoute } from "@/lib/ai/routing";
+import { MAC_SUBSCRIPTION_KINDS, macPreferredKind } from "@/lib/studio/text-route";
 import { IDEA_REVIEW_MODEL } from "@/lib/studio/idea-review-policy";
 export const dynamic = "force-dynamic";
 export const GET = withStudioRoute(async (request, { params }) => {
@@ -40,18 +42,23 @@ export const GET = withStudioRoute(async (request, { params }) => {
     : workflow === "video_template" ? "video_template"
       : workflow === "selected_idea" || workflow === "source_assist" ? "source_assist"
         : workflow === "knowledge_outline" ? "knowledge_extract" : "idea_review";
-  const [apiKeyPresent, route] = await Promise.all([
+  const [apiKeyPresent, route, macRoute] = await Promise.all([
     settingsService.hasSecret({ scopeType: "LOCATION", scopeId: access.locationId, domain: SETTINGS_DOMAINS.LOCATION_AI, secretKey: SETTINGS_SECRET_KEYS.OPENAI_API_KEY }),
     resolveLocationAiRoute(access.locationId, operation, { access }),
+    macPreferredKind(access).then(first => resolveLocationAiRoute(access.locationId, operation, { access, only: MAC_SUBSCRIPTION_KINDS, first })),
   ]);
+  // Companion-version gates stay per workflow; the Setup provider's own limit never blocks the other subscription.
+  const gate = devices.find(d => !d.ready && /Update and restart|Update the Studio companion|Turn on Text work/.test(d.reason ?? ""));
+  const mac = !devices.length ? { ready: false, reason: "Pair your own Mac in Connected computer settings." }
+    : gate && !devices.some(d => d.ready) ? gate
+      : macRoute.candidates[0] ? { ready: true, reason: `${describeTextRoute(macRoute)} Readiness is checked when queued.` }
+        : { ready: false, reason: macRoute.stopReason ?? devices[0].reason };
   const step = route.candidates[0];
-  const next = step?.kind === "device_codex" ? "Codex" : step?.kind === "device_claude" ? "Claude" : "OpenAI API";
-  const model = step?.kind === "openai_key" ? IDEA_REVIEW_MODEL : step?.model;
   return Response.json({
     location_order: step
-      ? { ready: true, reason: `Next eligible connection: ${next}${model ? ` · ${model}` : ""}. Readiness is checked when queued.` }
+      ? { ready: true, reason: `${describeTextRoute(route)} Readiness is checked when queued.` }
       : { ready: false, reason: route.stopReason ?? "Check the Location AI order and connection status." },
-    subscription: devices.find(d => d.ready) ?? devices[0] ?? { ready: false, reason: "Pair your own Mac in Connected computer settings." },
+    subscription: mac,
     openai: { ready: apiKeyPresent, label: `${IDEA_REVIEW_MODEL} · OpenAI API (paid)`,
       reason: apiKeyPresent ? "Location API key saved. Budget is checked at execution." : "Add a Location OpenAI API key in AI settings." },
   }, { headers: { "Cache-Control": "private, no-store" } });

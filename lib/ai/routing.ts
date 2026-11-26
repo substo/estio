@@ -124,3 +124,17 @@ export function nextAiRoute(decision: AiRouteDecision, current: AiConnectionKind
   if (!next) return { next: null, stopReason: `${failure.reason}; no further step in this Location's order can run it` };
   return { next, switchReason: `${failure.reason} → ${next.label}` };
 }
+
+/** One plain sentence for the UI: which route will run and, when it is not the first choice, why. Null when nothing runs. */
+export function describeTextRoute(decision: AiRouteDecision): string | null {
+  const step = decision.candidates[0];
+  if (!step) return null;
+  const via = step.kind === "device_codex" || step.kind === "device_claude" ? `${step.label} on your Mac` : `${step.label}${step.paid ? " (paid)" : ""}`;
+  const asked = decision.requested;
+  if (!asked || asked.kind === step.kind) return `Using ${via}${step.model ? ` · ${step.model}` : ""}.`;
+  const why = decision.skipped.find(s => s.kind === asked.kind)?.reason ?? `${AI_KIND_LABELS[asked.kind]} isn't available`;
+  const label = AI_KIND_LABELS[asked.kind];
+  const clean = (why.toLowerCase().startsWith(label.toLowerCase()) ? why.slice(label.length).replace(/^:?\s*/, "") : why).replace(/\s*\(resets[^)]*\)/, "");
+  return `${AI_KIND_LABELS[asked.kind]}: ${clean.charAt(0).toLowerCase()}${clean.slice(1)}. Using ${via}${step.model ? ` · ${step.model}` : ""} instead.`;
+}
+

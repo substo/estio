@@ -16,7 +16,7 @@ export function StudioTextProviderChoice({ provider, onChange, fullSource = fals
   }, [tenant, fullSource, videoTemplate, sourceAssist, selectedIdea, stagedCreation, studioAgent]);
   const choices = <>
     <option value="location_order">Location AI order</option>
-    <option value="subscription">{state?.subscription.label ?? "My paired Mac subscription"}</option>
+    <option value="subscription">My Mac subscription (Codex or Claude)</option>
     <option value="openai">{state?.openai.label ?? "Location OpenAI API (paid)"}</option>
   </>;
   const status = state?.[provider]?.reason ?? (failed ? "Could not check readiness. The server will check when you submit." : "Checking readiness…");
@@ -33,7 +33,7 @@ export function StudioTextProviderChoice({ provider, onChange, fullSource = fals
     <p className="text-muted-foreground">{provider === "location_order"
       ? "Follows the order set by a Location admin. A paid step uses the Location budget."
       : provider === "subscription"
-        ? "Uses the model selected in Connected computer settings."
+        ? "Uses your Codex or Claude subscription on this Mac, never a paid API. If the first one is at its limit, the other runs instead and this page says so. The preferred one and its model are set in Connected computer settings."
         : fullSource
           ? "Each batch reserves $0.01 and settles metered usage. A full extraction can use up to 48 batches."
           : "Reserves $0.01 and settles metered usage. An uncertain outcome retains the hold for review."}</p>

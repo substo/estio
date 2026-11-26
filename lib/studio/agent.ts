@@ -99,19 +99,22 @@ function measure(text: string, target: number | null) {
 
 async function views(access: StudioAccess, turns: TurnRow[], pending: Map<string, { waiting: "queued" | "running" | null }> = new Map()): Promise<AgentTurnView[]> {
   const reviewIds = turns.flatMap(t => t.rounds.map(r => r.reviewId));
-  const models = reviewIds.length ? await studioDb.rows<{ id: string; execution_provider: string; model: string }>(Prisma.sql`
-    SELECT id::text,execution_provider,model FROM studio.studio_idea_reviews WHERE location_id=${access.locationId} AND id=ANY(${reviewIds}::uuid[])`) : [];
-  const model = new Map(models.map(m => [m.id, m]));
+  // A running turn has no recorded round yet; its queued round is found by the deterministic request id.
+  const pendingIds = turns.filter(t => t.status === "running").map(t => agentRoundRequestId(t.id, t.rounds.length + 1));
+  const models = reviewIds.length || pendingIds.length ? await studioDb.rows<{ id: string; request_id: string; execution_provider: string; model: string; why: string | null }>(Prisma.sql`
+    SELECT r.id::text,r.request_id::text,r.execution_provider,r.model,j.route->>'reason' AS why FROM studio.studio_idea_reviews r LEFT JOIN studio.studio_jobs j ON j.id=r.job_id
+    WHERE r.location_id=${access.locationId} AND (r.id=ANY(${reviewIds}::uuid[]) OR r.request_id=ANY(${pendingIds}::uuid[]))`) : [];
+  const model = new Map(models.flatMap(m => [[m.id, m], [m.request_id, m]] as const));
   return turns.map(turn => {
     const chosen = turn.evidence_choice ?? null;
     const items = turnEvidence(turn);
     const last = turn.rounds.at(-1);
-    const run = last ? model.get(last.reviewId) : undefined;
+    const run = (turn.status === "running" ? model.get(agentRoundRequestId(turn.id, turn.rounds.length + 1)) : undefined) ?? (last ? model.get(last.reviewId) : undefined);
     return { id: turn.id, seq: turn.seq, message: turn.message, provider: turn.provider as AgentTurnView["provider"], status: turn.status, error: turn.error,
       activity: turn.rounds.filter(r => r.tool || r.observation?.summary).map(r => r.tool ? describeAgentStep(r.tool, r.observation) : r.observation!.summary!),
       target: turn.target_seconds, selection: turn.selection ?? null,
       waiting: turn.status === "running" ? pending.get(turn.id)?.waiting ?? "queued" : null,
-      route: run ? `${run.execution_provider === "subscription" ? "Your Mac subscription" : "Location OpenAI key (paid)"} · ${run.model.replace(/^mac_/, "")}` : null,
+      route: run ? `${run.execution_provider === "subscription" ? "Your Mac subscription" : "Location OpenAI key (paid)"} · ${run.model.replace(/^mac_/, "")}${run.why ? ` · ${run.why}` : ""}` : null,
       result: turn.result && { ...turn.result, plan: turn.result.plan ?? [], proposals: turn.result.proposals.map(p => ({ ...p, ...(p.stage === "Script" && !p.replaces ? { length: measure(p.text, turn.target_seconds) } : {}),
         evidence: p.evidenceIds.flatMap(id => { const item = items.get(id); return item ? [{ id, label: item.label, quote: item.text, sourceId: item.sourceId ?? null, at: item.at ?? null }] : []; }) })) },
       inputs: { reads: [
