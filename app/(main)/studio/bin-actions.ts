@@ -19,5 +19,5 @@ async function run(locationId: string, kind: unknown, id: string, action: Action
   return { ok: true };
 }
 
-export const binItemAction = (locationId: string, kind: string, id: string) => run(locationId, kind, id, "moveToBin", "That item is already gone or in the bin.");
-export const restoreItemAction = (locationId: string, kind: string, id: string) => run(locationId, kind, id, "restoreFromBin", "That item is no longer in the bin.");
+export async function binItemAction(locationId: string, kind: string, id: string): Promise<Result> { return run(locationId, kind, id, "moveToBin", "That item is already gone or in the bin."); }
+export async function restoreItemAction(locationId: string, kind: string, id: string): Promise<Result> { return run(locationId, kind, id, "restoreFromBin", "That item is no longer in the bin."); }
