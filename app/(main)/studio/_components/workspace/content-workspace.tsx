@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { startTransition, useActionState, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, Video } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { stageDraft, type CreationRecord } from "@/lib/studio/creation-policy";
 import type { AgentSelection } from "@/lib/studio/agent-policy";
@@ -121,6 +121,7 @@ export function ContentWorkspace(props: {
           <h1 className="min-w-0 break-words text-xl font-semibold">{props.title}</h1>
           <div className="flex flex-wrap items-center gap-2">
             <MacChip status={mac} />
+            {props.hasScript && !props.archived ? <Link href={`/studio/content/${recordId}/shoot`} className="inline-flex min-h-11 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"><Video aria-hidden className="size-4" />Shoot</Link> : null}
             {loop?.projectKept ? <form action={open}><button type="submit" disabled={opening || editorPending} className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm font-medium hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60">{editorPending ? "Opening…" : "Open in editor"}</button></form> : null}
             <MakeVideoDialog locationId={locationId} recordId={recordId} voices={props.voices} availability={props.availability} soundSources={props.soundSources} motion={props.motion} disabledReason={makeBlock} busy={busy} />
           </div>

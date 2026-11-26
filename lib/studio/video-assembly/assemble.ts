@@ -5,6 +5,7 @@ import { buildBrief } from "./brief";
 import { parseScriptTimeline } from "./script";
 import { prepareSourceQuotes } from "./source-quotes";
 import { MAX_SOURCE_QUOTES } from "../script-source-quotes";
+import { parseShotFileName, shotFilesByBeat, supersededShotFiles } from "../shoot/shots";
 import { agentEnv, runEditingAgent } from "./agent";
 import { localCloneSpeech, localSpeech, type SpeechEngine } from "./tts";
 import { measureCompanionFeature, observeCompanionMetricUnits } from "../companion/metrics";
@@ -45,13 +46,25 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
   if (quotes.length > MAX_SOURCE_QUOTES) throw new Error(`Use at most ${MAX_SOURCE_QUOTES} source clips in one script.`);
   if (!beats.length) throw new Error("The script has no spoken paragraphs.");
   const narration = new Set([...(o.voice?.engine === "prerendered" ? o.voice.files : []), ...[o.sounds?.music, o.sounds?.sfx].filter((f): f is string => Boolean(f))]);
-  const sources = (await readdir(o.clipsDir)).filter(f => !f.startsWith(".") && !narration.has(f) && videoExtensions.has(extname(f).toLowerCase())).sort();
+  const listed = (await readdir(o.clipsDir)).filter(f => !f.startsWith(".") && !narration.has(f) && videoExtensions.has(extname(f).toLowerCase())).sort();
+  const retired = supersededShotFiles(listed);   // a re-shot beat uses only its newest take
+  const sources = listed.filter(f => !retired.has(f));
   if (!sources.length && !o.voiceover) throw new Error("No footage found and voiceover is off.");
   await mkdir(o.projectDir, { recursive: true });
   const prepared = await prepareSourceQuotes({ quotes, names: o.footageNames, files: new Set(sources),
     clipsDir: o.clipsDir, projectDir: o.projectDir, run, signal: o.signal, dryRun: o.dryRun });
   const clips: string[] = [];
-  for (const f of sources) { if (prepared.quotedFiles.has(f)) continue; await copyFile(join(o.clipsDir, f), join(o.projectDir, f)); clips.push(f); }
+  for (const f of sources) {
+    if (prepared.quotedFiles.has(f)) continue;
+    // Browsers record WebM, which the editor cannot read: a shot filmed on the Shoot page is converted once, here on the Mac. If that fails the original is kept.
+    if (parseShotFileName(f) && extname(f).toLowerCase() === ".webm" && !o.dryRun) {
+      const mp4 = f.replace(/\.webm$/i, ".mp4");
+      const done = await run({ command: "ffmpeg", args: ["-y", "-i", join(o.clipsDir, f), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", join(o.projectDir, mp4)], cwd: o.projectDir, timeoutMs: 20 * 60_000, maxOutputBytes: 64 * 1024, env: { PATH: `${process.env.PATH ?? ""}:/opt/homebrew/bin:/usr/local/bin` }, signal: o.signal }).then(() => true, () => false);
+      if (done) { clips.push(mp4); continue; }
+    }
+    await copyFile(join(o.clipsDir, f), join(o.projectDir, f)); clips.push(f);
+  }
+  const shotFiles = shotFilesByBeat(clips);
 
   const soundFiles: { music?: string; sfx?: string } = {};
   const avatarFile = o.avatar && /^storyboard-avatar\.(jpg|png|webp)$/.test(o.avatar) ? o.avatar : undefined;
@@ -95,7 +108,7 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
     const segments = await o.transcribeFootage(join(o.projectDir, f), o.signal).catch(() => null);
     if (segments?.length) footageTranscripts.push({ file: f, lines: segments.map(x => `${x.start.toFixed(1)}-${x.end.toFixed(1)} ${x.text}`).join("\n").slice(0, 6000) });
   }
-  const brief = buildBrief({ footageTranscripts, projectFile, editorDocs: o.editorDocs, orientation: o.orientation ?? "landscape", beats, voiceFiles, timings, clips, sourceQuotes: prepared.quotes, hasVoiceover: Boolean(o.voiceover), music: o.music ?? false, soundFiles, avatarFile, ...(frameFiles.some(Boolean) ? { frameFiles } : {}), ...(o.motion ? { motion: o.motion } : {}) });
+  const brief = buildBrief({ footageTranscripts, projectFile, editorDocs: o.editorDocs, orientation: o.orientation ?? "landscape", beats, voiceFiles, timings, clips, sourceQuotes: prepared.quotes, hasVoiceover: Boolean(o.voiceover), music: o.music ?? false, soundFiles, avatarFile, ...(shotFiles.length ? { shotFiles } : {}), ...(frameFiles.some(Boolean) ? { frameFiles } : {}), ...(o.motion ? { motion: o.motion } : {}) });
   if (o.dryRun) return { projectDir: o.projectDir, projectFile, beats: beats.length, clips, voiceFiles, timings, brief };
   log("Editing with the agent");
   const agentOutput = await runEditingAgent({ cwd, brief, editorDocs: o.editorDocs, model: o.model, run, signal: o.signal });

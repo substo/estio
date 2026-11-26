@@ -131,3 +131,16 @@ test("source quotes trim the selected private upload, leave room in the narratio
     script: `Before.\n\n${cue}`, clipsDir: clips, projectDir: project, editorDocs: "/docs", dryRun: true,
   }), /uploaded source clip.*unavailable/);
 });
+
+test("filmed shots are matched to their beats, re-shot beats use only the newest take, and WebM takes are converted", async () => {
+  const clips = await mkdtemp(join(tmpdir(), "clips-")), project = await mkdtemp(join(tmpdir(), "proj-"));
+  for (const f of ["Shot 01 take 1.mp4", "Shot 01 take 2.mp4", "Shot 02 take 1.webm", "broll.mov"]) await writeFile(join(clips, f), "x");
+  const calls: { command: string; args: string[]; input?: string }[] = [];
+  const result = await assembleVideo({ script: "[wide, at my desk]\n\nOne.\n\nTwo.", clipsDir: clips, projectDir: project, editorDocs: "/docs", voiceover: false,
+    run: async r => { calls.push(r); if (r.command === "ffmpeg") await writeFile(r.args[r.args.length - 1], "mp4"); return { stdout: "done", stderr: "" }; } });
+  assert.ok(!result.clips.includes("Shot 01 take 1.mp4"));
+  assert.ok(result.clips.includes("Shot 02 take 1.mp4"));
+  assert.ok(calls.some(c => c.command === "ffmpeg"));
+  assert.match(result.brief, /1\. "One\."  \[visual: wide, at my desk\]  \[filmed footage for this beat: Shot 01 take 2\.mp4\]/);
+  assert.match(result.brief, /2\. "Two\." {2}\[filmed footage for this beat: Shot 02 take 1\.mp4\]/);
+});
