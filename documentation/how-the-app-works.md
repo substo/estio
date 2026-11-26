@@ -10,6 +10,14 @@ One Next.js codebase serves two apps, chosen by the domain. **Estio** (estio.co)
 
 A customer is a **Location** (a business with a team; Substo screens call it a Brand), and it uses both products. There is no billing yet.
 
+## Core principle: the customer's own machine and subscriptions first, not paid APIs
+
+Decided by the owner, 2026-11-26. The app does as much as it can on the customer's own Mac, with the subscriptions they already have (Codex and Claude through their CLIs, ChatGPT for images) or with local models (Parakeet transcription, Qwen3-TTS voices, Stable Audio 3 Small music and effects, the built-in synth). Paid hosted APIs are never the default and are never used silently: a person turns one on, in Settings, with their own key. Consequences for design and testing:
+
+- Every AI job has a free route on the Mac first; a hosted route is an explicit choice. A limit on one subscription (for example the Codex image limit) must not stop work another route can do: text and agent work fall back to the other available subscription and tell the person which one is being used.
+- Local models must fit an 8 GB Apple-silicon Mac (one model loaded at a time) and have licences usable in a product; the person accepts a model's licence before it is installed.
+- No local model generates video. Video comes from the footage people shoot; AI makes the script, storyboard pictures, voice, subtitles, motion graphics, music and effects around it.
+
 ## Names: one backend name per thing
 
 Decided 2026-10-27. In the database, code and docs, each thing has exactly one name, and Studio and the CRM use the same one. The screens may use friendlier words per app, through the vocabulary layer only.
