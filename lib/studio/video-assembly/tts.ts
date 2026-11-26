@@ -30,13 +30,15 @@ export async function localCloneReady(python = venvPython(), hub = hubDirectory(
   if (!await detectModel(cloneEntry, hub)) return false;
   try { await execFileAsync(python, ["-c", "import mlx_audio"], { timeout: 30_000 }); return true; } catch { return false; }
 }
+/** Qwen3-TTS makes about 12.5 tokens a second and people speak about 2.6 words a second, so 5 tokens a word is natural pace. Twice that, plus a little, leaves room for slow speech but stops a run that never ends (a 3 second sentence once produced 11 minutes of audio and 15 GB of memory). */
+export const ttsMaxTokens = (text: string) => Math.min(9000, Math.max(100, text.trim().split(/\s+/).filter(Boolean).length * 10 + 60));
 /** Speak with an on-device cloned voice: mlx-audio's --ref_audio/--ref_text zero-shot cloning on the Base model. The transcript must be the exact words in the reference. */
 export async function synthesizeLocalClone({ text, refAudio, refText, model = cloneModel, python = venvPython(), signal }: { text: string; refAudio: string; refText: string; model?: string; python?: string; signal?: AbortSignal }): Promise<Buffer> {
   if (!modelPattern.test(model)) throw new Error("invalid_model");
   if (!text.trim() || text.length > 4500 || !refText.trim() || refText.length > 1500) throw new Error("invalid_speech_text");
   const dir = await mkdtemp(join(tmpdir(), "studio-tts-"));
   try {
-    await execFileAsync(python, ["-m", "mlx_audio.tts.generate", "--model", model, "--text", text, "--ref_audio", refAudio, "--ref_text", refText, "--output_path", dir, "--file_prefix", "speech", "--audio_format", "mp3", "--lang_code", "a"], { timeout: 10 * 60_000, signal, maxBuffer: 1 << 20 });
+    await execFileAsync(python, ["-m", "mlx_audio.tts.generate", "--model", model, "--text", text, "--max_tokens", String(ttsMaxTokens(text)), "--ref_audio", refAudio, "--ref_text", refText, "--output_path", dir, "--file_prefix", "speech", "--audio_format", "mp3", "--lang_code", "a"], { timeout: 10 * 60_000, signal, maxBuffer: 1 << 20 });
     const file = (await readdir(dir)).find(f => f.startsWith("speech") && f.endsWith(".mp3"));
     if (!file) throw new Error("local_tts_no_output");
     const bytes = await readFile(join(dir, file));
@@ -52,7 +54,7 @@ export async function synthesizeLocal({ text, model = localModel, voice = localE
   if (!text.trim() || text.length > 4500) throw new Error("invalid_speech_text");
   const dir = await mkdtemp(join(tmpdir(), "studio-tts-"));
   try {
-    await execFileAsync(python, ["-m", "mlx_audio.tts.generate", "--model", model, "--voice", voice, "--text", text, "--output_path", dir, "--file_prefix", "speech", "--audio_format", "mp3", "--lang_code", "a"], { timeout: 10 * 60_000, signal, maxBuffer: 1 << 20 });
+    await execFileAsync(python, ["-m", "mlx_audio.tts.generate", "--model", model, "--voice", voice, "--text", text, "--max_tokens", String(ttsMaxTokens(text)), "--output_path", dir, "--file_prefix", "speech", "--audio_format", "mp3", "--lang_code", "a"], { timeout: 10 * 60_000, signal, maxBuffer: 1 << 20 });
     const file = (await readdir(dir)).find(f => f.startsWith("speech") && f.endsWith(".mp3"));
     if (!file) throw new Error("local_tts_no_output");
     const bytes = await readFile(join(dir, file));
