@@ -50,7 +50,9 @@ export const parseScript = (text: string) => parseScriptTimeline(text).beats;
 
 export function sameScriptNarration(original: string, current: string) {
   if (original === current) return Boolean(current.trim());
-  const lines = (value: string) => parseScript(value).map(beat => beat.narration);
-  const expected = lines(original);
-  return expected.length > 0 && JSON.stringify(expected) === JSON.stringify(lines(current));
+  // The block editor adds paragraph breaks around directions. Beat boundaries can
+  // move without changing the sequence of spoken words the citation supported.
+  const narration = (value: string) => parseScript(value).map(beat => beat.narration).join(" ");
+  const expected = narration(original);
+  return Boolean(expected) && expected === narration(current);
 }
