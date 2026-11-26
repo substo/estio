@@ -93,7 +93,7 @@ export async function previewVoice(locationId: string, voiceId: string): Promise
   const voice = (await listVoices(access.locationId)).find(v => v.id === voiceId);
   if (!voice || !isHostedProvider(voice.provider)) throw new StudioCommandError("Preview is available for hosted voices.", 400);
   const key = await needKey(access.locationId, voice.provider);
-  try { return await synthesizeHosted(voice.provider, key, voice.providerVoiceId, "Hello, this is how I will sound in your videos."); }
+  try { return await synthesizeHosted(voice.provider, key, voice.providerVoiceId, "Hi, this is how I sound in your videos."); }
   catch (error) { throw new StudioCommandError(providerMessage(error) ?? "Could not preview this voice.", 502); }
 }
 

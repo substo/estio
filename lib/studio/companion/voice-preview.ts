@@ -6,8 +6,8 @@ import { StudioJobError, type StudioJobHandler } from "../worker/handlers";
 import { LOCAL_CLONE_PATTERN, LOCAL_SPEAKERS } from "../voices/policy";
 import { runNativeProcess, type ProcessRunner } from "./process";
 
-export const PREVIEW_TEXT = "Hello, this is how I will sound in your videos.";
-/** The device request body is bounded at 32 KiB, so the sample is a short mono clip: about 4 s at 32 kbps is 16 KB (21 KB as base64). */
+export const PREVIEW_TEXT = "Hi, this is how I sound in your videos.";
+/** The device request body is bounded at 32 KiB, so the sample is a short mono clip: about 4.6 s at 28 kbps is 16 KB (21 KB as base64). */
 export const MAX_PREVIEW_BASE64 = 24000;
 const payload = z.object({ voiceId: z.string().uuid(), speaker: z.union([z.enum(LOCAL_SPEAKERS), z.string().regex(LOCAL_CLONE_PATTERN)]), name: z.string().max(80).optional(),
   voiceReference: z.object({ id: z.string().uuid(), audioUrl: z.string().url().max(4000), textUrl: z.string().url().max(4000) }).optional() }).passthrough();
@@ -17,7 +17,7 @@ export async function compressPreview(mp3: Buffer, run: ProcessRunner = runNativ
   const dir = await mkdtemp(join(tmpdir(), "studio-preview-"));
   try {
     await writeFile(join(dir, "in.mp3"), mp3, { mode: 0o600 });
-    await run({ command: ffmpeg, args: ["-y", "-loglevel", "error", "-i", "in.mp3", "-t", "4", "-ac", "1", "-ar", "22050", "-b:a", "32k", "out.mp3"], cwd: dir, timeoutMs: 60_000, maxOutputBytes: 8192, env: { PATH: `${process.env.PATH ?? ""}:/opt/homebrew/bin` } });
+    await run({ command: ffmpeg, args: ["-y", "-loglevel", "error", "-i", "in.mp3", "-t", "4.6", "-ac", "1", "-ar", "22050", "-b:a", "28k", "out.mp3"], cwd: dir, timeoutMs: 60_000, maxOutputBytes: 8192, env: { PATH: `${process.env.PATH ?? ""}:/opt/homebrew/bin` } });
     return await readFile(join(dir, "out.mp3"));
   } finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
 }
@@ -51,6 +51,6 @@ export function createVoicePreviewHandler(deps: VoicePreviewDeps): StudioJobHand
     }
     const audioBase64 = audio.toString("base64");
     if (audio.length < 300 || audioBase64.length > MAX_PREVIEW_BASE64) throw new StudioJobError("voice_preview_failed", "The Mac could not generate a usable preview. Try again.", false);
-    return { preview: { audioBase64, bytes: audio.length, seconds: Math.min(4, Math.round(audio.length * 8 / 32000 * 10) / 10), speaker: parsed.data.speaker } };
+    return { preview: { audioBase64, bytes: audio.length, seconds: Math.min(5, Math.round(audio.length * 8 / 28000 * 10) / 10), speaker: parsed.data.speaker } };
   };
 }
