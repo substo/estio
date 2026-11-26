@@ -123,4 +123,31 @@ begin
  if (select status from studio.studio_jobs where id=j2)<>'succeeded' or jsonb_array_length(studio.studio_storyboard_for(w,'cs-owner',rec)->'ready')<>2 then raise exception 'Frame 40 or the history not kept'; end if;
  -- a storyboard never shows up as a character sheet to the video path
  if exists(select 1 from jsonb_array_elements(studio.studio_job_character_sheets(w,'cs-owner')) e where e->>'sheet'='storyboard') then raise exception 'Storyboard offered as a sheet'; end if;
+ -- Upload transcripts on the Mac: asked for by the owner's own ready Mac, claimed without Codex, one transcript.json result, saved once.
+ declare u uuid:=gen_random_uuid(); m uuid; mo text; w2 text:='cc000000-0000-4000-8000-0000000000b2'; begin
+ mo:=w||'/uploads/'||u::text||'/original';
+ insert into studio.studio_media_objects(location_id,storage_provider,bucket_id,object_key,original_filename,content_type,byte_size,sha256,created_by_clerk_user_id) values(w,'cloudflare_r2','test-bucket-1',mo,'clip.mp4','video/mp4',1000,repeat('a',64),'cs-owner') returning id into m;
+ insert into studio.studio_uploads(id,location_id,record_id,original_filename,content_type,byte_size,bucket_id,object_key,status,media_object_id,created_by_clerk_user_id,uploaded_at) values(u,w,rec,'clip.mp4','video/mp4',1000,'test-bucket-1',mo,'uploaded',m,'cs-owner',clock_timestamp());
+ if not pg_temp.fails(format('select studio.studio_request_upload_transcript(%L,%L,%L,%L)',w,'substo','cs-owner',u),'UT014') then raise exception 'Asked of a Mac that cannot transcribe at all'; end if;
+ update studio.studio_devices set report=jsonb_set(report,'{transcribeUpload}','{"ready":false}') where id=d;
+ if not pg_temp.fails(format('select studio.studio_request_upload_transcript(%L,%L,%L,%L)',w,'substo','cs-owner',u),'UT013') then raise exception 'Asked before the Mac reported it can transcribe'; end if;
+ update studio.studio_devices set report=jsonb_set(report,'{transcribeUpload}','{"ready":true}') where id=d;
+ if not pg_temp.fails(format('select studio.studio_request_upload_transcript(%L,%L,%L,%L)',w,'substo','cs-owner',gen_random_uuid()),'UT001') then raise exception 'Unknown upload accepted'; end if;
+ if not pg_temp.fails(format('select studio.studio_request_upload_transcript(%L,%L,%L,%L)',w2,'substo','cs-other',u),'UT001') then raise exception 'Another tenant asked for this upload'; end if;
+ r:=studio.studio_request_upload_transcript(w,'substo','cs-owner',u); j:=(r->>'jobId')::uuid;
+ if r->>'status'<>'queued' or (studio.studio_request_upload_transcript(w,'substo','cs-owner',u)->>'jobId')::uuid<>j then raise exception 'Transcript not queued or reused'; end if;
+ -- Codex not ready: the transcript is still claimed
+ c:=pg_temp.cmd(h1,'claim',jsonb_build_object('workerId','mac','leaseSeconds',120,'sheetReady',false,'limit',1)); tok:=(c->0->>'lease_token')::uuid;
+ if c->0->'payload'->>'sheet'<>'transcript' then raise exception 'Transcript not claimed without Codex: %',c; end if;
+ if not pg_temp.fails(format('select pg_temp.cmd(%L,%L,%L::jsonb)',h1,'complete',jsonb_build_object('workerId','mac','jobId',j,'leaseToken',tok,'result',jsonb_build_object('sheet','transcript','files',jsonb_build_array('frame-1.png')))::text),'22023') then raise exception 'Wrong file accepted for a transcript'; end if;
+ perform pg_temp.cmd(h1,'complete',jsonb_build_object('workerId','mac','jobId',j,'leaseToken',tok,'result',jsonb_build_object('sheet','transcript','files',jsonb_build_array('transcript.json'))));
+ s:=studio.studio_upload_transcript_state(w,'substo','cs-owner',array[u]);
+ if s#>>'{0,status}'<>'succeeded' or (s#>>'{0,transcribed}')::boolean then raise exception 'State wrong: %',s; end if;
+ if not studio.studio_save_local_upload_transcript(w,u,'parakeet-local','en',12.5,'hello',jsonb_build_array(jsonb_build_object('start',1,'end',2,'text','hello'))) then raise exception 'Not saved'; end if;
+ if studio.studio_save_local_upload_transcript(w,u,'parakeet-local','en',99,'other','[]'::jsonb) then raise exception 'Second write replaced the first'; end if;
+ if not (studio.studio_upload_transcript_state(w,'substo','cs-owner',array[u])#>>'{0,transcribed}')::boolean or studio.studio_request_upload_transcript(w,'substo','cs-owner',u)->>'status'<>'done' then raise exception 'Not reported as transcribed'; end if;
+ if not pg_temp.fails(format('select studio.studio_save_local_upload_transcript(%L,%L,%L,%L,1,%L,%L::jsonb)',w2,u,'parakeet-local','en','x','[]'),'22023') then raise exception 'Another tenant saved a transcript'; end if;
+ if has_function_privilege('authenticated','studio.studio_save_local_upload_transcript(text,uuid,text,text,numeric,text,jsonb)','EXECUTE') then raise exception 'Unsafe transcript grants'; end if;
+ if exists(select 1 from jsonb_array_elements(studio.studio_job_character_sheets(w,'cs-owner')) e where e->>'sheet'='transcript') then raise exception 'Transcript offered as a sheet'; end if;
+ end;
 end $$;

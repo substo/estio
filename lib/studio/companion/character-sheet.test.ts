@@ -12,7 +12,7 @@ const job = (over: Record<string, unknown> = {}) => ({ id: "11111111-1111-4111-8
   sheet: "turnaround", profile: { aspects: [{ key: "hair", value: "short dark", locked: true }, { key: "clothing", value: "navy sweater", locked: false }] },
   photos: [{ name: "photo-1.jpg", url: "https://r2.example/p1" }, { name: "photo-2.png", url: "https://r2.example/p2" }], uploads: [{ name: "sheet-1.png", url: "https://r2.example/up?sig=1" }], ...over } });
 const ctx = () => ({ signal: new AbortController().signal, workerId: "mac" });
-function setup(over: { draw?: FrameDrawer; enabled?: boolean; ready?: boolean; put?: number; photoStatus?: number } = {}) {
+function setup(over: { transcribe?: (file: string) => Promise<Array<{ start: number; end: number; text: string }> | null>; draw?: FrameDrawer; enabled?: boolean; ready?: boolean; put?: number; photoStatus?: number } = {}) {
   const puts: Array<{ url: string; type: string | null; size: number }> = [], gets: string[] = [], drawn: Parameters<FrameDrawer>[0][] = [];
   const fetcher = (async (input: URL | string, init?: RequestInit) => {
     const url = String(input);
@@ -20,7 +20,7 @@ function setup(over: { draw?: FrameDrawer; enabled?: boolean; ready?: boolean; p
     gets.push(url); return new Response(new Uint8Array([1, 2, 3, 4]), { status: over.photoStatus ?? 200 });
   }) as typeof fetch;
   const draw: FrameDrawer = over.draw ?? (async r => { drawn.push(r); await writeFile(r.out, png); return true; });
-  const handler = createCharacterSheetHandler({ enabled: () => over.enabled ?? true, ready: () => over.ready ?? true, draw, fetcher, workRoot: tmpdir() });
+  const handler = createCharacterSheetHandler({ enabled: () => over.enabled ?? true, ready: () => over.ready ?? true, draw, fetcher, workRoot: tmpdir(), transcribe: over.transcribe });
   return { handler, puts, gets, drawn };
 }
 
@@ -84,4 +84,19 @@ test("a storyboard draws one picture per beat from the photos and sheets, upload
   assert.equal(none.code, "storyboard_failed");
   assert.deepEqual(await setup().handler(job({ ...payload, uploads: [uploads[0]] }) as never, ctx()), { sheet: "storyboard", files: ["frame-1.png"] });
   assert.equal(((await setup().handler(job({ ...payload, characterSheets: [{ name: "../x.png", url: "https://r2.example/x" }] }) as never, ctx()).catch(e => e)) as StudioJobError).code, "invalid_job_payload");
+});
+
+test("a transcript job reads the video through its private link, transcribes it on this Mac without Codex or photos, and uploads only the timed lines", async () => {
+  const seen: string[] = [];
+  const s = setup({ ready: false, transcribe: async file => { seen.push(file); return [{ start: 1, end: 2.5, text: "hello there" }]; } });
+  const payload = { sheet: "transcript", photos: undefined, media: { url: "https://r2.example/video?sig=1" }, uploads: [{ name: "transcript.json", url: "https://r2.example/t.json?sig=2" }] };
+  assert.deepEqual(await s.handler(job(payload) as never, ctx()), { sheet: "transcript", files: ["transcript.json"] });
+  assert.deepEqual(s.gets, ["https://r2.example/video?sig=1"]);
+  assert.equal(s.puts.length, 1); assert.equal(s.puts[0].type, "application/json"); assert.equal(s.puts[0].url, "https://r2.example/t.json?sig=2");
+  assert.equal(seen.length, 1); assert.deepEqual(s.drawn, []);
+  const code = async (x: ReturnType<typeof setup>) => ((await x.handler(job(payload) as never, ctx()).catch(e => e)) as StudioJobError).code;
+  assert.equal(await code(setup({ transcribe: async () => null })), "transcription_tools_missing");
+  assert.equal(await code(setup({ transcribe: async () => [] })), "no_speech");
+  assert.equal(await code(setup({ transcribe: async () => [{ start: 0, end: 1, text: "x" }], put: 500 })), "transcript_upload_failed");
+  assert.equal(await code(setup({ transcribe: async () => [{ start: 0, end: 1, text: "x" }], photoStatus: 403 })), "media_unavailable");
 });

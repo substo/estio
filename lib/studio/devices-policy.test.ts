@@ -195,3 +195,9 @@ test("a storyboard result is frame-N.png files only, and sheet names are not fra
   for (const bad of [{ sheet: "storyboard", files: ["sheet-1.png"] }, { sheet: "storyboard", files: ["frame-41.png"] }, { sheet: "storyboard", files: ["frame-0.png"] }, { sheet: "storyboard", files: [] }, { sheet: "turnaround", files: ["frame-1.png"] }, { sheet: "storyboard", files: Array.from({ length: 41 }, () => "frame-1.png") }])
     assert.throws(() => readSheetResult(bad), undefined, JSON.stringify(bad));
 });
+
+test("a transcript result is exactly one transcript.json", () => {
+  assert.deepEqual(readSheetResult({ sheet: "transcript", files: ["transcript.json"] }), { sheet: "transcript", files: ["transcript.json"] });
+  for (const bad of [{ sheet: "transcript", files: ["frame-1.png"] }, { sheet: "transcript", files: [] }, { sheet: "transcript", files: ["transcript.json", "transcript.json"] }, { sheet: "turnaround", files: ["transcript.json"] }])
+    assert.throws(() => readSheetResult(bad));
+});

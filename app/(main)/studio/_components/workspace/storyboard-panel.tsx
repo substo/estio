@@ -1,9 +1,9 @@
 "use client";
 /* eslint-disable @next/next/no-img-element -- previews are short-lived private links */
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { approveClipAction, drawStoryboardAction } from "../../(tenant)/content/actions";
-import type { ClipSuggestion } from "@/lib/studio/clip-suggestions";
+import { approveClipAction, drawStoryboardAction, transcribeUploadAction } from "../../(tenant)/content/actions";
+import type { ClipSuggestion, ClipVideo } from "@/lib/studio/clip-suggestions";
 import type { StoryboardView } from "@/lib/studio/storyboard";
 
 export const BRAINSTORM_MESSAGE = "Let's plan the storyboard for this script together. Tell me how many pictures it needs and which beats they belong to: not every beat needs one, so say why for each you pick. Write a shot only for those beats, as that beat's [visual note]: its size and angle, where I am, what I'm doing and what is on screen. Keep my spoken words exactly as they are, and ask me before you change a visual note that already exists.";
@@ -12,12 +12,15 @@ export const BRAINSTORM_MESSAGE = "Let's plan the storyboard for this script tog
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 export function StoryboardPanel({ locationId, recordId, view, hasScript, archived, canPlan, onPlan, onMake, clips }: {
-  locationId: string; recordId: string; view: StoryboardView | null; hasScript: boolean; archived: boolean; canPlan: boolean; onPlan: () => void; onMake: () => void; clips: { suggestions: ClipSuggestion[]; videos: number };
+  locationId: string; recordId: string; view: StoryboardView | null; hasScript: boolean; archived: boolean; canPlan: boolean; onPlan: () => void; onMake: () => void; clips: { suggestions: ClipSuggestion[]; videos: ClipVideo[] };
 }) {
   const [clipResult, setClipResult] = useState<{ error?: string; notice?: string }>({});
   const [adding, setAdding] = useState<string | null>(null);
   const approve = (c: ClipSuggestion) => { setAdding(c.blockId); start(async () => { setClipResult(await approveClipAction(locationId, recordId, { blockId: c.blockId, uploadId: c.uploadId, start: c.start, end: c.end })); setAdding(null); router.refresh(); }); };
   const router = useRouter();
+  const transcribe = (uploadId: string) => { setAdding(uploadId); start(async () => { setClipResult(await transcribeUploadAction(locationId, recordId, uploadId)); setAdding(null); router.refresh(); }); };
+  const transcribing = clips.videos.some(v => v.status === "queued" || v.status === "running") && !clips.videos.every(v => v.transcribed);
+  useEffect(() => { if (!transcribing) return; const t = setInterval(() => router.refresh(), 8000); return () => clearInterval(t); }, [transcribing, router]);   // the page reads the finished lines once the Mac is done
   const [vertical, setVertical] = useState(false);
   const [picked, setPicked] = useState<Set<number> | null>(null);   // null: the default choice
   const [pending, start] = useTransition();
@@ -72,7 +75,16 @@ export function StoryboardPanel({ locationId, recordId, view, hasScript, archive
             <p className="text-muted-foreground">“{c.quote}”</p>
             <button type="button" onClick={() => approve(c)} disabled={pending || archived} className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-accent disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">{adding === c.blockId ? "Adding…" : "Add to the script"}</button>
           </li>)}
-        </ul> : <p className="text-sm">{clips.videos ? "No line of your script matches something said in your uploaded videos yet. Add or change a line, then come back." : "Upload a video with the footage or source you want to quote (Edit → Add footage). Once it is transcribed, matching moments are suggested here."}</p>}
+        </ul> : <p className="text-sm">{clips.videos.some(v => v.transcribed) ? "No line of your script matches something said in your uploaded videos yet. Add or change a line, then come back." : "Upload a video with the footage or source you want to quote (Edit → Add footage). Once it is transcribed on your Mac, matching moments are suggested here."}</p>}
+        {clips.videos.length ? <ul aria-label="Your uploaded videos" className="space-y-1 text-sm">
+          {clips.videos.map(v => <li key={v.uploadId} className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{v.name}</span>
+            {v.transcribed ? <span className="text-muted-foreground">Transcribed</span> : v.status === "queued" || v.status === "running"
+              ? <span role="status" className="text-muted-foreground">{v.status === "running" ? "Your Mac is transcribing it…" : "Waiting for your Mac…"}</span>
+              : <button type="button" onClick={() => transcribe(v.uploadId)} disabled={pending || archived} className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-accent disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">{adding === v.uploadId ? "Starting…" : v.status === "failed" ? "Transcribe again" : "Transcribe on my Mac"}</button>}
+            {!v.transcribed && v.status === "failed" && v.error ? <span role="alert" className="text-destructive">{v.error}</span> : null}
+          </li>)}
+        </ul> : null}
         {clipResult.error ? <p role="alert" className="text-sm text-destructive">{clipResult.error}</p> : null}
         {clipResult.notice && !clipResult.error ? <p role="status" className="text-sm text-muted-foreground">{clipResult.notice}</p> : null}
         <p className="text-xs text-muted-foreground">Only videos you upload to this piece can be cut. Clips from related videos you approve will join this same list.</p>

@@ -275,8 +275,9 @@ export function readPreviewResult(value: unknown) {
 }
 /** A character sheet: which sheet, and the names of the pictures the Mac uploaded (never a path or a link). */
 export function readSheetResult(value: unknown) {
-  const v = object(value); valid(Object.keys(v).length === 2 && ["turnaround", "expressions", "face", "outfits", "storyboard"].includes(String(v.sheet)));
+  const v = object(value); valid(Object.keys(v).length === 2 && ["turnaround", "expressions", "face", "outfits", "storyboard", "transcript"].includes(String(v.sheet)));
   const storyboard = v.sheet === "storyboard";
+  if (v.sheet === "transcript") { valid(Array.isArray(v.files) && v.files.length === 1 && v.files[0] === "transcript.json"); return { sheet: v.sheet, files: v.files }; }
   valid(Array.isArray(v.files) && v.files.length >= 1 && v.files.length <= (storyboard ? 40 : 4) && v.files.every(f => typeof f === "string" && (storyboard ? /^frame-(?:[1-9]|[1-3][0-9]|40)\.png$/ : /^sheet-[1-4]\.png$/).test(f)));
   return { sheet: v.sheet, files: v.files };
 }

@@ -1,4 +1,7 @@
+import { createWriteStream } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -6,17 +9,20 @@ import { cleanProfile } from "../character-profile";
 import { sheetPrompt, type SheetKind } from "../images/character-sheet";
 import { StudioJobError, type StudioJobHandler } from "../worker/handlers";
 import type { FrameDrawer } from "./codex-image";
+import type { FootageSegment } from "./footage-transcript";
 
 const payload = z.object({
-  sheet: z.enum(["turnaround", "expressions", "face", "outfits", "storyboard"]),
+  sheet: z.enum(["turnaround", "expressions", "face", "outfits", "storyboard", "transcript"]),
+  /** Transcript only, added at claim time: a private link to the uploaded video. */
+  media: z.object({ url: z.string().url().max(4000) }).optional(),
   profile: z.object({ aspects: z.array(z.object({ key: z.string().max(40), value: z.string().max(200), locked: z.boolean() })).max(12), notes: z.string().max(400).optional() }).passthrough().optional(),
   /** Storyboard only: one picture per script beat, each with the scene text to draw. */
   beats: z.array(z.object({ n: z.number().int().min(1).max(40), prompt: z.string().min(1).max(1500) }).passthrough()).min(1).max(40).optional(),
   /** Storyboard only, added at claim time: the creator's latest turnaround and face sheets, when they have them. */
   characterSheets: z.array(z.object({ name: z.string().regex(/^character-(turnaround|face)\.png$/), url: z.string().url().max(4000) })).max(2).optional(),
   /** Added at claim time: short-lived private links to this person's own photos (the face first) and one upload link per picture. */
-  photos: z.array(z.object({ name: z.string().regex(/^photo-[1-5]\.(jpg|png|webp)$/), url: z.string().url().max(4000) })).min(1).max(3),
-  uploads: z.array(z.object({ name: z.string().regex(/^(?:sheet-[1-4]|frame-(?:[1-9]|[1-3][0-9]|40))\.png$/), url: z.string().url().max(4000) })).min(1).max(40),
+  photos: z.array(z.object({ name: z.string().regex(/^photo-[1-5]\.(jpg|png|webp)$/), url: z.string().url().max(4000) })).max(3).default([]),
+  uploads: z.array(z.object({ name: z.string().regex(/^(?:(?:sheet-[1-4]|frame-(?:[1-9]|[1-3][0-9]|40))\.png|transcript\.json)$/), url: z.string().url().max(4000) })).min(1).max(40),
 }).passthrough();
 
 const MAX_PHOTO = 8 * 1024 * 1024, MAX_SHEET = 12 * 1024 * 1024;
@@ -35,6 +41,8 @@ export interface CharacterSheetDeps {
   /** The Codex CLI is installed and signed in with ChatGPT on this Mac. */
   ready: () => boolean;
   draw: FrameDrawer;
+  /** Offline Parakeet on this Mac: timed lines for a local media file, or null when the tools are not set up. */
+  transcribe?: (file: string, signal?: AbortSignal) => Promise<FootageSegment[] | null>;
   workRoot?: string;
   fetcher?: typeof fetch;
 }
@@ -69,10 +77,36 @@ export function createCharacterSheetHandler(deps: CharacterSheetDeps): StudioJob
     if (!files.length) throw new StudioJobError("storyboard_failed", "The Mac could not draw the storyboard. Try again.", false);
     return { sheet: "storyboard", files };
   };
+  /** The uploaded video is read through a private link, transcribed here, and the timed lines go back as one private file. Nothing leaves this Mac for a paid service. */
+  const transcribeUpload = async (p: z.infer<typeof payload>, dir: string, signal: AbortSignal) => {
+    const target = p.uploads.find(u => u.name === "transcript.json");
+    if (!p.media || !target || !deps.transcribe) throw new StudioJobError("invalid_job_payload", "This transcript request is invalid.", false);
+    if (new URL(p.media.url).protocol !== "https:" || new URL(target.url).protocol !== "https:") throw new StudioJobError("invalid_job_payload", "This transcript request is invalid.", false);
+    const file = join(dir, "media");
+    try {
+      const r = await fetcher(new URL(p.media.url), { redirect: "error", signal });
+      if (!r.ok || !r.body) throw new Error("download_failed");
+      await pipeline(Readable.fromWeb(r.body as never), createWriteStream(file, { mode: 0o600 }));
+    } catch (error) { if (signal.aborted) throw error; throw new StudioJobError("media_unavailable", "The Mac could not download the video. Try again.", false); }
+    const segments = await deps.transcribe(file, signal);
+    if (segments === null) throw new StudioJobError("transcription_tools_missing", "Install the transcription tools on this Mac in Setup, then try again.", false);
+    if (!segments.length) throw new StudioJobError("no_speech", "No speech was found in this video, so there is nothing to match to the script.", false);
+    const body = Buffer.from(JSON.stringify({ segments }), "utf8");
+    let put: Response;
+    try { put = await fetcher(new URL(target.url), { method: "PUT", headers: { "content-type": "application/json" }, body: new Uint8Array(body), redirect: "error", signal }); }
+    catch (error) { if (signal.aborted) throw error; throw new StudioJobError("transcript_upload_failed", "The Mac could not save the transcript. Try again.", false); }
+    if (!put.ok) throw new StudioJobError("transcript_upload_failed", "The Mac could not save the transcript. Try again.", false);
+    return { sheet: "transcript", files: ["transcript.json"] };
+  };
   return async (job, context) => {
     const parsed = payload.safeParse(job.payload);
     if (!parsed.success) throw new StudioJobError("invalid_job_payload", "This sheet request is invalid.", false);
+    if (parsed.data.sheet !== "transcript" && !parsed.data.photos.length) throw new StudioJobError("invalid_job_payload", "This sheet request is invalid.", false);
     if (!deps.enabled()) throw new StudioJobError("local_policy", "Turn on Mac processing in Setup and keep it On.", true, 300);
+    if (parsed.data.sheet === "transcript") {
+      const dir = await mkdtemp(join(deps.workRoot ?? tmpdir(), "studio-transcript-"));
+      try { return await transcribeUpload(parsed.data, dir, context.signal); } finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
+    }
     if (!deps.ready()) throw new StudioJobError("codex_not_ready", "Sign in to Codex with ChatGPT on this Mac, then try again.", true, 300);
     const p = parsed.data, dir = await mkdtemp(join(deps.workRoot ?? tmpdir(), "studio-sheet-"));
     try {

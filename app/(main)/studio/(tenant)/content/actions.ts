@@ -1,5 +1,6 @@
 "use server";
 
+import { requestUploadTranscript } from "@/lib/studio/upload-transcripts";
 import { requestStoryboard } from "@/lib/studio/storyboard";
 import { approveClipSuggestion } from "@/lib/studio/clip-suggestions-server";
 import { notFound, redirect } from "next/navigation";
@@ -113,6 +114,19 @@ export async function drawStoryboardAction(locationId: string, recordId: string,
   } catch (error) {
     if (error instanceof StudioCommandError) return { error: error.message };
     return { error: "Studio could not send this to your Mac. Try again." };
+  }
+}
+
+/** The creator asks their own Mac to transcribe one uploaded video (offline, no paid service), so clips can be suggested from it. */
+export async function transcribeUploadAction(locationId: string, recordId: string, uploadId: string): Promise<{ error?: string; notice?: string }> {
+  if (!await getStudioAccess(locationId)) notFound();
+  try {
+    const r = await requestUploadTranscript(locationId, String(uploadId));
+    revalidatePath(`/studio/content/${recordId}`);
+    return { notice: r.status === "done" ? "That video is already transcribed." : "Your Mac is transcribing it. This takes a few minutes; matching clips appear here when it is done." };
+  } catch (error) {
+    if (error instanceof StudioCommandError) return { error: error.message };
+    return { error: "The transcription could not be started. Try again." };
   }
 }
 

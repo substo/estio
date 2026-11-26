@@ -1,4 +1,5 @@
 import "server-only";
+import { Prisma } from "@prisma/client";
 import { auth } from "@clerk/nextjs/server";
 import { getStudioAccess } from "./access";
 import { characterSheetKey, referenceOrder, characterPhotoKey, SHEET_FILE } from "./character-profile";
@@ -41,7 +42,7 @@ export async function getCharacterSheets(locationId: string): Promise<SheetView[
   if (!access) return [];
   const rows = await studioDb.call<Array<{ jobId: string; sheet: SheetKind; status: SheetView["status"]; files: unknown; error: string | null; createdAt: string; finishedAt: string | null }>>("studio_character_sheet_state", identity(access)).catch(() => []);
   const config = readStudioR2Config(), store = config ? createStudioR2Store(config) : null;
-  return Promise.all(rows.filter(r => uuid.test(r.jobId) && r.sheet !== ("storyboard" as string)).map(async r => {
+  return Promise.all(rows.filter(r => uuid.test(r.jobId) && r.sheet !== ("storyboard" as string) && r.sheet !== ("transcript" as string)).map(async r => {
     const names = Array.isArray(r.files) ? r.files.filter((f): f is string => typeof f === "string" && SHEET_FILE.test(f)) : [];
     const files = store && r.status === "succeeded" ? await Promise.all(names.map(async name => ({ name, url: await store.presignRead({ key: characterSheetKey(access.locationId, access.userId, r.jobId, name), contentType: "image/png", contentDisposition: "inline" }) }))) : [];
     return { jobId: r.jobId, sheet: r.sheet, status: r.status, error: r.error, files, createdAt: r.createdAt, finishedAt: r.finishedAt };
@@ -69,6 +70,15 @@ export async function withCharacterSheetFiles(jobs: unknown): Promise<unknown> {
     const job = raw as { kind?: unknown; id?: unknown; location_id?: unknown; created_by_clerk_user_id?: unknown; payload?: Record<string, unknown> };
     if (job?.kind !== "studio.character_sheet" || typeof job.id !== "string" || !uuid.test(job.id) || typeof job.location_id !== "string" || typeof job.created_by_clerk_user_id !== "string") return raw;
     try {
+      if (job.payload?.sheet === "transcript") {
+        // A transcript job needs the uploaded video to read and one private file to write; no photos.
+        const uploadId = String(job.payload.uploadId ?? "");
+        if (!uuid.test(uploadId)) return raw;
+        const [upload] = await studioDb.rows<{ object_key: string }>(Prisma.sql`select object_key from studio.studio_uploads where location_id = ${job.location_id} and id = ${uploadId}::uuid and status = 'uploaded' limit 1`);
+        if (!upload) return raw;
+        return { ...job, payload: { ...job.payload, media: { url: await store.presignWorkerRead(upload.object_key, 6 * 3600) },
+          uploads: [{ name: "transcript.json", url: await store.presignWorkerUpload(characterSheetKey(job.location_id, job.created_by_clerk_user_id, job.id, "transcript.json"), "application/json", 6 * 3600) }] } };
+      }
       const manifest = await readCharacterManifest(store, job.location_id, job.created_by_clerk_user_id);
       const photos = await Promise.all(referenceOrder(manifest.photos).slice(0, 3).map(async p => ({
         name: `photo-${p.n}.${p.contentType === "image/png" ? "png" : p.contentType === "image/webp" ? "webp" : "jpg"}`,

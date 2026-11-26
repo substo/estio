@@ -67,3 +67,6 @@ export function addSuggestedClip(blocks: readonly ScriptBlock[], pick: { blockId
   if (!quote || !blocks.some(b => b.id === pick.blockId && b.type === "narration") || blocks.length >= MAX_BLOCKS || readQuotes(blocks).length >= MAX_SOURCE_QUOTES) return null;
   return insertBlockAfter(blocks, pick.blockId, "visual", makeBlockId(), sourceQuoteCue(quote));
 }
+
+/** One uploaded video of the piece and where its transcript stands (a Mac transcribes it offline when asked). */
+export interface ClipVideo { uploadId: string; name: string; transcribed: boolean; status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | null; error: string | null }

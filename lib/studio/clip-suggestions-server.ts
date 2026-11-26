@@ -1,30 +1,34 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { StudioCommandError } from "./command-error";
-import { addSuggestedClip, defaultCredit, suggestClips, type ClipSource, type ClipSuggestion, type TimedSegment } from "./clip-suggestions";
+import { addSuggestedClip, defaultCredit, suggestClips, type ClipSource, type ClipSuggestion, type ClipVideo, type TimedSegment } from "./clip-suggestions";
 import { getStudioContentRecord, saveStudioContentRecord } from "./content";
 import { blocksDoc, blocksToScript, reconcileBlocks } from "./script-blocks";
 import { studioDb } from "./studio-db";
+import { getUploadTranscriptStates } from "./upload-transcripts";
 
 /** The piece's uploaded videos that have a finished transcript, with its timed lines. */
-async function clipSources(locationId: string, recordId: string): Promise<ClipSource[]> {
+async function clipSources(locationId: string, recordId: string): Promise<{ sources: ClipSource[]; videos: ClipVideo[] }> {
   const uploads = await studioDb.rows<{ id: string; original_filename: string }>(Prisma.sql`select id, original_filename from studio.studio_uploads where location_id = ${locationId} and record_id = ${recordId}::uuid and status = 'uploaded' and content_type like 'video/%' order by created_at desc limit 12`);
-  if (!uploads.length) return [];
-  const chunks = await studioDb.rows<{ upload_id: string; segments: unknown }>(Prisma.sql`select upload_id, segments from studio.studio_transcript_chunks where location_id = ${locationId} and upload_id = any(${uploads.map(u => u.id)}::uuid[]) order by upload_id, chunk_index`);
-  return uploads.map(u => {
+  if (!uploads.length) return { sources: [], videos: [] };
+  const states = await getUploadTranscriptStates(locationId, uploads.map(u => u.id));   // also stores any lines a Mac has just finished
+  const transcripts = await studioDb.rows<{ upload_id: string; segments: unknown }>(Prisma.sql`select upload_id, segments from studio.studio_transcripts where location_id = ${locationId} and upload_id = any(${uploads.map(u => u.id)}::uuid[])`);
+  const sources = uploads.map(u => {
     const segments: TimedSegment[] = [];
-    for (const c of chunks.filter(x => x.upload_id === u.id)) for (const s of Array.isArray(c.segments) ? c.segments as Array<Record<string, unknown>> : [])
+    for (const c of transcripts.filter(x => x.upload_id === u.id)) for (const s of Array.isArray(c.segments) ? c.segments as Array<Record<string, unknown>> : [])
       if (typeof s?.start === "number" && typeof s?.end === "number" && typeof s?.text === "string") segments.push({ start: s.start, end: s.end, text: s.text });
     return { uploadId: u.id, name: u.original_filename, segments };
   }).filter(s => s.segments.length);
+  const have = new Set(sources.map(x => x.uploadId));
+  return { sources, videos: uploads.map(u => { const st = states.find(x => x.uploadId === u.id); return { uploadId: u.id, name: u.original_filename, transcribed: have.has(u.id), status: st?.status ?? null, error: st?.error ?? null }; }) };
 }
 
 /** Moments in the piece's own uploaded videos that support lines of the saved script. Empty when there is no transcribed video yet. */
-export async function getClipSuggestions(locationId: string, recordId: string): Promise<{ suggestions: ClipSuggestion[]; videos: number }> {
+export async function getClipSuggestions(locationId: string, recordId: string): Promise<{ suggestions: ClipSuggestion[]; videos: ClipVideo[] }> {
   const found = await getStudioContentRecord(locationId, recordId);
-  if (!found || found.record.archived) return { suggestions: [], videos: 0 };
-  const sources = await clipSources(locationId, recordId);
-  return { suggestions: suggestClips(reconcileBlocks(found.record.payload), sources), videos: sources.length };
+  if (!found || found.record.archived) return { suggestions: [], videos: [] };
+  const { sources, videos } = await clipSources(locationId, recordId);
+  return { suggestions: suggestClips(reconcileBlocks(found.record.payload), sources), videos };
 }
 
 /** Approve one suggestion: it is added to the script as a source clip block, which Make video then places. The upload and its times are checked against this piece's own transcribed video, not taken from the page. */
