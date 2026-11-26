@@ -22,7 +22,7 @@ async function deps(over: Partial<VideoAssembleDeps> = {}) {
   const kept = new Map<string, { dir: string; file: string }>();
   const projects = { get: async (id: string) => kept.has(id) ? { ...kept.get(id)!, updatedAt: "" } : null, set: async (id: string, p: { dir: string; file: string }) => { kept.set(id, p); } };
   const value: VideoAssembleDeps = { enabled: () => true, tools: async () => ({ ready: true, missing: [] }), localSpeechReady: async () => true, workRoot: root, projectsRoot: join(root, "Projects"), projects, editorDocs: "/docs", api,
-    fetcher: (async () => new Response("data")) as typeof fetch,
+    fetcher: (async (url: URL | string) => new Response(String(url).includes("r2.example/sb-") ? "x".repeat(9000) : "data")) as typeof fetch,
     assemble: async o => { await mkdir(join(o.projectDir, "exports"), { recursive: true }); await writeFile(join(o.projectDir, "exports", "Video r2.mp4"), Buffer.alloc(2000, 1));
       assert.deepEqual(await readdir(o.clipsDir), ["shot.mov"]); return { projectDir: o.projectDir, projectFile: "Video.substo", beats: 1, clips: ["shot.mov"], voiceFiles: ["voice-01.mp3"], timings: [0], brief: "" }; },
     ...over };
@@ -158,6 +158,11 @@ test("storyboard frames: Codex draws one per beat when there is no footage, with
   assert.equal(sheets.drawn[0].references.length, 1);   // "data" is under 8 KB, so the sheet is ignored: photo only
   assert.equal((await run({ ...none, characterSheets: [{ name: "../evil.png", url: "https://r2.example/e" }] })).drawn.length, 0);   // only the fixed names are accepted
   assert.equal((await run({ avatar, storyboardFrames: { source: "codex", max: 6 } })).drawn.length, 3);      // footage present: frames still drawn for beats it does not cover
+  // Pictures the creator approved in the Storyboard step are used as they are, and nothing else is drawn.
+  const approved = await run({ ...none, storyboardPreviews: [{ beat: 1, name: "storyboard-frame-1.png", url: "https://r2.example/sb-1" }, { beat: 3, name: "storyboard-frame-3.png", url: "https://r2.example/sb-3" }] });
+  assert.equal(approved.drawn.length, 0);
+  assert.deepEqual((approved.seen?.frames ?? []).filter(Boolean), ["storyboard-frame-1.png", "storyboard-frame-3.png"]);
+  assert.equal((await run({ ...none, storyboardPreviews: [{ beat: 1, name: "../x.png", url: "https://r2.example/s1" }] })).seen, undefined);   // only the fixed names are accepted
   assert.equal((await run({ media: [], downloads: [], storyboardFrames: { source: "codex", max: 6 } })).drawn.length, 0);   // no photo
   assert.equal((await run({ media: [], downloads: [], avatar })).drawn.length, 0);                              // not chosen
 });

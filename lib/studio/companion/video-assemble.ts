@@ -38,6 +38,8 @@ const payload = z.object({
   motionStyle: z.unknown().optional(),
   /** Added at claim time when the Location chose Codex on the Mac for storyboard frames: draw one per beat when there is no footage. */
   storyboardFrames: z.object({ source: z.literal("codex"), max: z.number().int().min(1).max(8) }).optional(),
+  /** Added at claim time: the pictures the creator already drew and approved in the Storyboard step, for beats whose script has not changed since. They are used as they are; nothing is drawn for those beats. */
+  storyboardPreviews: z.array(z.object({ beat: z.number().int().min(1).max(6), name: z.string().regex(/^storyboard-frame-[1-6]\.png$/), url: z.string().url().max(4000) })).max(6).default([]),
   /** The creator's private storyboard photo, minted at claim time when they saved one. */
   avatar: z.object({ name: z.string().regex(/^storyboard-avatar\.(jpg|png|webp)$/), contentType: z.string().max(40), url: z.string().url().max(4000), byteSize: z.number().int().positive().max(5 * 1024 * 1024) }).optional(),
   /** The creator's latest turnaround and face sheets, minted at claim time. Frames are drawn from these as well as the photo. */
@@ -209,7 +211,13 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
         try { await downloadUpTo(sheet.url, join(clipsDir, sheet.name), 12 * 1024 * 1024, context.signal, fetcher); sheetFiles.push(join(clipsDir, sheet.name)); }
         catch (error) { if (context.signal.aborted) throw error; }
       }
-      if (p.storyboardFrames && avatar && deps.drawFrame) {
+      // Pictures the creator approved in the Storyboard step come first, as they are.
+      for (const preview of p.storyboardPreviews) {
+        try { await downloadUpTo(preview.url, join(clipsDir, preview.name), 12 * 1024 * 1024, context.signal, fetcher); frames[preview.beat] = preview.name; }
+        catch (error) { if (context.signal.aborted) throw error; }
+      }
+      // With approved pictures nothing more is drawn: the creator chose these, and a beat without one keeps the plain photo.
+      if (p.storyboardFrames && avatar && deps.drawFrame && !p.storyboardPreviews.length) {
         console.log(JSON.stringify({ at: new Date().toISOString(), event: "storyboard_references", jobId: job.id, sheets: sheetFiles.length, offered: p.characterSheets.length }));
         for (const beat of parseScript(p.script).slice(0, p.storyboardFrames.max)) {
           const name = `storyboard-frame-${beat.index}.png`;

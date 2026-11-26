@@ -1,4 +1,5 @@
 import { withCharacterSheetFiles, withCharacterSheetReferences } from "./character-sheets";
+import { withStoryboardPreviews } from "./storyboard";
 import { auth } from "@clerk/nextjs/server";
 import { Prisma } from "@prisma/client";
 import { studioDb } from "@/lib/studio/studio-db";
@@ -124,7 +125,7 @@ export async function executeStudioDeviceCommand(token: string, brand: "estio" |
   const call = (observed?: unknown) => studioDb.call<unknown>("studio_character_sheet_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy, p_observed: observed });
   if (operation === "video_frames_reserve" || operation === "video_frames_verify") return executeVideoFrameOperation(operation, call);
   if (operation === "video_export_reserve" || operation === "video_export_verify") return executeExportOperation(operation, call);
-  return operation === "claim" ? withCharacterSheetFiles(await withCharacterSheetReferences(await withStoryboardAvatar(await withVoiceReferences(await withAssemblyDownloads(await call()))))) : call();
+  return operation === "claim" ? withCharacterSheetFiles(await withCharacterSheetReferences(await withStoryboardAvatar(await withStoryboardPreviews(await withVoiceReferences(await withAssemblyDownloads(await call())))))) : call();
 }
 
 export const PAIRING_POLL_SECONDS = 5;

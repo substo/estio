@@ -7,7 +7,7 @@ import { agentSessionKey, type AgentSelection } from "@/lib/studio/agent-policy"
 import type { CreationRecord, CreationStage } from "@/lib/studio/creation-policy";
 import type { StudioTextProvider } from "@/lib/studio/text-provider";
 import { AgentChat } from "../agent-chat";
-import { AgentDraftProvider, WritingAudiencePanel } from "../agent-workspace";
+import { AgentDraftProvider, WritingAudiencePanel, useAgentDraft } from "../agent-workspace";
 
 export type WritingAgentData = { record: CreationRecord; turns: AgentTurnView[]; plan: string[]; target: number | null; scope: string };
 const desktopQuery = "(min-width: 1024px)";
@@ -19,7 +19,16 @@ function subscribeDesktop(change: () => void) {
 const isDesktop = () => window.matchMedia(desktopQuery).matches;
 
 /** Keep one chat mounted through sheet close, tab changes and resize so an in-flight turn or typed message survives. */
-export function ScriptWritingAgent({ locationId, data, active, open, onOpenChange, focus, returnFocus, startApply, endApply, onApplied, clearFocus, onSent }: {
+/** Sends one prepared message into the chat each time `nonce` changes (the Storyboard step's "Plan the shots"). Inside the provider, so it reaches the same send as the box. */
+function StarterBridge({ starter }: { starter?: { message: string; nonce: number } | null }) {
+  const { sendRef } = useAgentDraft();
+  const sent = useRef(0);
+  useEffect(() => { if (starter && starter.nonce !== sent.current) { sent.current = starter.nonce; requestAnimationFrame(() => sendRef.current?.(starter.message)); } }, [starter, sendRef]);
+  return null;
+}
+
+export function ScriptWritingAgent({ locationId, data, active, open, onOpenChange, focus, returnFocus, startApply, endApply, onApplied, clearFocus, onSent, starter }: {
+  starter?: { message: string; nonce: number } | null;
   locationId: string;
   data: WritingAgentData;
   active: boolean;
@@ -97,6 +106,7 @@ export function ScriptWritingAgent({ locationId, data, active, open, onOpenChang
         </div>
       </header>
       <AgentDraftProvider recordId={data.record.id} sessionKey={sessionKey} initialRecord={data.record} initialPlan={data.plan} initialTarget={data.target}>
+        <StarterBridge starter={starter} />
         <div className={showAudience ? "hidden" : "flex min-h-0 flex-1 flex-col"}>
           <AgentChat locationId={locationId} source={null} initialTurns={data.turns} provider={provider} onProvider={setProvider} scope={data.scope}
             focus={focus} scriptEditor={{ startApply, endApply, onApplied, clearFocus, onSent }} />

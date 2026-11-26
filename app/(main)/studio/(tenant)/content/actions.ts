@@ -1,5 +1,6 @@
 "use server";
 
+import { requestStoryboard } from "@/lib/studio/storyboard";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getStudioAccess } from "@/lib/studio/access";
@@ -95,6 +96,19 @@ export async function makeVideoAction(locationId: string, recordId: string, _pre
     if (!result.ok) return { error: result.message };
     revalidatePath(`/studio/content/${recordId}`);
     return { notice: result.reused ? "A video is already being made for this piece." : result.narrating ? "Preparing the narration. This page shows the progress, and the Mac starts when it is ready." : "Sent to your Mac." };
+  } catch (error) {
+    if (error instanceof StudioCommandError) return { error: error.message };
+    return { error: "Studio could not send this to your Mac. Try again." };
+  }
+}
+
+/** Ask the signed-in user's own Mac to draw one picture per beat of the saved script. Nothing is paid for: the Mac draws with the creator's ChatGPT login. */
+export async function drawStoryboardAction(locationId: string, recordId: string, portrait: boolean): Promise<{ error?: string; notice?: string }> {
+  if (!await getStudioAccess(locationId)) notFound();
+  try {
+    const result = await requestStoryboard(locationId, recordId, portrait);
+    revalidatePath(`/studio/content/${recordId}`);
+    return { notice: result.reused ? "The storyboard is already being drawn." : "Sent to your Mac. The pictures appear here as they finish." };
   } catch (error) {
     if (error instanceof StudioCommandError) return { error: error.message };
     return { error: "Studio could not send this to your Mac. Try again." };

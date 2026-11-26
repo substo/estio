@@ -62,3 +62,26 @@ test("a cancelled job stops the work", async () => {
   const s = setup({ draw: async () => { throw new Error("aborted"); } });
   await assert.rejects(s.handler(job() as never, { signal: controller.signal, workerId: "mac" }));
 });
+
+test("a storyboard draws one picture per beat from the photos and sheets, uploads each, and a beat that fails costs only that picture", async () => {
+  const beats = [{ n: 1, prompt: "A wide shot of the desk." }, { n: 2, prompt: "A close-up while speaking." }, { n: 3, prompt: "Walking to the door." }];
+  const uploads = beats.map(b => ({ name: `frame-${b.n}.png`, url: `https://r2.example/up${b.n}` }));
+  const payload = { sheet: "storyboard", profile: undefined, beats, uploads, characterSheets: [{ name: "character-turnaround.png", url: "https://r2.example/t" }] };
+  const ok = setup();
+  assert.deepEqual(await ok.handler(job(payload) as never, ctx()), { sheet: "storyboard", files: ["frame-1.png", "frame-2.png", "frame-3.png"] });
+  assert.equal(ok.drawn.length, 3);
+  assert.match(ok.drawn[0].prompt, /wide shot of the desk/);
+  assert.match(ok.drawn[0].references[0], /character-turnaround\.png$/);   // sheets first, then the photos
+  assert.equal(ok.drawn[0].references.length, 3);
+  assert.match(ok.drawn[0].intro ?? "", /reference sheets/);
+  assert.deepEqual(ok.puts.map(p => p.url), ["https://r2.example/up1", "https://r2.example/up2", "https://r2.example/up3"]);
+  // beat 2 fails: the others still land
+  let n = 0;
+  const partial = setup({ draw: async r => { n++; if (n === 2) return false; await writeFile(r.out, png); return true; } });
+  assert.deepEqual(await partial.handler(job(payload) as never, ctx()), { sheet: "storyboard", files: ["frame-1.png", "frame-3.png"] });
+  // nothing drawn is a failure the creator can retry; a beat with no upload link is skipped; a bad sheet name is refused
+  const none = await setup({ draw: async () => false }).handler(job(payload) as never, ctx()).catch(e => e) as StudioJobError;
+  assert.equal(none.code, "storyboard_failed");
+  assert.deepEqual(await setup().handler(job({ ...payload, uploads: [uploads[0]] }) as never, ctx()), { sheet: "storyboard", files: ["frame-1.png"] });
+  assert.equal(((await setup().handler(job({ ...payload, characterSheets: [{ name: "../x.png", url: "https://r2.example/x" }] }) as never, ctx()).catch(e => e)) as StudioJobError).code, "invalid_job_payload");
+});

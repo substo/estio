@@ -275,8 +275,9 @@ export function readPreviewResult(value: unknown) {
 }
 /** A character sheet: which sheet, and the names of the pictures the Mac uploaded (never a path or a link). */
 export function readSheetResult(value: unknown) {
-  const v = object(value); valid(Object.keys(v).length === 2 && ["turnaround", "expressions", "face", "outfits"].includes(String(v.sheet)));
-  valid(Array.isArray(v.files) && v.files.length >= 1 && v.files.length <= 4 && v.files.every(f => typeof f === "string" && /^sheet-[1-4]\.png$/.test(f)));
+  const v = object(value); valid(Object.keys(v).length === 2 && ["turnaround", "expressions", "face", "outfits", "storyboard"].includes(String(v.sheet)));
+  const storyboard = v.sheet === "storyboard";
+  valid(Array.isArray(v.files) && v.files.length >= 1 && v.files.length <= (storyboard ? 6 : 4) && v.files.every(f => typeof f === "string" && (storyboard ? /^frame-[1-6]\.png$/ : /^sheet-[1-4]\.png$/).test(f)));
   return { sheet: v.sheet, files: v.files };
 }
 /** Opening the kept project in Substo Video: a boolean and the folder's name, never a path. */

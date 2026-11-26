@@ -189,3 +189,9 @@ test("a character sheet result is accepted exactly as the Mac sends it, and noth
   for (const bad of [{ sheet: "selfie", files: ["sheet-1.png"] }, { sheet: "face", files: [] }, { sheet: "face", files: ["../sheet-1.png"] }, { sheet: "face", files: ["https://x/sheet-1.png"] }, { sheet: "face", files: ["sheet-1.png"], extra: 1 }, { sheet: "face", files: ["sheet-1.png", "sheet-2.png", "sheet-3.png", "sheet-4.png", "sheet-1.png"] }])
     assert.throws(() => readSheetResult(bad), undefined, JSON.stringify(bad));
 });
+
+test("a storyboard result is frame-N.png files only, and sheet names are not frames", () => {
+  assert.deepEqual(readSheetResult({ sheet: "storyboard", files: ["frame-1.png", "frame-6.png"] }), { sheet: "storyboard", files: ["frame-1.png", "frame-6.png"] });
+  for (const bad of [{ sheet: "storyboard", files: ["sheet-1.png"] }, { sheet: "storyboard", files: ["frame-7.png"] }, { sheet: "storyboard", files: [] }, { sheet: "turnaround", files: ["frame-1.png"] }, { sheet: "storyboard", files: ["frame-1.png", "frame-2.png", "frame-3.png", "frame-4.png", "frame-5.png", "frame-6.png", "frame-6.png"] }])
+    assert.throws(() => readSheetResult(bad), undefined, JSON.stringify(bad));
+});
