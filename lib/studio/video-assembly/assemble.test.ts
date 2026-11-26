@@ -92,7 +92,7 @@ test("the storyboard photo is kept out of the footage, copied into the project, 
   const brief = calls.find(c => c.command === "claude")!.input!;
   assert.match(brief, /storyboard-avatar\.png/);
   assert.match(brief, /placeMedia/);
-  assert.match(brief, /FOOTAGE NEEDED: <the beat's visual note>/);
+  assert.match(brief, /FOOTAGE NEEDED: <the beat's visual note in at most 8 words>/);
   assert.doesNotMatch(brief, /solid-colour or title-card clip/);
 });
 

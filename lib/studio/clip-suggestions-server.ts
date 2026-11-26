@@ -9,7 +9,7 @@ import { getUploadTranscriptStates } from "./upload-transcripts";
 
 /** The piece's uploaded videos that have a finished transcript, with its timed lines. */
 async function clipSources(locationId: string, recordId: string): Promise<{ sources: ClipSource[]; videos: ClipVideo[] }> {
-  const uploads = await studioDb.rows<{ id: string; original_filename: string }>(Prisma.sql`select id, original_filename from studio.studio_uploads where location_id = ${locationId} and record_id = ${recordId}::uuid and status = 'uploaded' and content_type like 'video/%' order by created_at desc limit 12`);
+  const uploads = await studioDb.rows<{ id: string; original_filename: string }>(Prisma.sql`select id, original_filename from studio.studio_uploads where location_id = ${locationId} and record_id = ${recordId}::uuid and status = 'uploaded' and content_type like 'video/%' and original_filename not like 'Edited video %' order by created_at desc limit 12`);
   if (!uploads.length) return { sources: [], videos: [] };
   const states = await getUploadTranscriptStates(locationId, uploads.map(u => u.id));   // also stores any lines a Mac has just finished
   const transcripts = await studioDb.rows<{ upload_id: string; segments: unknown }>(Prisma.sql`select upload_id, segments from studio.studio_transcripts where location_id = ${locationId} and upload_id = any(${uploads.map(u => u.id)}::uuid[])`);
