@@ -22,6 +22,10 @@ export function usePreview(locationId: string, voiceId: string) {
         }
         setState({ busy: false, error: "The Mac did not answer in time. Check that the companion is running." }); return;
       }
+      if (response.headers.get("content-type")?.includes("application/json") && response.ok) {
+        const body = await response.json() as { status?: string; audioBase64?: string };
+        if (body.status === "done" && body.audioBase64) { play(`data:audio/mpeg;base64,${body.audioBase64}`); setState({ busy: false }); return; }
+      }
       if (!response.ok) { setState({ busy: false, error: (await response.json().catch(() => ({}))).error ?? "Could not preview this voice." }); return; }
       play(URL.createObjectURL(await response.blob())); setState({ busy: false });
     } catch { setState({ busy: false, error: "Could not preview this voice." }); }

@@ -2,7 +2,7 @@ import { studioRouteParams, withStudioRoute } from "@/lib/studio/route-context";
 import { StudioCommandError } from "@/lib/studio/command-error";
 import { VoiceSettingsError } from "@/lib/studio/voices/keys";
 import { originVerified } from "@/lib/studio/voices/route-origin";
-import { listVoices, previewVoice, readLocalPreview, requestLocalPreview } from "@/lib/studio/voices/service";
+import { listVoices, previewVoice, readLocalPreview, requestLocalPreview, storedLocalPreview } from "@/lib/studio/voices/service";
 
 export const dynamic = "force-dynamic";
 const respond = (value: unknown, status = 200) => Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
@@ -17,7 +17,11 @@ export const POST = withStudioRoute(async (request, { params }) => {
   if (typeof voiceId !== "string" || !/^[0-9a-f-]{36}$/i.test(voiceId)) return respond({ error: "Choose a voice." }, 400);
   try {
     const voice = (await listVoices(locationId)).find(v => v.id === voiceId);
-    if (voice?.provider === "local") return respond({ jobId: (await requestLocalPreview(locationId, voiceId)).jobId }, 202);
+    if (voice?.provider === "local") {
+      const stored = await storedLocalPreview(locationId, voiceId);
+      if (stored) return respond({ status: "done", audioBase64: stored });
+      return respond({ jobId: (await requestLocalPreview(locationId, voiceId)).jobId }, 202);
+    }
     const audio = await previewVoice(locationId, voiceId);
     return new Response(new Uint8Array(audio), { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
   } catch (error) { return fail(error); }

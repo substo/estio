@@ -217,17 +217,59 @@ export const previewMessages: Record<string, string> = {
   VP011: "Pair a Mac under Settings → Devices to preview on-device voices.", VP012: "Turn processing on for your Mac under Settings → Devices.",
   VP013: "Your Mac is not ready: install the on-device voice model under Settings → Devices and keep the companion running.", VP014: "Update the Mac companion to preview voices.",
 };
+/** A finished on-device preview is kept in private storage so Preview plays at once after the first time. Derived from the voice id, never from user input. */
+export const voicePreviewKey = (locationId: string, voiceId: string) => `${locationId}/voice-previews/${voiceId}.json`;
+const MAX_CACHED_PREVIEW = 700_000;
+async function readCachedPreview(locationId: string, voiceId: string): Promise<string | null> {
+  try {
+    const config = readStudioR2Config(); if (!config) return null;
+    const link = await createStudioR2Store(config).presignWorkerRead(voicePreviewKey(locationId, voiceId), 120);
+    const res = await fetch(link, { redirect: "error", signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) return null;
+    const body = await res.json() as { audioBase64?: unknown };
+    return typeof body.audioBase64 === "string" && body.audioBase64.length <= MAX_CACHED_PREVIEW ? body.audioBase64 : null;
+  } catch { return null; }
+}
+async function cachePreview(locationId: string, voiceId: string, audioBase64: string): Promise<void> {
+  if (audioBase64.length > MAX_CACHED_PREVIEW) return;
+  try {
+    const config = readStudioR2Config(); if (!config) return;
+    const dir = await mkdtemp(join(tmpdir(), "studio-voice-preview-")), file = join(dir, "p.json"), body = Buffer.from(JSON.stringify({ audioBase64 }));
+    try { await writeFile(file, body, { mode: 0o600 }); await createStudioR2Store(config).uploadCreateOnly({ key: voicePreviewKey(locationId, voiceId), filePath: file, byteSize: body.length, contentType: "application/json" }); }
+    finally { await rm(dir, { recursive: true, force: true }).catch(() => {}); }
+  } catch { /* the sample just plays from the job this time */ }
+}
+/** The newest finished preview job for this voice (e.g. the one queued when the clone was made), if its sample is still in the job. */
+async function latestFinishedPreview(locationId: string, userId: string, voiceId: string): Promise<string | null> {
+  const row = (await studioDb.rows<{ result: { preview?: { audioBase64?: unknown } } | null }>(Prisma.sql`
+    select result from studio.studio_jobs where location_id = ${locationId} and kind = 'studio.voice_preview' and payload->>'voiceId' = ${voiceId} and created_by_clerk_user_id = ${userId} and status = 'succeeded' order by created_at desc limit 1`))[0];
+  const audio = row?.result?.preview?.audioBase64;
+  return typeof audio === "string" ? audio : null;
+}
+/** An on-device voice's stored sample, if there is one: from storage, or from a preview the Mac already finished (stored for next time). */
+export async function storedLocalPreview(locationId: string, voiceId: string): Promise<string | null> {
+  const access = await getStudioAccess(locationId);
+  if (!access) throw new StudioCommandError("Studio access denied.", 403);
+  const cached = await readCachedPreview(access.locationId, voiceId);
+  if (cached) return cached;
+  const finished = await latestFinishedPreview(access.locationId, access.userId, voiceId);
+  if (finished) { await cachePreview(access.locationId, voiceId, finished); return finished; }
+  return null;
+}
 export type LocalPreviewState = { status: "pending" } | { status: "failed"; message: string } | { status: "done"; audioBase64: string };
 export async function readLocalPreview(locationId: string, jobId: string): Promise<LocalPreviewState> {
   const access = await getStudioAccess(locationId);
   if (!access) throw new StudioCommandError("Studio access denied.", 403);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(jobId)) throw new StudioCommandError("Preview again.", 400);
-  const row = (await studioDb.rows<{ status: string; result: { preview?: { audioBase64?: unknown } } | null; last_error_message: string | null }>(Prisma.sql`
-    select status, result, last_error_message from studio.studio_jobs where id = ${jobId}::uuid and location_id = ${access.locationId} and kind = 'studio.voice_preview' and created_by_clerk_user_id = ${access.userId} limit 1`))[0];
+  const row = (await studioDb.rows<{ status: string; result: { preview?: { audioBase64?: unknown } } | null; last_error_message: string | null; voice_id: string | null }>(Prisma.sql`
+    select status, result, last_error_message, payload->>'voiceId' as voice_id from studio.studio_jobs where id = ${jobId}::uuid and location_id = ${access.locationId} and kind = 'studio.voice_preview' and created_by_clerk_user_id = ${access.userId} limit 1`))[0];
   if (!row) throw new StudioCommandError("This preview expired. Preview again.", 404);
   if (row.status === "queued" || row.status === "running") return { status: "pending" };
-  const audio = row.result?.preview?.audioBase64;
-  if (row.status === "succeeded" && typeof audio === "string") return { status: "done", audioBase64: audio };
+  const audio = row.result?.preview?.audioBase64, voiceId = row.voice_id && /^[0-9a-f-]{36}$/i.test(row.voice_id) ? row.voice_id : null;
+  if (row.status === "succeeded" && typeof audio === "string") {
+    if (voiceId) await cachePreview(access.locationId, voiceId, audio);
+    return { status: "done", audioBase64: audio };
+  }
   return { status: "failed", message: row.last_error_message || "The Mac could not generate the preview." };
 }
 export { StudioDbError };
@@ -237,7 +279,7 @@ export const voiceReferenceKeys = (locationId: string, voiceId: string) => ({ au
 async function removeVoiceReference(locationId: string, voiceId: string) {
   const config = readStudioR2Config(); if (!config) return;
   const store = createStudioR2Store(config), keys = voiceReferenceKeys(locationId, voiceId);
-  await store.deleteObject(keys.audio); await store.deleteObject(keys.text);
+  await store.deleteObject(keys.audio); await store.deleteObject(keys.text); await store.deleteObject(voicePreviewKey(locationId, voiceId)).catch(() => {});
 }
 
 /** Clone on this Mac. The recording and its transcript are kept in private storage only so the owner's own Mac can fetch them; nothing goes to a voice provider. */
@@ -256,6 +298,7 @@ export async function cloneVoiceOnDevice(locationId: string, input: LocalCloneIn
     await writeFile(wav, bytes, { mode: 0o600 }); await writeFile(meta, text, { mode: 0o600 });
     await store.uploadCreateOnly({ key: keys.audio, filePath: wav, byteSize: bytes.length, contentType: "audio/wav" });
     await store.uploadCreateOnly({ key: keys.text, filePath: meta, byteSize: text.length, contentType: "application/json" });
+    await requestLocalPreview(locationId, created.id).catch(() => {});   // the sample is made now and kept, so Preview plays at once later
     return { id: created.id };
   } catch (error) {
     // Never leave a voice that cannot be used: remove the row and any stored half.
