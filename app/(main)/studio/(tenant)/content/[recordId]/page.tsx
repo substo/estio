@@ -17,6 +17,7 @@ import { getMacVideoStatus, getVideoAssemblyStatus } from "@/lib/studio/video-as
 import { getSoundModelState, getVoiceAvailability, listVoices } from "@/lib/studio/voices/service";
 import { getGenerationSources, getMotionChoice, getSoundProviderChoices } from "@/lib/studio/voices/sources-store";
 import { getStoryboard } from "@/lib/studio/storyboard";
+import { classifyUpload } from "@/lib/studio/workspace/assets";
 import { parseScript } from "@/lib/studio/video-assembly/script";
 import { soundKeyAvailability } from "@/lib/studio/voices/sound-keys";
 import { pickHostedSound, soundSourceLabel } from "@/lib/studio/voices/sound-providers";
@@ -89,7 +90,8 @@ export default async function StudioContentRecordPage({ params, searchParams }: 
   return (
     <ContentWorkspace locationId={locationId} recordId={recordId} title={record.title} archived={record.archived} hasScript={Boolean(script.trim())} initialMode={mode ?? null}
       form={{ locationId, recordId, version: record.version, title: record.title, payload: record.payload, templateOptions: templates.options, pinnedTemplateId: record.script_template_version_id,
-        templateSelectionSaved: record.script_template_selected, canSelectTemplate: templates.canSelect && !record.archived, voices: allVoices, locked: record.archived }}
+        templateSelectionSaved: record.script_template_selected, canSelectTemplate: templates.canSelect && !record.archived, voices: allVoices, locked: record.archived,
+        quoteMedia: assets.filter(file => file.status === "uploaded" && file.contentType.startsWith("video/") && classifyUpload(file.name) === "footage").map(({ id, name }) => ({ id, name })) }}
       uploads={assets} pending={pending} loop={loop} assembly={assembly.view} narration={assembly.narration} mac={mac} voices={allVoices} availability={availability} soundSources={soundSources} motion={motion} beats={parseScript(script).map(b => b.narration)}
       uploadSlot={<StudioUploadForm key={recordId} compact locationId={locationId} recordId={recordId} pendingUploads={pendingUploads}
         attention={assets.filter(a => a.status !== "uploaded").map(a => ({ id: a.id, name: a.name, why: "Upload did not finish" }))} />}

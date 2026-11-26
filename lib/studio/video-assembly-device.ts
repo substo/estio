@@ -7,7 +7,7 @@ import { getMotionChoice } from "./voices/sources-store";
 import { getImageSettings } from "./images/keys";
 import { EXPORT_PRESIGN_SECONDS, runExportOperation } from "./video-assembly-export";
 
-export interface AssemblyDownload { name: string; url: string; byteSize: number }
+export interface AssemblyDownload { uploadId: string; name: string; url: string; byteSize: number }
 export interface SoundDownload extends AssemblyDownload { role: "music" | "sfx" }
 /** Music and effect files the server made for this piece in the last two days (see renderVideoSounds). Newest of each role. */
 export const SOUND_WINDOW_HOURS = 48;
@@ -29,7 +29,7 @@ export async function withAssemblyDownloads(jobs: unknown, store?: Pick<StudioR2
         join studio.studio_media_objects m on m.id = u.media_object_id and m.location_id = u.location_id
         where u.location_id = ${job.location_id} and u.record_id = ${job.payload.recordId}::uuid and u.id = any(${wanted}::uuid[]) and u.status = 'uploaded'`) : [];
       const byId = new Map(rows.map(r => [r.id, r]));
-      return Promise.all(wanted.flatMap(id => byId.has(id) ? [byId.get(id)!] : []).map(async row => ({ name: row.original_filename, byteSize: Number(row.byte_size), url: await r2.presignWorkerRead(row.object_key, EXPORT_PRESIGN_SECONDS) })));
+      return Promise.all(wanted.flatMap(id => byId.has(id) ? [byId.get(id)!] : []).map(async row => ({ uploadId: row.id, name: row.original_filename, byteSize: Number(row.byte_size), url: await r2.presignWorkerRead(row.object_key, EXPORT_PRESIGN_SECONDS) })));
     };
     const downloads: AssemblyDownload[] = await link(ids);
     const voiceDownloads: AssemblyDownload[] = await link(voiceIds);   // beat order = uploadIds order

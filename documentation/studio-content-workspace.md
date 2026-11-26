@@ -26,6 +26,8 @@ Notion-style blocks: Heading, Narration, Visual note, Section break. Stored as s
 
 **Is this ready to film?** prepares a chat review of the saved script. It asks the agent to check the spoken opening, title and payoff, runtime, and assets or proof still needed. Save the proposed checklist in the same conversation. If the piece changes before you apply the checklist, request a new review.
 
+**Source clip** adds a time range from a video uploaded to this piece. Add a credit and optionally the original source link. Reorder the block to choose where it plays. Make video trims just that excerpt on the paired Mac and gives it to the editor with its original sound and a credit. Quotes add to video runtime, separate from the spoken script estimate. Use video files you have permission to include.
+
 ## Rules
 
 - Use the repo UI principles and tokens; no new palette. Keyboard focus always visible, targets >= 44px, drag always has a button alternative, reduced motion respected.

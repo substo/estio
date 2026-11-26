@@ -152,7 +152,7 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
   }
   if (v.videoAssembly && typeof v.videoAssembly === "object" && !Array.isArray(v.videoAssembly)) {
     const assembly = v.videoAssembly as Record<string, unknown>;
-    result.videoAssembly = { ready: assembly.ready === true, missing: Array.isArray(assembly.missing) ? assembly.missing.filter((x, i, all) => typeof x === "string" && /^[A-Za-z0-9 ._-]{1,40}$/.test(x) && all.indexOf(x) === i).slice(0, 8) : [] };
+    result.videoAssembly = { ready: assembly.ready === true, ...(assembly.sourceClips === 1 ? { sourceClips: 1 } : {}), missing: Array.isArray(assembly.missing) ? assembly.missing.filter((x, i, all) => typeof x === "string" && /^[A-Za-z0-9 ._-]{1,40}$/.test(x) && all.indexOf(x) === i).slice(0, 8) : [] };
   }
   if (v.voicePreview && typeof v.voicePreview === "object" && !Array.isArray(v.voicePreview)) result.voicePreview = { ready: (v.voicePreview as Record<string, unknown>).ready === true };
   // Character sheets: Codex is signed in with ChatGPT on this Mac and processing is allowed. A flag only, nothing else is kept.

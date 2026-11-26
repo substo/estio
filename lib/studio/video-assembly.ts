@@ -14,7 +14,8 @@ import { soundKeyAvailability } from "./voices/sound-keys";
 import { reusableBeatAudio, rememberRenderedBlockAudio } from "./script-audio";
 import { isHostedProvider } from "./voices/policy";
 import { VoiceSettingsError } from "./voices/keys";
-import { parseScript } from "./video-assembly/script";
+import { MAX_SOURCE_QUOTES, SOURCE_QUOTE_PREFIX } from "./script-source-quotes";
+import { parseScript, parseScriptTimeline } from "./video-assembly/script";
 import { videoAssemblyCodeReason, videoAssemblyMessages, type NarrationView, type VideoAssemblyOptions, type VideoAssemblyView, type VideoAssemblyJobStatus } from "./video-assembly-policy";
 
 /** Explicit user action only. Never paid, never another account's Mac; a missing or not-ready Mac is reported, not thrown. */
@@ -22,6 +23,32 @@ export async function requestVideoAssembly(locationId: string, recordId: string,
   const access = await getStudioAccess(locationId);
   if (!access) throw new StudioCommandError("Studio access denied.", 403);
   try {
+    const row = await studioDb.one<{ payload: Record<string, unknown> }>(Prisma.sql`
+      select payload from studio.studio_records where location_id = ${access.locationId} and id = ${recordId}::uuid and kind = 'content'`);
+    const script = typeof row?.payload.script === "string" ? row.payload.script : "";
+    if (script.includes(SOURCE_QUOTE_PREFIX)) {
+      const { beats, quotes } = parseScriptTimeline(script);
+      if (!beats.length) return { ok: false, message: "Add a spoken script alongside the source clips." };
+      if (quotes.length > MAX_SOURCE_QUOTES) return { ok: false, message: `Use at most ${MAX_SOURCE_QUOTES} source clips in one script.` };
+      if (quotes.length > 0) {
+        const mac = await studioDb.one<{ source_clips: string | null }>(Prisma.sql`
+          select report#>>'{videoAssembly,sourceClips}' as source_clips
+          from studio.studio_devices
+          where location_id = ${access.locationId} and app = ${access.app} and created_by = ${access.userId}
+            and revoked_at is null and processing_enabled and 'studio.video_assemble'=any(allowed_kinds)
+            and report->'handlers' ? 'studio.video_assemble' and report#>>'{videoAssembly,ready}'='true'
+          order by seen_at desc nulls last limit 1`);
+        if (mac?.source_clips !== "1") return { ok: false, message: "Update and restart the video companion on your paired Mac to make a video with source clips." };
+        const available = await studioDb.rows<{ id: string; content_type: string }>(Prisma.sql`
+          select id, content_type from studio.studio_uploads
+          where location_id = ${access.locationId} and record_id = ${recordId}::uuid and status = 'uploaded'
+            and media_object_id is not null and (content_type like 'audio/%' or content_type like 'video/%')
+            and original_filename !~ '^Edited video ' order by created_at limit 40`);
+        if (quotes.some(quote => !available.some(asset => asset.id === quote.asset && asset.content_type.startsWith("video/")))) {
+          return { ok: false, message: "One of the source clips is missing its video. Open the block and choose an available upload." };
+        }
+      }
+    }
     const { voiceId, ...base } = options;
     const sqlOptions: Record<string, unknown> = { ...base };
     let voice: Awaited<ReturnType<typeof listVoices>>[number] | undefined;
@@ -43,8 +70,6 @@ export async function requestVideoAssembly(locationId: string, recordId: string,
     if (hostedVoice || sound) {
       const active = await studioDb.rows<{ id: string }>(Prisma.sql`select id from studio.studio_jobs where location_id = ${access.locationId} and kind = 'studio.video_assemble' and payload->>'recordId' = ${recordId} and status in ('queued','running') limit 1`);
       if (active[0]) return { ok: true, jobId: active[0].id, reused: true };   // never render (and pay for) narration or sound twice
-      const row = (await studioDb.rows<{ payload: Record<string, unknown> | null }>(Prisma.sql`select payload from studio.studio_records where location_id = ${access.locationId} and id = ${recordId}::uuid and kind = 'content'`))[0];
-      const script = typeof row?.payload?.script === "string" ? row.payload.script : "";
       if (!script.trim()) return { ok: false, message: videoAssemblyMessages.no_script };
       // Rendering takes minutes: record the run, answer the click at once, and finish in the background (progress is on the page).
       const begun = await studioDb.call<{ runId: string; reused: boolean }>("studio_begin_narration_run", { p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_record_id: recordId, p_beats: parseScript(script).length });

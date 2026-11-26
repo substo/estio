@@ -1,3 +1,4 @@
+import { readSourceQuoteCue, type SourceQuote } from "../script-source-quotes";
 import { readSpeakerCue } from "../script-speakers";
 
 /** A script is plain text: blank-line separated paragraphs are spoken beats; `[bracketed]` or `(parenthesised)` lines are visual directions for the beat that follows. */
@@ -5,8 +6,10 @@ export interface Beat { index: number; narration: string; direction?: string; sp
 
 const directionLine = /^\s*(?:\[([^\]]+)\]|\(([^)]+)\))\s*$/;
 
-export function parseScript(text: string): Beat[] {
+export type TimedSourceQuote = SourceQuote & { beforeBeat: number };
+export function parseScriptTimeline(text: string) {
   const beats: Beat[] = [];
+  const quotes: TimedSourceQuote[] = [];
   let direction: string[] = [];
   let speaker = "";
   for (const block of text.replace(/\r\n/g, "\n").split(/\n\s*\n/)) {
@@ -21,6 +24,12 @@ export function parseScript(text: string): Beat[] {
     for (const raw of block.split("\n")) {
       const line = raw.trim();
       if (!line || /^#{1,6}\s/.test(line)) continue;
+      const quote = readSourceQuoteCue(line);
+      if (quote) {
+        flush();
+        quotes.push({ ...quote, beforeBeat: beats.length + 1 });
+        continue;
+      }
       const cue = readSpeakerCue(line);
       if (cue) {
         flush();
@@ -33,5 +42,7 @@ export function parseScript(text: string): Beat[] {
     }
     if (spoken.length) { flush(); speaker = ""; }
   }
-  return beats;
+  return { beats, quotes };
 }
+
+export const parseScript = (text: string) => parseScriptTimeline(text).beats;

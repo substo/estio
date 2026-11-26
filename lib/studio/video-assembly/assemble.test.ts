@@ -104,3 +104,30 @@ test("an unexpected avatar name is ignored and the plain labelled card is used",
   assert.deepEqual((await readdir(project)).sort(), ["a.mov"]);
   assert.match(calls.find(c => c.command === "claude")!.input!, /solid-colour or title-card clip/);
 });
+
+test("source quotes trim the selected private upload, leave room in the narration timeline, and keep original sound", async () => {
+  const asset = "10000000-0000-4000-8000-000000000001";
+  const clips = await mkdtemp(join(tmpdir(), "clip-quote-")), project = await mkdtemp(join(tmpdir(), "proj-quote-"));
+  await writeFile(join(clips, "interview.mp4"), "video");
+  const cue = `[Source clip: ${JSON.stringify({ asset, start: 1.25, end: 3.5, credit: "Guest · interview" })}]`;
+  const calls: Array<{ command: string; args: string[]; input?: string }> = [];
+  const result = await assembleVideo({
+    script: `Before.\n\n${cue}\n\nAfter.`, clipsDir: clips, footageNames: new Map([[asset, "interview.mp4"]]),
+    projectDir: project, editorDocs: "/docs", voiceover: true, speak: { label: "test", speak: async () => Buffer.alloc(10) },
+    run: async call => {
+      calls.push(call);
+      return { stdout: call.command === "ffprobe" ? call.args.at(-1)?.endsWith(".mp3") ? "2" : "12" : "", stderr: "" };
+    },
+  });
+  const ffmpeg = calls.find(call => call.command === "ffmpeg")!;
+  assert.equal(ffmpeg.args[ffmpeg.args.indexOf("-ss") + 1], "1.25");
+  assert.equal(ffmpeg.args[ffmpeg.args.indexOf("-t") + 1], "2.25");
+  assert.ok(ffmpeg.args.includes("0:a:0?"));
+  assert.deepEqual(result.timings, [0, 4.6]);
+  assert.deepEqual(result.clips, []);
+  assert.match(result.brief, /before spoken beat 2 · on-screen credit "Guest · interview"/);
+  assert.match(result.brief, /unmuted, without overlapping narration/);
+  await assert.rejects(assembleVideo({
+    script: `Before.\n\n${cue}`, clipsDir: clips, projectDir: project, editorDocs: "/docs", dryRun: true,
+  }), /uploaded source clip.*unavailable/);
+});

@@ -1,3 +1,4 @@
+import type { PreparedSourceQuote } from "./source-quotes";
 import type { Beat } from "./script";
 import { DEFAULT_MOTION_CHOICE, motionBriefStep, type MotionChoice } from "./motion-style";
 
@@ -6,6 +7,7 @@ export interface BriefInput {
   editorDocs: string; orientation: "landscape" | "portrait";
   beats: Beat[]; voiceFiles: string[]; timings: number[]; clips: string[]; hasVoiceover: boolean; music: boolean;
   /** Timed speech in each footage file (file time, seconds), made on this Mac when the editor cannot transcribe. */
+  sourceQuotes?: PreparedSourceQuote[];
   footageTranscripts?: { file: string; lines: string }[];
   /** Music bed and whoosh files in this folder (made on this Mac or by the server), when there are any. */
   soundFiles?: { music?: string; sfx?: string };
@@ -34,9 +36,10 @@ export function buildBrief(i: BriefInput): string {
   return `You are editing a finished video from a script. The current directory is a Substo Video project folder (already created with \`substo new\`). Use ONLY the \`substo\` command; read ${i.editorDocs}/AGENTS.md, then agents/cutting.md, agents/broll-and-titles.md, agents/sound.md, agents/shorts.md and agents/motion-graphics.md as needed. Pass --author claude and --project "${i.projectFile}" on every command.
 
 Canvas: ${i.orientation}. Footage the creator shot (already in this folder): ${i.clips.join(", ") || "none"}.
-${i.hasVoiceover ? "Generated voiceover files (one per beat, in this folder) are the narration: place them back to back on the Voice track in order." : "The footage carries the narration: transcribe it (`substo wait transcript`) and cut to the script. Files named voice-NN.mp3 in this folder are leftovers from an earlier version: do not place them, and remove any that an earlier revision left on the Voice track."}
+${i.sourceQuotes?.length ? `\nSource-video excerpts, cut from the creator's uploaded files and included as original audio/video. Place each entire file once at the listed point, unmuted, without overlapping narration. Reserve time for these excerpts on all tracks. Use the listed speaker/source credit as a discreet lower third, without speaking it. Keep excerpts out of the general B-roll pool and use only the listed excerpt files for them. A previous revision may also have the untrimmed upload in its folder. Never use that upload or recreate its audio.\n${i.sourceQuotes.map(q => `${q.file} · ${q.seconds}s · ${q.beforeBeat > i.beats.length ? "after the final spoken beat" : `before spoken beat ${q.beforeBeat}`} · on-screen credit ${JSON.stringify(q.credit)}`).join("\n")}\n` : ""}
+${i.hasVoiceover ? "Generated voiceover files (one per beat, in this folder) are the narration: place them on the Voice track in order at the listed times, leaving the reserved space for source clips." : "The footage carries the narration: transcribe it (`substo wait transcript`) and cut to the script. Files named voice-NN.mp3 in this folder are leftovers from an earlier version: do not place them, and remove any that an earlier revision left on the Voice track."}
 
-Script beats (speaker labels are credits, never spoken words or part of their captions):
+Script beats (show a speaker credit on their first appearance when a label is supplied. Keep the credit separate from the captions and never speak it):
 ${beats}
 ${i.footageTranscripts?.length ? `\nFootage transcripts (seconds in the file; the editor cannot transcribe on this Mac, so use these times for cuts, search and captions, not substo transcribe):\n${i.footageTranscripts.map(t => `[${t.file}]\n${t.lines}`).join("\n")}` : ""}
 

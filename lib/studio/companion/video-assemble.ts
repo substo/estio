@@ -23,7 +23,7 @@ const payload = z.object({
   recordId: z.string().uuid(), script: z.string().min(1).max(20000),
   options: z.object({ voiceover: z.boolean(), music: z.boolean(), portrait: z.boolean() }).strict(),
   media: z.array(z.object({ uploadId: z.string().uuid(), name: z.string().max(255), byteSize: z.number().int().positive() }).passthrough()).max(40),
-  downloads: z.array(z.object({ name: z.string().max(255), url: z.string().url().max(4000), byteSize: z.number().int().positive() })).max(40).default([]),
+  downloads: z.array(z.object({ uploadId: z.string().uuid().optional(), name: z.string().max(255), url: z.string().url().max(4000), byteSize: z.number().int().positive() })).max(40).default([]),
   /** The chosen voice. Hosted narration is already rendered by the server (the Mac never sees a provider key); local is generated here. */
   voice: z.discriminatedUnion("engine", [
     z.object({ engine: z.literal("local"), model: z.string().max(100), speaker: z.string().regex(/^([a-z_]{2,20}|clone-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12})$/) }).strict(),
@@ -185,8 +185,10 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
     try {
       await mkdir(clipsDir, { recursive: true });
       const used = new Set<string>();
+      const footageNames = new Map<string, string>();
       for (const [i, item] of p.downloads.entries()) {
         let name = safeName(item.name, i); if (used.has(name)) name = `${i}-${name}`; used.add(name);
+        if (item.uploadId) footageNames.set(item.uploadId.toLowerCase(), name);
         try { await download(item.url, join(clipsDir, name), item.byteSize, context.signal, fetcher); }
         catch (error) { if (context.signal.aborted) throw error; throw new StudioJobError("footage_download_failed", "The Mac could not download the footage. Make the video again.", false); }
       }
@@ -249,7 +251,7 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
         ? await deps.reference(p.voiceReference, context.signal).catch(() => { throw new StudioJobError("voice_reference_unavailable", "The Mac could not fetch this cloned voice. Make the video again.", false); }) : undefined;
       let result: AssembleResult;
       try {
-        result = await deps.assemble({ transcribeFootage: deps.transcribeFootage, script: p.script, clipsDir, projectDir, projectFile, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape", sounds, motion: readMotionChoice(p.motionStyle), ...(avatar ? { avatar } : {}), ...(frames.some(Boolean) ? { frames } : {}),
+        result = await deps.assemble({ transcribeFootage: deps.transcribeFootage, script: p.script, clipsDir, footageNames, projectDir, projectFile, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape", sounds, motion: readMotionChoice(p.motionStyle), ...(avatar ? { avatar } : {}), ...(frames.some(Boolean) ? { frames } : {}),
           voiceover: p.options.voiceover, music: p.options.music, model: deps.model, signal: context.signal,
           voice: !p.options.voiceover ? undefined : p.voice?.engine === "local" ? { engine: "local", speaker: p.voice.speaker, model: p.voice.model, ...(reference ? { reference } : {}) } : p.voice?.engine === "hosted" ? { engine: "prerendered", files: narration } : undefined });
       } catch (error) {

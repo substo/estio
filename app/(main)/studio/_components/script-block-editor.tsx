@@ -9,6 +9,8 @@ import {
   BLOCK_LABELS, MAX_BLOCKS, blockAudioStatus, blocksDoc, blocksToScript, scriptBlockSpan, insertBlockAfter, makeBlockId, moveBlock, moveBlockTo, narrationBlocks, removeBlock, setBlockAudio, setBlockSpeaker, setBlockText, setBlockType, splitBlock,
   type BlockAudio, type BlockType, type ScriptBlock,
 } from "@/lib/studio/script-blocks";
+import { SourceQuoteDialog } from "./source-quote-dialog";
+import { MAX_SOURCE_QUOTES, readSourceQuoteCue, sourceQuoteCue } from "@/lib/studio/script-source-quotes";
 import { ScriptReadingDialog } from "./script-reading-dialog";
 import { MAX_SCRIPT_SPEAKER } from "@/lib/studio/script-speakers";
 import type { AgentSelection } from "@/lib/studio/agent-policy";
@@ -21,11 +23,12 @@ const placeholders: Record<BlockType, string> = { narration: "What you say out l
 type Save = "saved" | "unsaved" | "saving" | "error";
 
 /** Notion-style script editor. Blocks autosave through the version-fenced record save; the plain `script` is derived from them on the server. Every drag has a button and keyboard equivalent. */
-export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks, voices, initialVoiceId, archived, onVersion, onBlocksChange, onSaveState, onAskAboutBlock, savedScript }: {
+export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks, voices, initialVoiceId, archived, onVersion, onBlocksChange, onSaveState, onAskAboutBlock, savedScript, quoteMedia = [] }: {
   locationId: string; recordId: string; version: number; initialBlocks: ScriptBlock[]; voices: readonly VoiceRow[]; initialVoiceId: string; archived: boolean;
   onVersion: (version: number, savedHere?: boolean) => void; onBlocksChange: (json: string, voiceId: string) => void;
   onSaveState?: (saved: boolean) => void;
   savedScript: string;
+  quoteMedia?: readonly { id: string; name: string }[];
   onAskAboutBlock?: (selection: AgentSelection, label: string, origin: HTMLElement) => void;
 }) {
   const router = useRouter();
@@ -37,6 +40,8 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
   const [busy, setBusy] = useState<string | null>(null);     // block id, "all", or null while generating audio
   const [audioMessage, setAudioMessage] = useState("");
   const [slashFor, setSlashFor] = useState<string | null>(null);
+  const [quoteDialog, setQuoteDialog] = useState<{ block?: ScriptBlock } | null>(null);
+  const quoteTrigger = useRef<HTMLButtonElement | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const past = useRef<ScriptBlock[][]>([]), future = useRef<ScriptBlock[][]>([]), lastPush = useRef({ key: "", at: 0 });
@@ -199,6 +204,7 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
       <ol className="space-y-2" aria-label="Script blocks">
         {blocks.map((block, index) => {
           const status = blockAudioStatus(block, effectiveVoice?.id ?? null);
+          const sourceQuote = block.type === "visual" ? readSourceQuoteCue(block.text) : null;
           const isBreak = block.type === "break";
           // The nth spoken block is the nth line of the transcript, so the transcript can jump here.
           const spoken = narrationBlocks(blocks).findIndex(b => b.id === block.id);
@@ -216,7 +222,11 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
                 </label>
                 <p className="mt-1">Shown as a credit. The voice reads only the narration.</p>
               </details> : null}
-              {isBreak ? <div ref={el => { if (el) fields.current.set(block.id, el); else fields.current.delete(block.id); }} tabIndex={0} role="separator" aria-label="Section break" className="flex items-center gap-3 py-2 text-xs uppercase tracking-wide text-muted-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"><span className="h-px flex-1 bg-border" />Section break<span className="h-px flex-1 bg-border" /></div>
+              {sourceQuote ? <div className="space-y-1 p-2 text-sm">
+                <p className="font-medium">Source clip · {sourceQuote.credit}</p>
+                <p className="text-xs text-muted-foreground">{sourceQuote.start}s to {sourceQuote.end}s · Original audio</p>
+                {sourceQuote.url ? <a href={sourceQuote.url} target="_blank" rel="noreferrer" className="text-xs text-primary underline">Original source (new tab)</a> : null}
+              </div> : isBreak ? <div ref={el => { if (el) fields.current.set(block.id, el); else fields.current.delete(block.id); }} tabIndex={0} role="separator" aria-label="Section break" className="flex items-center gap-3 py-2 text-xs uppercase tracking-wide text-muted-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"><span className="h-px flex-1 bg-border" />Section break<span className="h-px flex-1 bg-border" /></div>
                 : <textarea ref={el => { if (el) { fields.current.set(block.id, el); el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; } else fields.current.delete(block.id); }}
                   aria-label={`${BLOCK_LABELS[block.type]} ${index + 1}`} value={block.text} rows={1} maxLength={4500} disabled={archived} placeholder={placeholders[block.type]}
                   onChange={event => onText(block, event.target.value)} onKeyDown={event => onKey(event, block, index)}
@@ -232,7 +242,9 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
                 <select value={block.type} onChange={event => changeType(block.id, event.target.value as BlockType)} disabled={archived} aria-label={`Type of block ${index + 1}`} className="min-h-11 rounded-md border bg-background px-2 text-xs">
                   {TYPES.map(type => <option key={type} value={type}>{BLOCK_LABELS[type]}</option>)}
                 </select>
-                {!isBreak ? <button type="button" className={btn} onClick={event => void brainstorm(block, index, event.currentTarget)} disabled={archived || !block.text.trim()}><Lightbulb aria-hidden className="size-4" />{onAskAboutBlock ? "Ask about this block" : "Brainstorm this section"}</button> : null}
+                {sourceQuote ? <button type="button" className={btn} disabled={archived}
+                  onClick={event => { quoteTrigger.current = event.currentTarget; setQuoteDialog({ block }); }}>Edit source clip</button> : null}
+                {!isBreak && !sourceQuote ? <button type="button" className={btn} onClick={event => void brainstorm(block, index, event.currentTarget)} disabled={archived || !block.text.trim()}><Lightbulb aria-hidden className="size-4" />{onAskAboutBlock ? "Ask about this block" : "Brainstorm this section"}</button> : null}
                 <button type="button" className={btn} onClick={() => { const prev = blocks[index - 1] ?? blocks[index + 1]; if (prev) focusNext.current = { id: prev.id }; commit(removeBlock(blocksRef.current, block.id)); }} disabled={archived} aria-label={`Delete ${BLOCK_LABELS[block.type]} ${index + 1}`}><Trash2 aria-hidden className="size-4" /></button>
               </div>
               {status ? <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
@@ -250,7 +262,18 @@ export function ScriptBlockEditor({ locationId, recordId, version, initialBlocks
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Add block">
         <span className="inline-flex min-h-11 items-center gap-1 text-sm font-medium"><Plus aria-hidden className="size-4" />Add block</span>
         {TYPES.map(type => <button key={type} type="button" className={btn} disabled={archived || blocks.length >= MAX_BLOCKS} onClick={() => addAfter(blocks.at(-1)?.id ?? null, type)}>{BLOCK_LABELS[type]}</button>)}
+        <button type="button" className={btn} disabled={archived || blocks.length >= MAX_BLOCKS || blocks.filter(b => readSourceQuoteCue(b.text)).length >= MAX_SOURCE_QUOTES}
+          onClick={event => { quoteTrigger.current = event.currentTarget; setQuoteDialog({}); }}>Source clip</button>
       </div>
+      {quoteDialog ? <SourceQuoteDialog media={quoteMedia} initial={quoteDialog.block ? readSourceQuoteCue(quoteDialog.block.text) ?? undefined : undefined}
+        onClose={() => { setQuoteDialog(null); requestAnimationFrame(() => quoteTrigger.current?.focus()); }}
+        onSave={quote => {
+          const cue = sourceQuoteCue(quote);
+          if (quoteDialog.block) commit(setBlockText(blocksRef.current, quoteDialog.block.id, cue));
+          else commit(insertBlockAfter(blocksRef.current, blocksRef.current.at(-1)?.id ?? null, "visual", makeBlockId(), cue));
+          setQuoteDialog(null);
+          requestAnimationFrame(() => quoteTrigger.current?.focus());
+        }} /> : null}
       <p className="text-xs text-muted-foreground">Enter splits a block, Backspace on an empty block removes it, type / to change a block's type, Alt+↑/↓ moves it, Ctrl/⌘+Z undoes.</p>
 
       {hosted ? <div className="flex flex-wrap items-center gap-3 rounded-lg border p-3 text-sm">
