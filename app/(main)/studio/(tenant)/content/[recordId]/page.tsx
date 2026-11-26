@@ -17,6 +17,7 @@ import { getMacVideoStatus, getVideoAssemblyStatus } from "@/lib/studio/video-as
 import { getSoundModelState, getVoiceAvailability, listVoices } from "@/lib/studio/voices/service";
 import { getGenerationSources, getMotionChoice, getSoundProviderChoices } from "@/lib/studio/voices/sources-store";
 import { getStoryboard } from "@/lib/studio/storyboard";
+import { getClipSuggestions } from "@/lib/studio/clip-suggestions-server";
 import { classifyUpload } from "@/lib/studio/workspace/assets";
 import { parseScript } from "@/lib/studio/video-assembly/script";
 import { soundKeyAvailability } from "@/lib/studio/voices/sound-keys";
@@ -59,6 +60,7 @@ export default async function StudioContentRecordPage({ params, searchParams }: 
   ]);
   const script = typeof record.payload.script === "string" ? record.payload.script : "";
   const storyboard = script.trim() ? await getStoryboard(locationId, recordId, script).catch(() => null) : null;
+  const clips = script.trim() ? await getClipSuggestions(locationId, recordId).catch(() => ({ suggestions: [], videos: 0 })) : { suggestions: [], videos: 0 };
   const assets = uploads.map(u => ({ id: u.id, name: u.original_filename, contentType: u.content_type, byteSize: Number(u.byte_size), createdAt: new Date(u.created_at).toISOString(), status: u.status,
     note: u.transcript ? `Transcribed · ${Math.round(u.transcript.duration_seconds / 60)} min` : null }));
   const pending = pendingUploads.map(u => ({ id: u.id, name: u.original_filename, byteSize: Number(u.byte_size) }));
@@ -95,6 +97,6 @@ export default async function StudioContentRecordPage({ params, searchParams }: 
       uploads={assets} pending={pending} loop={loop} assembly={assembly.view} narration={assembly.narration} mac={mac} voices={allVoices} availability={availability} soundSources={soundSources} motion={motion} beats={parseScript(script).map(b => b.narration)}
       uploadSlot={<StudioUploadForm key={recordId} compact locationId={locationId} recordId={recordId} pendingUploads={pendingUploads}
         attention={assets.filter(a => a.status !== "uploaded").map(a => ({ id: a.id, name: a.name, why: "Upload did not finish" }))} />}
-      nextSteps={nextSteps} detailsExtra={detailsExtra} writingAgent={await writingAgent} storyboard={storyboard} />
+      nextSteps={nextSteps} detailsExtra={detailsExtra} writingAgent={await writingAgent} storyboard={storyboard} clips={clips} />
   );
 }

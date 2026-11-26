@@ -2,15 +2,21 @@
 /* eslint-disable @next/next/no-img-element -- previews are short-lived private links */
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { drawStoryboardAction } from "../../(tenant)/content/actions";
+import { approveClipAction, drawStoryboardAction } from "../../(tenant)/content/actions";
+import type { ClipSuggestion } from "@/lib/studio/clip-suggestions";
 import type { StoryboardView } from "@/lib/studio/storyboard";
 
 export const BRAINSTORM_MESSAGE = "Let's plan the storyboard for this script together. Tell me how many pictures it needs and which beats they belong to: not every beat needs one, so say why for each you pick. Write a shot only for those beats, as that beat's [visual note]: its size and angle, where I am, what I'm doing and what is on screen. Keep my spoken words exactly as they are, and ask me before you change a visual note that already exists.";
 
 /** Step between the script and the edit: plan the shots with the agent, draw a preview of each on the creator's own Mac, then make the video from them. */
-export function StoryboardPanel({ locationId, recordId, view, hasScript, archived, canPlan, onPlan, onMake }: {
-  locationId: string; recordId: string; view: StoryboardView | null; hasScript: boolean; archived: boolean; canPlan: boolean; onPlan: () => void; onMake: () => void;
+const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+export function StoryboardPanel({ locationId, recordId, view, hasScript, archived, canPlan, onPlan, onMake, clips }: {
+  locationId: string; recordId: string; view: StoryboardView | null; hasScript: boolean; archived: boolean; canPlan: boolean; onPlan: () => void; onMake: () => void; clips: { suggestions: ClipSuggestion[]; videos: number };
 }) {
+  const [clipResult, setClipResult] = useState<{ error?: string; notice?: string }>({});
+  const [adding, setAdding] = useState<string | null>(null);
+  const approve = (c: ClipSuggestion) => { setAdding(c.blockId); start(async () => { setClipResult(await approveClipAction(locationId, recordId, { blockId: c.blockId, uploadId: c.uploadId, start: c.start, end: c.end })); setAdding(null); router.refresh(); }); };
   const router = useRouter();
   const [vertical, setVertical] = useState(false);
   const [picked, setPicked] = useState<Set<number> | null>(null);   // null: the default choice
@@ -57,6 +63,20 @@ export function StoryboardPanel({ locationId, recordId, view, hasScript, archive
             <p className="text-xs text-muted-foreground">{b.direction ? `Shot: ${b.direction}` : "No shot planned yet: the preview shows you speaking this line."}</p>
           </li>))}
       </ol>
+      <section aria-label="Clips from your source videos" className="space-y-3 rounded-xl border p-4">
+        <h3 className="font-medium">Clips from your source videos</h3>
+        <p className="text-sm text-muted-foreground">Where a line of your script says what a moment in one of your uploaded videos says, it is suggested here with its time. Add the ones you want: they join the script as source clips and Make video places them, with their original sound.</p>
+        {clips.suggestions.length ? <ul className="space-y-3">
+          {clips.suggestions.map(c => <li key={`${c.blockId}:${c.start}`} className="space-y-1 rounded-lg border p-3 text-sm">
+            <p className="font-medium">Beat {c.beat} · {c.name} · {clock(c.start)}–{clock(c.end)}</p>
+            <p className="text-muted-foreground">“{c.quote}”</p>
+            <button type="button" onClick={() => approve(c)} disabled={pending || archived} className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-accent disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">{adding === c.blockId ? "Adding…" : "Add to the script"}</button>
+          </li>)}
+        </ul> : <p className="text-sm">{clips.videos ? "No line of your script matches something said in your uploaded videos yet. Add or change a line, then come back." : "Upload a video with the footage or source you want to quote (Edit → Add footage). Once it is transcribed, matching moments are suggested here."}</p>}
+        {clipResult.error ? <p role="alert" className="text-sm text-destructive">{clipResult.error}</p> : null}
+        {clipResult.notice && !clipResult.error ? <p role="status" className="text-sm text-muted-foreground">{clipResult.notice}</p> : null}
+        <p className="text-xs text-muted-foreground">Only videos you upload to this piece can be cut. Clips from related videos you approve will join this same list.</p>
+      </section>
       {drawn && !working ? <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-card p-4 text-sm">
         <p className="min-w-0 flex-1">Happy with the previews? Next, upload your footage and press Make video.</p>
         <button type="button" onClick={onMake} className="inline-flex min-h-11 items-center rounded-md border px-3 font-medium hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">Go to Edit</button>

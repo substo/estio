@@ -25,6 +25,7 @@ import { PlayerStage } from "./player-stage";
 import { TimelineView } from "./timeline-view";
 import { StoryboardPanel, BRAINSTORM_MESSAGE } from "./storyboard-panel";
 import type { StoryboardView } from "@/lib/studio/storyboard";
+import type { ClipSuggestion } from "@/lib/studio/clip-suggestions";
 import { TranscriptPanel } from "./transcript-panel";
 import { buildTranscript } from "@/lib/studio/workspace/transcript";
 
@@ -37,7 +38,7 @@ export function ContentWorkspace(props: {
   form: FormProps; uploads: AssetUpload[]; pending: PendingUpload[];
   loop: VideoLoopState | null; assembly: VideoAssemblyView | null; narration: NarrationView | null; mac: MacStatusInput; /** Every voice in the Location; the picker groups them by availability. */ voices: VoiceRow[]; availability?: Availability; /** Where music and sound effects will be made, from the Location's generation sources (labels only). */ soundSources?: { music: string; effects: string }; /** The Location's saved look for titles and callouts. */ motion?: import("@/lib/studio/video-assembly/motion-style").MotionChoice;
   /** The script's spoken beats in order, for the transcript. */ beats?: string[];
-  uploadSlot: React.ReactNode; nextSteps: React.ReactNode; detailsExtra: React.ReactNode; writingAgent?: WritingAgentData | null; storyboard?: StoryboardView | null;
+  uploadSlot: React.ReactNode; nextSteps: React.ReactNode; detailsExtra: React.ReactNode; writingAgent?: WritingAgentData | null; storyboard?: StoryboardView | null; clips?: { suggestions: ClipSuggestion[]; videos: number };
 }) {
   const { locationId, recordId, loop, writingAgent } = props;
   const router = useRouter();
@@ -139,7 +140,7 @@ export function ContentWorkspace(props: {
       <div className={mode === "details" ? "mx-auto max-w-3xl space-y-6" : mode === "script" || mode === "storyboard" ? "grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]" : "hidden"}>
         <div className="space-y-6"><ContentRecordForm {...props.form} scriptLock={scriptLock} scriptRevision={scriptRevision} onScriptSaved={writingAgent ? refreshSavedScript : undefined} onScriptSaveState={trackScriptSave}
           onAskAboutBlock={writingAgent ? (selection, label, origin) => showWritingAgent(origin, { selection, label }) : undefined} visible={mode === "script" ? "script" : mode === "details" ? "details" : "none"} />{mode === "details" ? props.detailsExtra : null}
-          {mode === "storyboard" ? <StoryboardPanel locationId={locationId} recordId={recordId} view={props.storyboard ?? null} hasScript={props.hasScript} archived={props.archived} canPlan={Boolean(writingAgent)}
+          {mode === "storyboard" ? <StoryboardPanel locationId={locationId} recordId={recordId} view={props.storyboard ?? null} hasScript={props.hasScript} archived={props.archived} canPlan={Boolean(writingAgent)} clips={props.clips ?? { suggestions: [], videos: 0 }}
             onPlan={() => { setStarter({ message: BRAINSTORM_MESSAGE, nonce: Date.now() }); setWritingOpen(true); }} onMake={() => choose("edit")} /> : null}</div>
         <div hidden={mode !== "script" && mode !== "storyboard"} className="min-w-0 space-y-4">
           {writingAgent ? <ScriptWritingAgent locationId={locationId} data={writingAgent} active={mode === "script" || mode === "storyboard"} open={writingOpen} onOpenChange={setWritingOpen}

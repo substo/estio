@@ -1,6 +1,7 @@
 "use server";
 
 import { requestStoryboard } from "@/lib/studio/storyboard";
+import { approveClipSuggestion } from "@/lib/studio/clip-suggestions-server";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getStudioAccess } from "@/lib/studio/access";
@@ -112,6 +113,19 @@ export async function drawStoryboardAction(locationId: string, recordId: string,
   } catch (error) {
     if (error instanceof StudioCommandError) return { error: error.message };
     return { error: "Studio could not send this to your Mac. Try again." };
+  }
+}
+
+/** The creator approves a suggested clip: it joins the script as a source clip block, and Make video places it. */
+export async function approveClipAction(locationId: string, recordId: string, pick: { blockId: string; uploadId: string; start: number; end: number }): Promise<{ error?: string; notice?: string }> {
+  if (!await getStudioAccess(locationId)) notFound();
+  try {
+    await approveClipSuggestion(locationId, recordId, { blockId: String(pick.blockId), uploadId: String(pick.uploadId), start: Number(pick.start), end: Number(pick.end) });
+    revalidatePath(`/studio/content/${recordId}`);
+    return { notice: "Added to the script as a source clip. Make video will place it." };
+  } catch (error) {
+    if (error instanceof StudioCommandError) return { error: error.message };
+    return { error: "The clip could not be added. Reload the page and try again." };
   }
 }
 
