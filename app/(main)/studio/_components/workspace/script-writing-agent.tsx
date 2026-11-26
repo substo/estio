@@ -43,7 +43,7 @@ export function ScriptWritingAgent({ locationId, data, active, open, onOpenChang
   onSent: () => void;
 }) {
   const [showAudience, setShowAudience] = useState(false);
-  const [provider, setProvider] = useState<StudioTextProvider>("location_order");
+  const [provider, setProvider] = useState<StudioTextProvider>("subscription");
   const desktop = useSyncExternalStore(subscribeDesktop, isDesktop, () => false);
   const panel = useRef<HTMLDialogElement>(null);
   const audienceToggle = useRef<HTMLButtonElement>(null);
