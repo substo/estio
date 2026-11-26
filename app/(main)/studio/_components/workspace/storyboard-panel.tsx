@@ -6,7 +6,7 @@ import { approveClipAction, drawStoryboardAction, transcribeUploadAction } from 
 import type { ClipSuggestion, ClipVideo } from "@/lib/studio/clip-suggestions";
 import type { StoryboardView } from "@/lib/studio/storyboard";
 
-export const BRAINSTORM_MESSAGE = "Let's plan the storyboard for this script together. Tell me how many pictures it needs and which beats they belong to: not every beat needs one, so say why for each you pick. Write a shot only for those beats, as that beat's [visual note]: its size and angle, where I am, what I'm doing and what is on screen. Keep my spoken words exactly as they are, and ask me before you change a visual note that already exists.";
+export const BRAINSTORM_MESSAGE = "Let's plan the storyboard for this script together. Tell me how many pictures it needs and which beats they belong to: not every beat needs one, so say why for each you pick. Then propose the updated Script with each shot written as a [visual note: ...] right after its beat, so I can apply it with Use as Script. A shot gives its size and angle, where I am, what I'm doing and what is on screen. Keep my spoken words exactly as they are, and ask me before you change a visual note that already exists.";
 
 /** Step between the script and the edit: plan the shots with the agent, draw a preview of each on the creator's own Mac, then make the video from them. */
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
