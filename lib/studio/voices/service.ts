@@ -241,10 +241,18 @@ async function cachePreview(locationId: string, voiceId: string, audioBase64: st
 }
 /** The newest finished preview job for this voice (e.g. the one queued when the clone was made), if its sample is still in the job. */
 async function latestFinishedPreview(locationId: string, userId: string, voiceId: string): Promise<string | null> {
-  const row = (await studioDb.rows<{ result: { preview?: { audioBase64?: unknown } } | null }>(Prisma.sql`
-    select result from studio.studio_jobs where location_id = ${locationId} and kind = 'studio.voice_preview' and payload->>'voiceId' = ${voiceId} and created_by_clerk_user_id = ${userId} and status = 'succeeded' order by created_at desc limit 1`))[0];
-  const audio = row?.result?.preview?.audioBase64;
+  const row = (await studioDb.rows<{ result: { preview?: { audioBase64?: unknown } } | null; status: string }>(Prisma.sql`
+    select result, status from studio.studio_jobs where location_id = ${locationId} and kind = 'studio.voice_preview' and payload->>'voiceId' = ${voiceId} and created_by_clerk_user_id = ${userId} order by created_at desc limit 1`))[0];
+  const audio = row?.status === "succeeded" ? row.result?.preview?.audioBase64 : null;   // only when the newest preview is the finished one, never an older sample while a new one is being made
   return typeof audio === "string" ? audio : null;
+}
+/** Throw away this voice's stored sample and make a new one on the Mac (for example after the Mac re-listened to the recording). */
+export async function regenerateLocalPreview(locationId: string, voiceId: string): Promise<{ jobId: string }> {
+  const access = await getStudioAccess(locationId);
+  if (!access) throw new StudioCommandError("Studio access denied.", 403);
+  const config = readStudioR2Config();
+  if (config) await createStudioR2Store(config).deleteObject(voicePreviewKey(access.locationId, voiceId)).catch(() => {});
+  return requestLocalPreview(locationId, voiceId);
 }
 /** An on-device voice's stored sample, if there is one: from storage, or from a preview the Mac already finished (stored for next time). */
 export async function storedLocalPreview(locationId: string, voiceId: string): Promise<string | null> {

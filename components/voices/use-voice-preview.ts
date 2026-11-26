@@ -6,10 +6,10 @@ export function usePreview(locationId: string, voiceId: string) {
   const [state, setState] = useState<{ busy: boolean; note?: string; error?: string }>({ busy: false });
   const audio = useRef<HTMLAudioElement>(null);
   const play = (src: string) => { if (audio.current) { audio.current.src = src; void audio.current.play().catch(() => {}); } };
-  async function run() {
+  async function run(regenerate = false) {
     setState({ busy: true });
     try {
-      const response = await fetch("/api/studio/voices/preview", { method: "POST", headers: { "Content-Type": "application/json", "X-Studio-Tenant": locationId }, body: JSON.stringify({ voiceId }) });
+      const response = await fetch("/api/studio/voices/preview", { method: "POST", headers: { "Content-Type": "application/json", "X-Studio-Tenant": locationId }, body: JSON.stringify(regenerate === true ? { voiceId, regenerate: true } : { voiceId }) });
       if (response.status === 202) {
         const { jobId } = await response.json() as { jobId: string };
         setState({ busy: true, note: "Your Mac is generating a sample…" });

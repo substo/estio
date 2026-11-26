@@ -26,10 +26,12 @@ export function VoiceItem({ locationId, voice, availability, canManage }: { loca
     {voice.description ? <p className="text-muted-foreground">{voice.description}</p> : null}
     {voice.tags?.length ? <ul aria-label="Voice traits" className="flex flex-wrap gap-1">{voice.tags.map(t => <li key={t} className="rounded-full bg-muted px-2 py-0.5 text-xs">{tagLabel(t)}</li>)}</ul> : null}
     {status.usable ? <div className="flex flex-wrap items-center gap-2">
-      <button type="button" onClick={preview.run} disabled={preview.state.busy} className={button}>{preview.state.busy ? "Loading…" : "Preview"}</button>
+      <button type="button" onClick={() => preview.run()} disabled={preview.state.busy} className={button}>{preview.state.busy ? "Loading…" : "Preview"}</button>
+      {canManage && voice.provider === "local" && voice.kind === "clone" ? <button type="button" onClick={() => preview.run(true)} disabled={preview.state.busy} className={button}>Make a new sample</button> : null}
       {canManage && !voice.isDefault ? <form action={setDef}><button type="submit" disabled={settingDef} className={button}>Make default</button></form> : null}
       {canManage && (voice.provider !== "local" || voice.kind === "clone") ? <form action={remove} onSubmit={event => { if (!confirm(voice.provider === "local" ? "Remove this cloned voice? Its recording is deleted from Studio's private storage and from your Mac the next time it is cleaned up." : voice.kind !== "preset" ? "Remove this voice? A voice created in Studio is also deleted at the provider." : "Remove this voice from Studio? It stays in your provider account.")) event.preventDefault(); }}><button type="submit" disabled={removing} className={button}>Remove</button></form> : null}
     </div> : <p className="text-muted-foreground">{status.message} <Link className="text-primary hover:underline" href={status.need === "key" ? "/settings/ai" : "/settings/computer"}>{status.need === "key" ? "Add a key" : "Open Devices"}</Link></p>}
+    {status.usable ? <p className="text-xs text-muted-foreground">The sample says: “Hello, this is how I will sound in your videos.”{voice.provider === "local" && voice.kind === "clone" ? " If it sounds wrong, make a new sample: your Mac listens to the recording again." : ""}</p> : null}
     <audio ref={preview.audio} hidden />
     {preview.state.note ? <p role="status" className="text-muted-foreground">{preview.state.note}</p> : null}
     <Say s={def} /><Say s={del} />{preview.state.error ? <p role="alert" className="text-destructive">{preview.state.error}</p> : null}

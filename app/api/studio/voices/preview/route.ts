@@ -2,7 +2,7 @@ import { studioRouteParams, withStudioRoute } from "@/lib/studio/route-context";
 import { StudioCommandError } from "@/lib/studio/command-error";
 import { VoiceSettingsError } from "@/lib/studio/voices/keys";
 import { originVerified } from "@/lib/studio/voices/route-origin";
-import { listVoices, previewVoice, readLocalPreview, requestLocalPreview, storedLocalPreview } from "@/lib/studio/voices/service";
+import { listVoices, previewVoice, readLocalPreview, regenerateLocalPreview, requestLocalPreview, storedLocalPreview } from "@/lib/studio/voices/service";
 
 export const dynamic = "force-dynamic";
 const respond = (value: unknown, status = 200) => Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
@@ -13,10 +13,11 @@ const fail = (error: unknown) => error instanceof StudioCommandError || error in
 export const POST = withStudioRoute(async (request, { params }) => {
   if (!originVerified(request)) return respond({ error: "The request origin could not be verified." }, 403);
   const { locationId } = await studioRouteParams(params, request);
-  const voiceId = (await request.json().catch(() => ({})) as { voiceId?: unknown }).voiceId;
+  const body = await request.json().catch(() => ({})) as { voiceId?: unknown; regenerate?: unknown }, voiceId = body.voiceId;
   if (typeof voiceId !== "string" || !/^[0-9a-f-]{36}$/i.test(voiceId)) return respond({ error: "Choose a voice." }, 400);
   try {
     const voice = (await listVoices(locationId)).find(v => v.id === voiceId);
+    if (voice?.provider === "local" && body.regenerate === true) return respond({ jobId: (await regenerateLocalPreview(locationId, voiceId)).jobId }, 202);
     if (voice?.provider === "local") {
       const stored = await storedLocalPreview(locationId, voiceId);
       if (stored) return respond({ status: "done", audioBase64: stored });
