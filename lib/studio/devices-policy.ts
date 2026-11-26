@@ -157,6 +157,7 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
   if (v.voicePreview && typeof v.voicePreview === "object" && !Array.isArray(v.voicePreview)) result.voicePreview = { ready: (v.voicePreview as Record<string, unknown>).ready === true };
   // Character sheets: Codex is signed in with ChatGPT on this Mac and processing is allowed. A flag only, nothing else is kept.
   if (v.characterSheet && typeof v.characterSheet === "object" && !Array.isArray(v.characterSheet)) result.characterSheet = { ready: (v.characterSheet as Record<string, unknown>).ready === true };
+  if (v.transcribeUpload && typeof v.transcribeUpload === "object" && !Array.isArray(v.transcribeUpload)) result.transcribeUpload = { ready: (v.transcribeUpload as Record<string, unknown>).ready === true };
   if (v.hardware && typeof v.hardware === "object" && !Array.isArray(v.hardware)) {
     const h = v.hardware as Record<string, unknown>;
     const power = h.power && typeof h.power === "object" && !Array.isArray(h.power) ? h.power as Record<string, unknown> : null;

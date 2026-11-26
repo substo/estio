@@ -201,3 +201,9 @@ test("a transcript result is exactly one transcript.json", () => {
   for (const bad of [{ sheet: "transcript", files: ["frame-1.png"] }, { sheet: "transcript", files: [] }, { sheet: "transcript", files: ["transcript.json", "transcript.json"] }, { sheet: "turnaround", files: ["transcript.json"] }])
     assert.throws(() => readSheetResult(bad));
 });
+
+test("the Mac's transcription readiness survives the report whitelist as a bare boolean", () => {
+  const kept = safeDeviceCapabilities({ transcribeUpload: { ready: true, path: "/Users/x/venv" } }) as { transcribeUpload?: unknown };
+  assert.deepEqual(kept.transcribeUpload, { ready: true });
+  assert.deepEqual((safeDeviceCapabilities({ transcribeUpload: { ready: "yes" } }) as { transcribeUpload?: unknown }).transcribeUpload, { ready: false });
+});
