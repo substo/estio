@@ -71,9 +71,13 @@ test("a storyboard draws one picture per beat from the photos and sheets, upload
   assert.deepEqual(await ok.handler(job(payload) as never, ctx()), { sheet: "storyboard", files: ["frame-1.png", "frame-2.png", "frame-3.png"] });
   assert.equal(ok.drawn.length, 3);
   assert.match(ok.drawn[0].prompt, /wide shot of the desk/);
-  assert.match(ok.drawn[0].references[0], /character-turnaround\.png$/);   // sheets first, then the photos
+  assert.match(ok.drawn[0].references[0], /character-turnaround\.png$/);   // the first picture: sheets first, then the photos
   assert.equal(ok.drawn[0].references.length, 3);
   assert.match(ok.drawn[0].intro ?? "", /reference sheets/);
+  // later pictures get the earlier ones as scene references, so the room and lighting stay the same
+  assert.match(ok.drawn[1].references[0], /frame-1\.png$/); assert.equal(ok.drawn[1].references.length, 4);
+  assert.match(ok.drawn[1].intro ?? "", /same room, set, background, lighting/);
+  assert.match(ok.drawn[2].references[0], /frame-1\.png$/); assert.match(ok.drawn[2].references[1], /frame-2\.png$/); assert.equal(ok.drawn[2].references.length, 5);
   assert.deepEqual(ok.puts.map(p => p.url), ["https://r2.example/up1", "https://r2.example/up2", "https://r2.example/up3"]);
   // beat 2 fails: the others still land
   let n = 0;

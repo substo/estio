@@ -47,6 +47,7 @@ export interface CharacterSheetDeps {
   fetcher?: typeof fetch;
 }
 const SHEETS_INTRO = "Use $imagegen to create one new image. The attached images are reference sheets and photos of the same person: keep exactly their face, hair, build and clothing in the new scene.";
+const SCENE_INTRO = "Use $imagegen to create one new image. The first attached image or images are earlier shots of this same video: keep exactly the same room, set, background, lighting, props and camera style, and the same person (the later attached sheets and photos show the face). Change only what this shot asks for: the framing, the pose or what is on screen.";
 const INTRO = "Use $imagegen to create one new image. The attached photos show the person: use them as the only source for the face, hairstyle and skin tone.";
 
 /** studio.character_sheet: one reference sheet from the creator's own photos, drawn by Codex on this Mac with their ChatGPT login (included in the subscription), uploaded through a private link, reported by file name only. */
@@ -65,14 +66,18 @@ export function createCharacterSheetHandler(deps: CharacterSheetDeps): StudioJob
       catch (error) { if (signal.aborted) throw error; }
     }
     const files: string[] = [];
+    const drawn: string[] = [];   // pictures already drawn for this video, kept as scene references so the set stays the same
     for (const beat of p.beats ?? []) {
       const name = `frame-${beat.n}.png`, target = p.uploads.find(u => u.name === name);
       if (!target) continue;
       const out = join(dir, name);
-      const ok = await deps.draw({ prompt: beat.prompt, references: [...sheets, ...photos], out, signal, intro: sheets.length ? SHEETS_INTRO : INTRO }).catch(error => { if (signal.aborted) throw error; return false; });
+      // The first picture and the latest one set the scene; at most six images go to the model (scene, then sheets, then photos).
+      const scene = drawn.length > 1 ? [drawn[0], drawn[drawn.length - 1]] : drawn.slice(0, 1);
+      const rest = [...sheets, ...photos].slice(0, 6 - scene.length);
+      const ok = await deps.draw({ prompt: beat.prompt, references: [...scene, ...rest], out, signal, intro: scene.length ? SCENE_INTRO : sheets.length ? SHEETS_INTRO : INTRO }).catch(error => { if (signal.aborted) throw error; return false; });
       if (!ok) continue;
       const bytes = await readFile(out);
-      if (bytes.length <= MAX_SHEET && await put(target.url, bytes, signal)) files.push(name);
+      if (bytes.length <= MAX_SHEET && await put(target.url, bytes, signal)) { files.push(name); drawn.push(out); }
     }
     if (!files.length) throw new StudioJobError("storyboard_failed", "The Mac could not draw the storyboard. Try again.", false);
     return { sheet: "storyboard", files };
