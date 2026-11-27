@@ -17,7 +17,7 @@ import { ContentWorkspace } from "../../../_components/workspace/content-workspa
 import { getVideoLoopState } from "@/lib/studio/video-loop";
 import { getMacVideoStatus, getVideoAssemblyStatus } from "@/lib/studio/video-assembly";
 import { getSoundModelState, getVoiceAvailability, listVoices } from "@/lib/studio/voices/service";
-import { getGenerationSources, getMotionChoice, getSoundProviderChoices } from "@/lib/studio/voices/sources-store";
+import { getGenerationSources, getModelPrefs, getMotionChoice, getSoundProviderChoices } from "@/lib/studio/voices/sources-store";
 import { getStoryboard } from "@/lib/studio/storyboard";
 import { getClipSuggestions } from "@/lib/studio/clip-suggestions-server";
 import { classifyUpload } from "@/lib/studio/workspace/assets";
@@ -60,7 +60,7 @@ export default async function StudioContentRecordPage({ params, searchParams }: 
     && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(inspiration.outlineId)
     && links.some(link => link.id === inspiration.sourceId) ? inspiration.outlineId : null;
   const [assembly, allVoices, availability, loop, mac, sources] = await Promise.all([getVideoAssemblyStatus(locationId, recordId), listVoices(locationId).catch(() => []), getVoiceAvailability(locationId), getVideoLoopState(locationId, recordId), getMacVideoStatus(locationId), getGenerationSources(locationId).catch((): GenerationSources => ({}))]);
-  const [soundChoices, soundKeys, soundModels, motion] = await Promise.all([getSoundProviderChoices(locationId), soundKeyAvailability(locationId), getSoundModelState(locationId), getMotionChoice(locationId)]);
+  const [soundChoices, soundKeys, soundModels, motion, modelPrefs] = await Promise.all([getSoundProviderChoices(locationId), soundKeyAvailability(locationId), getSoundModelState(locationId), getMotionChoice(locationId), getModelPrefs(locationId)]);
   const anyHostedSound = soundKeys.fal || soundKeys.elevenlabs;
   const soundLine = (kind: "music" | "effects") => { const r = resolveSource(kind, sources[kind], { localReady: true, hostedKey: anyHostedSound }); return soundSourceLabel(kind, r.source, pickHostedSound(soundChoices[kind], soundKeys), soundModels[kind]); };
   const soundSources = { music: soundLine("music"), effects: soundLine("effects") };
@@ -104,7 +104,7 @@ export default async function StudioContentRecordPage({ params, searchParams }: 
       form={{ locationId, recordId, version: record.version, title: record.title, payload: record.payload, templateOptions: templates.options, pinnedTemplateId: record.script_template_version_id,
         templateSelectionSaved: record.script_template_selected, canSelectTemplate: templates.canSelect && !record.archived, voices: allVoices, locked: record.archived, clipReference,
         quoteMedia: assets.filter(file => file.status === "uploaded" && file.contentType.startsWith("video/") && classifyUpload(file.name) === "footage").map(({ id, name }) => ({ id, name })) }}
-      uploads={assets} pending={pending} loop={loop} assembly={assembly.view} narration={assembly.narration} mac={mac} voices={allVoices} availability={availability} soundSources={soundSources} motion={motion} beats={parseScript(script).map(b => b.narration)}
+      uploads={assets} pending={pending} loop={loop} assembly={assembly.view} narration={assembly.narration} mac={mac} voices={allVoices} availability={availability} soundSources={soundSources} motion={motion} modelPrefs={modelPrefs} beats={parseScript(script).map(b => b.narration)}
       uploadSlot={<StudioUploadForm key={recordId} compact locationId={locationId} recordId={recordId} pendingUploads={pendingUploads}
         attention={assets.filter(a => a.status !== "uploaded").map(a => ({ id: a.id, name: a.name, why: "Upload did not finish" }))} />}
       nextSteps={mode === "script" && clipTurn && !clipReference ? <><p role="status" className="text-sm text-muted-foreground">This clip reference is unavailable. You can still add an uploaded excerpt in Script.</p>{nextSteps}</> : nextSteps} detailsExtra={detailsExtra} writingAgent={await writingAgent} storyboard={storyboard} clips={clips} />

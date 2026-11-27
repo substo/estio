@@ -2,6 +2,7 @@ import { copyFile, mkdir, readdir, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { runNativeProcess, type ProcessRunner } from "../companion/process";
 import { buildBrief } from "./brief";
+import { buildMotionPassBrief, DEFAULT_MOTION_CHOICE } from "./motion-style";
 import { parseScriptTimeline } from "./script";
 import { prepareSourceQuotes } from "./source-quotes";
 import { MAX_SOURCE_QUOTES } from "../script-source-quotes";
@@ -14,7 +15,8 @@ const videoExtensions = new Set([".mp4", ".mov", ".m4v", ".mkv", ".webm", ".mp3"
 export interface AssembleOptions {
   script: string; clipsDir: string; footageNames?: ReadonlyMap<string, string>; projectDir: string; editorDocs: string;
   /** The project file inside projectDir (a revision of the same piece gets the next free name). */ projectFile?: string;
-  orientation?: "landscape" | "portrait"; voiceover?: boolean; music?: boolean; model?: string; dryRun?: boolean;
+  orientation?: "landscape" | "portrait"; voiceover?: boolean; music?: boolean; model?: string;
+  /** The model for the motion-graphics pass. When it differs from `model` the graphics are a separate pass after the first export; otherwise one run does both. */ motionModel?: string; dryRun?: boolean;
   run?: ProcessRunner;
   /** Music bed and whoosh the server already rendered (file names inside clipsDir). They are copied into the project beside the voice files and never treated as footage. */
   sounds?: { music?: string; sfx?: string };
@@ -30,7 +32,7 @@ export interface AssembleOptions {
   voice?: { engine: "local"; speaker?: string; model?: string; /** An on-device clone: the reference recording and its exact transcript, both on this Mac. */ reference?: { audio: string; text: string } } | { engine: "prerendered"; files: string[] };
   /** Test seam. */ speak?: SpeechEngine; log?: (line: string) => void; signal?: AbortSignal;
 }
-export interface AssembleResult { projectDir: string; projectFile: string; beats: number; clips: string[]; voiceFiles: string[]; timings: number[]; brief: string; agentOutput?: string }
+export interface AssembleResult { /** The models that actually ran (undefined = the Mac's default). */ ran?: { edit?: string; motion?: string }; projectDir: string; projectFile: string; beats: number; clips: string[]; voiceFiles: string[]; timings: number[]; brief: string; agentOutput?: string }
 const BEAT_GAP = 0.35;
 async function durationOf(file: string, run: ProcessRunner, cwd: string): Promise<number> {
   const { stdout } = await run({ command: "ffprobe", args: ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file], cwd, timeoutMs: 30_000, maxOutputBytes: 1024, env: { PATH: `${process.env.PATH ?? ""}:/opt/homebrew/bin` } });
@@ -112,9 +114,15 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
     const segments = await o.transcribeFootage(join(o.projectDir, f), o.signal).catch(() => null);
     if (segments?.length) footageTranscripts.push({ file: f, lines: segments.map(x => `${x.start.toFixed(1)}-${x.end.toFixed(1)} ${x.text}`).join("\n").slice(0, 6000) });
   }
-  const brief = buildBrief({ footageTranscripts, projectFile, editorDocs: o.editorDocs, orientation: o.orientation ?? "landscape", beats, voiceFiles, timings, clips, sourceQuotes: prepared.quotes, hasVoiceover: Boolean(o.voiceover), music: o.music ?? false, soundFiles, avatarFile, ...(shotFiles.length ? { shotFiles } : {}), ...(frameFiles.some(Boolean) ? { frameFiles } : {}), ...(o.motion ? { motion: o.motion } : {}) });
+  const separateMotion = "motionModel" in o && o.motionModel !== o.model && (o.motion?.style ?? "clean") !== "minimal";
+  const brief = buildBrief({ footageTranscripts, projectFile, editorDocs: o.editorDocs, orientation: o.orientation ?? "landscape", beats, voiceFiles, timings, clips, sourceQuotes: prepared.quotes, hasVoiceover: Boolean(o.voiceover), music: o.music ?? false, soundFiles, avatarFile, ...(shotFiles.length ? { shotFiles } : {}), ...(frameFiles.some(Boolean) ? { frameFiles } : {}), ...(o.motion ? { motion: o.motion } : {}), ...(separateMotion ? { deferMotion: true } : {}) });
   if (o.dryRun) return { projectDir: o.projectDir, projectFile, beats: beats.length, clips, voiceFiles, timings, brief };
   log("Editing with the agent");
-  const agentOutput = await runEditingAgent({ cwd, brief, editorDocs: o.editorDocs, model: o.model, run, signal: o.signal });
-  return { projectDir: o.projectDir, projectFile, beats: beats.length, clips, voiceFiles, timings, brief, agentOutput };
+  let agentOutput = await runEditingAgent({ cwd, brief, editorDocs: o.editorDocs, model: o.model, run, signal: o.signal });
+  if (separateMotion) {
+    log("Adding motion graphics with the motion model");
+    const pass = buildMotionPassBrief({ editorDocs: o.editorDocs, projectFile, choice: o.motion ?? DEFAULT_MOTION_CHOICE, orientation: o.orientation ?? "landscape", script: beats.map(b => `${b.index}. ${b.narration}`).join("\n") });
+    agentOutput += "\n" + await runEditingAgent({ cwd, brief: pass, editorDocs: o.editorDocs, model: o.motionModel, run, signal: o.signal });
+  }
+  return { projectDir: o.projectDir, projectFile, beats: beats.length, clips, voiceFiles, timings, brief, agentOutput, ran: { edit: o.model, motion: separateMotion ? o.motionModel : o.model } };
 }

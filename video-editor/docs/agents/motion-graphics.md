@@ -11,6 +11,7 @@ needs more than a preset.
    First make a static end-state storyboard: write down every exact label, its bounding box and the region the graphic occupies. If
    labels cannot fit without intersecting, reveal the items sequentially instead of shrinking or overlapping them.
 2. **Look** at the proof moments: the starting state, the signature motion (the middle of the main move) and the final frame, plus anything the style promises. `substo graphic frame graphic-<n>.html --at <seconds> -o graphic-<n>-a.png --size 1920x1080`, then view the image.
+   Look on a plain backdrop first: add `--background dark` (or `light`, or `#rrggbb`) and name the file `graphic-<n>-plain.png`. Busy footage hides layout, spacing and contrast problems; on a neutral backdrop they show. This is a preview aid only: the render in step 3 stays transparent and the export always lays the graphic over the footage. Fix and look again, then check the composed frame over the real footage (step 5), so each graphic is judged twice.
    Check the first, middle and last moment. Fix and look again until each frame is right. Repair the graphic in place: never lengthen, shorten or re-time it just to hide a defect.
 3. **Render**: `substo graphic render graphic-<n>.html --duration <s> --size 1920x1080` writes `graphic-<n>.mov`, ProRes 4444
    with alpha. `--size 1080x1920` for a portrait video. Up to 3840x2160, 60 s, 12 to 60 fps.

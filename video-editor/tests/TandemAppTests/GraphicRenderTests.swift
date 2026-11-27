@@ -19,6 +19,14 @@ final class GraphicRenderTests: XCTestCase {
         return (Int((c.redComponent * 255).rounded()), Int((c.greenComponent * 255).rounded()), Int((c.blueComponent * 255).rounded()), Int((c.alphaComponent * 255).rounded()))
     }
 
+    /// The stored bytes of one pixel, with no colour conversion (colorAt would convert from whatever profile the PNG declares).
+    private func rawPixel(_ png: URL, x: Int, y: Int) throws -> (r: Int, g: Int, b: Int, a: Int) {
+        let rep = try XCTUnwrap(NSBitmapImageRep(data: Data(contentsOf: png)))
+        var p = [Int](repeating: 0, count: 5)
+        rep.getPixel(&p, atX: x, y: y)
+        return (p[0], p[1], p[2], p.count > 3 ? p[3] : 255)
+    }
+
     func testRefusesRequestsOutsideTheLimits() {
         let html = URL(fileURLWithPath: "/tmp/x.html"), out = URL(fileURLWithPath: "/tmp/x.mov")
         XCTAssertThrowsError(try GraphicRenderRequest(html: html, output: out, width: 8000, height: 1080).validate())
@@ -27,6 +35,32 @@ final class GraphicRenderTests: XCTestCase {
         XCTAssertThrowsError(try GraphicRenderRequest(html: html, output: out, duration: 61).validate())
         XCTAssertThrowsError(try GraphicRenderRequest(html: html, output: out, fps: 60, duration: 60.5).validate())
         XCTAssertNoThrow(try GraphicRenderRequest(html: html, output: out, width: 1080, height: 1920, fps: 30, duration: 3).validate())
+    }
+
+    func testAPlainBackgroundOnlyAppliesToStillsAndIsValidated() {
+        let html = URL(fileURLWithPath: "/tmp/x.html"), out = URL(fileURLWithPath: "/tmp/x.png")
+        XCTAssertEqual(GraphicRenderRequest.parseBackground("dark"), "#2b2f36")
+        XCTAssertEqual(GraphicRenderRequest.parseBackground("LIGHT"), "#f1f3f5")
+        XCTAssertEqual(GraphicRenderRequest.parseBackground("#AABBCC"), "#aabbcc")
+        XCTAssertNil(GraphicRenderRequest.parseBackground("red")); XCTAssertNil(GraphicRenderRequest.parseBackground("#abc"))
+        var still = GraphicRenderRequest(html: html, output: out, width: 64, height: 64); still.frameAt = 0; still.background = "#2b2f36"
+        XCTAssertNoThrow(try still.validate())
+        var clip = GraphicRenderRequest(html: html, output: out, width: 64, height: 64, duration: 1); clip.background = "#2b2f36"
+        XCTAssertThrowsError(try clip.validate())
+    }
+
+    func testAStillOnAPlainBackgroundIsOpaqueAndKeepsTheGraphicOnTop() async throws {
+        let dir = try folder()
+        try """
+        <!doctype html><html><body style="margin:0"><div style="position:absolute;left:16px;top:16px;width:32px;height:32px;background:#ff0000"></div>
+        <script>window.seek = t => {};</script></body></html>
+        """.write(to: dir.appendingPathComponent("g.html"), atomically: true, encoding: .utf8)
+        var still = GraphicRenderRequest(html: dir.appendingPathComponent("g.html"), output: dir.appendingPathComponent("plain.png"), width: 64, height: 64, fps: 30, duration: 1)
+        still.frameAt = 0; still.background = "#2b2f36"
+        try await HTMLGraphicRenderer.renderStill(still)
+        let corner = try rawPixel(still.output, x: 2, y: 2), inside = try rawPixel(still.output, x: 32, y: 32)
+        XCTAssertEqual(corner.a, 255); XCTAssertEqual(corner.r, 0x2b, accuracy: 2); XCTAssertEqual(corner.g, 0x2f, accuracy: 2); XCTAssertEqual(corner.b, 0x36, accuracy: 2)
+        XCTAssertEqual(inside.a, 255); XCTAssertGreaterThan(inside.r, 200)
     }
 
     func testRendersATransparentClipAndFrames() async throws {

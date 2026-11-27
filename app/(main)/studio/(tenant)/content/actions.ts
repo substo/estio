@@ -16,7 +16,8 @@ import { discardUnfinishedUploads } from "@/lib/studio/uploads";
 import { requestVideoAssembly } from "@/lib/studio/video-assembly";
 import { readVideoAssemblyOptions } from "@/lib/studio/video-assembly-policy";
 import { readMotionChoiceFromForm } from "@/lib/studio/video-assembly/motion-style";
-import { setMotionChoice } from "@/lib/studio/voices/sources-store";
+import { setModelPrefs, setMotionChoice } from "@/lib/studio/voices/sources-store";
+import { readModelPrefsFromForm } from "@/lib/studio/video-assembly/model-prefs";
 import { readScriptTemplateSelection } from "@/lib/studio/script-template-policy";
 import { studioJobAction } from "@/lib/studio/jobs";
 
@@ -106,6 +107,7 @@ export async function makeVideoAction(locationId: string, recordId: string, _pre
   try {
     // The look is saved on the Location first, so the next video starts from the last choice and the Mac reads it at claim time.
     await setMotionChoice(locationId, readMotionChoiceFromForm(form)).catch(() => null);
+    await setModelPrefs(locationId, readModelPrefsFromForm(form)).catch(() => null);
     const result = await requestVideoAssembly(locationId, recordId, readVideoAssemblyOptions(form));
     if (!result.ok) return { error: result.message };
     revalidatePath(`/studio/content/${recordId}`);

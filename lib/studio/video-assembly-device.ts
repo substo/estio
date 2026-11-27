@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { StudioCommandError } from "./command-error";
 import { createStudioR2Store, readStudioR2Config, type StudioR2Store } from "./media-r2";
 import { studioDb } from "./studio-db";
-import { getMotionChoice } from "./voices/sources-store";
+import { getModelPrefs, getMotionChoice } from "./voices/sources-store";
 import { getImageSettings } from "./images/keys";
 import { EXPORT_PRESIGN_SECONDS, runExportOperation } from "./video-assembly-export";
 
@@ -18,6 +18,11 @@ export async function withAssemblyDownloads(jobs: unknown, store?: Pick<StudioR2
   const config = readStudioR2Config();
   const r2 = store ?? (config ? createStudioR2Store(config) : null);
   return Promise.all(jobs.map(async job => {
+    // A revision needs only the look and the model choice, read at claim time (never stored in the job).
+    if (job?.kind === "studio.video_edit") {
+      const [motionStyle, modelPrefs] = await Promise.all([getMotionChoice(job.location_id).catch(() => undefined), getModelPrefs(job.location_id).catch(() => undefined)]);
+      return { ...job, payload: { ...job.payload, ...(motionStyle ? { motionStyle } : {}), ...(modelPrefs ? { modelPrefs } : {}) } };
+    }
     if (!job || job.kind !== "studio.video_assemble") return job;
     if (!r2) throw new StudioCommandError("Media storage is not configured.", 503);
     const uuid = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v);
@@ -42,10 +47,11 @@ export async function withAssemblyDownloads(jobs: unknown, store?: Pick<StudioR2
     // Same order as `wanted`, minus any whose file is not there any more.
     const soundDownloads: SoundDownload[] = linked.flatMap(d => { const role = wanted.find(w => d.name.startsWith(`Narration sound-${w.role} `))?.role; return role ? [{ ...d, role }] : []; });
     const motionStyle = await getMotionChoice(job.location_id).catch(() => undefined);
+    const modelPrefs = await getModelPrefs(job.location_id).catch(() => undefined);
     // Storyboard frames drawn by Codex on the Mac, only when the Location chose it (Settings → AI → Images). Off by default.
     const imageChoice = (await getImageSettings(job.location_id).catch(() => null))?.choice;
     const storyboardFrames = imageChoice?.platform === "codex" && imageChoice.model === "codex-imagegen" ? { source: "codex" as const, max: 6 } : undefined;
-    return { ...job, payload: { ...job.payload, downloads, voiceDownloads, ...(soundDownloads.length ? { soundDownloads } : {}), ...(motionStyle ? { motionStyle } : {}), ...(storyboardFrames ? { storyboardFrames } : {}) } };
+    return { ...job, payload: { ...job.payload, downloads, voiceDownloads, ...(soundDownloads.length ? { soundDownloads } : {}), ...(motionStyle ? { motionStyle } : {}), ...(modelPrefs ? { modelPrefs } : {}), ...(storyboardFrames ? { storyboardFrames } : {}) } };
   }));
 }
 

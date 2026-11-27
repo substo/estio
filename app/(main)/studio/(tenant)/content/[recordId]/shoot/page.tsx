@@ -5,7 +5,7 @@ import { getMacVideoStatus, getVideoAssemblyStatus } from "@/lib/studio/video-as
 import { videoAssemblyStatusLine } from "@/lib/studio/video-assembly-policy";
 import { getVideoLoopState } from "@/lib/studio/video-loop";
 import { getSoundModelState, getVoiceAvailability, listVoices } from "@/lib/studio/voices/service";
-import { getGenerationSources, getMotionChoice, getSoundProviderChoices } from "@/lib/studio/voices/sources-store";
+import { getGenerationSources, getModelPrefs, getMotionChoice, getSoundProviderChoices } from "@/lib/studio/voices/sources-store";
 import { soundKeyAvailability } from "@/lib/studio/voices/sound-keys";
 import { pickHostedSound, soundSourceLabel } from "@/lib/studio/voices/sound-providers";
 import { resolveSource, type GenerationSources } from "@/lib/studio/voices/sources";
@@ -22,9 +22,9 @@ export default async function StudioShootPage({ params }: { params: Promise<{ re
   if (!result) notFound();
   const { record, uploads } = result;
   const script = typeof record.payload.script === "string" ? record.payload.script : "";
-  const [assembly, voices, availability, loop, mac, sources, soundChoices, soundKeys, soundModels, motion] = await Promise.all([
+  const [assembly, voices, availability, loop, mac, sources, soundChoices, soundKeys, soundModels, motion, modelPrefs] = await Promise.all([
     getVideoAssemblyStatus(locationId, recordId), listVoices(locationId).catch(() => []), getVoiceAvailability(locationId), getVideoLoopState(locationId, recordId), getMacVideoStatus(locationId),
-    getGenerationSources(locationId).catch((): GenerationSources => ({})), getSoundProviderChoices(locationId), soundKeyAvailability(locationId), getSoundModelState(locationId), getMotionChoice(locationId)]);
+    getGenerationSources(locationId).catch((): GenerationSources => ({})), getSoundProviderChoices(locationId), soundKeyAvailability(locationId), getSoundModelState(locationId), getMotionChoice(locationId), getModelPrefs(locationId)]);
   const anyHostedSound = soundKeys.fal || soundKeys.elevenlabs;
   const soundLine = (kind: "music" | "effects") => { const r = resolveSource(kind, sources[kind], { localReady: true, hostedKey: anyHostedSound }); return soundSourceLabel(kind, r.source, pickHostedSound(soundChoices[kind], soundKeys), soundModels[kind]); };
   const steps = jobStepper({ narration: assembly.narration, assembly: assembly.view });
@@ -33,6 +33,6 @@ export default async function StudioShootPage({ params }: { params: Promise<{ re
   return (
     <ShootBoard locationId={locationId} recordId={recordId} title={record.title} beats={parseScript(script)} files={files} archived={record.archived} busy={busy}
       statusLine={videoAssemblyStatusLine(assembly.view, assembly.macOnline, assembly.narration)} hasVideo={Boolean(loop?.versions.length)}
-      makeProps={{ voices, availability, soundSources: { music: soundLine("music"), effects: soundLine("effects") }, motion }} />
+      makeProps={{ voices, availability, soundSources: { music: soundLine("music"), effects: soundLine("effects") }, motion, modelPrefs }} />
   );
 }

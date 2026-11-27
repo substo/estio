@@ -1,6 +1,6 @@
 import type { PreparedSourceQuote } from "./source-quotes";
 import type { Beat } from "./script";
-import { DEFAULT_MOTION_CHOICE, motionBriefStep, type MotionChoice } from "./motion-style";
+import { DEFAULT_MOTION_CHOICE, motionBriefStep, plainPreviewStep, type MotionChoice } from "./motion-style";
 
 export interface BriefInput {
   /** The .substo file in the current folder; every command names it (a folder may hold several versions). */ projectFile: string;
@@ -15,6 +15,8 @@ export interface BriefInput {
   avatarFile?: string;
   /** The look of titles and callouts, chosen by the creator in the Make video dialog (Clean when absent). */
   motion?: MotionChoice;
+  /** The motion graphics are added in a separate pass by another model: this run only cuts, captions and sounds. */
+  deferMotion?: boolean;
   /** AI-drawn storyboard frames by beat number (file names in this folder), when the Mac drew them. */
   frameFiles?: string[];
   /** Footage the creator filmed for one beat on the Shoot page, by beat number (file names in this folder). */
@@ -49,7 +51,7 @@ Do this, in order:
 1. \`substo media\` and \`substo timeline --summary\` to learn what exists.
 2. Build the picture: for each beat put the best-matching footage on the camera/screen/B-roll track for that beat's length. Use \`substo search\` on transcripts to match footage to lines. Trim dead air; do not invent footage. A beat that names "filmed footage for this beat" has its own take, shot by the creator for exactly that line: place that file for that beat (picture and its own sound, trimmed only of dead air at the start and end, never a placeholder, never another beat's footage in its place, and used even if the picture looks like a test pattern) and give the beat the length of that clip; every other beat keeps the matching rules here. Where a beat has a [visual] note and no footage fits, use a title or graphic instead.
 3. Captions: try \`substo captions --apply\` (word-by-word) once the voice track is in place. Transcripts need macOS 26; if it reports transcripts are unavailable, instead add one text clip (preset caption) per short phrase of each beat on the Text track, timed inside that beat's voiceover span (a beat lasts from its start to the next beat's start). Keep the caption preset's look as it is: bold white text with a dark outline and no background box. Never restyle captions to black text or put a box behind them.
-4. ${motionBriefStep(i.motion ?? DEFAULT_MOTION_CHOICE, i.orientation)}
+4. ${motionBriefStep(i.motion ?? DEFAULT_MOTION_CHOICE, i.orientation, true, i.deferMotion === true)}
 5. Sound design: ${soundStep(i)}
 6. Before exporting, run \`substo timeline --summary\` and confirm: every beat without filmed footage has its voice file on the Voice track at its listed time${i.music && i.soundFiles?.music ? ", and the music bed is on the Music track" : ""}. Fix anything missing now. Then \`substo loudness\` then normalise speech, then \`substo check --changed\` and fix what it reports.
 7. \`substo export --preset ${i.orientation === "portrait" ? "short" : "youtube1080"}\` and print the exported path as the last line.
@@ -59,7 +61,7 @@ ALWAYS finish with a complete, exported DRAFT the creator can preview; never sto
 Rules: run exactly one plain \`substo ...\` command per Bash call (never put a JSON batch on the command line or in a heredoc: write it with the Write tool using the RELATIVE path ./batch-<n>.json (never an absolute path; other paths are refused), then run substo apply batch-<n>.json --author claude; only batch-*.json files and graphic-*.html files in this folder may be written); no pipes, cd, variables, ; or &&, which are refused. Never delete or overwrite the creator's source files; never use footage not in this folder; if something cannot be done, say so in your final message and use a labelled placeholder rather than presenting it as real footage. Finish with a short summary of what you placed and anything needing the creator's attention.`;
 }
 
-export interface EditBriefInput { editorDocs: string; projectFile: string; instruction: string; history: Array<{ instruction: string; reply: string }>; orientation: "landscape" | "portrait" }
+export interface EditBriefInput { motion?: MotionChoice; editorDocs: string; projectFile: string; instruction: string; history: Array<{ instruction: string; reply: string }>; orientation: "landscape" | "portrait" }
 /** An existing project, one change request from the owner. Same tool limits as the first edit. */
 export function buildEditBrief(i: EditBriefInput): string {
   const past = i.history.length ? `\nEarlier requests on this video (oldest first), for context:\n${i.history.map(h => `- "${h.instruction}"${h.reply ? ` -> ${h.reply}` : ""}`).join("\n")}\n` : "";
@@ -73,7 +75,7 @@ ${i.instruction}
 Do this:
 1. \`substo status\` and \`substo timeline --summary\` to see the current state. Do not rebuild the video: change only what was asked.
 2. Make the change with labelled batches (\`substo apply\`). You can replace, move, delete, extend or shrink clips, retime or restyle titles and captions, change sound, and add placeholders: where something is missing (footage you do not have, a graphic you cannot make) put a clearly labelled placeholder title ("PLACEHOLDER: what goes here") in its place rather than inventing it. Generated sound or music only if the editor's asset provider is available; if not, say so.
-3. Look at the result with \`substo frame <time> -o /tmp/f.png\` around what changed; run \`substo check --changed\` and fix what it reports.
+3. For any custom graphic you changed or added: ${plainPreviewStep(i.motion ?? DEFAULT_MOTION_CHOICE)} Look at the composed result with \`substo frame <time> -o /tmp/f.png\` around what changed; run \`substo check --changed\` and fix what it reports.
 4. \`substo export --preset ${i.orientation === "portrait" ? "short" : "youtube1080"}\` and print the exported path as the LAST line.
 
 Rules: run exactly one plain \`substo ...\` command per Bash call (never put a JSON batch on the command line or in a heredoc: write it with the Write tool using the RELATIVE path ./batch-<n>.json (never an absolute path; other paths are refused), then run substo apply batch-<n>.json --author claude; only batch-*.json files and graphic-*.html files in this folder may be written); no pipes, cd, variables, ; or &&, which are refused. Never delete or overwrite the creator's source files; never use footage not in this folder. If the request cannot be done, say so plainly in your final message instead of faking it. Before the path line, write two or three plain sentences saying what you changed and anything the owner should check.`;

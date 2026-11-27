@@ -144,3 +144,28 @@ test("filmed shots are matched to their beats, re-shot beats use only the newest
   assert.match(result.brief, /1\. "One\."  \[visual: wide, at my desk\]  \[filmed footage for this beat: Shot 01 take 2\.mp4\]/);
   assert.match(result.brief, /2\. "Two\." {2}\[filmed footage for this beat: Shot 02 take 1\.mp4\]/);
 });
+
+test("different editing and motion models run two passes; the same model runs one, and the result says what ran", async () => {
+  const run = async (opts: { model?: string; motionModel?: string; motion?: { style: "clean" | "minimal" } }) => {
+    const clips = await mkdtemp(join(tmpdir(), "clips-")), project = await mkdtemp(join(tmpdir(), "proj-"));
+    await writeFile(join(clips, "a.mov"), "x");
+    const agents: { args: string[]; input?: string }[] = [];
+    const result = await assembleVideo({ script: "One.", clipsDir: clips, projectDir: project, editorDocs: "/docs", ...opts,
+      run: async r => { if (r.command === "claude") agents.push(r); return { stdout: "done", stderr: "" }; } });
+    return { agents, result };
+  };
+  const two = await run({ model: "claude-sonnet-5-5", motionModel: "claude-opus-5-5", motion: { style: "clean" } });
+  assert.equal(two.agents.length, 2);
+  assert.deepEqual(two.agents.map(a => a.args[a.args.indexOf("--model") + 1]), ["claude-sonnet-5-5", "claude-opus-5-5"]);
+  assert.match(two.agents[0].input!, /separate pass/);
+  assert.match(two.agents[1].input!, /Plain-background check FIRST/);
+  assert.deepEqual(two.result.ran, { edit: "claude-sonnet-5-5", motion: "claude-opus-5-5" });
+  const one = await run({ model: "claude-sonnet-5-5", motionModel: "claude-sonnet-5-5", motion: { style: "clean" } });
+  assert.equal(one.agents.length, 1);
+  assert.deepEqual(one.result.ran, { edit: "claude-sonnet-5-5", motion: "claude-sonnet-5-5" });
+  const defaults = await run({});
+  assert.equal(defaults.agents.length, 1);
+  assert.ok(!defaults.agents[0].args.includes("--model"));
+  const minimal = await run({ model: "a", motionModel: "b", motion: { style: "minimal" } });
+  assert.equal(minimal.agents.length, 1);
+});

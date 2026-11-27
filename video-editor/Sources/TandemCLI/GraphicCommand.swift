@@ -15,6 +15,17 @@ struct GraphicCommand {
         return resolved
     }
 
+    /// `dark` and `light` name the two neutral backdrops; anything else must be `#rrggbb`. (The app checks it again before drawing.)
+    static func parseBackground(_ text: String) -> String? {
+        switch text.lowercased() {
+        case "dark": return "#2b2f36"
+        case "light": return "#f1f3f5"
+        default:
+            let hex = text.lowercased()
+            return hex.count == 7 && hex.hasPrefix("#") && hex.dropFirst().allSatisfy({ $0.isHexDigit }) ? hex : nil
+        }
+    }
+
     static func parseSize(_ text: String?) throws -> (Int, Int) {
         guard let text else { return (1920, 1080) }
         let parts = text.lowercased().split(separator: "x").compactMap { Int($0) }
@@ -53,13 +64,19 @@ struct GraphicCommand {
             frameAt = String(seconds)
             defaultName = "\(stem)-\(String(format: "%.2f", seconds)).png"
         }
+        var background = ""
+        if let text = args.options["background"] {
+            guard mode == "frame" else { throw UsageError(message: "--background only applies to `substo graphic frame`: a rendered clip is always transparent so it can lay over the footage.") }
+            guard let hex = Self.parseBackground(text) else { throw UsageError(message: "--background is dark, light or a #rrggbb colour, like --background dark.") }
+            background = hex
+        }
         let output = try Self.inside(args.options["output"] ?? defaultName, directory: directory)
         guard output.pathExtension.lowercased() == (mode == "render" ? "mov" : "png") else { throw UsageError(message: mode == "render" ? "The output of render is a .mov." : "The output of frame is a .png.") }
         let app = try Self.appBinary()
 
         let process = Process()
         process.executableURL = app
-        process.arguments = ["--render-graphic", html.path, output.path, String(width), String(height), String(fps), String(duration == 0 ? 1 : duration)] + (frameAt.isEmpty ? [] : [frameAt])
+        process.arguments = ["--render-graphic", html.path, output.path, String(width), String(height), String(fps), String(duration == 0 ? 1 : duration)] + (frameAt.isEmpty ? [] : [frameAt] + (background.isEmpty ? [] : [background]))
         process.currentDirectoryURL = directory
         let out = Pipe(), err = Pipe()
         process.standardOutput = out; process.standardError = err

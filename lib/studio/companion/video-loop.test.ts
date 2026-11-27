@@ -110,3 +110,21 @@ test("status lines: narration progress first, its failure only when newer, loop 
   assert.equal(openEditorLine(null), null); assert.equal(openEditorLine({ jobId: "j", status: "succeeded", message: null }), "Opened on your Mac.");
   for (const code of ["VE001", "VE002", "VE003", "VE004", "VE011", "VE012", "VE013", "VE014", "42501"]) assert.ok(videoLoopMessages[videoLoopCodeReason[code]], code);
 });
+
+test("edit: a graphics revision goes back to the model that designed it when asked; the result says which model ran and the designer is kept", async () => {
+  const { store, dir, api } = await fixture();
+  await store.set(rec, { dir, file: "Video.substo", designer: "claude-opus-5-5" });
+  const models: Array<string | undefined> = [];
+  const run = async (r: { args: string[]; command: string }) => { if (r.command === "claude") { models.push(r.args[r.args.indexOf("--model") + 1]); await mkdir(join(dir, "exports"), { recursive: true }); await writeFile(join(dir, "exports", `out-${models.length}.mp4`), "v".repeat(2000)); } return { stdout: "Changed the title.\n/x/out.mp4\n", stderr: "" }; };
+  const prefs = { jobs: { edit: { provider: "claude", model: "claude-sonnet-5-5" }, motion: { provider: "claude", model: "claude-haiku-5-5" } }, keepDesigner: true };
+  const handler = createVideoEditHandler({ ...ready, projects: store, api, run: run as never });
+  const graphics = await handler(job("studio.video_edit", { recordId: rec, instruction: "Make the callout bigger", modelPrefs: prefs, motionStyle: { style: "clean", preview: "dark" } }), ctx()) as { assembly: { summary: string } };
+  assert.equal(models[0], "claude-opus-5-5");
+  assert.match(graphics.assembly.summary, /Motion graphics: claude-opus-5-5\. Kept the model that designed these graphics/);
+  assert.equal((await store.get(rec))?.designer, "claude-opus-5-5");
+  await new Promise(r => setTimeout(r, 5));
+  const cut = await handler(job("studio.video_edit", { recordId: rec, instruction: "Trim the pause", modelPrefs: prefs }), ctx()) as { assembly: { summary: string } };
+  assert.equal(models[1], "claude-sonnet-5-5");
+  assert.match(cut.assembly.summary, /Editing: claude-sonnet-5-5/);
+  assert.equal((await store.get(rec))?.designer, "claude-opus-5-5");
+});

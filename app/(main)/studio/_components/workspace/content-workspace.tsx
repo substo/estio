@@ -37,7 +37,7 @@ type FormProps = Omit<React.ComponentProps<typeof ContentRecordForm>, "visible">
 export function ContentWorkspace(props: {
   locationId: string; recordId: string; title: string; archived: boolean; hasScript: boolean; initialMode: string | null;
   form: FormProps; uploads: AssetUpload[]; pending: PendingUpload[];
-  loop: VideoLoopState | null; assembly: VideoAssemblyView | null; narration: NarrationView | null; mac: MacStatusInput; /** Every voice in the Location; the picker groups them by availability. */ voices: VoiceRow[]; availability?: Availability; /** Where music and sound effects will be made, from the Location's generation sources (labels only). */ soundSources?: { music: string; effects: string }; /** The Location's saved look for titles and callouts. */ motion?: import("@/lib/studio/video-assembly/motion-style").MotionChoice;
+  loop: VideoLoopState | null; assembly: VideoAssemblyView | null; narration: NarrationView | null; mac: MacStatusInput; /** Every voice in the Location; the picker groups them by availability. */ voices: VoiceRow[]; availability?: Availability; /** Where music and sound effects will be made, from the Location's generation sources (labels only). */ soundSources?: { music: string; effects: string }; /** The Location's saved look for titles and callouts. */ motion?: import("@/lib/studio/video-assembly/motion-style").MotionChoice; /** The Location's model per kind of video work. */ modelPrefs?: import("@/lib/studio/video-assembly/model-prefs").ModelPrefs;
   /** The script's spoken beats in order, for the transcript. */ beats?: string[];
   uploadSlot: React.ReactNode; nextSteps: React.ReactNode; detailsExtra: React.ReactNode; writingAgent?: WritingAgentData | null; storyboard?: StoryboardView | null; clips?: { suggestions: ClipSuggestion[]; videos: ClipVideo[] };
 }) {
@@ -128,7 +128,7 @@ export function ContentWorkspace(props: {
             {props.hasScript && !props.archived ? <Link href={`/studio/content/${recordId}/shoot`} className="inline-flex min-h-11 items-center gap-2 rounded-md border px-3 text-sm font-medium hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"><Video aria-hidden className="size-4" />Shoot</Link> : null}
             {loop?.projectKept ? <form action={open}><button type="submit" disabled={opening || editorPending} className="inline-flex min-h-11 items-center rounded-md border px-3 text-sm font-medium hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-60">{editorPending ? "Opening…" : "Open in editor"}</button></form> : null}
             <BinDeleteButton locationId={locationId} kind="content" id={recordId} name={props.title} afterDelete="/studio/content" />
-            <MakeVideoDialog locationId={locationId} recordId={recordId} voices={props.voices} availability={props.availability} soundSources={props.soundSources} motion={props.motion} disabledReason={makeBlock} busy={busy} />
+            <MakeVideoDialog locationId={locationId} recordId={recordId} voices={props.voices} availability={props.availability} soundSources={props.soundSources} motion={props.motion} modelPrefs={props.modelPrefs} disabledReason={makeBlock} busy={busy} />
           </div>
         </div>
         <div role="tablist" aria-label="Workspace mode" className="inline-flex rounded-lg border p-1">
@@ -161,7 +161,7 @@ export function ContentWorkspace(props: {
           <div className="order-1 min-w-0 space-y-4 lg:order-2">
             <PlayerStage versions={versions} versionId={versionId} onVersion={setVersionId} steps={steps} onStop={busy ? onStop : undefined} stopping={stopping} onRetry={retryJobId ? onRetry : undefined} retrying={retrying} retryError={retryState.error} videoRef={videoRef}
               empty={<><p className="font-medium">No video yet</p><p className="text-muted-foreground">Add your footage on the left, then press Make video. Your Mac does the editing.</p>
-                <MakeVideoDialog locationId={locationId} recordId={recordId} voices={props.voices} availability={props.availability} soundSources={props.soundSources} motion={props.motion} disabledReason={makeBlock} busy={busy} trigger="inline" /></>} />
+                <MakeVideoDialog locationId={locationId} recordId={recordId} voices={props.voices} availability={props.availability} soundSources={props.soundSources} motion={props.motion} modelPrefs={props.modelPrefs} disabledReason={makeBlock} busy={busy} trigger="inline" /></>} />
             {hasVideo ? <TimelineView snapshot={current?.timeline ?? null} selected={selected} onSelect={setSelected} onAction={onClipAction} canEdit={Boolean(loop?.projectKept)} busy={busy || asking} /> : null}
             {transcript ? <TranscriptPanel lines={transcript} videoRef={videoRef} onEditLine={editLine} onComment={commentOn} /> : null}
           </div>

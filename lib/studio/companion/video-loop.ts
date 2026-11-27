@@ -2,6 +2,8 @@ import { snapshotTimeline, timelineField } from "./timeline-snapshot";
 import { z } from "zod";
 import { StudioJobError, type StudioJobHandler } from "../worker/handlers";
 import { agentEnv, agentSummary, runEditingAgent } from "../video-assembly/agent";
+import { readModelPrefs, revisionModel, revisionRanLine } from "../video-assembly/model-prefs";
+import { readMotionChoice } from "../video-assembly/motion-style";
 import { buildEditBrief } from "../video-assembly/brief";
 import { runNativeProcess, type ProcessRunner } from "./process";
 import { latestExport, saveExport, type ExportApi, type ExportLease } from "./video-assemble";
@@ -10,6 +12,8 @@ import { projectFolderName, type ProjectStore } from "./video-projects";
 const editPayload = z.object({
   recordId: z.string().uuid(), instruction: z.string().trim().min(1).max(1000), title: z.string().max(200).default("video"),
   history: z.array(z.object({ instruction: z.string().max(300), reply: z.string().max(300).default("") }).passthrough()).max(6).default([]),
+  /** Added at claim time (absent on an older server: the Mac's default). */
+  modelPrefs: z.unknown().optional(), motionStyle: z.unknown().optional(),
 }).passthrough();
 const openPayload = z.object({ recordId: z.string().uuid() }).passthrough();
 const missing = () => new StudioJobError("project_missing", "This Mac no longer has the project for this piece. Make the video again to start a new one.", false);
@@ -36,20 +40,23 @@ export function createVideoEditHandler(deps: VideoLoopDeps & { api: ExportApi })
     const lease: ExportLease = { jobId: job.id, workerId: context.workerId, leaseToken: job.lease_token };
     const startedAt = Date.now();
     let output: string;
+    const chosen = revisionModel(readModelPrefs(p.modelPrefs), p.instruction, project.designer);
+    const model = chosen.model ?? deps.model;
     try {
-      output = await runEditingAgent({ cwd: project.dir, editorDocs: deps.editorDocs, model: deps.model, run: deps.run, signal: context.signal,
-        brief: buildEditBrief({ editorDocs: deps.editorDocs, projectFile: project.file, instruction: p.instruction, history: p.history, orientation: /\bportrait|vertical|9:16\b/i.test(p.instruction) ? "portrait" : "landscape" }) });
+      output = await runEditingAgent({ cwd: project.dir, editorDocs: deps.editorDocs, model, run: deps.run, signal: context.signal,
+        brief: buildEditBrief({ motion: readMotionChoice(p.motionStyle), editorDocs: deps.editorDocs, projectFile: project.file, instruction: p.instruction, history: p.history, orientation: /\bportrait|vertical|9:16\b/i.test(p.instruction) ? "portrait" : "landscape" }) });
     } catch (error) {
       if (context.signal.aborted) throw error;
       throw new StudioJobError("video_edit_failed", "The Mac could not finish this change. It was not retried.", false);
     }
     const exported = await latestExport(project.dir, startedAt);
     // No new export means the agent could not (or chose not to) change anything: its own words are the answer, not a failure.
-    if (!exported) return { assembly: { summary: agentSummary(output) || "Nothing was changed.", projectKept: true, projectName: projectFolderName(p.title, p.recordId) } };
+    const ran = revisionRanLine(chosen.kind, model, chosen.reason);
+    if (!exported) return { assembly: { summary: `${agentSummary(output) || "Nothing was changed."} ${ran}`.slice(0, 1900), projectKept: true, projectName: projectFolderName(p.title, p.recordId) } };
     const uploadId = await saveExport(deps.api, lease, exported, context.signal);
-    await deps.projects.set(p.recordId, { dir: project.dir, file: project.file }).catch(() => {});
+    await deps.projects.set(p.recordId, { dir: project.dir, file: project.file, ...(chosen.kind === "motion" && model ? { designer: model } : project.designer ? { designer: project.designer } : {}) }).catch(() => {});
     const timeline = await snapshotTimeline(project.file, project.dir, deps.run, context.signal);
-    return { assembly: { exportName: exported.name.slice(0, 200), bytes: exported.size, uploadId, exportSaved: true, ...timelineField(timeline), projectKept: true, projectName: projectFolderName(p.title, p.recordId), summary: agentSummary(output) } };
+    return { assembly: { exportName: exported.name.slice(0, 200), bytes: exported.size, uploadId, exportSaved: true, ...timelineField(timeline), projectKept: true, projectName: projectFolderName(p.title, p.recordId), summary: `${agentSummary(output)} ${ran}`.slice(0, 1900) } };
   };
 }
 

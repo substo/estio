@@ -21,7 +21,8 @@ export async function nextProjectFile(dir: string): Promise<string> {
   for (let n = 2; n < 1000; n++) if (!taken.has(`Video v${n}.substo`)) return `Video v${n}.substo`;
   throw new Error("too_many_project_versions");
 }
-export interface KeptProject { dir: string; file: string; updatedAt: string }
+/** `designer` is the model that designed this project's graphics (this Mac only), so a revision can go back to it when the creator asked for that. */
+export interface KeptProject { dir: string; file: string; updatedAt: string; designer?: string }
 export interface ProjectStore { get(recordId: string): Promise<KeptProject | null>; set(recordId: string, project: Omit<KeptProject, "updatedAt">): Promise<void> }
 
 /** recordId -> project on this Mac. The paths never leave the Mac: the server only learns a boolean ("kept") and the folder's name. */
@@ -33,7 +34,7 @@ export function createProjectStore(file = projectStateFile(), root = projectsRoo
       const entry = (await load())[recordId];
       // A path from the state file is only trusted while it is still inside the projects folder and exists.
       if (!entry || typeof entry.dir !== "string" || typeof entry.file !== "string" || !entry.dir.startsWith(root + "/") || entry.file.includes("/") || !existsSync(join(entry.dir, entry.file))) return null;
-      return entry;
+      return { ...entry, ...(typeof entry.designer === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,119}$/.test(entry.designer) ? {} : { designer: undefined }) };
     },
     async set(recordId, project) {
       if (!uuid.test(recordId) || !project.dir.startsWith(root + "/") || project.file.includes("/")) throw new Error("invalid_project");

@@ -6,6 +6,7 @@ import { getStudioAccess } from "../access";
 import { requireVoiceManager } from "./keys";
 import { readSoundProviderChoices, type HostedSoundProvider, type SoundKind, type SoundProviderChoices } from "./sound-providers";
 import { readMotionChoice, type MotionChoice } from "../video-assembly/motion-style";
+import { readModelPrefs, type ModelPrefs } from "../video-assembly/model-prefs";
 import { readGenerationSources, GENERATION_KINDS, type GenerationKind, type GenerationSources, type SourceChoice } from "./sources";
 
 const ref = (locationId: string) => ({ scopeType: "LOCATION" as const, scopeId: locationId, domain: SETTINGS_DOMAINS.LOCATION_AI });
@@ -61,5 +62,20 @@ export async function setMotionChoice(locationId: string, choice: MotionChoice):
   const current = await settingsService.getDocument<Record<string, unknown>>(ref(access.locationId));
   const actor = (await db.user.findFirst({ where: { clerkId: access.userId, authRealm: access.app }, select: { id: true } }))?.id ?? null;
   await settingsService.upsertDocument({ ...ref(access.locationId), payload: { whatsappTranscriptRetentionDays: 90, ...(current?.payload ?? {}), [MOTION_FIELD]: clean }, actorUserId: actor, expectedVersion: current?.version ?? 0, schemaVersion: 1 });
+  return clean;
+}
+
+const MODEL_FIELD = "studioVideoModels";
+/** Which model does which kind of video work, per Location (the Mac default for everything until chosen). Same settings document as the look. */
+export async function getModelPrefs(locationId: string): Promise<ModelPrefs> {
+  const doc = await settingsService.getDocument<Record<string, unknown>>(ref(locationId)).catch(() => null);
+  return readModelPrefs(doc?.payload?.[MODEL_FIELD]);
+}
+export async function setModelPrefs(locationId: string, prefs: ModelPrefs): Promise<ModelPrefs> {
+  const clean = readModelPrefs(prefs);
+  const access = await requireVoiceManager(locationId);
+  const current = await settingsService.getDocument<Record<string, unknown>>(ref(access.locationId));
+  const actor = (await db.user.findFirst({ where: { clerkId: access.userId, authRealm: access.app }, select: { id: true } }))?.id ?? null;
+  await settingsService.upsertDocument({ ...ref(access.locationId), payload: { whatsappTranscriptRetentionDays: 90, ...(current?.payload ?? {}), [MODEL_FIELD]: clean }, actorUserId: actor, expectedVersion: current?.version ?? 0, schemaVersion: 1 });
   return clean;
 }

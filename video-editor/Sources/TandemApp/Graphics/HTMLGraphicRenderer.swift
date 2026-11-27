@@ -19,6 +19,25 @@ struct GraphicRenderRequest {
     var duration = 3.0
     /// A single frame at this time, as a PNG, instead of a clip.
     var frameAt: Double?
+    /// A plain backdrop (`#rrggbb`) behind a single frame, so layout and readability can be judged without busy footage. A preview aid for stills only:
+    /// clips are always transparent, so an export always composites the graphic over the footage.
+    var background: String?
+
+    /// `dark` and `light` name the two neutral backdrops; anything else must be `#rrggbb`. nil when it is neither.
+    static func parseBackground(_ text: String) -> String? {
+        switch text.lowercased() {
+        case "dark": return "#2b2f36"
+        case "light": return "#f1f3f5"
+        default:
+            let hex = text.lowercased()
+            guard hex.count == 7, hex.hasPrefix("#"), hex.dropFirst().allSatisfy({ $0.isHexDigit }) else { return nil }
+            return hex
+        }
+    }
+    var backgroundColour: (r: CGFloat, g: CGFloat, b: CGFloat)? {
+        guard let background, let value = Int(background.dropFirst(), radix: 16) else { return nil }
+        return (CGFloat((value >> 16) & 255) / 255, CGFloat((value >> 8) & 255) / 255, CGFloat(value & 255) / 255)
+    }
 
     static let maxWidth = 3840, maxHeight = 2160, maxSeconds = 60.0, maxFrames = 3600
 
@@ -26,6 +45,7 @@ struct GraphicRenderRequest {
     func validate() throws {
         guard width >= 16, height >= 16, width <= Self.maxWidth, height <= Self.maxHeight else { throw GraphicError("The size must be between 16x16 and \(Self.maxWidth)x\(Self.maxHeight).") }
         guard (12...60).contains(fps) else { throw GraphicError("The frame rate must be between 12 and 60.") }
+        if let background { guard frameAt != nil, Self.parseBackground(background) == background else { throw GraphicError("A background is a #rrggbb colour (or dark or light) and only applies to a single frame; clips stay transparent.") } }
         if frameAt == nil {
             guard duration > 0, duration <= Self.maxSeconds else { throw GraphicError("The duration must be between 0 and \(Int(Self.maxSeconds)) seconds.") }
             guard Int((duration * Double(fps)).rounded(.up)) <= Self.maxFrames else { throw GraphicError("That is more than \(Self.maxFrames) frames. Use a shorter duration or a lower frame rate.") }
@@ -160,14 +180,16 @@ final class HTMLGraphicRenderer: NSObject, WKNavigationDelegate {
         let image = try await renderer.frame(at: request.frameAt ?? 0, width: request.width, height: request.height)
         // Exactly width x height pixels, like the clip (a snapshot can come back at the screen's 2x).
         guard let context = CGContext(data: nil, width: request.width, height: request.height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
-              (context.clear(CGRect(x: 0, y: 0, width: request.width, height: request.height)), context.draw(image, in: CGRect(x: 0, y: 0, width: request.width, height: request.height))).0 == (), let exact = context.makeImage() else { throw GraphicError("The still could not be drawn.") }
+              (context.clear(CGRect(x: 0, y: 0, width: request.width, height: request.height)),
+               { if let c = request.backgroundColour { context.setFillColor(CGColor(colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!, components: [c.r, c.g, c.b, 1])!); context.fill(CGRect(x: 0, y: 0, width: request.width, height: request.height)) } }(),
+               context.draw(image, in: CGRect(x: 0, y: 0, width: request.width, height: request.height))).0 == (), let exact = context.makeImage() else { throw GraphicError("The still could not be drawn.") }
         let rep = NSBitmapImageRep(cgImage: exact)
         guard let png = rep.representation(using: .png, properties: [:]) else { throw GraphicError("The still could not be encoded.") }
         try png.write(to: request.output)
     }
 }
 
-/// `substo-app --render-graphic <html> <output> <width> <height> <fps> <duration> [frameAt]`: headless, no window, exits when done.
+/// `substo-app --render-graphic <html> <output> <width> <height> <fps> <duration> [frameAt] [background]`: headless, no window, exits when done.
 enum GraphicRenderEntry {
     static let flag = "--render-graphic"
 
@@ -176,6 +198,7 @@ enum GraphicRenderEntry {
         guard arguments.count >= 6, let width = Int(arguments[2]), let height = Int(arguments[3]), let fps = Int(arguments[4]), let duration = Double(arguments[5]) else { fail("usage: --render-graphic <html> <output> <width> <height> <fps> <duration> [frameAt]") }
         var request = GraphicRenderRequest(html: URL(fileURLWithPath: arguments[0]), output: URL(fileURLWithPath: arguments[1]), width: width, height: height, fps: fps, duration: duration)
         if arguments.count >= 7 { request.frameAt = Double(arguments[6]) }
+        if arguments.count >= 8 { request.background = arguments[7] }
         NSApplication.shared.setActivationPolicy(.prohibited)
         Task { @MainActor in
             do {

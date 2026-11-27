@@ -15,6 +15,7 @@ import { runNativeProcess, type ProcessRunner } from "./process";
 import { freeBytes, nextProjectFile, projectFolderName, type ProjectStore } from "./video-projects";
 import { parseScript } from "../video-assembly/script";
 import { readMotionChoice } from "../video-assembly/motion-style";
+import { agentModel, ranModelsLine, readModelPrefs } from "../video-assembly/model-prefs";
 import { probeOutputOrientation } from "../video-assembly/orientation";
 import { renderShot } from "../images/prompts";
 import { shotForBeat } from "../images/storyboard";
@@ -38,6 +39,8 @@ const payload = z.object({
   soundDownloads: z.array(z.object({ role: z.enum(["music", "sfx"]), name: z.string().max(255), url: z.string().url().max(4000), byteSize: z.number().int().positive() })).max(2).default([]),
   /** The creator's chosen look for titles and callouts, added at claim time (absent on an older server: Clean). Read defensively: it is text from the server. */
   motionStyle: z.unknown().optional(),
+  /** The creator's model per kind of work, added at claim time (absent on an older server: the Mac's default for everything). Read defensively. */
+  modelPrefs: z.unknown().optional(),
   /** Added at claim time when the Location chose Codex on the Mac for storyboard frames: draw one per beat when there is no footage. */
   storyboardFrames: z.object({ source: z.literal("codex"), max: z.number().int().min(1).max(8) }).optional(),
   /** Added at claim time: the pictures the creator already drew and approved in the Storyboard step, for beats whose script has not changed since. They are used as they are; nothing is drawn for those beats. */
@@ -265,9 +268,11 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
         ? await deps.reference(p.voiceReference, context.signal).catch(() => { throw new StudioJobError("voice_reference_unavailable", "The Mac could not fetch this cloned voice. Make the video again.", false); }) : undefined;
       observeCompanionStageDuration("prepare", Date.now() - preparationStarted);
       let result: AssembleResult;
+      const prefs = readModelPrefs(p.modelPrefs);
+      const editModel = agentModel(prefs.jobs.edit) ?? deps.model, motionModel = agentModel(prefs.jobs.motion) ?? deps.model;
       try {
         result = await measureCompanionStage("assemble", () => deps.assemble({ transcribeFootage: deps.transcribeFootage, script: p.script, clipsDir, footageNames, projectDir, projectFile, editorDocs: deps.editorDocs, orientation, sounds, motion: readMotionChoice(p.motionStyle), ...(avatar ? { avatar } : {}), ...(frames.some(Boolean) ? { frames } : {}),
-          voiceover: p.options.voiceover, music: p.options.music, model: deps.model, signal: context.signal,
+          voiceover: p.options.voiceover, music: p.options.music, model: editModel, motionModel, signal: context.signal,
           voice: !p.options.voiceover ? undefined : p.voice?.engine === "local" ? { engine: "local", speaker: p.voice.speaker, model: p.voice.model, ...(reference ? { reference } : {}) } : p.voice?.engine === "hosted" ? { engine: "prerendered", files: narration } : undefined }));
       } catch (error) {
         if (context.signal.aborted) throw error;
@@ -281,12 +286,12 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
         throw new StudioJobError("video_not_exported", "The editor finished without exporting a video. Make the video again.", false, undefined, "agent_log_saved");
       }
       // The edit is kept from here on, whether or not the upload below succeeds.
-      await deps.projects.set(p.recordId, { dir: projectDir, file: result.projectFile }).catch(() => {});
+      await deps.projects.set(p.recordId, { dir: projectDir, file: result.projectFile, ...(result.ran?.motion ? { designer: result.ran.motion } : {}) }).catch(() => {});
       const uploadId = await measureCompanionStage("upload", () => saveExport(deps.api, lease, exported, context.signal));
       const timeline = await snapshotTimeline(result.projectFile, projectDir, deps.run, context.signal);
       const mb = (exported.size / 1_000_000).toFixed(1);
       return { assembly: { exportName: exported.name.slice(0, 200), bytes: exported.size, beats: result.beats, clips: result.clips.length, voiced: result.voiceFiles.length, uploadId, exportSaved: true, ...timelineField(timeline), ...(SERVER_HAS_PROJECT_FIELDS ? { projectKept: true, projectName: projectFolderName(title, p.recordId) } : {}),
-        summary: `${result.beats} beats, ${result.clips.length} clip${result.clips.length === 1 ? "" : "s"}${result.voiceFiles.length ? ", generated voiceover" : ""}, ${mb} MB. Kept on your Mac; ask the agent below to change it or open it in the editor.` } };
+        summary: `${result.beats} beats, ${result.clips.length} clip${result.clips.length === 1 ? "" : "s"}${result.voiceFiles.length ? ", generated voiceover" : ""}, ${mb} MB. Kept on your Mac; ask the agent below to change it or open it in the editor. ${ranModelsLine({ edit: result.ran?.edit, motion: result.ran?.motion })}` } };
     } finally { await rm(work, { recursive: true, force: true }).catch(() => {}); }
   };
 }
