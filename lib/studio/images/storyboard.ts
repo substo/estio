@@ -9,6 +9,11 @@ import { SHOT_SIZES, type ShotSize, type ShotSpec } from "./prompts";
 export const STORYBOARD_CHARACTER = "the person in the reference photo, same face, hair and clothing";
 const ROTATION: ShotSize[] = ["medium", "wide", "close-up", "medium close-up"].filter((s): s is ShotSize => (SHOT_SIZES as readonly string[]).includes(s));
 
+const SCREEN_NOTE = /\b(screen|phone|app|ui|interface|chips?|json|catalog|component|graphic|animation|split screen|dashboard|chatbot)\b/i;
+const PERSON_NOTE = /\b(presenter|host|creator|speaker|talking|to camera|face|I am|me|my|hands? (on|resting)|seated|standing|walks?)\b/i;
+/** A visual note that only describes a screen or graphic is drawn as a flat graphic, not as a photo of the creator. */
+export const isGraphicNote = (note: string) => SCREEN_NOTE.test(note) && !PERSON_NOTE.test(note);
+
 export function shotForBeat(beat: Pick<Beat, "index" | "narration" | "direction">, portrait = false): ShotSpec {
   const note = (beat.direction ?? "").replace(/\s+/g, " ").trim();
   const line = beat.narration.replace(/\s+/g, " ").trim().slice(0, 140);
@@ -18,6 +23,7 @@ export function shotForBeat(beat: Pick<Beat, "index" | "narration" | "direction"
     character: STORYBOARD_CHARACTER,
     setting: "a bright, tidy home studio with a plain wall and a plant", lighting: "soft window light from camera-left", lens: "35mm, shallow depth of field",
     texture: "natural skin texture, subtle film grain", continuity: "same clothing, same light direction and same room in every frame",
+    ...(isGraphicNote(note) ? { graphic: true } : {}),
     avoid: ["text", "extra people", "watermark"], aspect: portrait ? "9:16" : "16:9",
   };
 }

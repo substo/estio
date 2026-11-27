@@ -26,3 +26,15 @@ test("the edit prompt names the person by description, keeps the face, forbids t
   assert.ok(prompt.split(/\s+/).length < 140);
   assert.doesNotMatch(prompt, /\b(she|he|her|his)\b/i);
 });
+
+test("a screen or graphic visual note is drawn as a flat graphic, a person note as the creator", async () => {
+  const { shotForBeat, isGraphicNote } = await import("./storyboard");
+  const { renderShot } = await import("./prompts");
+  assert.equal(isGraphicNote("Dark phone screen. A chatbot reply fills it as four grey paragraphs."), true);
+  assert.equal(isGraphicNote("I am seated at a desk facing the camera, phone on screen"), false);
+  const graphic = renderShot(shotForBeat({ index: 2, narration: "x", direction: "Split screen. JSON on the left and chips on the right." }), "edit", { acceptsText: false }).prompt;
+  assert.match(graphic, /flat motion-graphic frame/);
+  assert.match(graphic, /Do not show any person/);
+  const person = renderShot(shotForBeat({ index: 1, narration: "x", direction: "Presenter at a desk, hands resting on it" }), "edit", { acceptsText: false }).prompt;
+  assert.doesNotMatch(person, /flat motion-graphic/);
+});

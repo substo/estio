@@ -30,6 +30,8 @@ export interface ShotSpec {
   text?: ShotText[];
   /** Things that must not appear, as plain nouns ("extra people", "watermark"). */
   avoid?: string[];
+  /** A screen, interface or motion-graphic frame with no person: drawn flat, never a photo of the creator. */
+  graphic?: boolean;
   aspect: "16:9" | "9:16" | "1:1" | "4:3" | "3:4" | "21:9";
 }
 
@@ -72,6 +74,10 @@ export function renderShot(shot: ShotSpec, dialect: PromptDialect, options: { ac
     return { prompt, negative, aspect: shot.aspect, notes };
   }
 
+  if (dialect === "edit" && shot.graphic) {
+    const look = "Dark minimal phone and app screens, one accent colour, rounded UI elements, clean flat vector style, the same look in every frame.";
+    return { prompt: [cap(`Draw a flat motion-graphic frame, not a photograph: ${f.subject}.`), look, "Do not show any person, face or hand, and ignore the person in the reference image.", "No text except a few short UI labels."].join(" "), aspect: shot.aspect, notes };
+  }
   if (dialect === "edit") {
     // An instruction to an editing model: name the person by description (never "she/he"), say what to keep, then describe the new frame.
     const who = f.character || "the person in the reference image";
