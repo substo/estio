@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { captionsFromJson3, createVideoTranscribeHandler, type VideoTranscribeDeps } from "./video-transcribe";
+import { captionsFromJson3, classifyYtDlpFailure, createVideoTranscribeHandler, pickCaptionFile, YOUTUBE_CLIENT_ORDER, YOUTUBE_COOLDOWN_SECONDS, type VideoTranscribeDeps } from "./video-transcribe";
 import { createLocalTextAdapter, type LocalTextAdapter } from "./providers";
 import { CompanionProcessError, type ProcessRequest } from "./process";
 import type { VideoTools } from "./video-tools";
@@ -28,7 +28,7 @@ const segments = [{ start: 0, end: 4, text: "Welcome to pricing." }, { start: 5,
 const jpeg = Buffer.from("\xff\xd8fakejpeg-bytes\xff\xd9", "binary");
 const meta = { title: "Pricing tiers", description: "All about tiers", channel: "Acme", duration: 120, is_live: false };
 
-interface Options { metaOverride?: Record<string, unknown>; parakeetFails?: boolean; captions?: boolean; videoFails?: boolean; extractFails?: boolean; uploadFails?: boolean; verifyMissing?: number; tools?: VideoTools; enabled?: boolean; controller?: AbortController; failAudio?: "timeout" | "other" }
+interface Options { metaOverride?: Record<string, unknown>; parakeetFails?: boolean; captions?: boolean; videoFails?: boolean; extractFails?: boolean; uploadFails?: boolean; verifyMissing?: number; tools?: VideoTools; enabled?: boolean; controller?: AbortController; failAudio?: "timeout" | "other"; clientFailures?: Record<string, string>; failAll?: string; captionsWarning?: string; clock?: { t: number } }
 function fixture(options: Options = {}) {
   const runs: ProcessRequest[] = []; const chunks: TranscriptSegment[][] = []; const reserved: FrameDeclaration[][] = []; const uploads: Uint8Array[] = []; let workdir = "";
   const api: VideoDeviceApi = {
@@ -40,16 +40,20 @@ function fixture(options: Options = {}) {
   const adapter = (generate: LocalTextAdapter["generate"]): LocalTextAdapter => ({ provider: "codex", readiness: async () => ({ installed: true, authenticated: true, ready: true, loginMethod: "chatgpt", models: [] }), generate });
   const generated: Array<{ prompt: string; model?: string; workflowContext?: string; webSearch?: boolean }> = [];
   const deps = (generate: LocalTextAdapter["generate"] = async request => request.validate({ relevant: true, score: 90, reason: "Matches pricing talks", matches: ["Pricing talks"] })): VideoTranscribeDeps => ({
-    tools: async () => options.tools ?? allTools(), api, enabled: () => options.enabled ?? true, config: () => config, usage, scriptsDir: "/scripts/studio-video",
+    now: () => options.clock?.t ?? Date.now(), sleep: async () => {}, tools: async () => options.tools ?? allTools(), api, enabled: () => options.enabled ?? true, config: () => config, usage, scriptsDir: "/scripts/studio-video",
     adapter: () => adapter(async request => { generated.push({ prompt: request.prompt, model: request.model, workflowContext: request.workflowContext, webSearch: request.webSearch }); return generate(request); }),
     run: async request => {
       runs.push(request); workdir = request.cwd;
       const [command, ...args] = [request.command, ...request.args];
       if (command === "/tools/yt-dlp") {
+        const client = args.includes("--extractor-args") ? args[args.indexOf("--extractor-args") + 1].replace("youtube:player_client=", "") : "default";
+        const failure = options.failAll ?? options.clientFailures?.[client];
+        if (failure) throw new CompanionProcessError("cli_failed", failure);
         if (args.includes("--dump-single-json")) return { stdout: JSON.stringify({ ...meta, ...options.metaOverride }), stderr: "" };
         if (args.includes("--write-subs")) {
+          if (options.captionsWarning) return { stdout: "", stderr: options.captionsWarning };
           if (!options.captions) throw new CompanionProcessError("cli_failed");
-          await writeFile(join(request.cwd, "captions.en.json3"), JSON.stringify({ events: [{ tStartMs: 1000, dDurationMs: 2000, segs: [{ utf8: "Caption words" }] }] }));
+          await writeFile(join(request.cwd, "captions.en-orig.json3"), JSON.stringify({ events: [{ tStartMs: 1000, dDurationMs: 2000, segs: [{ utf8: "Caption words from YouTube" }] }] }));
           return { stdout: "", stderr: "" };
         }
         if (args.includes("-x")) {
@@ -112,7 +116,7 @@ test("every subprocess is an argv array with fixed tools, the URL after --, size
 test("Parakeet failure falls back to YouTube captions; no captions and no transcript is a terminal failure; a timeout is retryable", async () => {
   const f = fixture({ parakeetFails: true, captions: true });
   const result = await createVideoTranscribeHandler(f.deps())(job(), context()) as { method: string; language: string };
-  assert.equal(result.method, "youtube-captions-fallback"); assert.equal(f.chunks[0][0].text, "Caption words");
+  assert.equal(result.method, "youtube-captions-fallback"); assert.equal(f.chunks[0][0].text, "Caption words from YouTube"); assert.equal(result.language, "en");
   const none = fixture({ parakeetFails: true });
   await assert.rejects(createVideoTranscribeHandler(none.deps())(job(), context()), (e: unknown) => e instanceof StudioJobError && e.code === "video_no_transcript" && !e.retryable);
   assert.equal(none.chunks.length, 0, "nothing is saved without a transcript");
@@ -261,4 +265,83 @@ test("device boundary: new operations keep lease fields, bound sizes and reject 
   assert.ok(readDeviceCommand("complete", { ...base, result: ok }));
   for (const bad of [{ ...ok, method: "openai" }, { ...ok, extra: 1 }, { ...ok, transcript: { chunks: 99, segments: 2 } }, { ...ok, visual: { status: "ready", frames: 999 } }, { ...ok, relevance: { relevant: true, score: 101, reason: "x", matches: [] } }, { outcome: "other" }])
     assert.throws(() => readDeviceCommand("complete", { ...base, result: bad }));
+});
+
+const cookieFree = (runs: ProcessRequest[]) => runs.every(r => !r.args.some(a => /cookie|--username|--password/i.test(a)));
+const ytRuns = (f: { runs: ProcessRequest[] }) => f.runs.filter(r => r.command === "/tools/yt-dlp");
+const clientOf = (r: ProcessRequest) => r.args.includes("--extractor-args") ? r.args[r.args.indexOf("--extractor-args") + 1].replace("youtube:player_client=", "") : "default";
+
+test("yt-dlp failures are classified for accurate messages", () => {
+  assert.equal(classifyYtDlpFailure("ERROR: unable to download video data: HTTP Error 429: Too Many Requests"), "rate_limited");
+  assert.equal(classifyYtDlpFailure("ERROR: [youtube] x: Sign in to confirm you\u2019re not a bot"), "bot_check");
+  assert.equal(classifyYtDlpFailure("ERROR: [youtube] x: Private video. Sign in if you've been granted access"), "private");
+  assert.equal(classifyYtDlpFailure("ERROR: Video unavailable. This video has been removed by the uploader"), "removed");
+  assert.equal(classifyYtDlpFailure("ERROR: Sign in to confirm your age"), "age_restricted");
+  assert.equal(classifyYtDlpFailure("ERROR: Unable to download webpage: <urlopen error timed out>"), "network");
+  assert.equal(classifyYtDlpFailure("something odd"), "unknown");
+});
+
+test("caption files: original language first, then English, with a safe language code", () => {
+  assert.deepEqual(pickCaptionFile(["captions.en.json3", "captions.de-orig.json3", "captions.de.json3"]), { file: "captions.de-orig.json3", language: "de" });
+  assert.deepEqual(pickCaptionFile(["captions.fr.json3", "captions.en.json3"]), { file: "captions.en.json3", language: "en" });
+  assert.deepEqual(pickCaptionFile(["captions.pt-BR.json3"]), { file: "captions.pt-BR.json3", language: "pt" });
+  assert.equal(pickCaptionFile(["video.mp4", "captions.en.vtt"]), undefined);
+});
+
+test("captions are used first: no audio is downloaded and Parakeet never runs when YouTube has captions", async () => {
+  const f = fixture({ captions: true });
+  const result = await createVideoTranscribeHandler(f.deps())(job(), context()) as { method: string; language: string };
+  assert.equal(result.method, "youtube-captions-fallback"); assert.equal(result.language, "en");
+  assert.ok(!f.runs.some(r => r.args.includes("-x")), "no audio download"); assert.ok(!f.runs.some(r => r.args[1]?.endsWith("transcribe-local.py")), "no Parakeet");
+  const order = f.runs.map(r => r.args.includes("--dump-single-json") ? "meta" : r.args.includes("--write-subs") ? "captions" : "other");
+  assert.deepEqual(order.slice(0, 2), ["meta", "captions"]);
+  assert.ok(cookieFree(f.runs));
+});
+
+test("without captions the audio route runs; the fixed node runtime is passed to yt-dlp", async () => {
+  const tools = allTools(); tools.paths.node = "/opt/homebrew/bin/node";
+  const f = fixture({ tools }); await createVideoTranscribeHandler(f.deps())(job(), context());
+  assert.ok(f.runs.some(r => r.args.includes("-x")));
+  for (const run of ytRuns(f)) assert.equal(run.args[run.args.indexOf("--js-runtimes") + 1], "node:/opt/homebrew/bin/node");
+});
+
+test("player clients are tried in order, and the one that works is reused", async () => {
+  const f = fixture({ captions: true, clientFailures: { default: "ERROR: unexpected response", tv: "ERROR: nothing useful" } });
+  const result = await createVideoTranscribeHandler(f.deps())(job(), context()) as { method: string };
+  assert.equal(result.method, "youtube-captions-fallback");
+  const clients = ytRuns(f).map(clientOf);
+  assert.deepEqual(clients.slice(0, 3), ["default", "tv", "web_safari"]);
+  assert.ok(clients.slice(3).every(c => c === "web_safari"), "later calls reuse the working client");
+  assert.deepEqual(YOUTUBE_CLIENT_ORDER, [null, "tv", "web_safari", "mweb", "tv_simply"]);
+});
+
+test("HTTP 429 stops at once, starts a cool-down and every job waits it out without touching YouTube", async () => {
+  const clock = { t: 1_000_000 };
+  const f = fixture({ failAll: "ERROR: unable to download video data: HTTP Error 429: Too Many Requests", clock });
+  const handler = createVideoTranscribeHandler(f.deps());
+  await assert.rejects(handler(job(), context()), (e: unknown) => e instanceof StudioJobError && e.code === "video_rate_limited" && e.retryable && /rate-limiting this Mac/.test(e.message) && /30 minutes/.test(e.message) && /paste a transcript/.test(e.message));
+  assert.equal(ytRuns(f).length, 1, "no other client is hammered after a 429");
+  const before = f.runs.length; clock.t += 10 * 60_000;
+  await assert.rejects(handler(job(), context()), (e: unknown) => e instanceof StudioJobError && e.code === "video_rate_limited" && /20 minutes/.test(e.message));
+  assert.equal(f.runs.length, before, "cool-down: no process was started");
+  clock.t += YOUTUBE_COOLDOWN_SECONDS * 1000;
+  await assert.rejects(handler(job(), context()), (e: unknown) => e instanceof StudioJobError && e.code === "video_rate_limited");
+  assert.ok(f.runs.length > before, "after the cool-down YouTube is tried again");
+});
+
+test("a bot check is tried on every client, then reported as a temporary limit; private and removed videos stop at once", async () => {
+  const bot = fixture({ failAll: "ERROR: Sign in to confirm you’re not a bot" });
+  await assert.rejects(createVideoTranscribeHandler(bot.deps())(job(), context()), (e: unknown) => e instanceof StudioJobError && e.code === "video_rate_limited" && /not a bot/.test(e.message) && e.retryable);
+  assert.equal(ytRuns(bot).length, YOUTUBE_CLIENT_ORDER.length);
+  const priv = fixture({ failAll: "ERROR: Private video. Sign in if you've been granted access" });
+  await assert.rejects(createVideoTranscribeHandler(priv.deps())(job(), context()), (e: unknown) => e instanceof StudioJobError && e.code === "video_private" && !e.retryable && /paste a transcript/i.test(e.message));
+  assert.equal(ytRuns(priv).length, 1);
+  const gone = fixture({ failAll: "ERROR: Video unavailable" });
+  await assert.rejects(createVideoTranscribeHandler(gone.deps())(job(), context()), (e: unknown) => e instanceof StudioJobError && e.code === "video_unavailable" && !e.retryable);
+});
+
+test("a rate-limited subtitle request (a warning with exit 0) is not mistaken for 'no captions'", async () => {
+  const f = fixture({ captionsWarning: "WARNING: Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests" });
+  await assert.rejects(createVideoTranscribeHandler(f.deps())(job(), context()), (e: unknown) => e instanceof StudioJobError && e.code === "video_rate_limited");
+  assert.ok(!f.runs.some(r => r.args.includes("-x")), "audio is not requested from a rate-limited IP");
 });

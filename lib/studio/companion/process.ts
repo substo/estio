@@ -3,7 +3,8 @@ import { execFile, spawn } from "node:child_process";
 import { observeCompanionPeakMemoryMb } from "./metrics";
 
 export class CompanionProcessError extends Error {
-  constructor(public readonly code: "cli_unavailable" | "cli_failed" | "cli_timeout" | "cli_cancelled" | "cli_output_limit") {
+  /** `stderr` is the tail of a failed CLI's error output, kept only so callers can classify the failure (never shown to users). */
+  constructor(public readonly code: "cli_unavailable" | "cli_failed" | "cli_timeout" | "cli_cancelled" | "cli_output_limit", public readonly stderr = "") {
     super(code); this.name = "CompanionProcessError";
   }
 }
@@ -91,5 +92,5 @@ export const runNativeProcess: ProcessRunner = request => new Promise((resolve, 
   child.once("error", () => { cleanup(); reject(new CompanionProcessError("cli_unavailable")); });
   child.once("close", code => { cleanup(); if (failure) reject(failure);
     else if (request.until) { if (satisfied) resolve({ stdout, stderr }); else reject(new CompanionProcessError("cli_failed")); }
-    else if (code !== 0) reject(request.subscriptionGeneration && completedRateLimit(stdout, code, request.subscriptionGeneration) ? new StudioProviderRejectedError("rate_limited", "Subscription rejected the request before generation.", true, undefined, "before_generation") : new CompanionProcessError("cli_failed")); else resolve({ stdout, stderr }); });
+    else if (code !== 0) reject(request.subscriptionGeneration && completedRateLimit(stdout, code, request.subscriptionGeneration) ? new StudioProviderRejectedError("rate_limited", "Subscription rejected the request before generation.", true, undefined, "before_generation") : new CompanionProcessError("cli_failed", stderr.slice(-4000))); else resolve({ stdout, stderr }); });
 });

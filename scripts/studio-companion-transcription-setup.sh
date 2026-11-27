@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Guided Setup for Studio video transcription on this Mac.
 #   check    report what is installed (default; changes nothing)
+#   update   upgrade yt-dlp (+ its YouTube challenge solver) inside the private environment; YouTube changes often, so run this when a video stops working
 #   install  create the isolated Python environment, install yt-dlp + parakeet-mlx into it and download the speech model once
 # Everything lands in one private folder; nothing is installed system-wide and no credentials are used.
 # ffmpeg/ffprobe/tesseract come from Homebrew: this script prints the exact command, it never runs brew for you.
@@ -17,6 +18,8 @@ check() {
   local missing=0 p
   echo "Studio video transcription: $HOME_DIR"
   if [ -x "$VENV/bin/yt-dlp" ]; then row "yt-dlp (isolated)" "$("$VENV/bin/yt-dlp" --version)"; elif p=$(tool yt-dlp); then row "yt-dlp" "$p"; else row "yt-dlp" "MISSING -> $0 install"; missing=1; fi
+  if [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -I -c "import yt_dlp_ejs" >/dev/null 2>&1; then row "yt-dlp challenge solver" "installed"; else row "yt-dlp challenge solver" "MISSING -> $0 update"; missing=1; fi
+  if p=$(tool node); then row "node (YouTube JS runtime)" "$p $("$p" --version)"; elif p=$(tool deno); then row "deno (YouTube JS runtime)" "$p"; else row "JS runtime for YouTube" "MISSING -> brew install node"; missing=1; fi
   for t in ffmpeg ffprobe tesseract; do if p=$(tool "$t"); then row "$t" "$p"; else row "$t" "MISSING -> brew install $([ "$t" = tesseract ] && echo tesseract || echo ffmpeg)"; [ "$t" = tesseract ] || missing=1; fi; done
   if [ -x "$VENV/bin/python" ]; then row "Python (isolated)" "$("$VENV/bin/python" --version 2>&1)"; else row "Python (isolated)" "MISSING -> $0 install"; missing=1; fi
   if [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -I -c "import importlib.metadata as m; print(m.version('parakeet-mlx'))" >/dev/null 2>&1; then
@@ -34,13 +37,19 @@ install() {
   mkdir -p "$HOME_DIR"; chmod 700 "$HOME_DIR"
   "$PY" -m venv "$VENV"
   "$VENV/bin/python" -m pip install --quiet --upgrade pip
-  "$VENV/bin/python" -m pip install --quiet --upgrade yt-dlp parakeet-mlx
+  "$VENV/bin/python" -m pip install --quiet --upgrade "yt-dlp[default]" parakeet-mlx
   HF_HOME="$HF" HF_HUB_DISABLE_XET=1 "$VENV/bin/python" -I "$SCRIPT_DIR/studio-video/transcribe-local.py" --prepare-model
   echo "Done. Next, if listed as MISSING above: brew install ffmpeg tesseract"
   check || true
 }
+update() {
+  [ -x "$VENV/bin/python" ] || { echo "Not installed yet: run $0 install" >&2; exit 1; }
+  "$VENV/bin/python" -m pip install --quiet --upgrade "yt-dlp[default]"
+  row "yt-dlp" "$("$VENV/bin/yt-dlp" --version)"
+}
 case "${1:-check}" in
+  update) update ;;
   check) check ;;
   install) shift || true; install "${1:-}" ;;
-  *) echo "usage: $0 [check|install [--yes]]" >&2; exit 2 ;;
+  *) echo "usage: $0 [check|update|install [--yes]]" >&2; exit 2 ;;
 esac

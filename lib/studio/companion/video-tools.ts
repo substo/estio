@@ -20,7 +20,7 @@ export async function resolveTool(name: string, extra: string[] = []) {
 export interface VideoTools {
   report: VideoToolsReport;
   /** Absolute executables, local only (never reported to the server). */
-  paths: Partial<Record<"ytDlp" | "ffmpeg" | "ffprobe" | "tesseract" | "python", string>>;
+  paths: Partial<Record<"ytDlp" | "ffmpeg" | "ffprobe" | "tesseract" | "python" | "node", string>>;
   home: string;
 }
 const version = (text: string) => text.match(/\b\d+(?:\.\d+){1,3}\b/)?.[0];
@@ -37,6 +37,9 @@ export async function discoverVideoTools(run: ProcessRunner = runNativeProcess, 
     if (!path) return;
     const v = version(await probe(run, path, args)); if (v) { found[key] = v; paths[key] = path; }
   };
+  // Node is yt-dlp's JavaScript runtime for YouTube's player challenges. Optional: the report never requires it.
+  const node = await resolveTool("node");
+  if (node && version(await probe(run, node, ["--version"]))) paths.node = node;
   await Promise.all([check("ytDlp", ytDlp, ["--version"]), check("ffmpeg", ffmpeg, ["-version"]), check("ffprobe", ffprobe, ["-version"]), check("tesseract", tesseract, ["--version"])]);
   // Only the isolated environment may import parakeet: the system Python is never trusted for the speech model.
   if (python && python.startsWith(venvBin)) {

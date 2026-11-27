@@ -38,10 +38,52 @@ export interface VideoTranscribeDeps {
   run?: ProcessRunner;
   tmpRoot?: string;
   readFile?: typeof readFile;
+  /** Test seams: the clock (cool-down) and the pause between player clients. */
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
 }
 const MB = 1024 * 1024;
-const baseYtDlp = (tools: VideoTools) => ["--ignore-config", "--no-playlist", "--no-cache-dir", "--no-warnings", "--quiet", "--no-progress", "--socket-timeout", "30", "--retries", "3",
-  "--restrict-filenames", ...(tools.paths.ffmpeg ? ["--ffmpeg-location", dirname(tools.paths.ffmpeg)] : [])];
+/** YouTube player clients, tried in order after yt-dlp's own default (null). Public videos only: no cookies or sign-in are ever used. */
+export const YOUTUBE_CLIENT_ORDER: ReadonlyArray<string | null> = [null, "tv", "web_safari", "mweb", "tv_simply"];
+/** After YouTube rate-limits or bot-checks this Mac, no YouTube request is made for this long. */
+export const YOUTUBE_COOLDOWN_SECONDS = 30 * 60;
+const baseYtDlp = (tools: VideoTools, client: string | null = null) => ["--ignore-config", "--no-playlist", "--no-cache-dir", "--quiet", "--no-progress", "--socket-timeout", "30", "--retries", "3",
+  "--sleep-requests", "1", "--restrict-filenames", ...(tools.paths.ffmpeg ? ["--ffmpeg-location", dirname(tools.paths.ffmpeg)] : []),
+  // Newer yt-dlp only enables deno by default; Homebrew node is passed by absolute path (a LaunchAgent PATH is minimal).
+  ...(tools.paths.node ? ["--js-runtimes", `node:${tools.paths.node}`] : []), ...(client ? ["--extractor-args", `youtube:player_client=${client}`] : [])];
+export type YoutubeFailure = "rate_limited" | "bot_check" | "private" | "removed" | "age_restricted" | "network" | "unknown";
+/** Classify yt-dlp's error output. Text only informs the user message and the retry policy; it never selects a command. */
+export function classifyYtDlpFailure(stderr: string): YoutubeFailure {
+  if (/HTTP Error 429|too many requests/i.test(stderr)) return "rate_limited";
+  if (/sign in to confirm you.?re not a bot|confirm you.?re not a bot/i.test(stderr)) return "bot_check";
+  if (/private video|members-only|join this channel/i.test(stderr)) return "private";
+  if (/confirm your age|age-restricted|inappropriate for some users/i.test(stderr)) return "age_restricted";
+  if (/video unavailable|has been removed|account.*terminated|no longer available|not available in your country|does not exist/i.test(stderr)) return "removed";
+  if (/unable to download|timed out|connection|http error 5|temporary failure|network is unreachable|name or service not known/i.test(stderr)) return "network";
+  return "unknown";
+}
+/** One accurate, user-facing failure per cause. Every message keeps the paste-a-transcript way out. */
+export function youtubeFailureError(kind: YoutubeFailure, retryAfterSeconds = YOUTUBE_COOLDOWN_SECONDS): StudioJobError {
+  const minutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
+  switch (kind) {
+    case "rate_limited": return new StudioJobError("video_rate_limited", `YouTube is rate-limiting this Mac. Studio will try again in about ${minutes} minutes; you can also paste a transcript instead.`, true, retryAfterSeconds);
+    case "bot_check": return new StudioJobError("video_rate_limited", `YouTube is asking this Mac to prove it is not a bot, which is usually a temporary limit on its connection. Studio will try again in about ${minutes} minutes; you can also paste a transcript instead.`, true, retryAfterSeconds);
+    case "private": return new StudioJobError("video_private", "This video is private or members-only, so it cannot be transcribed. Paste a transcript instead.");
+    case "removed": return new StudioJobError("video_unavailable", "YouTube says this video was removed or is not available. Paste a transcript instead.");
+    case "age_restricted": return new StudioJobError("video_age_restricted", "This video is age-restricted and needs a YouTube sign-in, which Studio never uses. Paste a transcript instead.");
+    case "network": return new StudioJobError("video_network", "Could not reach YouTube from this Mac. It will be retried.", true, 600);
+    default: return new StudioJobError("video_unavailable", "YouTube did not return this video's details. It may be private, removed or temporarily unreachable. You can paste a transcript instead.", true, 600);
+  }
+}
+/** Prefer the original-language captions (`xx-orig`), then English, then whatever came back. */
+export function pickCaptionFile(names: string[]): { file: string; language?: string } | undefined {
+  const files = names.filter(name => /^captions\..+\.json3$/.test(name));
+  const lang = (name: string) => name.slice("captions.".length, -".json3".length);
+  const file = files.find(n => lang(n).endsWith("-orig")) ?? files.find(n => lang(n) === "en") ?? files.find(n => /^en[-_]/.test(lang(n))) ?? files[0];
+  if (!file) return undefined;
+  const base = lang(file).replace(/-orig$/, "").split(/[-_]/)[0].toLowerCase();
+  return { file, ...(/^[a-z]{2,12}$/.test(base) ? { language: base } : {}) };
+}
 /** YouTube json3 captions -> timestamped segments (ported from the archived Substo transcriber). */
 export function captionsFromJson3(data: unknown): TranscriptSegment[] {
   const events = (data as { events?: Array<{ tStartMs?: number; dDurationMs?: number; segs?: Array<{ utf8?: string }> }> })?.events ?? [];
@@ -56,12 +98,16 @@ export function captionsFromJson3(data: unknown): TranscriptSegment[] {
   }
   return segments;
 }
-const networkish = /unable to download|timed out|connection|http error 5|temporary failure|network is unreachable|name or service not known|HTTP Error 429/i;
 function fail(code: string, message: string, retryable = false, retryAfter?: number): never { throw new StudioJobError(code, message, retryable, retryAfter); }
 
 export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJobHandler {
   const run = deps.run ?? runNativeProcess;
   const read = deps.readFile ?? readFile;
+  const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>(done => setTimeout(done, ms)));
+  /** Shared by every job on this Mac: one rate-limit answer from YouTube pauses all YouTube requests, not just this job. */
+  let blockedUntil = 0; let workingClient: string | null | undefined;
+  const block = (kind: "rate_limited" | "bot_check") => { blockedUntil = now() + YOUTUBE_COOLDOWN_SECONDS * 1000; return youtubeFailureError(kind); };
   return async (job, context) => {
     const parsed = payloadSchema.safeParse(job.payload);
     const video = parsed.success ? canonicalYoutubeVideo(parsed.data.url) : null;
@@ -77,6 +123,8 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
     const signal = context.signal;
     const env = videoProcessEnvironment(tools);
     const work = await mkdtemp(join(deps.tmpRoot ?? tmpdir(), "studio-video-"));
+    const blockedFor = Math.ceil((blockedUntil - now()) / 1000);
+    if (blockedFor > 0) throw youtubeFailureError("rate_limited", blockedFor);
     const exec = async (command: string, args: string[], timeoutMs: number, maxOutputBytes = 64 * 1024, withEnv = false) => {
       if (signal.aborted) fail("worker_lease_lost", "The Mac lost its job lease.", true);
       try { return await run({ command, args, cwd: work, signal, timeoutMs, maxOutputBytes, ...(withEnv ? { env: { ...process.env, ...env } } : {}) }); }
@@ -85,16 +133,57 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
         throw error instanceof CompanionProcessError ? error : new Error("process_failed");
       }
     };
+    /** yt-dlp through the player-client ladder. A 429 stops everything and starts the cool-down; a bot check is tried on the other clients first. */
+    const ytdlp = async (args: string[], timeoutMs: number, maxOutputBytes = 64 * 1024) => {
+      const order = workingClient === undefined ? YOUTUBE_CLIENT_ORDER : [workingClient, ...YOUTUBE_CLIENT_ORDER.filter(client => client !== workingClient)];
+      let last: unknown; let botChecked = false;
+      for (const [index, client] of order.entries()) {
+        if (index > 0) await sleep(2000);
+        try {
+          const out = await exec(tools.paths.ytDlp!, [...baseYtDlp(tools, client), ...args], timeoutMs, maxOutputBytes);
+          workingClient = client;
+          return out;
+        } catch (error) {
+          if (!(error instanceof CompanionProcessError) || ["cli_timeout", "cli_cancelled", "cli_unavailable", "cli_output_limit"].includes(error.code)) throw error;
+          last = error;
+          const kind = classifyYtDlpFailure(error.stderr);
+          if (kind === "rate_limited") throw block(kind);
+          if (kind === "bot_check") botChecked = true;
+          if (kind === "private" || kind === "removed") throw youtubeFailureError(kind);
+        }
+      }
+      if (botChecked) throw block("bot_check");
+      throw last;
+    };
+    /** Captions first: cheap, no media download. Original language, uploaded subtitles or YouTube's automatic ones. */
+    let captionsMemo: Promise<{ segments: TranscriptSegment[]; language?: string } | null> | undefined;
+    const captions = () => captionsMemo ??= (async () => {
+      let stderr = "";
+      try {
+        stderr = (await ytdlp(["--skip-download", "--write-subs", "--write-auto-subs", "--sub-langs", ".*-orig,en,en-.*", "--sub-format", "json3",
+          "-o", join(work, "captions.%(ext)s"), "--", video.url], 3 * 60_000)).stderr;
+      } catch (error) { if (error instanceof StudioJobError) throw error; return null; }
+      const picked = pickCaptionFile(await readdir(work));
+      if (!picked) {
+        // yt-dlp reports a rate-limited subtitle request as a warning and still exits 0.
+        if (/HTTP Error 429|too many requests/i.test(stderr)) throw block("rate_limited");
+        return null;
+      }
+      if ((await stat(join(work, picked.file))).size > 8 * MB) return null;
+      const segments = normalizeSegments(captionsFromJson3(JSON.parse(String(await read(join(work, picked.file), "utf8")))), meta.duration + 60);
+      return segments.map(s => s.text).join(" ").length >= 20 ? { segments, ...(picked.language ? { language: picked.language } : {}) } : null;
+    })();
+    let meta!: { title: string; description: string; channel: string; duration: number; live: boolean };
     try {
       // 1. Bounded metadata: duration limit, title/description/channel for the relevance gate. No media is downloaded yet.
-      let meta: { title: string; description: string; channel: string; duration: number; live: boolean };
       try {
-        const out = await exec(tools.paths.ytDlp, [...baseYtDlp(tools), "--skip-download", "--dump-single-json", "--", video.url], 90_000, 4 * MB);
+        const out = await ytdlp(["--skip-download", "--dump-single-json", "--", video.url], 90_000, 4 * MB);
         const json = JSON.parse(out.stdout) as Record<string, unknown>;
         meta = { title: String(json.title ?? ""), description: String(json.description ?? ""), channel: String(json.channel ?? json.uploader ?? ""), duration: Number(json.duration ?? 0), live: json.is_live === true };
       } catch (error) {
         if (error instanceof StudioJobError) throw error;
-        fail(error instanceof CompanionProcessError && error.code === "cli_timeout" ? "video_network" : "video_unavailable", "YouTube did not return this video's details. It may be private, removed or temporarily unreachable.", true, 600);
+        const failure = error instanceof CompanionProcessError ? (error.code === "cli_timeout" ? "network" : classifyYtDlpFailure(error.stderr)) : "unknown";
+        throw youtubeFailureError(failure);
       }
       if (meta.live) fail("video_unavailable", "Live streams cannot be transcribed until they end.");
       if (!Number.isFinite(meta.duration) || meta.duration <= 0) fail("video_unavailable", "This video's length is unknown, so it was not downloaded.");
@@ -114,8 +203,8 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
         let candidate: VideoCandidate | undefined;
         const attempt = await runLocalRoute(steps, { adapter: deps.adapter, usage: deps.usage }, signal, async (adapter, step) => {
           if (!candidate) {
-            const captions = await captionText(exec, tools, video.url, work, read, signal).catch(() => undefined);
-            candidate = { title: meta.title, description: meta.description, channel: meta.channel, ...(captions ? { captions } : {}) };
+            const text = (await captions().catch(() => null))?.segments.map(s => s.text).join(" ").slice(0, 5000);
+            candidate = { title: meta.title, description: meta.description, channel: meta.channel, ...(text ? { captions: text } : {}) };
           }
           return adapter.generate({ workflowContext: "video_relevance", signal, model: step.model, prompt: buildRelevancePrompt(candidate, payload.gate!.context as RelevanceContext, thresholds),
             jsonSchema: relevanceJsonSchema as unknown as Record<string, unknown>, validate: value => relevanceResultSchema.parse(value), timeoutMs: 120_000, maxResultBytes: 4096 });
@@ -129,33 +218,32 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
         if (band !== "high") return { outcome: gateOutcome(band), relevance: stripBand(relevance), ...(routeActual ? { routeActual } : {}) };
       }
 
-      // 3. Audio -> local Parakeet; YouTube captions only as the fallback. No paid service is ever called.
-      let segments: TranscriptSegment[] = []; let method: "local-parakeet-tdt-v3-4bit" | "youtube-captions-fallback" = "local-parakeet-tdt-v3-4bit"; let language: string | undefined;
+      // 3. Captions first (cheap, no media download); only when YouTube has none is the audio downloaded and transcribed locally with Parakeet. No paid service is ever called.
+      let segments: TranscriptSegment[] = []; let method: "local-parakeet-tdt-v3-4bit" | "youtube-captions-fallback" = "youtube-captions-fallback"; let language: string | undefined;
+      const fromCaptions = await captions();
+      if (fromCaptions) { segments = fromCaptions.segments; language = fromCaptions.language; }
       let audioFailure: unknown;
-      try {
-        await exec(tools.paths.ytDlp, [...baseYtDlp(tools), "--match-filter", `duration < ${VIDEO_LIMITS.maxSeconds}`, `--max-filesize`, `${payload.limits.maxMediaMb}M`, "-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "0",
-          "-o", join(work, "source.%(ext)s"), "--", video.url], 40 * 60_000, 256 * 1024);
-        const audio = (await readdir(work)).find(name => name.endsWith(".mp3"));
-        if (!audio) throw new Error("audio_missing");
-        const resultFile = join(work, "transcript.json");
-        await exec(tools.paths.python, ["-I", resolve(deps.scriptsDir, "transcribe-local.py"), join(work, audio), resultFile], 40 * 60_000, 64 * 1024, true);
-        const size = (await stat(resultFile)).size; if (size > 8 * MB) throw new Error("transcript_too_large");
-        const result = JSON.parse(String(await read(resultFile, "utf8"))) as { segments?: unknown; language?: unknown };
-        segments = normalizeSegments(result.segments, meta.duration + 60);
-        if (typeof result.language === "string" && /^[a-z]{2,12}$/.test(result.language)) language = result.language;
-        if (!segments.length) throw new Error("empty_transcript");
-      } catch (error) {
-        if (error instanceof StudioJobError) throw error;
-        audioFailure = error; segments = [];
-      }
       if (!segments.length) {
+        method = "local-parakeet-tdt-v3-4bit";
         try {
-          segments = normalizeSegments(await captionSegments(exec, tools, video.url, work, read), meta.duration + 60);
-          method = "youtube-captions-fallback"; language = "en";
-        } catch (error) { if (error instanceof StudioJobError) throw error; /* both routes failed */ }
+          await ytdlp(["--match-filter", `duration < ${VIDEO_LIMITS.maxSeconds}`, `--max-filesize`, `${payload.limits.maxMediaMb}M`, "-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "0",
+            "-o", join(work, "source.%(ext)s"), "--", video.url], 40 * 60_000, 256 * 1024);
+          const audio = (await readdir(work)).find(name => name.endsWith(".mp3"));
+          if (!audio) throw new Error("audio_missing");
+          const resultFile = join(work, "transcript.json");
+          await exec(tools.paths.python, ["-I", resolve(deps.scriptsDir, "transcribe-local.py"), join(work, audio), resultFile], 40 * 60_000, 64 * 1024, true);
+          const size = (await stat(resultFile)).size; if (size > 8 * MB) throw new Error("transcript_too_large");
+          const result = JSON.parse(String(await read(resultFile, "utf8"))) as { segments?: unknown; language?: unknown };
+          segments = normalizeSegments(result.segments, meta.duration + 60);
+          if (typeof result.language === "string" && /^[a-z]{2,12}$/.test(result.language)) language = result.language;
+          if (!segments.length) throw new Error("empty_transcript");
+        } catch (error) {
+          if (error instanceof StudioJobError) throw error;
+          audioFailure = error; segments = [];
+        }
         if (!segments.length) {
           const network = audioFailure instanceof CompanionProcessError && ["cli_timeout"].includes(audioFailure.code);
-          fail(network ? "video_network" : "video_no_transcript", network ? (relevance ? "Downloading the audio timed out after scoring relevance." : "Downloading the audio timed out. It will be retried.") : "No local transcript could be produced and YouTube has no English captions for this video.", network && !relevance, 600);
+          fail(network ? "video_network" : "video_no_transcript", network ? (relevance ? "Downloading the audio timed out after scoring relevance." : "Downloading the audio timed out. It will be retried.") : "YouTube has no captions for this video and its audio could not be transcribed on this Mac. You can paste a transcript instead.", network && !relevance, 600);
         }
       }
 
@@ -168,7 +256,7 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
       }
 
       // 5. Slides: scene detection + Tesseract with ±15s transcript context. Any failure here leaves a usable transcript (partial).
-      const visual = await visualPass({ exec, tools, video: video.url, work, segments, lease, api: deps.api, signal, scriptsDir: deps.scriptsDir, payload, read })
+      const visual = await visualPass({ exec, ytdlp, tools, video: video.url, work, segments, lease, api: deps.api, signal, scriptsDir: deps.scriptsDir, payload, read })
         .then(frames => ({ status: "ready" as const, frames }), (error: unknown) => {
           if (signal.aborted) fail("worker_lease_lost", "The Mac lost its job lease.", true);
           return { status: "failed" as const, error: visualMessage(error) };
@@ -185,26 +273,14 @@ function visualMessage(error: unknown) {
   const known: Record<string, string> = { missing_visual_tools: "Slides were skipped: ffmpeg, ffprobe and tesseract are needed.", cli_timeout: "The slide scan timed out.", cli_output_limit: "The slide scan produced too much output.", video_upload_failed: "Frame upload failed.", video_upload_refused: "Frame upload was refused.", frames_unverified: "Frames could not be verified in private storage." };
   return known[code] ?? "The slide and frame pass failed.";
 }
-async function captionSegments(exec: (c: string, a: string[], t: number, m?: number, e?: boolean) => Promise<{ stdout: string }>, tools: VideoTools, url: string, work: string, read: typeof readFile, _signal?: AbortSignal) {
-  await exec(tools.paths.ytDlp!, [...baseYtDlp(tools), "--skip-download", "--write-subs", "--write-auto-subs", "--sub-langs", "en.*", "--sub-format", "json3", "-o", join(work, "captions.%(ext)s"), "--", url], 3 * 60_000);
-  const file = (await readdir(work)).find(name => name.endsWith(".json3"));
-  if (!file) throw new Error("no_captions");
-  if ((await stat(join(work, file))).size > 8 * MB) throw new Error("captions_too_large");
-  return captionsFromJson3(JSON.parse(String(await read(join(work, file), "utf8"))));
-}
-async function captionText(exec: Parameters<typeof captionSegments>[0], tools: VideoTools, url: string, work: string, read: typeof readFile, signal: AbortSignal) {
-  const segments = await captionSegments(exec, tools, url, work, read, signal);
-  await Promise.all((await readdir(work)).filter(name => name.endsWith(".json3")).map(name => rm(join(work, name), { force: true })));
-  return normalizeSegments(segments).map(s => s.text).join(" ").slice(0, 5000) || undefined;
-}
-
 async function visualPass(input: {
-  exec: Parameters<typeof captionSegments>[0]; tools: VideoTools; video: string; work: string; segments: TranscriptSegment[]; lease: VideoLease; api: VideoDeviceApi;
+  exec: (c: string, a: string[], t: number, m?: number, e?: boolean) => Promise<{ stdout: string; stderr: string }>; tools: VideoTools; video: string; work: string; segments: TranscriptSegment[]; lease: VideoLease; api: VideoDeviceApi;
+  ytdlp: (args: string[], timeoutMs: number, maxOutputBytes?: number) => Promise<unknown>;
   signal: AbortSignal; scriptsDir: string; payload: z.infer<typeof payloadSchema>; read: typeof readFile;
 }): Promise<number> {
   const { exec, tools, work, signal } = input;
   if (!tools.paths.ffmpeg || !tools.paths.ffprobe || !tools.paths.tesseract || !tools.paths.python) throw new Error("missing_visual_tools");
-  await exec(tools.paths.ytDlp!, [...baseYtDlp(tools), "--match-filter", `duration < ${VIDEO_LIMITS.maxSeconds}`, "--max-filesize", `${input.payload.limits.maxMediaMb}M`, "-f", "bv*[height<=480]+ba/b[height<=480]",
+  await input.ytdlp(["--match-filter", `duration < ${VIDEO_LIMITS.maxSeconds}`, "--max-filesize", `${input.payload.limits.maxMediaMb}M`, "-f", "bv*[height<=480]+ba/b[height<=480]",
     "--merge-output-format", "mp4", "-o", join(work, "video.%(ext)s"), "--", input.video], 40 * 60_000, 256 * 1024);
   const file = (await readdir(work)).find(name => /^video\.(mp4|mkv|webm)$/.test(name));
   if (!file) throw new Error("video_missing");
