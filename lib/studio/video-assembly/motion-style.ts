@@ -71,20 +71,9 @@ export const MOTION_STYLES: Record<MotionStyleId, MotionStyle> = {
   },
 };
 
-/**
- * Where graphics are judged first. "dark" and "light" are a neutral plain backdrop, a preview and QA aid only: the exported video always
- * composites the graphics over the footage. "off" judges them over the footage only.
- */
-export const MOTION_PREVIEW_IDS = ["dark", "light", "off"] as const;
-export type MotionPreviewId = typeof MOTION_PREVIEW_IDS[number];
-export const PLAIN_BACKGROUNDS: Record<"dark" | "light", string> = { dark: "#2b2f36", light: "#f1f3f5" };
-export const MOTION_PREVIEW_LABELS: Record<MotionPreviewId, string> = { dark: "Plain dark grey", light: "Plain light", off: "Over footage only" };
-
-/** What the user saves: a style, an accent colour, free notes and where graphics are previewed first. */
-export interface MotionChoice { style: MotionStyleId; accent?: string; notes?: string; preview?: MotionPreviewId }
+/** What the user saves: a style, an accent colour and free notes. */
+export interface MotionChoice { style: MotionStyleId; accent?: string; notes?: string }
 export const DEFAULT_MOTION_CHOICE: MotionChoice = { style: "clean" };
-/** The preview backdrop in force: plain dark grey until the creator chooses otherwise. */
-export const previewOf = (c: MotionChoice): MotionPreviewId => c.preview ?? "dark";
 const HEX = /^#[0-9a-f]{6}$/i;
 
 /** Anything that is not recognised falls back to the default instead of failing a video. Notes are plain text, capped, and never carry control characters. */
@@ -95,13 +84,12 @@ export function readMotionChoice(value: unknown): MotionChoice {
   const accent = typeof raw.accent === "string" && HEX.test(raw.accent) ? raw.accent.toLowerCase() : undefined;
   // eslint-disable-next-line no-control-regex
   const notes = typeof raw.notes === "string" ? raw.notes.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "").trim().slice(0, 300) : "";
-  const preview = (MOTION_PREVIEW_IDS as readonly unknown[]).includes(raw.preview) ? raw.preview as MotionPreviewId : undefined;
-  return { style, ...(accent ? { accent } : {}), ...(notes ? { notes } : {}), ...(preview ? { preview } : {}) };
+  return { style, ...(accent ? { accent } : {}), ...(notes ? { notes } : {}) };
 }
 
 /** The form fields of the dialog to a choice. */
 export function readMotionChoiceFromForm(form: FormData): MotionChoice {
-  return readMotionChoice({ style: form.get("motionStyle"), accent: form.get("motionAccent"), notes: form.get("motionNotes"), preview: form.get("motionPreview") });
+  return readMotionChoice({ style: form.get("motionStyle"), accent: form.get("motionAccent"), notes: form.get("motionNotes") });
 }
 
 const range = (r: [number, number]) => r[0] === r[1] ? String(r[0]) : `${r[0]} to ${r[1]}`;
@@ -116,13 +104,12 @@ export function describeMotionStyle(choice: MotionChoice): string[] {
     `Accent colour ${accentOf(choice)}${s.uppercase ? ", upper-case type" : ""}`,
     ...(s.customGraphics > 0 ? [`Up to ${s.customGraphics} custom animated graphics (charts, counters) drawn for your script`] : []),
     `Never: ${s.banned.join("; ")}`,
-    previewOf(choice) === "off" ? "Graphics are checked over your footage only" : `Graphics are checked on a ${MOTION_PREVIEW_LABELS[previewOf(choice)].toLowerCase()} backdrop first, then over your footage`,
   ];
 }
 
 /**
  * The motion-graphics step of the editing agent's brief. The user's notes are untrusted text: they steer taste, they cannot change the tool rules.
- * Structure: direction in numbers, the banned list, how it lands on the beats, then a check and one critique round.
+ * Structure: direction in numbers, the banned list, how it lands on the beats, then one check over the composed frames and one critique round.
  */
 export function motionBriefStep(choice: MotionChoice, orientation: "landscape" | "portrait", hasCaptions = true, deferred = false): string {
   const s = MOTION_STYLES[choice.style];
@@ -136,19 +123,7 @@ export function motionBriefStep(choice: MotionChoice, orientation: "landscape" |
   return `Motion graphics, style "${s.label}" (${s.summary})
    Direction: ${s.direction.join(" ")} Aim for ${range(s.perMinute)} title moments per minute of video, each on screen ${range(s.holdSeconds)} s, entrance ${s.entranceSeconds} s and exit ${s.exitSeconds} s. Use only these animations: ${s.animations.join(", ")}. Accent colour ${accent} for callout boxes or strokes. A transparent canvas provides no contrast: near-black text is allowed only on an opaque light surface; otherwise use white text with an opaque dark backing or stroke, and judge the composed video frame, not the isolated graphic. Use ${s.uppercase ? "upper-case type" : "sentence case"}; one font family for the whole video. Text at least 48 px tall (at 1080p), at most a few words per line, inside the safe margins (${safe}), and never across a person's face: use the upper or empty side of the frame${hasCaptions ? "; reserve the bottom 25% as a caption-only exclusion zone for all titles and custom graphics" : ""}. Use the title presets (callout, sectionHeader, label) with animationIn and animationOut. For portrait, place elements for the tall frame instead of shrinking a landscape layout.
    Banned: ${s.banned.join("; ")}; any text you cannot read clearly at the frame where it is fully visible; any title or callout that is wider than the safe area or runs off an edge (break long text onto two lines or shorten it, and check the frame where its entrance ends). Never invent a figure, a name or a claim that is not in the script.${graphics}${notes}
-   ${plainPreviewStep(choice)}
    Check, then one critique round: look at one frame per beat (\`substo frame <time> -o /tmp/f.png\` and view each image, or a contact sheet). Judge it like a senior motion designer: hierarchy (what reads first), timing (rushed or lingering), overlaps and clipped type, anything that looks generic or off-grid. Fix everything you find in one labelled batch, then re-check the frames you changed. Do not start a second round.`;
-}
-
-/**
- * The plain-background check. Graphics are judged first on a neutral backdrop, where layout, hierarchy and readability are not hidden by busy footage,
- * then over the real footage. The backdrop only exists in `graphic frame` pictures: renders stay transparent, so the export always composites over the footage.
- */
-export function plainPreviewStep(choice: MotionChoice): string {
-  const mode = previewOf(choice);
-  if (mode === "off") return "Judge graphics over the footage only (the creator turned the plain-background preview off).";
-  const colour = PLAIN_BACKGROUNDS[mode];
-  return `Plain-background check FIRST: look at every custom graphic on a neutral ${mode === "dark" ? "dark grey" : "light"} backdrop with \`substo graphic frame graphic-<n>.html --at <seconds> --background ${mode} -o graphic-<n>-plain.png\` (backdrop ${colour}; first, middle and last moment), and fix layout, hierarchy, spacing, clipped type and contrast there until it is right. The backdrop is a preview aid only: never place or render it, the clip you render stays transparent and goes over the footage. THEN the footage check below on the composed frame. Report both rounds.`;
 }
 
 /** The motion-graphics pass on its own, run by the model chosen for motion work on a project that is already cut and exported. */

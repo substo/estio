@@ -96,11 +96,11 @@ The routing context exists only on the authenticated call stack. Immediate manua
 
 The selected model reaches classification, sentiment, skill planning, post-tool synthesis and high-risk critique as an explicit pick on its own connection kind; the Location order still decides the connection. Skill traces retain requested/actual kind, model, provider, funding and switch reason for the planning and synthesis calls. Existing trace cost estimates do not establish invoice reconciliation or complete metering of every legacy classifier/critic/embedding path. Workflow-specific CRM readiness respects edition and modality; subscription-only eligibility cannot enable transcription, realtime, property images or replay speech. Live Assist's direct Gemini assistant prompt also imports the bundled contract. Undeclared skill tools are blocked before handlers execute, including synthetic availability calls.
 
-## Video: model per job type and plain-background graphics
+## Video: model per job type
 
 Make video → **Options · Models** stores, per Location (settings document field `studioVideoModels`; no migration), a model for script/storyboard planning, motion graphics, editing/assembly and other text, plus **keep the designing model for a graphic's revisions**. Default is the Mac's own model; the only routes are the creator's Mac subscription (Claude, or Codex for text kinds). Code: `lib/studio/video-assembly/model-prefs.ts`. The server adds the preferences at claim time (`withAssemblyDownloads`), never into the stored job. Editing and motion graphics run through the Claude Code editing agent, so only they are wired: different models run as two passes (cut, then graphics); a revision about graphics uses the motion model, or the model this Mac recorded as designer when keep-designer is on. Planning and other-text choices are saved but text jobs still follow the route chain from Settings → AI. The result line states the model that actually ran.
 
-Graphics are checked first on a plain backdrop (`motionPreview`: dark grey default, light, or off) with `substo graphic frame --background`, then over footage. The backdrop exists only in preview stills and the UI preview; renders stay transparent and exports always composite over footage.
+Graphics are designed once, over the storyboard frame (the camera point of view; real footage is expected to be shot with the same framing) and checked on composed frames. There is no separate plain-background pass. If the real footage is framed differently, the creator asks the agent to re-analyse against the footage.
 
 ## Evidence and release prerequisites
 

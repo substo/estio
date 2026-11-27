@@ -8,15 +8,18 @@ import { AutoRefresh } from "../auto-refresh";
 import { MakeVideoDialog } from "../workspace/make-video-dialog";
 import { currentShotFiles, nextTake, shotFileName } from "@/lib/studio/shoot/shots";
 import { formatBytes } from "@/lib/studio/workspace/assets";
+import { transcribeUploadAction } from "../../(tenant)/content/actions";
+import { SHOT_SOUND_LABEL } from "@/lib/studio/shoot/shot-sound";
+import type { ShotSoundState } from "@/lib/studio/shoot/shot-sound-server";
 import { uploadRecordFile } from "./upload-client";
 import { ShotRecorder, canRecordInBrowser } from "./shot-recorder";
 import type { Beat } from "@/lib/studio/video-assembly/script";
 
 type FootageFile = { id: string; name: string; byteSize: number };
-type Props = { locationId: string; recordId: string; title: string; beats: Beat[]; files: FootageFile[]; archived: boolean; busy: boolean; statusLine: string | null; hasVideo: boolean; makeProps: Omit<React.ComponentProps<typeof MakeVideoDialog>, "locationId" | "recordId" | "busy" | "disabledReason" | "trigger"> };
+type Props = { locationId: string; recordId: string; title: string; beats: Beat[]; files: FootageFile[]; soundStates?: Record<string, ShotSoundState>; archived: boolean; busy: boolean; statusLine: string | null; hasVideo: boolean; makeProps: Omit<React.ComponentProps<typeof MakeVideoDialog>, "locationId" | "recordId" | "busy" | "disabledReason" | "trigger"> };
 
 /** The script clip by clip: what the scene is, what to say, and one place to film or upload each shot. */
-export function ShootBoard({ locationId, recordId, title, beats, files, archived, busy, statusLine, hasVideo, makeProps }: Props) {
+export function ShootBoard({ locationId, recordId, title, beats, files, soundStates = {}, archived, busy, statusLine, hasVideo, makeProps }: Props) {
   const router = useRouter();
   const headers = useStudioTenantHeaders();
   const current = currentShotFiles(files);
@@ -26,6 +29,11 @@ export function ShootBoard({ locationId, recordId, title, beats, files, archived
   const [recording, setRecording] = useState<number | null>(null);
   const [canRecord, setCanRecord] = useState(false);
   const inFlight = useRef(false);
+  const [checkNotice, setCheckNotice] = useState<Record<string, string>>({});
+  const checkSound = async (uploadId: string) => {
+    const r = await transcribeUploadAction(locationId, recordId, uploadId).catch(() => ({ error: "Could not start the sound check. Try again." }));
+    setCheckNotice(n => ({ ...n, [uploadId]: r.error ?? r.notice ?? "" })); router.refresh();
+  };
   useEffect(() => setCanRecord(canRecordInBrowser()), []);
 
   const send = async (shot: number, blob: Blob | File, extension: string) => {
@@ -52,7 +60,7 @@ export function ShootBoard({ locationId, recordId, title, beats, files, archived
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-4 md:p-6">
-      <AutoRefresh active={busy} />
+      <AutoRefresh active={busy || Object.values(soundStates).some(s => s.checking)} />
       <header className="space-y-2">
         <nav className="text-xs"><Link href={`/studio/content/${recordId}`} className="text-muted-foreground hover:underline">← Back to {title}</Link></nav>
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -81,6 +89,15 @@ export function ShootBoard({ locationId, recordId, title, beats, files, archived
               {beat.direction ? <p className="text-sm"><span className="font-medium">Scene: </span><span className="text-muted-foreground">{beat.direction}</span></p> : <p className="text-xs text-muted-foreground">No scene note. Film it however suits the line.</p>}
               <p className="text-sm"><span className="font-medium">Say: </span>“{beat.narration}”</p>
               {file ? <video key={file.id} controls preload="metadata" playsInline src={`/studio/uploads/${file.id}?inline=1`} className="aspect-video w-full max-w-sm rounded-lg bg-black" aria-label={`Shot ${beat.index} preview`} /> : null}
+              {file && !here ? (() => {
+                const st = soundStates[file.id];
+                return <div className="space-y-1 text-xs" data-testid={`shot-sound-${beat.index}`} aria-live="polite">
+                  {st?.plan ? <p><span className="font-medium">Sound: </span>{SHOT_SOUND_LABEL[st.plan]}</p>
+                    : st?.checking ? <p className="flex items-center gap-1"><Loader2 aria-hidden className="size-3 animate-spin motion-reduce:animate-none" />Checking this clip's sound on your Mac…</p>
+                    : <p><span className="font-medium">Sound: </span>not checked yet. If this clip has no speech matching the line, the voiceover plays over it.{st?.failed ? " The last check failed." : ""}{!archived ? <> <button type="button" onClick={() => void checkSound(file.id)} className="min-h-11 text-primary underline focus-visible:outline focus-visible:outline-2">Check its sound on my Mac</button></> : null}</p>}
+                  {checkNotice[file.id] ? <p className="text-muted-foreground">{checkNotice[file.id]}</p> : null}
+                </div>;
+              })() : null}
               {here ? <div role="progressbar" aria-label={`Uploading shot ${beat.index}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={uploading!.percent} className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary" style={{ width: `${uploading!.percent}%` }} /></div> : null}
               {!archived ? <div className="flex flex-wrap gap-2">
                 {canRecord ? <button type="button" disabled={Boolean(uploading)} onClick={() => setRecording(beat.index)} className={btn}><Video aria-hidden className="size-4" />{file ? "Record again" : "Record"}</button> : null}

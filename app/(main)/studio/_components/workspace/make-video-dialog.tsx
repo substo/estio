@@ -6,9 +6,8 @@ import { makeVideoAction } from "../../(tenant)/content/actions";
 import { VoicePicker } from "@/components/voices/voice-picker";
 import { voiceStatus, type Availability } from "@/lib/studio/voices/library";
 import type { VoiceRow } from "@/lib/studio/voices/policy";
-import { DEFAULT_MOTION_CHOICE, MOTION_PREVIEW_IDS, MOTION_PREVIEW_LABELS, MOTION_STYLES, MOTION_STYLE_IDS, describeMotionStyle, previewOf, type MotionChoice, type MotionPreviewId, type MotionStyleId } from "@/lib/studio/video-assembly/motion-style";
+import { DEFAULT_MOTION_CHOICE, MOTION_STYLES, MOTION_STYLE_IDS, describeMotionStyle, type MotionChoice, type MotionStyleId } from "@/lib/studio/video-assembly/motion-style";
 import { DEFAULT_MODEL_PREFS, JOB_TYPES, JOB_TYPE_LABELS, encodePick, modelChoices, routeLabel, type ModelPrefs } from "@/lib/studio/video-assembly/model-prefs";
-import { MotionPreview } from "./motion-preview";
 
 /** The one place the options for a new video live: voice, music, vertical. Opens from the top bar, so the page itself carries no form. */
 export function MakeVideoDialog({ locationId, recordId, voices, availability, soundSources, motion, modelPrefs, disabledReason, busy, trigger }: {
@@ -27,7 +26,6 @@ export function MakeVideoDialog({ locationId, recordId, voices, availability, so
   const [accent, setAccent] = useState(saved.accent ?? MOTION_STYLES[saved.style].accent);
   const [accentChosen, setAccentChosen] = useState(Boolean(saved.accent));
   const [notes, setNotes] = useState(saved.notes ?? "");
-  const [preview, setPreview] = useState<MotionPreviewId>(previewOf(saved));
   const models = modelPrefs ?? DEFAULT_MODEL_PREFS;
   const [picks, setPicks] = useState(() => Object.fromEntries(JOB_TYPES.map(t => [t, encodePick(models.jobs[t])])) as Record<(typeof JOB_TYPES)[number], string>);
   const [keepDesigner, setKeepDesigner] = useState(models.keepDesigner);
@@ -57,11 +55,6 @@ export function MakeVideoDialog({ locationId, recordId, voices, availability, so
             </div>
             <p className="text-xs">{MOTION_STYLES[style].summary}</p>
             <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">{describeMotionStyle({ style, accent }).map(line => <li key={line}>{line}</li>)}</ul>
-            <label className="flex min-h-11 flex-wrap items-center gap-2 text-xs">Check graphics first on
-              <select name="motionPreview" value={preview} onChange={e => setPreview(e.target.value as MotionPreviewId)} className="min-h-11 rounded-md border bg-background px-2 text-sm">
-                {MOTION_PREVIEW_IDS.map(id => <option key={id} value={id}>{MOTION_PREVIEW_LABELS[id]}</option>)}
-              </select></label>
-            <MotionPreview choice={{ style, accent }} accent={accent} mode={preview} />
             <label className="block text-xs">Your notes on the look (optional)
               <textarea name="motionNotes" value={notes} onChange={e => setNotes(e.target.value)} maxLength={300} rows={2} placeholder="e.g. Use our brand blue, keep titles short, no all-caps" className="mt-1 w-full rounded-md border bg-background p-2 text-sm" /></label>
           </fieldset>

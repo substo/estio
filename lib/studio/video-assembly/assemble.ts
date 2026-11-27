@@ -6,6 +6,7 @@ import { buildMotionPassBrief, DEFAULT_MOTION_CHOICE } from "./motion-style";
 import { parseScriptTimeline } from "./script";
 import { prepareSourceQuotes } from "./source-quotes";
 import { MAX_SOURCE_QUOTES } from "../script-source-quotes";
+import { soundFromTranscript, soundFromVolume, type ShotSound } from "../shoot/shot-sound";
 import { parseShotFileName, shotFilesByBeat, supersededShotFiles } from "../shoot/shots";
 import { agentEnv, runEditingAgent } from "./agent";
 import { localCloneSpeech, localSpeech, type SpeechEngine } from "./tts";
@@ -74,6 +75,23 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
   const frameFiles = (o.frames ?? []).map(f => f && /^storyboard-frame-\d{1,2}\.png$/.test(f) ? f : "");
   if (!o.dryRun) for (const f of frameFiles) if (f) await copyFile(join(o.clipsDir, f), join(o.projectDir, f));
   if (!o.dryRun) for (const role of ["music", "sfx"] as const) { const f = o.sounds?.[role]; if (f && o.music !== false) { await copyFile(join(o.clipsDir, f), join(o.projectDir, f)); soundFiles[role] = f; } }
+  // A filmed beat uses its own sound only when the clip has speech that matches the line; otherwise the voiceover plays over the clip.
+  const shotSound: ShotSound[] = [];
+  const transcripts = new Map<string, { start: number; end: number; text: string }[] | null>();
+  const transcriptOf = async (file: string) => {
+    if (!transcripts.has(file)) transcripts.set(file, o.transcribeFootage ? await o.transcribeFootage(join(o.projectDir, file), o.signal).catch(() => null) : null);
+    return transcripts.get(file) ?? null;
+  };
+  if (o.voiceover && !o.dryRun) for (const b of beats) {
+    const file = shotFiles[b.index];
+    if (!file) continue;
+    const segments = await transcriptOf(file);
+    if (segments) { shotSound[b.index] = soundFromTranscript(segments.map(x => x.text).join(" "), b.narration); continue; }
+    const probe = await run({ command: "ffmpeg", args: ["-hide_banner", "-nostats", "-i", join(o.projectDir, file), "-vn", "-af", "volumedetect", "-f", "null", "-"], cwd: o.projectDir, timeoutMs: 120_000, maxOutputBytes: 64 * 1024, env: { PATH: `${process.env.PATH ?? ""}:/opt/homebrew/bin:/usr/local/bin` }, signal: o.signal }).then(r => `${r.stdout}\n${r.stderr}`, () => "");
+    shotSound[b.index] = soundFromVolume(probe);
+    log(`Shot ${b.index}: no transcript, volume check says ${shotSound[b.index] === "own" ? "speech-like sound" : "no speech"}`);
+  }
+  const ownSound = (beat: number) => Boolean(shotFiles[beat]) && shotSound[beat] === "own";
   const voiceFiles: string[] = [];
   const timings: number[] = [];
   let at = 0;
@@ -93,8 +111,8 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
       let narrationSeconds = 0;
       if (!o.dryRun) for (const f of voiceFiles) { const beforeBeat = timings.length + 1;
         at += prepared.quotes.filter(quote => quote.beforeBeat === beforeBeat).reduce((total, quote) => total + quote.seconds, 0);
-        timings.push(Number(at.toFixed(2))); const filmed = shotFiles[beforeBeat];
-        // A beat with its own filmed clip is as long as that clip (its sound carries the narration), so the generated voice must not reserve a longer, empty slot.
+        timings.push(Number(at.toFixed(2))); const filmed = ownSound(beforeBeat) ? shotFiles[beforeBeat] : undefined;
+        // A beat whose filmed clip carries matching speech is as long as that clip, so the generated voice must not reserve a longer, empty slot. A clip without speech takes the voiceover's length.
         const seconds = await durationOf(join(o.projectDir, f), run, o.projectDir);
         if (!filmed) narrationSeconds += seconds;
         at += (filmed ? await durationOf(join(o.projectDir, filmed), run, o.projectDir).catch(() => seconds) : seconds) + BEAT_GAP;
@@ -111,11 +129,11 @@ export async function assembleVideo(o: AssembleOptions): Promise<AssembleResult>
   if (o.transcribeFootage && !o.dryRun) for (const f of clips) {
     if (!/\.(mp4|mov|m4v|mkv|webm|mp3|wav|m4a)$/i.test(f)) continue;
     log(`Transcribing ${f}`);
-    const segments = await o.transcribeFootage(join(o.projectDir, f), o.signal).catch(() => null);
+    const segments = await transcriptOf(f);
     if (segments?.length) footageTranscripts.push({ file: f, lines: segments.map(x => `${x.start.toFixed(1)}-${x.end.toFixed(1)} ${x.text}`).join("\n").slice(0, 6000) });
   }
   const separateMotion = "motionModel" in o && o.motionModel !== o.model && (o.motion?.style ?? "clean") !== "minimal";
-  const brief = buildBrief({ footageTranscripts, projectFile, editorDocs: o.editorDocs, orientation: o.orientation ?? "landscape", beats, voiceFiles, timings, clips, sourceQuotes: prepared.quotes, hasVoiceover: Boolean(o.voiceover), music: o.music ?? false, soundFiles, avatarFile, ...(shotFiles.length ? { shotFiles } : {}), ...(frameFiles.some(Boolean) ? { frameFiles } : {}), ...(o.motion ? { motion: o.motion } : {}), ...(separateMotion ? { deferMotion: true } : {}) });
+  const brief = buildBrief({ footageTranscripts, projectFile, editorDocs: o.editorDocs, orientation: o.orientation ?? "landscape", beats, voiceFiles, timings, clips, sourceQuotes: prepared.quotes, hasVoiceover: Boolean(o.voiceover), music: o.music ?? false, soundFiles, avatarFile, ...(shotFiles.length ? { shotFiles, shotSound } : {}), ...(frameFiles.some(Boolean) ? { frameFiles } : {}), ...(o.motion ? { motion: o.motion } : {}), ...(separateMotion ? { deferMotion: true } : {}) });
   if (o.dryRun) return { projectDir: o.projectDir, projectFile, beats: beats.length, clips, voiceFiles, timings, brief };
   log("Editing with the agent");
   let agentOutput = await runEditingAgent({ cwd, brief, editorDocs: o.editorDocs, model: o.model, run, signal: o.signal });

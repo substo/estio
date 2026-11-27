@@ -158,7 +158,7 @@ test("different editing and motion models run two passes; the same model runs on
   assert.equal(two.agents.length, 2);
   assert.deepEqual(two.agents.map(a => a.args[a.args.indexOf("--model") + 1]), ["claude-sonnet-5-5", "claude-opus-5-5"]);
   assert.match(two.agents[0].input!, /separate pass/);
-  assert.match(two.agents[1].input!, /Plain-background check FIRST/);
+  assert.match(two.agents[1].input!, /Motion graphics, style/);
   assert.deepEqual(two.result.ran, { edit: "claude-sonnet-5-5", motion: "claude-opus-5-5" });
   const one = await run({ model: "claude-sonnet-5-5", motionModel: "claude-sonnet-5-5", motion: { style: "clean" } });
   assert.equal(one.agents.length, 1);
@@ -168,4 +168,44 @@ test("different editing and motion models run two passes; the same model runs on
   assert.ok(!defaults.agents[0].args.includes("--model"));
   const minimal = await run({ model: "a", motionModel: "b", motion: { style: "minimal" } });
   assert.equal(minimal.agents.length, 1);
+});
+
+async function filmedBeatRun(opts: { transcript: { start: number; end: number; text: string }[] | null; volume?: string }) {
+  const clips = await mkdtemp(join(tmpdir(), "clips-")), project = await mkdtemp(join(tmpdir(), "proj-"));
+  await writeFile(join(clips, "Shot 02 take 1.mp4"), "x");
+  const result = await assembleVideo({ script: "Hello there.\n\nWeak sound is the first mistake that makes viewers leave.", clipsDir: clips, projectDir: project, editorDocs: "/docs", voiceover: true,
+    speak: { label: "t", speak: async () => Buffer.from("mp3") }, transcribeFootage: async () => opts.transcript,
+    run: async r => {
+      if (r.command === "ffprobe") return { stdout: r.args.at(-1)!.includes("Shot 02") ? "10" : "4", stderr: "" };
+      if (r.command === "ffmpeg") return { stdout: "", stderr: opts.volume ?? "" };
+      return { stdout: "done", stderr: "" };
+    } });
+  return result;
+}
+
+test("a filmed beat with no speech (colour bars and a tone) keeps its voiceover over the clip and takes the voiceover's length", async () => {
+  const r = await filmedBeatRun({ transcript: [] });
+  assert.match(r.brief, /\[filmed footage for this beat: Shot 02 take 1\.mp4\]  \[this clip has no speech matching the line: mute its own audio and keep this beat's voiceover/);
+  assert.match(r.brief, /\(voiceover: voice-02\.mp3, place at 4\.35s\)/);
+  assert.doesNotMatch(r.brief, /\[its own sound is the narration/);
+});
+
+test("a filmed beat whose speech matches the line uses its own sound, drops the voice file and takes the clip's length", async () => {
+  const r = await filmedBeatRun({ transcript: [{ start: 0, end: 4, text: "Weak sound is the first mistake that makes viewers leave" }] });
+  assert.match(r.brief, /\[its own sound is the narration: no voiceover file for this beat\]/);
+  assert.doesNotMatch(r.brief, /voice-02\.mp3/);
+});
+
+test("without a transcript the ffmpeg volume check decides: a steady tone keeps the voiceover, speech-like sound does not", async () => {
+  const tone = await filmedBeatRun({ transcript: null, volume: "mean_volume: -20.1 dB\nmax_volume: -17.0 dB" });
+  assert.match(tone.brief, /\[this clip has no speech matching the line/);
+  const speech = await filmedBeatRun({ transcript: null, volume: "mean_volume: -27.0 dB\nmax_volume: -8.0 dB" });
+  assert.match(speech.brief, /\[its own sound is the narration/);
+});
+
+test("the filmed clip replaces only its own beat's picture", async () => {
+  const r = await filmedBeatRun({ transcript: [] });
+  assert.match(r.brief, /1\. "Hello there\."[^\n]*\(voiceover: voice-01\.mp3/);
+  assert.doesNotMatch(r.brief.split("\n").find(l => l.startsWith("1. "))!, /filmed footage/);
+  assert.match(r.brief, /for that beat only \(it replaces the placeholder or storyboard frame of its own beat/);
 });

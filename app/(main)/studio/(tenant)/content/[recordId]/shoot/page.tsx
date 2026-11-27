@@ -11,6 +11,8 @@ import { pickHostedSound, soundSourceLabel } from "@/lib/studio/voices/sound-pro
 import { resolveSource, type GenerationSources } from "@/lib/studio/voices/sources";
 import { parseScript } from "@/lib/studio/video-assembly/script";
 import { jobStepper } from "@/lib/studio/workspace/stepper";
+import { getShotSoundStates } from "@/lib/studio/shoot/shot-sound-server";
+import { currentShotFiles } from "@/lib/studio/shoot/shots";
 import { ShootBoard } from "../../../../_components/shoot/shoot-board";
 
 export const dynamic = "force-dynamic";
@@ -30,8 +32,11 @@ export default async function StudioShootPage({ params }: { params: Promise<{ re
   const steps = jobStepper({ narration: assembly.narration, assembly: assembly.view });
   const busy = Boolean(loop?.busy) || steps?.some(s => s.state === "active") === true;
   const files = uploads.filter(u => u.status === "uploaded" && u.content_type.startsWith("video/")).map(u => ({ id: u.id, name: u.original_filename, byteSize: Number(u.byte_size) }));
+  const beats = parseScript(script);
+  const lineOf = new Map(beats.flatMap(b => { const f = currentShotFiles(files).get(b.index); return f ? [[f.id, b.narration] as [string, string]] : []; }));
+  const soundStates = await getShotSoundStates(locationId, [...lineOf.keys()].map(id => ({ id })), lineOf);
   return (
-    <ShootBoard locationId={locationId} recordId={recordId} title={record.title} beats={parseScript(script)} files={files} archived={record.archived} busy={busy}
+    <ShootBoard locationId={locationId} recordId={recordId} title={record.title} beats={beats} files={files} soundStates={soundStates} archived={record.archived} busy={busy}
       statusLine={videoAssemblyStatusLine(assembly.view, assembly.macOnline, assembly.narration)} hasVideo={Boolean(loop?.versions.length)}
       makeProps={{ voices, availability, soundSources: { music: soundLine("music"), effects: soundLine("effects") }, motion, modelPrefs }} />
   );

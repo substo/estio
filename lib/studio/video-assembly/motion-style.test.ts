@@ -73,40 +73,29 @@ test("the brief requires voice files on unfilmed beats and a pre-export track ch
   assert.match(brief, /Before exporting[\s\S]*music bed is on the Music track/);
 });
 
-import { MOTION_PREVIEW_IDS, PLAIN_BACKGROUNDS, buildMotionPassBrief, plainPreviewStep, previewOf } from "./motion-style";
+import { buildMotionPassBrief } from "./motion-style";
 import { buildEditBrief } from "./brief";
 
-test("the plain preview defaults to dark grey, is read defensively, and round trips through the form", () => {
-  assert.equal(previewOf(DEFAULT_MOTION_CHOICE), "dark");
-  assert.deepEqual(readMotionChoice({ style: "clean", preview: "neon" }), { style: "clean" });
-  assert.equal(readMotionChoice({ style: "clean", preview: "light" }).preview, "light");
-  const form = new FormData(); form.set("motionStyle", "data"); form.set("motionPreview", "off");
-  assert.equal(readMotionChoiceFromForm(form).preview, "off");
-  assert.deepEqual([...MOTION_PREVIEW_IDS], ["dark", "light", "off"]);
-});
-
-test("the agent checks graphics on the plain backdrop first, then over footage, and never bakes the backdrop in", () => {
+test("graphics are designed once over the storyboard frame and checked once on composed frames, with no plain-background pass", () => {
   const step = motionBriefStep({ style: "data" }, "landscape");
-  assert.match(step, /Plain-background check FIRST/);
-  assert.match(step, /--background dark/);
-  assert.ok(step.indexOf("Plain-background check FIRST") < step.indexOf("Check, then one critique round"));
-  assert.match(step, /stays transparent and goes over the footage/);
-  assert.match(plainPreviewStep({ style: "clean", preview: "light" }), new RegExp(`--background light.*${PLAIN_BACKGROUNDS.light}`));
-  assert.doesNotMatch(plainPreviewStep({ style: "clean", preview: "off" }), /--background/);
-  assert.match(plainPreviewStep({ style: "clean", preview: "off" }), /over the footage only/);
+  assert.doesNotMatch(step, /Plain-background|--background|plain backdrop/i);
+  assert.match(step, /Check, then one critique round/);
+  assert.match(step, /judge the composed video frame/);
+  assert.deepEqual(readMotionChoice({ style: "clean", preview: "light" }), { style: "clean" });
 });
 
-test("a separate motion pass defers graphics in the cut and carries the same plain-first check", () => {
+test("a separate motion pass defers graphics in the cut and has no plain-background pass", () => {
   const cut = motionBriefStep({ style: "clean" }, "landscape", true, true);
   assert.match(cut, /separate pass/);
   assert.doesNotMatch(cut, /--background/);
   const pass = buildMotionPassBrief({ editorDocs: "/docs", projectFile: "Video.substo", choice: { style: "kinetic" }, orientation: "landscape", script: "1. Hello" });
-  assert.match(pass, /Plain-background check FIRST/);
+  assert.doesNotMatch(pass, /Plain-background/);
   assert.match(pass, /Change only graphics, never the cut/);
   assert.match(pass, /substo export --preset youtube1080/);
 });
 
-test("a revision brief asks for the plain check only for graphics it changed", () => {
-  const brief = buildEditBrief({ editorDocs: "/docs", projectFile: "Video.substo", instruction: "bigger title", history: [], orientation: "landscape", motion: { style: "clean", preview: "dark" } });
-  assert.match(brief, /For any custom graphic you changed or added: Plain-background check FIRST/);
+test("a revision brief checks changed graphics on the composed frame only", () => {
+  const brief = buildEditBrief({ editorDocs: "/docs", projectFile: "Video.substo", instruction: "bigger title", history: [], orientation: "landscape", motion: { style: "clean" } });
+  assert.doesNotMatch(brief, /Plain-background|--background/);
+  assert.match(brief, /For any custom graphic you changed or added: Look at the composed result/);
 });
