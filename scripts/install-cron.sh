@@ -36,6 +36,22 @@ if [ "${1:-}" = "--disk-maintenance-only" ]; then
     exit
 fi
 
+# The Studio bin purge entry, installed alone. The guarded deploy (deploy-local-build.sh) runs this on every release so the schedule can never be forgotten:
+# it replaces only that one entry by name, leaves every other crontab line untouched, and points at the live symlink so a blue/green switch keeps working.
+install_studio_bin_purge() {
+    local live_scripts="${SCRIPT_DIR}"
+    case "${SCRIPT_DIR}" in /home/martin/estio-app-blue/scripts|/home/martin/estio-app-green/scripts) live_scripts="/home/martin/estio-app/scripts" ;; esac
+    chmod +x "${SCRIPT_DIR}/run-cron-endpoint.sh"
+    # Studio Bin: permanently removes items binned more than 30 days ago (R2 files first, then rows). Nightly at 03:30.
+    (crontab -l 2>/dev/null | grep -v -E "run-cron-endpoint\.sh studio-bin-purge|api/cron/studio-bin-purge"; echo "30 3 * * * ${live_scripts}/run-cron-endpoint.sh studio-bin-purge 280") | crontab -
+    crontab -l | grep -E "run-cron-endpoint\.sh studio-bin-purge"
+}
+
+if [ "${1:-}" = "--studio-bin-purge-only" ]; then
+    install_studio_bin_purge
+    exit
+fi
+
 echo "📅 Installing Estio Cron Jobs..."
 
 # Make scripts executable

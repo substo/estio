@@ -6,6 +6,9 @@
 set -eo pipefail
 
 SERVER="root@138.199.214.117"
+# Optional: run one Studio cron job once on the server after cutover (inside the lease) and print its log.
+DEPLOY_CRON_RUN_ONCE="${DEPLOY_CRON_RUN_ONCE:-}"
+[[ "$DEPLOY_CRON_RUN_ONCE" =~ ^(|studio-bin-purge|studio-schedules)$ ]] || { echo "DEPLOY_CRON_RUN_ONCE must be studio-bin-purge or studio-schedules" >&2; exit 2; }
 BASE_DIR="/home/martin"
 SYMLINK_NAME="estio-app"
 SYMLINK_PATH="$BASE_DIR/$SYMLINK_NAME"
@@ -530,6 +533,7 @@ ssh $SSH_OPTS $SERVER bash << ENDSSH
     DEPLOY_TOKEN="$DEPLOY_TOKEN"
     DEPLOY_STATE_DIR="$DEPLOY_STATE_DIR"
     CURRENT_DEPLOY_TOKEN_FILE="$CURRENT_DEPLOY_TOKEN_FILE"
+    CRON_RUN_ONCE="$DEPLOY_CRON_RUN_ONCE"
 
     mkdir -p "\$DEPLOY_STATE_DIR"
 
@@ -1280,6 +1284,16 @@ DRAIN_EOF
                 echo "🧹 Removed old process immediately: \$ACTIVE_APP_NAME"
             fi
         fi
+    fi
+
+    # Studio schedules are part of the release: the guarded deploy installs/refreshes only the Studio bin purge crontab entry (idempotent, other
+    # entries untouched). DEPLOY_CRON_RUN_ONCE=studio-bin-purge|studio-schedules also runs that job once and prints its log, as the hand-run check.
+    echo "📅 Ensuring the Studio bin purge cron entry..."
+    bash "\$SYMLINK_PATH/scripts/install-cron.sh" --studio-bin-purge-only || record_post_cutover_failure "Studio bin purge cron entry could not be installed"
+    if [ -n "\$CRON_RUN_ONCE" ]; then
+        echo "▶️  Running \$CRON_RUN_ONCE once"
+        bash "\$SYMLINK_PATH/scripts/run-cron-endpoint.sh" "\$CRON_RUN_ONCE" 280 || record_post_cutover_failure "\$CRON_RUN_ONCE manual run failed"
+        tail -n 6 "\$SYMLINK_PATH/logs/\$CRON_RUN_ONCE-cron.log" || true
     fi
 
     pm2 save

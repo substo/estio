@@ -22,6 +22,10 @@ LOG_FILE="${LOG_DIR}/${JOB_NAME}-cron.log"
 LOCK_FILE="/tmp/${JOB_NAME}-cron.lock"
 APP_URL="${APP_BASE_URL:-https://estio.co}"
 CRON_SECRET="${CRON_SECRET:-}"
+# A crontab that does not carry the secret reads it from the app's own .env (the same value the route checks); it is never logged.
+if [ -z "${CRON_SECRET}" ] && [ -f "${SCRIPT_DIR}/../.env" ]; then
+    CRON_SECRET="$(grep -E '^CRON_SECRET=' "${SCRIPT_DIR}/../.env" | tail -n1 | sed -E 's/^[^=]+=//' | tr -d "'\"" | tr -d '[:space:]' || true)"
+fi
 
 mkdir -p "${LOG_DIR}"
 
