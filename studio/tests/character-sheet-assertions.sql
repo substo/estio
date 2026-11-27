@@ -88,7 +88,7 @@ end $$;
 -- Storyboard previews: the same job kind, one picture per beat, per piece, only for the person who asked.
 do $$
 declare w text:='cc000000-0000-4000-8000-0000000000b1'; d uuid; rec uuid:=gen_random_uuid(); h1 text:=repeat('a',64); r jsonb; j uuid; j2 uuid; c jsonb; tok uuid; s jsonb;
- beats jsonb:=jsonb_build_array(jsonb_build_object('n',1,'prompt','A wide shot of the desk','h',repeat('1',64)),jsonb_build_object('n',2,'prompt','A close-up while speaking','h',repeat('2',64)));
+ beats jsonb:=jsonb_build_array(jsonb_build_object('n',1,'prompt','A wide shot of the desk','h',repeat('1',64),'person',false),jsonb_build_object('n',2,'prompt','A close-up while speaking','h',repeat('2',64),'person',true));
 begin
  select id into d from studio.studio_devices where location_id=w and revoked_at is null limit 1;
  update studio.studio_devices set processing_enabled=true,paused=false where id=d;
@@ -98,12 +98,14 @@ begin
  -- bad input is refused
  if not pg_temp.fails(format('select studio.studio_request_storyboard(%L,%L,%L,%L,%L::jsonb,false)',w,'substo','cs-owner',rec,'[]'),'SB001') then raise exception 'Empty storyboard accepted'; end if;
  if not pg_temp.fails(format('select studio.studio_request_storyboard(%L,%L,%L,%L,%L::jsonb,false)',w,'substo','cs-owner',rec,'[{"n":99,"prompt":"x","h":"'||repeat('1',64)||'"}]'),'SB001') then raise exception 'Beat 99 accepted'; end if;
+ if not pg_temp.fails(format('select studio.studio_request_storyboard(%L,%L,%L,%L,%L::jsonb,false)',w,'substo','cs-owner',rec,'[{"n":1,"prompt":"x","h":"'||repeat('1',64)||'","person":"no"}]'),'SB001') then raise exception 'Non-boolean person accepted'; end if;
+ if not pg_temp.fails(format('select studio.studio_request_storyboard(%L,%L,%L,%L,%L::jsonb,false)',w,'substo','cs-owner',rec,'[{"n":1,"prompt":"x","h":"'||repeat('1',64)||'","person":false,"extra":1}]'),'SB001') then raise exception 'Unexpected storyboard key accepted'; end if;
  if not pg_temp.fails(format('select studio.studio_request_storyboard(%L,%L,%L,%L,%L::jsonb,false)',w,'substo','cs-owner',gen_random_uuid(),beats::text),'SB002') then raise exception 'Unknown piece accepted'; end if;
  -- ask, reuse, claim
  r:=studio.studio_request_storyboard(w,'substo','cs-owner',rec,beats,false); j:=(r->>'jobId')::uuid;
  if r->>'status'<>'queued' or (studio.studio_request_storyboard(w,'substo','cs-owner',rec,beats,false)->>'jobId')::uuid<>j then raise exception 'Not queued or reused'; end if;
  c:=pg_temp.cmd(h1,'claim',jsonb_build_object('workerId','mac','leaseSeconds',120,'sheetReady',true,'limit',1)); tok:=(c->0->>'lease_token')::uuid;
- if c->0->'payload'->>'sheet'<>'storyboard' then raise exception 'Not claimed: %',c; end if;
+ if c->0->'payload'->>'sheet'<>'storyboard' or (c#>>'{0,payload,beats,0,person}')::boolean then raise exception 'Not claimed with person decision: %',c; end if;
  -- results: only frame-N.png, 1 to 6, for this kind; sheet names are refused for a storyboard
  if not pg_temp.fails(format('select pg_temp.cmd(%L,%L,%L::jsonb)',h1,'complete',jsonb_build_object('workerId','mac','jobId',j,'leaseToken',tok,'result',jsonb_build_object('sheet','storyboard','files',jsonb_build_array('sheet-1.png')))::text),'22023') then raise exception 'Sheet name accepted for a storyboard'; end if;
  if not pg_temp.fails(format('select pg_temp.cmd(%L,%L,%L::jsonb)',h1,'complete',jsonb_build_object('workerId','mac','jobId',j,'leaseToken',tok,'result',jsonb_build_object('sheet','storyboard','files',jsonb_build_array('frame-0.png')))::text),'22023') then raise exception 'Frame 0 accepted'; end if;

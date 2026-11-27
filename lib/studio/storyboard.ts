@@ -7,7 +7,7 @@ import { StudioCommandError } from "./command-error";
 import { getStudioContentRecord } from "./content";
 import { StudioDbError } from "./db";
 import { renderShot } from "./images/prompts";
-import { shotForBeat } from "./images/storyboard";
+import { shotForBeat, storyboardBeatNeedsPerson } from "./images/storyboard";
 import { createStudioR2Store, readStudioR2Config } from "./media-r2";
 import { studioDb } from "./studio-db";
 import { parseScript, type Beat } from "./video-assembly/script";
@@ -36,7 +36,7 @@ export async function requestStoryboard(locationId: string, recordId: string, po
   const beats = parseScript(script).slice(0, STORYBOARD_MAX).filter(b => !chosen || chosen.has(b.index));
   if (!beats.length) throw new StudioCommandError(chosen ? "Choose at least one beat to draw." : "Save a script first, then draw the storyboard.");
   const wide = portrait ? "vertical 9:16 portrait" : "wide 16:9 landscape";
-  const payload = beats.map(b => ({ n: b.index, h: beatHash(b),
+  const payload = beats.map(b => ({ n: b.index, h: beatHash(b), person: storyboardBeatNeedsPerson(b.direction),
     prompt: `${renderShot(shotForBeat(b, portrait), "edit", { acceptsText: false }).prompt} Compose it as a ${wide} image that fills the whole frame.`.slice(0, 1500) }));
   try {
     const r = await studioDb.call<{ jobId: string; reused: boolean }>("studio_request_storyboard", { ...identity(access), p_record_id: recordId, p_beats: payload, p_portrait: portrait });

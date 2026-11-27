@@ -63,8 +63,8 @@ test("a cancelled job stops the work", async () => {
   await assert.rejects(s.handler(job() as never, { signal: controller.signal, workerId: "mac" }));
 });
 
-test("a storyboard draws one picture per beat from the photos and sheets, uploads each, and a beat that fails costs only that picture", async () => {
-  const beats = [{ n: 1, prompt: "A wide shot of the desk." }, { n: 2, prompt: "A close-up while speaking." }, { n: 3, prompt: "Walking to the door." }];
+test("a storyboard draws one picture per beat from the right references, uploads each, and a beat that fails costs only that picture", async () => {
+  const beats = [{ n: 1, prompt: "A wide shot of the desk.", person: true }, { n: 2, prompt: "A close-up of the interface.", person: false }, { n: 3, prompt: "Walking to the door.", person: true }];
   const uploads = beats.map(b => ({ name: `frame-${b.n}.png`, url: `https://r2.example/up${b.n}` }));
   const payload = { sheet: "storyboard", profile: undefined, beats, uploads, characterSheets: [{ name: "character-turnaround.png", url: "https://r2.example/t" }] };
   const ok = setup();
@@ -74,10 +74,10 @@ test("a storyboard draws one picture per beat from the photos and sheets, upload
   assert.match(ok.drawn[0].references[0], /character-turnaround\.png$/);   // the first picture: sheets first, then the photos
   assert.equal(ok.drawn[0].references.length, 3);
   assert.match(ok.drawn[0].intro ?? "", /reference sheets/);
-  // later pictures get the earlier ones as scene references, so the room and lighting stay the same
-  assert.match(ok.drawn[1].references[0], /frame-1\.png$/); assert.equal(ok.drawn[1].references.length, 4);
-  assert.match(ok.drawn[1].intro ?? "", /same room, set, background, lighting/);
-  assert.match(ok.drawn[2].references[0], /frame-1\.png$/); assert.match(ok.drawn[2].references[1], /frame-2\.png$/); assert.equal(ok.drawn[2].references.length, 5);
+  // Object/UI-only beats get no creator references. Later presenter beats reuse only compatible presenter shots.
+  assert.deepEqual(ok.drawn[1].references, []); assert.match(ok.drawn[1].intro ?? "", /no person, presenter, face or hands/);
+  assert.match(ok.drawn[2].references[0], /frame-1\.png$/); assert.equal(ok.drawn[2].references.length, 4);
+  assert.doesNotMatch(ok.drawn[2].references.join(" "), /frame-2\.png/);
   assert.deepEqual(ok.puts.map(p => p.url), ["https://r2.example/up1", "https://r2.example/up2", "https://r2.example/up3"]);
   // beat 2 fails: the others still land
   let n = 0;
@@ -88,6 +88,13 @@ test("a storyboard draws one picture per beat from the photos and sheets, upload
   assert.equal(none.code, "storyboard_failed");
   assert.deepEqual(await setup().handler(job({ ...payload, uploads: [uploads[0]] }) as never, ctx()), { sheet: "storyboard", files: ["frame-1.png"] });
   assert.equal(((await setup().handler(job({ ...payload, characterSheets: [{ name: "../x.png", url: "https://r2.example/x" }] }) as never, ctx()).catch(e => e)) as StudioJobError).code, "invalid_job_payload");
+});
+
+test("an all-object storyboard needs no creator photos", async () => {
+  const payload = { sheet: "storyboard", photos: [], beats: [{ n: 1, prompt: "Full-frame dark phone UI.", person: false }], uploads: [{ name: "frame-1.png", url: "https://r2.example/up1" }] };
+  const s = setup();
+  assert.deepEqual(await s.handler(job(payload) as never, ctx()), { sheet: "storyboard", files: ["frame-1.png"] });
+  assert.deepEqual(s.gets, []); assert.deepEqual(s.drawn[0].references, []); assert.match(s.drawn[0].intro ?? "", /only the requested object or interface/);
 });
 
 test("a transcript job reads the video through its private link, transcribes it on this Mac without Codex or photos, and uploads only the timed lines", async () => {

@@ -17,6 +17,8 @@ export interface ShotSpec {
   subject: string;
   /** The locked description of the person, identical in every frame ("the man in the reference photo, short dark hair, grey hoodie"). */
   character?: string;
+  /** The shot is intentionally object/UI-only. Reference photos must not introduce a person. */
+  noCharacter?: boolean;
   setting: string; time?: string;
   /** Concrete light: "soft window light from camera-left", "single tungsten key", "golden-hour backlight". */
   lighting?: string;
@@ -76,9 +78,19 @@ export function renderShot(shot: ShotSpec, dialect: PromptDialect, options: { ac
 
   if (dialect === "edit" && shot.graphic) {
     const look = "Dark minimal phone and app screens, one accent colour, rounded UI elements, clean flat vector style, the same look in every frame.";
-    return { prompt: [cap(`Draw a flat motion-graphic frame, not a photograph: ${f.subject}.`), look, "Do not show any person, face or hand, and ignore the person in the reference image.", "No text except a few short UI labels."].join(" "), aspect: shot.aspect, notes };
+    const people = shot.noCharacter ? "Do not show any person, presenter, face or hand." : "Do not show any person, face or hand, and ignore the person in the reference image.";
+    return { prompt: [cap(`Draw a flat motion-graphic frame, not a photograph: ${f.subject}.`), look, people, "No text except a few short UI labels."].join(" "), aspect: shot.aspect, notes };
   }
   if (dialect === "edit") {
+    if (shot.noCharacter) {
+      const scene = `Create ${f.subject} as a ${shotPhrase(shot)}, ${f.setting}${f.time ? `, ${f.time}` : ""}.`;
+      const look = [sentence(f.lighting), f.lens ? sentence(`Shot on ${f.lens}`) : "", sentence(f.texture), sentence(f.palette)].filter(Boolean).join(" ");
+      const cont = f.continuity ? sentence(`Match the previous frame: ${f.continuity}`) : "";
+      const remainingAvoid = avoid.filter(item => !/^(people|presenter)$/i.test(item));
+      const no = sentence(`No people, no presenter${remainingAvoid.length ? `, no ${remainingAvoid.join(", no ")}` : ""}`);
+      const withText = options.acceptsText !== false && texts.length ? sentence(`Include ${texts.join(" and ")}`) : "";
+      return { prompt: [cap(scene), look, cont, withText, no].filter(Boolean).join(" "), aspect: shot.aspect, notes };
+    }
     // An instruction to an editing model: name the person by description (never "she/he"), say what to keep, then describe the new frame.
     const who = f.character || "the person in the reference image";
     const keep = `Keep ${who}'s face, hairstyle and clothing exactly the same as in the reference image.`;

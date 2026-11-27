@@ -17,7 +17,7 @@ const payload = z.object({
   media: z.object({ url: z.string().url().max(4000) }).optional(),
   profile: z.object({ aspects: z.array(z.object({ key: z.string().max(40), value: z.string().max(200), locked: z.boolean() })).max(12), notes: z.string().max(400).optional() }).passthrough().optional(),
   /** Storyboard only: one picture per script beat, each with the scene text to draw. */
-  beats: z.array(z.object({ n: z.number().int().min(1).max(40), prompt: z.string().min(1).max(1500) }).passthrough()).min(1).max(40).optional(),
+  beats: z.array(z.object({ n: z.number().int().min(1).max(40), prompt: z.string().min(1).max(1500), person: z.boolean().default(true) }).passthrough()).min(1).max(40).optional(),
   /** Storyboard only, added at claim time: the creator's latest turnaround and face sheets, when they have them. */
   characterSheets: z.array(z.object({ name: z.string().regex(/^character-(turnaround|face)\.png$/), url: z.string().url().max(4000) })).max(2).optional(),
   /** Added at claim time: short-lived private links to this person's own photos (the face first) and one upload link per picture. */
@@ -48,6 +48,8 @@ export interface CharacterSheetDeps {
 }
 const SHEETS_INTRO = "Use $imagegen to create one new image. The attached images are reference sheets and photos of the same person: keep exactly their face, hair, build and clothing in the new scene.";
 const SCENE_INTRO = "Use $imagegen to create one new image. The first attached image or images are earlier shots of this same video: keep exactly the same room, set, background, lighting, props and camera style, and the same person (the later attached sheets and photos show the face). Change only what this shot asks for: the framing, the pose or what is on screen.";
+const OBJECT_SCENE_INTRO = "Use $imagegen to create one new image. The attached images are earlier object or interface shots from this same video: keep exactly the same palette, materials, lighting and visual style. This shot contains no person, presenter, face or hands.";
+const OBJECT_INTRO = "Use $imagegen to create one new image. Draw only the requested object or interface scene. It contains no person, presenter, face or hands.";
 const INTRO = "Use $imagegen to create one new image. The attached photos show the person: use them as the only source for the face, hairstyle and skin tone.";
 
 /** studio.character_sheet: one reference sheet from the creator's own photos, drawn by Codex on this Mac with their ChatGPT login (included in the subscription), uploaded through a private link, reported by file name only. */
@@ -66,18 +68,20 @@ export function createCharacterSheetHandler(deps: CharacterSheetDeps): StudioJob
       catch (error) { if (signal.aborted) throw error; }
     }
     const files: string[] = [];
-    const drawn: string[] = [];   // pictures already drawn for this video, kept as scene references so the set stays the same
+    const drawn: Array<{ file: string; person: boolean }> = [];   // earlier compatible shots keep each visual world consistent
     for (const beat of p.beats ?? []) {
       const name = `frame-${beat.n}.png`, target = p.uploads.find(u => u.name === name);
       if (!target) continue;
       const out = join(dir, name);
       // The first picture and the latest one set the scene; at most six images go to the model (scene, then sheets, then photos).
-      const scene = drawn.length > 1 ? [drawn[0], drawn[drawn.length - 1]] : drawn.slice(0, 1);
-      const rest = [...sheets, ...photos].slice(0, 6 - scene.length);
-      const ok = await deps.draw({ prompt: beat.prompt, references: [...scene, ...rest], out, signal, intro: scene.length ? SCENE_INTRO : sheets.length ? SHEETS_INTRO : INTRO }).catch(error => { if (signal.aborted) throw error; return false; });
+      const compatible = drawn.filter(frame => frame.person === beat.person).map(frame => frame.file);
+      const scene = compatible.length > 1 ? [compatible[0], compatible[compatible.length - 1]] : compatible.slice(0, 1);
+      const rest = beat.person ? [...sheets, ...photos].slice(0, 6 - scene.length) : [];
+      const intro = beat.person ? (scene.length ? SCENE_INTRO : sheets.length ? SHEETS_INTRO : INTRO) : (scene.length ? OBJECT_SCENE_INTRO : OBJECT_INTRO);
+      const ok = await deps.draw({ prompt: beat.prompt, references: [...scene, ...rest], out, signal, intro }).catch(error => { if (signal.aborted) throw error; return false; });
       if (!ok) continue;
       const bytes = await readFile(out);
-      if (bytes.length <= MAX_SHEET && await put(target.url, bytes, signal)) { files.push(name); drawn.push(out); }
+      if (bytes.length <= MAX_SHEET && await put(target.url, bytes, signal)) { files.push(name); drawn.push({ file: out, person: beat.person }); }
     }
     if (!files.length) throw new StudioJobError("storyboard_failed", "The Mac could not draw the storyboard. Try again.", false);
     return { sheet: "storyboard", files };
@@ -106,7 +110,8 @@ export function createCharacterSheetHandler(deps: CharacterSheetDeps): StudioJob
   return async (job, context) => {
     const parsed = payload.safeParse(job.payload);
     if (!parsed.success) throw new StudioJobError("invalid_job_payload", "This sheet request is invalid.", false);
-    if (parsed.data.sheet !== "transcript" && !parsed.data.photos.length) throw new StudioJobError("invalid_job_payload", "This sheet request is invalid.", false);
+    if (parsed.data.sheet !== "transcript" && parsed.data.sheet !== "storyboard" && !parsed.data.photos.length) throw new StudioJobError("invalid_job_payload", "This sheet request is invalid.", false);
+    if (parsed.data.sheet === "storyboard" && parsed.data.beats?.some(beat => beat.person) && !parsed.data.photos.length) throw new StudioJobError("invalid_job_payload", "This sheet request is invalid.", false);
     if (!deps.enabled()) throw new StudioJobError("local_policy", "Turn on Mac processing in Setup and keep it On.", true, 300);
     if (parsed.data.sheet === "transcript") {
       const dir = await mkdtemp(join(deps.workRoot ?? tmpdir(), "studio-transcript-"));
@@ -120,7 +125,7 @@ export function createCharacterSheetHandler(deps: CharacterSheetDeps): StudioJob
         try { const file = join(dir, photo.name); await writeFile(file, await getBytes(photo.url, fetcher, context.signal, MAX_PHOTO), { mode: 0o600 }); references.push(file); }
         catch (error) { if (context.signal.aborted) throw error; }
       }
-      if (!references.length) throw new StudioJobError("photos_unavailable", "The Mac could not download your photos. Try again.", false);
+      if (!references.length && p.sheet !== "storyboard") throw new StudioJobError("photos_unavailable", "The Mac could not download your photos. Try again.", false);
       if (p.sheet === "storyboard") return await drawStoryboard(p, references, dir, context.signal);
       if (!p.profile) throw new StudioJobError("invalid_job_payload", "This sheet request is invalid.", false);
       const out = join(dir, "sheet-1.png");

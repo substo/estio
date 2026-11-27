@@ -1,16 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderShot } from "./prompts";
-import { STORYBOARD_CHARACTER, shotForBeat } from "./storyboard";
+import { STORYBOARD_CHARACTER, shotForBeat, storyboardBeatNeedsPerson } from "./storyboard";
 
 test("a beat's own visual note is its scene; without one the creator speaks the line", () => {
   const withNote = shotForBeat({ index: 2, narration: "Freeze there.", direction: "Open overhead on a blank page" });
   assert.equal(withNote.subject, "Open overhead on a blank page");
+  assert.equal(withNote.noCharacter, true);
   const without = shotForBeat({ index: 3, narration: "Hey, today I am going to show you how to draw a straight line." });
   assert.match(without.subject, /^speaking to camera, mid-sentence, saying "Hey, today/);
+  assert.equal(without.character, STORYBOARD_CHARACTER);
 });
 
-test("every frame carries the same locked character and continuity; sizes rotate; portrait follows the canvas", () => {
+test("object and interface notes stay person-free while explicit presenter notes keep the creator", () => {
+  for (const note of ["Dark phone screen with four grey paragraphs", "JSON beside rendered choice chips", "A locked component row lights up"]) {
+    assert.equal(storyboardBeatNeedsPerson(note), false);
+    const shot = shotForBeat({ index: 1, narration: "x", direction: note });
+    assert.equal(shot.character, undefined); assert.equal(shot.noCharacter, true);
+    const prompt = renderShot(shot, "edit", { acceptsText: false }).prompt;
+    assert.match(prompt, /[Nn]o(?:t show)? any? ?person|No people/); assert.match(prompt, /presenter/); assert.doesNotMatch(prompt, /reference photo|reference image/);
+  }
+  assert.equal(storyboardBeatNeedsPerson("Medium shot of the presenter seated at a desk"), true);
+  assert.equal(shotForBeat({ index: 1, narration: "x", direction: "I am standing beside the screen" }).character, STORYBOARD_CHARACTER);
+});
+
+test("spoken frames carry the locked character and continuity; sizes rotate; portrait follows the canvas", () => {
   const shots = [1, 2, 3, 4, 5].map(i => shotForBeat({ index: i, narration: "x" }));
   assert.ok(shots.every(s => s.character === STORYBOARD_CHARACTER && /same clothing/.test(s.continuity ?? "")));
   assert.deepEqual(shots.slice(0, 4).map(s => s.size), ["medium", "wide", "close-up", "medium close-up"]);

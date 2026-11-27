@@ -63,7 +63,8 @@ test("storyboard frames are named on their beat lines and the agent is told to u
   assert.match(withFrames, /1\. "One\."  \[storyboard frame: storyboard-frame-1\.png\]/);
   assert.doesNotMatch(withFrames, /2\. "Two\."[^\n]*storyboard frame/);
   assert.match(withFrames, /place the frame file[\s\S]*instead of the plain photo/);
-  assert.match(withFrames, /FOOTAGE NEEDED caption small and in the lower third[\s\S]*never at the same time and place as a title or callout/);
+  assert.match(withFrames, /Do not add a FOOTAGE NEEDED label to an approved storyboard frame/);
+  assert.match(withFrames, /remaining FOOTAGE NEEDED caption small and in the lower third[\s\S]*never at the same time and place as a title or callout/);
   assert.doesNotMatch(buildBrief(base), /\[storyboard frame:/);
 });
 
