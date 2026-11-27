@@ -8,6 +8,8 @@ needs more than a preset.
 ## The loop
 
 1. **Write** `./graphic-<n>.html` in the project folder (Write tool, relative path, `graphic-*.html` only).
+   First make a static end-state storyboard: write down every exact label, its bounding box and the region the graphic occupies. If
+   labels cannot fit without intersecting, reveal the items sequentially instead of shrinking or overlapping them.
 2. **Look** at the proof moments: the starting state, the signature motion (the middle of the main move) and the final frame, plus anything the style promises. `substo graphic frame graphic-<n>.html --at <seconds> -o graphic-<n>-a.png --size 1920x1080`, then view the image.
    Check the first, middle and last moment. Fix and look again until each frame is right. Repair the graphic in place: never lengthen, shorten or re-time it just to hide a defect.
 3. **Render**: `substo graphic render graphic-<n>.html --duration <s> --size 1920x1080` writes `graphic-<n>.mov`, ProRes 4444
@@ -24,13 +26,16 @@ needs more than a preset.
   alone. No CSS transitions or animations, no `setTimeout`/`setInterval`/`requestAnimationFrame` loops, no unseeded
   `Math.random` (seed your own), no `Date.now()`. Easing and springs are closed-form (below). `seek` may be async.
 - **Transparent**: no background on `html` or `body`. Only the elements you draw are visible. The clip lays over the video.
+  Transparency provides no contrast: near-black text needs an opaque light card; otherwise use white with an opaque dark backing
+  or stroke. Check that decision on the composed video frame, not only the isolated graphic.
 - **Avoid top-level names the window already owns** (`top`, `name`, `parent`, `length`, `status`, `event`): a `const` with one of those names rejects the whole script and `seek` is never defined.
 - **Self-contained**: inline SVG, CSS and canvas, system fonts, or files in the project folder. The network is blocked.
 - **Scale from the frame**: `const W = innerWidth, H = innerHeight, u = Math.min(W, H) / 1080;` and size everything in `u`, so the
   same file works at 1920x1080 and 1080x1920.
 - **Never on top of other text.** Before placing, run `substo timeline` and note every title, placeholder and caption that is on screen during the graphic's span. Put the graphic in a region none of them use (design it for that corner or band, not the middle), or move or shorten the other text, or ask for the graphic's moment to change. After placing, view the composed frame (`substo frame <time>`): overlapping text is a defect to fix, not to ship. A translucent card does not make it acceptable.
-- Text at least `48 * u` tall, inside safe margins (about 5%; portrait: 150 px top and 170 px bottom for platform UI), never over
-  the captions, a few words at a time. Use the numbers, names and words from the script exactly. **Never invent a figure.**
+- Text at least `48 * u` tall, inside safe margins (about 5%; portrait: 150 px top and 170 px bottom for platform UI), a few words
+  at a time. When captions exist, reserve the bottom 25% of the frame as a caption-only exclusion zone for every graphic. Use the
+  numbers, names and words from the script exactly. **Never invent a figure.**
 - **Banned** (the generic "AI look"): particle bursts, glows and lens flares, RGB split, camera shake, crossfades as the only
   transition, bouncy easing everywhere, dead time, a template look with no point of view. One entrance style per video.
 - End with a hold of at least 1 to 1.5 s so the idea can be read, then (optionally) a short exit.

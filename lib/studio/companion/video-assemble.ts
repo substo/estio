@@ -15,6 +15,7 @@ import { runNativeProcess, type ProcessRunner } from "./process";
 import { freeBytes, nextProjectFile, projectFolderName, type ProjectStore } from "./video-projects";
 import { parseScript } from "../video-assembly/script";
 import { readMotionChoice } from "../video-assembly/motion-style";
+import { probeOutputOrientation } from "../video-assembly/orientation";
 import { renderShot } from "../images/prompts";
 import { shotForBeat } from "../images/storyboard";
 import type { FrameDrawer } from "./codex-image";
@@ -188,12 +189,14 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
       await mkdir(clipsDir, { recursive: true });
       const used = new Set<string>();
       const footageNames = new Map<string, string>();
+      const footageFiles: string[] = [];
       for (const [i, item] of p.downloads.entries()) {
         let name = safeName(item.name, i); if (used.has(name)) name = `${i}-${name}`; used.add(name);
         if (item.uploadId) footageNames.set(item.uploadId.toLowerCase(), name);
-        try { await download(item.url, join(clipsDir, name), item.byteSize, context.signal, fetcher); }
+        try { await download(item.url, join(clipsDir, name), item.byteSize, context.signal, fetcher); footageFiles.push(join(clipsDir, name)); }
         catch (error) { if (context.signal.aborted) throw error; throw new StudioJobError("footage_download_failed", "The Mac could not download the footage. Make the video again.", false); }
       }
+      const orientation = await probeOutputOrientation(footageFiles, p.options.portrait, deps.run ?? runNativeProcess);
       const sounds: { music?: string; sfx?: string } = {};
       for (const item of p.soundDownloads) {
         const name = item.role === "music" ? "music-bed.mp3" : "whoosh.mp3";
@@ -228,9 +231,9 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
           let pictures = 0;
           for (const beat of parseScript(p.script).slice(0, p.storyboardFrames!.max)) {
             const name = `storyboard-frame-${beat.index}.png`;
-            const shot = renderShot(shotForBeat(beat, p.options.portrait), "edit", { acceptsText: false });
+            const shot = renderShot(shotForBeat(beat, orientation === "portrait"), "edit", { acceptsText: false });
             // The model ignores a separate aspect field, so the shape is part of the prompt: frames fill the video instead of leaving bars.
-            const prompt = `${shot.prompt} Compose it as a ${p.options.portrait ? "vertical 9:16 portrait" : "wide 16:9 landscape"} image that fills the whole frame.`;
+            const prompt = `${shot.prompt} Compose it as a ${orientation === "portrait" ? "vertical 9:16 portrait" : "wide 16:9 landscape"} image that fills the whole frame.`;
             const ok = await deps.drawFrame!({ prompt, references: [...sheetFiles, join(clipsDir, avatar)], out: join(clipsDir, name), signal: context.signal, ...(sheetFiles.length ? { intro: SHEET_INTRO } : {}) }).catch(error => { if (context.signal.aborted) throw error; return false; });
             if (ok) { frames[beat.index] = name; pictures++; }
           }
@@ -263,7 +266,7 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
       observeCompanionStageDuration("prepare", Date.now() - preparationStarted);
       let result: AssembleResult;
       try {
-        result = await measureCompanionStage("assemble", () => deps.assemble({ transcribeFootage: deps.transcribeFootage, script: p.script, clipsDir, footageNames, projectDir, projectFile, editorDocs: deps.editorDocs, orientation: p.options.portrait ? "portrait" : "landscape", sounds, motion: readMotionChoice(p.motionStyle), ...(avatar ? { avatar } : {}), ...(frames.some(Boolean) ? { frames } : {}),
+        result = await measureCompanionStage("assemble", () => deps.assemble({ transcribeFootage: deps.transcribeFootage, script: p.script, clipsDir, footageNames, projectDir, projectFile, editorDocs: deps.editorDocs, orientation, sounds, motion: readMotionChoice(p.motionStyle), ...(avatar ? { avatar } : {}), ...(frames.some(Boolean) ? { frames } : {}),
           voiceover: p.options.voiceover, music: p.options.music, model: deps.model, signal: context.signal,
           voice: !p.options.voiceover ? undefined : p.voice?.engine === "local" ? { engine: "local", speaker: p.voice.speaker, model: p.voice.model, ...(reference ? { reference } : {}) } : p.voice?.engine === "hosted" ? { engine: "prerendered", files: narration } : undefined }));
       } catch (error) {

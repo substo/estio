@@ -18,6 +18,7 @@ import { readVideoAssemblyOptions } from "@/lib/studio/video-assembly-policy";
 import { readMotionChoiceFromForm } from "@/lib/studio/video-assembly/motion-style";
 import { setMotionChoice } from "@/lib/studio/voices/sources-store";
 import { readScriptTemplateSelection } from "@/lib/studio/script-template-policy";
+import { studioJobAction } from "@/lib/studio/jobs";
 
 export async function saveContentAction(
   locationId: string, recordId: string, version: number,
@@ -75,6 +76,17 @@ export async function stopVideoAction(locationId: string, recordId: string, _pre
   } catch (error) {
     if (error instanceof StudioCommandError) return { error: error.message };
     return { error: "Studio could not stop this. Try again." };
+  }
+}
+export async function retryVideoJobAction(locationId: string, recordId: string, jobId: string, _previous: { error?: string; notice?: string }): Promise<{ error?: string; notice?: string }> {
+  if (!await getStudioAccess(locationId)) notFound();
+  try {
+    await studioJobAction(locationId, jobId, "retry");
+    revalidatePath(`/studio/content/${recordId}`);
+    return { notice: "Sent back to your Mac." };
+  } catch (error) {
+    if (error instanceof StudioCommandError) return { error: error.message };
+    return { error: "Studio could not retry this job. Check that the paired Mac is active, then try again." };
   }
 }
 export async function openEditorAction(locationId: string, recordId: string, _previous: { error?: string; notice?: string }): Promise<{ error?: string; notice?: string }> {

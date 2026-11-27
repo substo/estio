@@ -56,7 +56,7 @@ export const videoLoopCodeReason: Record<string, VideoLoopReason> = {
 };
 export interface VideoVersion { id: string; name: string; bytes: number; createdAt: string; /** What the Mac's timeline looked like for this export; absent for older exports. */ timeline?: import("./workspace/timeline").TimelineSnapshot | null }
 export interface VideoThreadMessage { id: string; instruction: string; createdAt: string; status: VideoAssemblyJobStatus; reply: string | null }
-export interface VideoLoopState { projectKept: boolean; versions: VideoVersion[]; thread: VideoThreadMessage[]; openEditor: { jobId: string; status: VideoAssemblyJobStatus; message: string | null } | null; busy: boolean }
+export interface VideoLoopState { projectKept: boolean; versions: VideoVersion[]; thread: VideoThreadMessage[]; openEditor: { jobId: string; status: VideoAssemblyJobStatus; message: string | null } | null; busy: boolean; /** Latest expired Mac report that the member may requeue. */ retryJobId: string | null }
 /** One line for a thread message's state. */
 export function threadReplyLine(m: VideoThreadMessage): string {
   if (m.status === "queued") return "Waiting for your Mac…";

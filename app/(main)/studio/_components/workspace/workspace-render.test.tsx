@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AgentDock } from "./agent-dock";
 import { AssetsRail } from "./assets-rail";
@@ -36,6 +37,7 @@ test("player shows the video with a version switcher, a live stepper, or the emp
   const html = renderToStaticMarkup(<PlayerStage versions={[v("a", 2), v("b", 1)]} versionId="a" onVersion={noop} steps={[{ key: "narration", label: "Narration", state: "active", detail: "3 of 6 voiced" }, { key: "editing", label: "Editing", state: "pending", detail: null }]} empty={null} />);
   assert.doesNotMatch(html, />Stop</); assert.match(html, /Download/);
   assert.match(renderToStaticMarkup(<PlayerStage versions={[v("a", 2)]} versionId="a" onVersion={noop} steps={null} empty={null} onStop={noop} />), />Stop</);
+  assert.match(renderToStaticMarkup(<PlayerStage versions={[v("a", 2)]} versionId="a" onVersion={noop} steps={[{ key: "editing", label: "Editing", state: "failed", detail: "The Mac stopped." }]} empty={null} onRetry={noop} />), />Retry</);
   assert.match(html, /<video[^>]*controls/); assert.match(html, /src="\/studio\/uploads\/a\?inline=1"/); assert.match(html, /Latest/); assert.match(html, /3 of 6 voiced/); assert.match(html, /aria-current="step"/);
   assert.match(renderToStaticMarkup(<PlayerStage versions={[]} versionId="" onVersion={noop} steps={null} empty={<p>No video yet</p>} />), /No video yet/);
 });

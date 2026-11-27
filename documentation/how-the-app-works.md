@@ -18,6 +18,23 @@ Decided by the owner, 2026-11-26. The app does as much as it can on the customer
 - Local models must fit an 8 GB Apple-silicon Mac (one model loaded at a time) and have licences usable in a product; the person accepts a model's licence before it is installed.
 - No local model generates video. Video comes from the footage people shoot; AI makes the script, storyboard pictures, voice, subtitles, motion graphics, music and effects around it.
 
+### Expressive local voice on an 8 GB M1
+
+Reviewed 2026-11-27. The product still uses its pinned Qwen3-TTS 0.6B 4-bit built-in voices: they fit the baseline Mac and share the existing MLX runtime, but they are dependable narration rather than strongly directed acting. No heavier model was installed during this review.
+
+| Open model | 8 GB M1 verdict |
+| --- | --- |
+| **Dia 1.6B** | Expressive two-speaker dialogue, but the official runtime is CUDA-oriented and warns that very short generations can sound unnatural. Not a dependable M1 product path today. |
+| **Orpheus 3B** | Strong emotion tags and streaming, but the released path is a 3B Llama/vLLM stack aimed at NVIDIA GPUs; smaller checkpoints remain roadmap items. Too heavy and operationally mismatched. |
+| **Sesame CSM 1B** | Convincing conversational speech, but the official setup requires CUDA and its conversational context/reference workflow is heavier than short-form narration. Not an M1 integration candidate. |
+| **Kokoro 82M** | The safest fallback: tiny, fast, mature Apple-silicon ports and many voices. It fits easily, but offers voice choice and speed more than instruction-led emotion or cloning. |
+| **Chatterbox Turbo 0.6B (4-bit MLX)** | The most promising lightweight expressive experiment: tags and reference-voice cloning in roughly the same weight class as the current model. Hold for an isolated quality/licence/runtime test because the upstream research project is retired and the MLX port is community-maintained. |
+| **Qwen3-TTS 1.7B CustomVoice (4-bit MLX)** | Best continuity candidate for instruction-led delivery and the existing named voices/runtime. Its approximately 2.3 GB snapshot plus generation state leaves little headroom on an 8 GB machine, so do not make it the baseline until an isolated memory/latency acceptance run passes. The current 0.6B checkpoint ignores style instructions. |
+
+Decision: keep Qwen3-TTS 0.6B as the installed baseline; evaluate Chatterbox Turbo first for a small expressive option and Qwen3-TTS 1.7B only as an opt-in model. Kokoro is the recovery/fallback choice. Do not install Dia, Orpheus or CSM on the baseline Mac, and never substitute a paid TTS API silently.
+
+Primary evidence: [Dia](https://github.com/nari-labs/dia), [Orpheus](https://github.com/canopyai/Orpheus-TTS), [Sesame CSM](https://github.com/SesameAILabs/csm), [Kokoro MLX](https://github.com/gabrimatic/kokoro-mlx), [Chatterbox Turbo MLX](https://huggingface.co/mlx-community/chatterbox-turbo-4bit), and [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS).
+
 ## Names: one backend name per thing
 
 Decided 2026-10-27. In the database, code and docs, each thing has exactly one name, and Studio and the CRM use the same one. The screens may use friendlier words per app, through the vocabulary layer only.

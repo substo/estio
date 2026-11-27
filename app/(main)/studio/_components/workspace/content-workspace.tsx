@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { stageDraft, type CreationRecord } from "@/lib/studio/creation-policy";
 import type { AgentSelection } from "@/lib/studio/agent-policy";
 import { ScriptWritingAgent, type WritingAgentData } from "./script-writing-agent";
-import { askVideoEditAction, openEditorAction, stopVideoAction } from "../../(tenant)/content/actions";
+import { askVideoEditAction, openEditorAction, retryVideoJobAction, stopVideoAction } from "../../(tenant)/content/actions";
 import { ContentRecordForm } from "../content-record-form";
 import { AutoRefresh } from "../auto-refresh";
 import { openEditorLine, type VideoAssemblyView, type NarrationView, type VideoLoopState } from "@/lib/studio/video-assembly-policy";
@@ -77,6 +77,8 @@ export function ContentWorkspace(props: {
   const [agentOpen, setAgentOpen] = useState(false);
   const [askState, ask, asking] = useActionState(askVideoEditAction.bind(null, locationId, recordId), {} as Form);
   const [stopState, stop, stopping] = useActionState(stopVideoAction.bind(null, locationId, recordId), {} as Form);
+  const retryJobId = props.assembly?.status === "failed" ? props.assembly.jobId : props.loop?.retryJobId ?? "";
+  const [retryState, retry, retrying] = useActionState(retryVideoJobAction.bind(null, locationId, recordId, retryJobId), {} as Form);
   const [draft, setDraft] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [openState, open, opening] = useActionState(openEditorAction.bind(null, locationId, recordId), {} as Form);
@@ -92,6 +94,7 @@ export function ContentWorkspace(props: {
   };
   const send = (text: string) => { const form = new FormData(); form.set("instruction", text); startTransition(() => ask(form)); setSelected(null); };
   const onStop = () => startTransition(() => stop());
+  const onRetry = () => startTransition(() => retry());
   // Choosing an action sends nothing. It focuses the clip and starts a message in the agent's box for the user to finish (how long, how, what instead) and send.
   const onClipAction = (action: ClipAction, clip: SelectedClip) => { setSelected(clip); setDraft(clipStarter(action)); setAgentOpen(true); };
 
@@ -156,7 +159,7 @@ export function ContentWorkspace(props: {
         <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)_340px]">
           <div className="order-2 lg:order-1"><AssetsRail locationId={locationId} groups={groups} uploadSlot={props.uploadSlot} /></div>
           <div className="order-1 min-w-0 space-y-4 lg:order-2">
-            <PlayerStage versions={versions} versionId={versionId} onVersion={setVersionId} steps={steps} onStop={busy ? onStop : undefined} stopping={stopping} videoRef={videoRef}
+            <PlayerStage versions={versions} versionId={versionId} onVersion={setVersionId} steps={steps} onStop={busy ? onStop : undefined} stopping={stopping} onRetry={retryJobId ? onRetry : undefined} retrying={retrying} retryError={retryState.error} videoRef={videoRef}
               empty={<><p className="font-medium">No video yet</p><p className="text-muted-foreground">Add your footage on the left, then press Make video. Your Mac does the editing.</p>
                 <MakeVideoDialog locationId={locationId} recordId={recordId} voices={props.voices} availability={props.availability} soundSources={props.soundSources} motion={props.motion} disabledReason={makeBlock} busy={busy} trigger="inline" /></>} />
             {hasVideo ? <TimelineView snapshot={current?.timeline ?? null} selected={selected} onSelect={setSelected} onAction={onClipAction} canEdit={Boolean(loop?.projectKept)} busy={busy || asking} /> : null}

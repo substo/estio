@@ -112,6 +112,7 @@ async function narrateThenAssemble(actor: Actor, recordId: string, voice: Parame
 export async function getVideoAssemblyStatus(locationId: string, recordId: string): Promise<{ view: VideoAssemblyView | null; macOnline: boolean | null; narration: NarrationView | null }> {
   const access = await getStudioAccess(locationId);
   if (!access || !/^[0-9a-f-]{36}$/i.test(recordId)) return { view: null, macOnline: null, narration: null };
+  await studioDb.call("studio_timeout_stuck_video_jobs", { p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_record_id: recordId }).catch(() => 0);
   const narration = await studioDb.call<NarrationView | null>("studio_narration_state", { p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_record_id: recordId }).catch(() => null);
   const job = (await studioDb.rows<{ id: string; status: VideoAssemblyJobStatus; last_error_message: string | null; result: { assembly?: { summary?: string } } | null; created_at: string; device_id: string | null }>(Prisma.sql`
     select id, status, last_error_message, result, created_at, device_id from studio.studio_jobs

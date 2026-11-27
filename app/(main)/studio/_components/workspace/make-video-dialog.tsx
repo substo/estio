@@ -54,7 +54,7 @@ export function MakeVideoDialog({ locationId, recordId, voices, availability, so
             <label className="block text-xs">Your notes on the look (optional)
               <textarea name="motionNotes" value={notes} onChange={e => setNotes(e.target.value)} maxLength={300} rows={2} placeholder="e.g. Use our brand blue, keep titles short, no all-caps" className="mt-1 w-full rounded-md border bg-background p-2 text-sm" /></label>
           </fieldset>
-          <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="portrait" /> Vertical (9:16)</label>
+          <label className="flex min-h-11 items-center gap-2"><input type="checkbox" name="portrait" /> Force vertical (9:16); otherwise match the footage</label>
           <button type="submit" disabled={pending || (voiceover && !voices.some(v => v.id === voiceId && voiceStatus(v, avail).usable))} className="inline-flex min-h-11 items-center rounded-md bg-primary px-4 font-medium text-primary-foreground disabled:opacity-60">{pending ? (voiceover ? "Preparing narration…" : "Sending…") : "Make video"}</button>
           {state.error ? <p role="alert" className="text-destructive">{state.error}</p> : null}
           {state.notice ? <p role="status">{state.notice}</p> : null}

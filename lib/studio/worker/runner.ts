@@ -7,6 +7,7 @@ export interface StudioWorkerOptions {
   report?: { instanceId: string; handlers: string[] };
   concurrency?: number; leaseSeconds?: number; pollMs?: number; idlePollMaxMs?: number; failurePollMaxMs?: number; heartbeatMs?: number;
   signal: AbortSignal; log?: (event: Record<string, unknown>) => void; sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+  /** Test seam for the short final-report retry loop. */ reportSleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
 
 const defaultSleep = (ms: number, signal: AbortSignal) => new Promise<void>(resolve => {
@@ -17,7 +18,7 @@ const defaultSleep = (ms: number, signal: AbortSignal) => new Promise<void>(reso
 });
 
 /** Run one claimed job: keep its lease alive, then record success or a classified failure. */
-export async function runStudioJob(job: StudioJob, options: Pick<StudioWorkerOptions, "queue" | "handlers" | "workerId" | "leaseSeconds" | "log">) {
+export async function runStudioJob(job: StudioJob, options: Pick<StudioWorkerOptions, "queue" | "handlers" | "workerId" | "leaseSeconds" | "log" | "reportSleep">) {
   const { queue, workerId, log = () => {} } = options;
   const leaseSeconds = options.leaseSeconds ?? 120;
   const controller = new AbortController();
@@ -56,7 +57,16 @@ export async function runStudioJob(job: StudioJob, options: Pick<StudioWorkerOpt
     const failure = error instanceof StudioJobError
       ? { code: error.code, message: error.message, retryable: error.retryable, retryAfterSeconds: error.retryAfterSeconds, ...(error.stage ? { stage: error.stage } : {}) }
       : { code: "unexpected_error", message: "The worker hit an unexpected error. It will retry.", retryable: true };
-    const outcome = await queue.fail(job.id, workerId, failure, job.lease_token).catch(() => "report_failed");
+    let outcome = "report_failed";
+    const reportSleep = options.reportSleep ?? defaultSleep;
+    for (let attempt = 0; !controller.signal.aborted; attempt += 1) {
+      try { outcome = await queue.fail(job.id, workerId, failure, job.lease_token); break; }
+      catch {
+        const delay = Math.min(10_000, 1000 * 2 ** attempt);
+        log({ event: "job_report_retry", jobId: job.id, kind: job.kind, attempt: attempt + 1, delayMs: delay });
+        await reportSleep(delay, controller.signal);
+      }
+    }
     // Report structured stages and fixed device call codes without logging provider or browser messages.
     const stage = error instanceof StudioJobError ? error.stage
       : error instanceof Error && /^device_[a-z0-9_]+_failed$/.test(error.message) ? error.message

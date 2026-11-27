@@ -73,6 +73,14 @@ begin
  if (studio.studio_video_loop_state(w,'substo','el-owner',rec)->>'busy')<>'true' then raise exception 'Busy flag missing'; end if;
  if jsonb_array_length(pg_temp.claim(h2))<>0 then raise exception 'Another Location Mac claimed the edit'; end if;
 
+ -- Reading state recovers an expired Mac lease even when no new claim arrives after a deploy.
+ c:=pg_temp.claim(h1); tok:=(c#>>'{0,lease_token}')::uuid;
+ update studio.studio_jobs set lease_expires_at=clock_timestamp()-interval '1 second' where id=je;
+ st:=studio.studio_video_loop_state(w,'substo','el-owner',rec);
+ if st->>'busy'<>'false' or st->>'retryJobId' is distinct from je::text or (select status from studio.studio_jobs where id=je)<>'failed'
+  or (select last_error_code from studio.studio_jobs where id=je)<>'worker_report_timeout' then raise exception 'Expired edit was not made visibly retryable: %',st; end if;
+ perform studio.studio_member_job_action(w,'substo','el-owner',je,'retry');
+
  -- The Mac claims and completes it; no export is needed to finish an edit, and the reply is read from the job.
  c:=pg_temp.claim(h1); tok:=(c#>>'{0,lease_token}')::uuid;
  if c#>>'{0,kind}' is distinct from 'studio.video_edit' then raise exception 'Edit claim wrong: %',c; end if;

@@ -35,6 +35,24 @@ test("success, classified failure, unknown kind and unexpected errors are record
   ]);
 });
 
+test("a final failure report retries with backoff until the server records it", async () => {
+  const { queue, calls } = fakeQueue([]);
+  let attempts = 0;
+  queue.fail = async (id, _worker, failure) => {
+    calls.push(["fail", id, failure]);
+    attempts += 1;
+    if (attempts < 3) throw new Error("deploy in progress");
+    return "failed";
+  };
+  const waits: number[] = [];
+  await runStudioJob(job("bad", "bad"), {
+    queue, handlers: { bad: async () => { throw new StudioJobError("invalid_input", "Bad input", false); } }, workerId: "w1",
+    reportSleep: async ms => { waits.push(ms); },
+  });
+  assert.equal(attempts, 3);
+  assert.deepEqual(waits, [1000, 2000]);
+});
+
 test("a lost lease aborts the running handler", async () => {
   const { queue } = fakeQueue([], { extend: false });
   let aborted = false;

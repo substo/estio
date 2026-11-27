@@ -42,6 +42,15 @@ test("handler downloads footage, assembles, uploads through the lease-fenced exp
   assert.equal(kept.get(record)?.file, "Video.substo"); assert.ok(kept.get(record)?.dir.startsWith(join(root, "Projects") + "/"));
   assert.ok((await readdir(join(kept.get(record)!.dir, "exports"))).includes("Video r2.mp4"), "export kept with the project");
 });
+test("portrait footage makes a portrait storyboard and export unless the request already forces vertical", async () => {
+  let seen: AssembleOptions | undefined;
+  const d = await deps({
+    run: async r => ({ stdout: r.command === "ffprobe" ? JSON.stringify({ streams: [{ width: 1080, height: 1920 }] }) : "", stderr: "" }),
+    assemble: async o => { seen = o; await mkdir(join(o.projectDir, "exports"), { recursive: true }); await writeFile(join(o.projectDir, "exports", "Video r2.mp4"), Buffer.alloc(2000, 1)); return { projectDir: o.projectDir, projectFile: "Video.substo", beats: 1, clips: ["shot.mov"], voiceFiles: [], timings: [], brief: "" }; },
+  });
+  await createVideoAssembleHandler(d.value)(job({}, { voiceover: false, music: false, portrait: false }) as never, ctx());
+  assert.equal(seen?.orientation, "portrait");
+});
 test("gates: processing off, missing tools, voice choice and install only when voiceover, bad payload, missing links", async () => {
   const code = async (over: Partial<VideoAssembleDeps>, j = job()) => (await createVideoAssembleHandler((await deps(over)).value)(j as never, ctx()).catch(e => e)) as StudioJobError;
   assert.equal((await code({ enabled: () => false })).code, "local_policy");
