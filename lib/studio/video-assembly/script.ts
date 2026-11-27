@@ -38,7 +38,11 @@ export function parseScriptTimeline(text: string) {
         continue;
       }
       const d = directionLine.exec(line);
-      if (d) direction.push((d[1] ?? d[2]).trim()); else spoken.push(line);
+      if (d) {
+        // A direction describes the beat that follows, so one after spoken lines starts a new beat even without a blank line.
+        if (spoken.length) flush();
+        direction.push((d[1] ?? d[2]).trim());
+      } else spoken.push(line);
     }
     if (spoken.length) { flush(); speaker = ""; }
   }

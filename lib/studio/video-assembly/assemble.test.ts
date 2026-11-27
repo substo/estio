@@ -6,6 +6,14 @@ import { test } from "node:test";
 import { assembleVideo } from "./assemble";
 import { parseScript } from "./script";
 
+test("a direction after spoken lines starts a new beat without a blank line", () => {
+  const beats = parseScript("[Opening]\n[wall of text]\nFirst line.\n[chips]\nSecond line.");
+  assert.deepEqual(beats, [
+    { index: 1, narration: "First line.", direction: "Opening; wall of text" },
+    { index: 2, narration: "Second line.", direction: "chips" },
+  ]);
+});
+
 test("script paragraphs become beats and directions attach to the next beat", () => {
   const beats = parseScript("# Title\n\n[show the dashboard]\n\nWelcome to Estio.\nIt is simple.\n\n(cut to phone)\n\nThanks!");
   assert.deepEqual(beats, [
