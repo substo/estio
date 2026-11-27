@@ -285,6 +285,10 @@ export function createVideoAssembleHandler(deps: VideoAssembleDeps): StudioJobHa
           voice: !p.options.voiceover ? undefined : p.voice?.engine === "local" ? { engine: "local", speaker: p.voice.speaker, model: p.voice.model, ...(reference ? { reference } : {}) } : p.voice?.engine === "hosted" ? { engine: "prerendered", files: narration } : undefined }));
       } catch (error) {
         if (context.signal.aborted) throw error;
+        // The editor can crash or hit a limit after it already exported: keep and save that finished video instead of discarding it.
+        console.log(JSON.stringify({ at: new Date().toISOString(), event: "assemble_error", jobId: job.id, name: error instanceof Error ? error.name : "unknown", message: error instanceof Error ? error.message.replace(/\s+/g, " ").slice(0, 300) : "" }));
+        if (await latestExport(projectDir, startedAt)) result = { projectDir, projectFile, beats: parseScript(p.script).length, clips: [], voiceFiles: [], timings: [], brief: "", agentOutput: "" };
+        else
         throw new StudioJobError("video_assembly_failed", "The Mac could not finish editing this video. It was not retried.", false);
       }
       const exported = await latestExport(projectDir, startedAt);
