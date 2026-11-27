@@ -20,8 +20,10 @@ export async function getShotSoundStates(locationId: string, files: { id: string
   for (const f of files) {
     const state = states.find(s => s.uploadId === f.id);
     const text = rows.filter(r => r.upload_id === f.id).flatMap(r => Array.isArray(r.segments) ? r.segments as Array<Record<string, unknown>> : []).map(s => typeof s?.text === "string" ? s.text : "").join(" ").trim();
-    const done = Boolean(state?.transcribed) || state?.status === "succeeded";
-    out[f.id] = { uploadId: f.id, plan: done || text ? soundFromTranscript(text, lines.get(f.id) ?? "") : null, checking: state?.status === "queued" || state?.status === "running", failed: state?.status === "failed" || state?.status === "cancelled" };
+    // The Mac fails a transcript job with "no speech" when it heard nothing: for a shot that is a finished check (the voiceover plays), not a failure.
+    const heardNothing = state?.status === "failed" && /no[_ ]speech/i.test(state.error ?? "");
+    const done = Boolean(state?.transcribed) || state?.status === "succeeded" || heardNothing;
+    out[f.id] = { uploadId: f.id, plan: done || text ? soundFromTranscript(text, lines.get(f.id) ?? "") : null, checking: state?.status === "queued" || state?.status === "running", failed: !heardNothing && (state?.status === "failed" || state?.status === "cancelled") };
   }
   return out;
 }
