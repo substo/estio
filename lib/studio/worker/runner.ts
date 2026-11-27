@@ -41,7 +41,11 @@ export async function runStudioJob(job: StudioJob, options: Pick<StudioWorkerOpt
       // Count from request start, never from the delayed response arrival.
       armDeadline(requestedAt + leaseSeconds * 1000 - Date.now());
       renewal = setTimeout(renew, Math.max(1000, leaseSeconds * 1000 / 3));
-    } catch { controller.abort(); }
+    } catch {
+      // A transient transport error (502, timeout) must not kill a long render: retry until the lease deadline passes, which aborts on its own.
+      if (finished || controller.signal.aborted) return;
+      renewal = setTimeout(renew, Math.min(5000, Math.max(1000, leaseSeconds * 1000 / 6)));
+    }
   };
   renewal = setTimeout(renew, Math.max(1000, leaseSeconds * 1000 / 3));
   try {

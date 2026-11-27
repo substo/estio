@@ -75,18 +75,33 @@ test("worker loop heartbeats, respects concurrency, runs the diagnostic job and 
 });
 
 
-test("renewal transport failures abort work and never report completion", async () => {
+test("renewal transport failures that outlast the lease abort work and never report completion", async () => {
   const { queue, calls } = fakeQueue([]);
   queue.extend = async () => { throw new Error("database unavailable"); };
   let observedAbort = false;
   const slow: StudioJobHandler = async (_job, context) => {
-    await new Promise(resolve => setTimeout(resolve, 1100));
+    await new Promise(resolve => setTimeout(resolve, 3400));
     observedAbort = context.signal.aborted;
     return {};
   };
   await runStudioJob(job("slow", "slow"), { queue, handlers: { slow }, workerId: "w1", leaseSeconds: 3 });
   assert.equal(observedAbort, true);
   assert.equal(calls.some(c => c[0] === "complete"), false);
+});
+
+test("one transient renewal failure does not abort work", async () => {
+  const { queue, calls } = fakeQueue([]);
+  let n = 0;
+  queue.extend = async () => { if (++n === 1) throw new Error("502"); return true; };
+  let observedAbort = true;
+  const slow: StudioJobHandler = async (_job, context) => {
+    await new Promise(resolve => setTimeout(resolve, 2500));
+    observedAbort = context.signal.aborted;
+    return {};
+  };
+  await runStudioJob(job("slow", "slow"), { queue, handlers: { slow }, workerId: "w1", leaseSeconds: 3 });
+  assert.equal(observedAbort, false);
+  assert.equal(calls.some(c => c[0] === "complete"), true);
 });
 
 test("a hung renewal cannot extend work beyond the last confirmed lease", async () => {
