@@ -31,7 +31,7 @@ export function ShootBoard({ locationId, recordId, title, beats, files, soundSta
   const inFlight = useRef(false);
   const [checkNotice, setCheckNotice] = useState<Record<string, string>>({});
   const checkSound = async (uploadId: string) => {
-    const r = await transcribeUploadAction(locationId, recordId, uploadId).catch(() => ({ error: "Could not start the sound check. Try again." }));
+    const r: { error?: string; notice?: string } = await transcribeUploadAction(locationId, recordId, uploadId).catch(() => ({ error: "Could not start the sound check. Try again." }));
     setCheckNotice(n => ({ ...n, [uploadId]: r.error ?? r.notice ?? "" })); router.refresh();
   };
   useEffect(() => setCanRecord(canRecordInBrowser()), []);
