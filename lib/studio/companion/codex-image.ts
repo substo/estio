@@ -1,6 +1,7 @@
 import { open, rm, stat } from "node:fs/promises";
 import { basename, dirname } from "node:path";
-import { nativeLoginEnvironment, runNativeProcess, type ProcessRunner } from "./process";
+import { StudioJobError } from "../worker/handlers";
+import { CompanionProcessError, nativeLoginEnvironment, runNativeProcess, type ProcessRunner } from "./process";
 
 /**
  * Draws one storyboard frame with the Codex CLI's built-in image tool (gpt-image), on this Mac, with the owner's own ChatGPT login.
@@ -30,7 +31,12 @@ export function createCodexFrameDrawer(deps: { run?: ProcessRunner; command?: st
     const args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--ephemeral", "-C", cwd, ...references.flatMap(r => ["-i", r]), "--", text];
     try {
       await run({ subscriptionGeneration: "codex", command, args, cwd, env: nativeLoginEnvironment(), signal, timeoutMs: deps.timeoutMs ?? 5 * 60_000, maxOutputBytes: 256 * 1024 });
-    } catch (error) { if (signal?.aborted) throw error; return false; }
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      // The subscription's own limit is the one failure worth naming: retrying cannot help until it resets.
+      if (error instanceof CompanionProcessError && /usage limit/i.test(error.stderr)) throw new StudioJobError("agent_rate_limited", "Your ChatGPT subscription hit its usage limit, so no pictures could be drawn. Try again after it resets.", false);
+      return false;
+    }
     if (await looksLikeImage(out)) return true;
     await rm(out, { force: true });
     return false;

@@ -36,3 +36,11 @@ test("a cancelled job stops the draw instead of returning false", async () => {
   const controller = new AbortController(); controller.abort();
   await assert.rejects(createCodexFrameDrawer({ run: async () => { throw new Error("aborted"); } })({ prompt: "x", references: [], out: join(tmpdir(), "never.png"), signal: controller.signal }));
 });
+
+test("a subscription usage limit is reported as such instead of a silent failure", async () => {
+  const { CompanionProcessError } = await import("./process");
+  const { StudioJobError } = await import("../worker/handlers");
+  const dir = await mkdtemp(join(tmpdir(), "codex-frame-"));
+  const draw = createCodexFrameDrawer({ run: async () => { throw new CompanionProcessError("cli_failed", "ERROR: You've hit your usage limit. try again at 11:34 PM."); } });
+  await assert.rejects(draw({ prompt: "p", references: [], out: join(dir, "a.png") }), (e: unknown) => e instanceof StudioJobError && e.code === "agent_rate_limited" && /usage limit/.test(e.message));
+});
