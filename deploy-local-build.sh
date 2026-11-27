@@ -8,7 +8,7 @@ set -eo pipefail
 SERVER="root@138.199.214.117"
 # Optional: run one Studio cron job once on the server after cutover (inside the lease) and print its log.
 DEPLOY_CRON_RUN_ONCE="${DEPLOY_CRON_RUN_ONCE:-}"
-[[ "$DEPLOY_CRON_RUN_ONCE" =~ ^(|studio-bin-purge|studio-schedules)$ ]] || { echo "DEPLOY_CRON_RUN_ONCE must be studio-bin-purge or studio-schedules" >&2; exit 2; }
+case "$DEPLOY_CRON_RUN_ONCE" in ""|studio-bin-purge|studio-schedules) ;; *) echo "DEPLOY_CRON_RUN_ONCE must be studio-bin-purge or studio-schedules" >&2; exit 2 ;; esac
 BASE_DIR="/home/martin"
 SYMLINK_NAME="estio-app"
 SYMLINK_PATH="$BASE_DIR/$SYMLINK_NAME"
