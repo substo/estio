@@ -31,7 +31,7 @@ test("provider receives bounded source units with no tools or media and returns 
  const output=await requestKnowledgeExtraction(snapshot,"sk-synthetic",new AbortController().signal,async(_url,init)=>{
   sent=JSON.parse(String(init?.body));return Response.json({id:"resp_extract",status:"completed",model:"gpt-6-luna",service_tier:"default",usage:{input_tokens:1000,output_tokens:1000,input_tokens_details:{cached_tokens:0,cache_write_tokens:0}},output:[{type:"message",content:[{type:"output_text",text:JSON.stringify(result)}]}]});
  });
- assert.equal(sent.max_output_tokens,6000);assert.equal(sent.store,false);assert.deepEqual(sent.tools,[]);assert.match(sent.instructions,/untrusted data/);assert.match(sent.instructions,/ai-workflows.2026-11-20.v5/);assert.match(sent.instructions,/empty findings is valid/);assert.deepEqual(JSON.parse(sent.input),snapshot);assert.equal(output.costMicros,600);assert.deepEqual(output.result,result);
+ assert.equal(sent.max_output_tokens,6000);assert.equal(sent.store,false);assert.deepEqual(sent.tools,[]);assert.match(sent.instructions,/untrusted data/);assert.match(sent.instructions,/ai-workflows.2026-11-27.v6/);assert.match(sent.instructions,/empty findings is valid/);assert.deepEqual(JSON.parse(sent.input),snapshot);assert.equal(output.costMicros,600);assert.deepEqual(output.result,result);
 });
 test("lost provider/persistence outcomes retain the hold, block resend, and never apply findings",async()=>{
  for(const mode of ["success","response_lost","persist_failed","abort"]){

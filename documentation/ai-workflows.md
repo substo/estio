@@ -77,7 +77,7 @@ Owner decision. Each Location orders its AI connections once, for example Codex 
 
 ## Runtime instructions: what actually reaches the AI
 
-The executable source is [`lib/ai/workflow-capabilities.ts`](../lib/ai/workflow-capabilities.ts), contract version `ai-workflows.2026-11-20.v5`. It is imported into the build; production does not need `documentation/`, which deployment excludes. This document is for people/contributors and is **not automatically read by a model**.
+The executable source is [`lib/ai/workflow-capabilities.ts`](../lib/ai/workflow-capabilities.ts), contract version `ai-workflows.2026-11-27.v6`. It is imported into the build; production does not need `documentation/`, which deployment excludes. This document is for people/contributors and is **not automatically read by a model**.
 
 Bounded operation-relevant instructions are explicitly prepended at:
 
@@ -215,3 +215,7 @@ Decisions in [studio-voices-and-local-models.md](studio-voices-and-local-models.
 ## Kept edits, open in editor and agent changes (2026-11-23)
 
 The Mac keeps each made video as a real Substo Video project under `~/Movies/Substo/Projects/<title>-<record id first 8>/` (later revisions of the same piece reuse the folder as `Video v2.substo`, ...); `~/Library/Application Support/Estio/StudioCompanion/projects.json` maps record id to project and never leaves the Mac. Studio learns only `projectKept` and the folder name. The content page shows the latest `Edited video` upload in a player with earlier versions, an **Open in editor** button (`studio.open_editor`: fixed `substo app <file>`, path from the Mac's own map) and an agent thread (`studio.video_edit`: the same restricted `claude -p`, `Bash(substo:*)` and `Read` only, against the existing project; replies are the agent's own summary; every request becomes a new exported version). Hosted narration no longer blocks the click: a `studio_narration_runs` row tracks progress ("3 of 6 voiced") and a background step then queues the Mac job. Migration `20261128100000_studio_edit_loop` also registers `studio.voice_preview` (implemented by the voices work). Verification: `bash scripts/test-studio-edit-loop.sh` (disposable PostgreSQL 17) and the focused unit tests; not verified in a browser or against a real playback range request.
+
+## A2UI-style replies in the Studio agent chats (2026-11-27)
+
+The creation agent (content page and Library source page share `agent-chat.tsx`) can end a reply with one fenced ```` ```a2ui ```` JSON block naming components from a closed catalog: `choices`, `form`, `checklist`, `cards`, `confirm`. `lib/studio/a2ui.ts` is the only gate: it validates shape and lengths, drops unknown components, allows at most four, and passes no HTML, links, styles or code. Invalid input degrades to the plain reply text. `a2ui-view.tsx` renders it with the existing UI kit, only on the latest reply. A click or submit is sent as an ordinary owner message beginning `[A2UI kind]`, so routing, history, limits and the "which route/model ran" line are unchanged. It is opt-in through the agent system prompt (`OPTIONAL UI (A2UI)`) and the capability contract (`ai-workflows.2026-11-27.v6`); there is no schema change, and no component can apply, save or publish anything. The one-shot Source assistant is not part of this.

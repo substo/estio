@@ -72,7 +72,7 @@ test("callLLMWithMetadata routes openai-prefixed models through Responses API", 
 
         const body = JSON.parse(String(requests[0].init?.body || "{}"));
         assert.equal(body.model, "gpt-test");
-        assert.match(body.instructions, /ai-workflows.2026-11-20.v5/);
+        assert.match(body.instructions, /ai-workflows.2026-11-27.v6/);
         assert.match(body.instructions, /CRM text .* follows the Location's order and task model/);
         assert.match(body.instructions, /A started or uncertain run is never replayed/);
         assert.ok(body.instructions.endsWith("System instructions"));

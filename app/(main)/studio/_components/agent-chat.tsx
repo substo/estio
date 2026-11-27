@@ -3,6 +3,8 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { Search, AlertTriangle, ExternalLink, Loader2, Mic, MicOff, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { parseA2ui } from "@/lib/studio/a2ui";
+import { A2uiView } from "./a2ui-view";
 import type { AgentTurnView } from "@/lib/studio/agent";
 import { agentCitationClipHref, agentCitationHref, citedQuote, proposalAnchor, type ProposalFocus } from "@/lib/studio/citation-navigation";
 import { AGENT_MESSAGE_LIMIT, type AgentSelection } from "@/lib/studio/agent-policy";
@@ -272,7 +274,7 @@ export function AgentChat({ locationId, source, initialTurns, provider, onProvid
           {turn.id === last?.id ? <Button type="button" variant="outline" className="min-h-9 text-xs" disabled={sending} onClick={() => void send(turn.message, turn.selection)}>Send again</Button> : null}
         </div> : null}
         {turn.result ? <div className="mr-6 space-y-3 rounded-lg bg-muted p-3">
-          <p className="whitespace-pre-wrap break-words">{turn.result.reply}</p>
+          {(() => { const ui = parseA2ui(turn.result.reply); return <><p className="whitespace-pre-wrap break-words">{ui.text}</p>{turn.id === last?.id && ui.components.length ? <A2uiView components={ui.components} disabled={sending || running} onSend={message => void send(message)} /> : null}</>; })()}
           {turn.result.proposals.map((proposal, index) => {
             const savedText = record ? stageDraft(record.state, proposal.stage).text : "";
             const inDraft = savedText === proposal.text && Boolean(savedText);
