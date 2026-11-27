@@ -141,17 +141,26 @@ export async function latestExport(projectDir: string, sinceMs = 0): Promise<{ n
     return { name: newest.f, file, size: (await stat(file)).size };
   } catch { return null; }
 }
+/** A finished render is expensive: ride out a brief server outage (502, timeout) on the idempotent reserve/verify calls instead of discarding it. */
+async function transientRetry<T>(run: () => Promise<T>, signal: AbortSignal, waitsMs: number[] = [3_000, 10_000, 30_000, 60_000]): Promise<T> {
+  for (let i = 0; ; i++) {
+    try { return await run(); } catch (error) {
+      if (signal.aborted || i >= waitsMs.length) throw error;
+      await new Promise<void>(resolve => { const t = setTimeout(resolve, waitsMs[i]); signal.addEventListener("abort", () => { clearTimeout(t); resolve(); }, { once: true }); });
+    }
+  }
+}
 /** Reserve, upload and verify one export through the lease-fenced device endpoints. Returns the saved upload's id. */
 export async function saveExport(api: ExportApi, lease: ExportLease, exported: { file: string; size: number }, signal: AbortSignal): Promise<string> {
   if (exported.size < 1000 || exported.size > 5_368_709_120) throw new StudioJobError("video_export_size", "The exported video has an unusable size.", false);
   const digest = await sha256(exported.file);
   let step = "reserve";
   try {
-    const slot = await api.reserve(lease, digest, exported.size);
+    const slot = await transientRetry(() => api.reserve(lease, digest, exported.size), signal);
     if (slot.state !== "verified") {
       if (!slot.uploadUrl) throw new Error("no_upload_url");
       step = "put"; await api.put(slot.uploadUrl, exported.file, exported.size, signal);
-      step = "verify"; await api.verify(lease);
+      step = "verify"; await transientRetry(() => api.verify(lease), signal);
     }
     return slot.uploadId;
   } catch (error) {
