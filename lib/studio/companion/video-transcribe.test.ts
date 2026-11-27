@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { captionsFromJson3, classifyYtDlpFailure, createVideoTranscribeHandler, pickCaptionFile, YOUTUBE_CLIENT_ORDER, YOUTUBE_COOLDOWN_SECONDS, type VideoTranscribeDeps } from "./video-transcribe";
@@ -344,4 +345,31 @@ test("a rate-limited subtitle request (a warning with exit 0) is not mistaken fo
   const f = fixture({ captionsWarning: "WARNING: Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests" });
   await assert.rejects(createVideoTranscribeHandler(f.deps())(job(), context()), (e: unknown) => e instanceof StudioJobError && e.code === "video_rate_limited");
   assert.ok(!f.runs.some(r => r.args.includes("-x")), "audio is not requested from a rate-limited IP");
+});
+
+test("YouTube requests are paced: jitter between them, and only a few jobs an hour may touch YouTube", async () => {
+  const waits: number[] = [];
+  const clock = { t: 1_000_000 };
+  const f = fixture({ captions: true, clock });
+  const handler = createVideoTranscribeHandler({ ...f.deps(), sleep: async ms => { waits.push(ms); }, jitterMs: () => 12_000 });
+  await handler(job(), context());
+  assert.ok(waits.length > 0 && waits.every(ms => ms === 12_000), "a pause of the jittered length between YouTube requests");
+  const again = async () => { f.chunks.length = 0; return handler(job(), context()); };
+  await again(); await again();
+  await assert.rejects(again(), (e: unknown) => e instanceof StudioJobError && e.code === "video_paced" && e.retryable);
+  clock.t += 3_600_000 + 1;
+  await again();
+});
+
+test("captions and metadata fetched once are reused, so a re-run asks YouTube for nothing", async () => {
+  const cacheDir = await mkdtemp(join(tmpdir(), "yt-cache-"));
+  const f = fixture({ captions: true });
+  const handler = createVideoTranscribeHandler({ ...f.deps(), cacheDir });
+  await handler(job(), context());
+  const first = ytRuns(f).length;
+  assert.ok(first > 0);
+  f.chunks.length = 0;
+  await handler(job(), context());
+  const later = ytRuns(f).slice(first).map(r => r.args.join(" "));
+  assert.ok(!later.some(a => a.includes("--dump-single-json") || a.includes("--write-subs")), "metadata and captions are not requested again");
 });

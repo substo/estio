@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { z } from "zod";
@@ -41,12 +41,19 @@ export interface VideoTranscribeDeps {
   /** Test seams: the clock (cool-down) and the pause between player clients. */
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  /** Random 5-20 s pause between YouTube requests (seam for tests). */
+  jitterMs?: () => number;
+  /** Where metadata and captions already fetched for a video are kept, so a re-run asks YouTube for nothing. Off when unset. */
+  cacheDir?: string;
 }
 const MB = 1024 * 1024;
 /** YouTube player clients, tried in order after yt-dlp's own default (null). Public videos only: no cookies or sign-in are ever used. */
 export const YOUTUBE_CLIENT_ORDER: ReadonlyArray<string | null> = [null, "tv", "web_safari", "mweb", "tv_simply"];
 /** After YouTube rate-limits or bot-checks this Mac, no YouTube request is made for this long. */
 export const YOUTUBE_COOLDOWN_SECONDS = 30 * 60;
+/** Human-like pacing: one YouTube request at a time, 5-20 s apart, and at most this many transcription jobs a rolling hour may touch YouTube (the metadata, captions and client retries of one job count once). */
+export const YOUTUBE_MAX_REQUESTS_PER_HOUR = 3;
+const defaultJitterMs = () => 5_000 + Math.floor(Math.random() * 15_000);
 const baseYtDlp = (tools: VideoTools, client: string | null = null) => ["--ignore-config", "--no-playlist", "--no-cache-dir", "--quiet", "--no-progress", "--socket-timeout", "30", "--retries", "3",
   "--sleep-requests", "1", "--restrict-filenames", ...(tools.paths.ffmpeg ? ["--ffmpeg-location", dirname(tools.paths.ffmpeg)] : []),
   // Newer yt-dlp only enables deno by default; Homebrew node is passed by absolute path (a LaunchAgent PATH is minimal).
@@ -107,6 +114,26 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>(done => setTimeout(done, ms)));
   /** Shared by every job on this Mac: one rate-limit answer from YouTube pauses all YouTube requests, not just this job. */
   let blockedUntil = 0; let workingClient: string | null | undefined;
+  const jitter = deps.jitterMs ?? defaultJitterMs;
+  /** Serialised across every job on this Mac; a request waits for the previous one plus a random pause. */
+  let paceChain: Promise<unknown> = Promise.resolve(); let lastRequestAt = 0; const requestTimes: number[] = [];
+  const pace = <T,>(request: () => Promise<T>, session: { counted: boolean }): Promise<T> => {
+    const turn = paceChain.then(async () => {
+      const hourAgo = now() - 3_600_000;
+      while (requestTimes.length && requestTimes[0] < hourAgo) requestTimes.shift();
+      if (!session.counted && requestTimes.length >= YOUTUBE_MAX_REQUESTS_PER_HOUR) {
+        const wait = Math.ceil((requestTimes[0] + 3_600_000 - now()) / 1000);
+        throw new StudioJobError("video_paced", `Studio paces its YouTube requests to look like a person. It will try again in about ${Math.max(1, Math.ceil(wait / 60))} minutes; you can also paste a transcript instead.`, true, wait);
+      }
+      if (lastRequestAt) { const gap = jitter() - (now() - lastRequestAt); if (gap > 0) await sleep(gap); }
+      if (!session.counted) { session.counted = true; requestTimes.push(now()); }
+      lastRequestAt = now();
+      return request();
+    });
+    paceChain = turn.catch(() => undefined).then(() => { lastRequestAt = now(); });
+    return turn;
+  };
+  const cachePath = (videoId: string) => deps.cacheDir ? join(deps.cacheDir, `${videoId}.json`) : null;
   const block = (kind: "rate_limited" | "bot_check") => { blockedUntil = now() + YOUTUBE_COOLDOWN_SECONDS * 1000; return youtubeFailureError(kind); };
   return async (job, context) => {
     const parsed = payloadSchema.safeParse(job.payload);
@@ -134,13 +161,13 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
       }
     };
     /** yt-dlp through the player-client ladder. A 429 stops everything and starts the cool-down; a bot check is tried on the other clients first. */
+    const session = { counted: false };
     const ytdlp = async (args: string[], timeoutMs: number, maxOutputBytes = 64 * 1024) => {
       const order = workingClient === undefined ? YOUTUBE_CLIENT_ORDER : [workingClient, ...YOUTUBE_CLIENT_ORDER.filter(client => client !== workingClient)];
       let last: unknown; let botChecked = false;
       for (const [index, client] of order.entries()) {
-        if (index > 0) await sleep(2000);
         try {
-          const out = await exec(tools.paths.ytDlp!, [...baseYtDlp(tools, client), ...args], timeoutMs, maxOutputBytes);
+          const out = await pace(() => exec(tools.paths.ytDlp!, [...baseYtDlp(tools, client), ...args], timeoutMs, maxOutputBytes), session);
           workingClient = client;
           return out;
         } catch (error) {
@@ -157,7 +184,10 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
     };
     /** Captions first: cheap, no media download. Original language, uploaded subtitles or YouTube's automatic ones. */
     let captionsMemo: Promise<{ segments: TranscriptSegment[]; language?: string } | null> | undefined;
-    const captions = () => captionsMemo ??= (async () => {
+    let cached: { meta: { title: string; description: string; channel: string; duration: number; live: boolean }; captions: { segments: TranscriptSegment[]; language?: string } } | null = null;
+    const cacheFile = cachePath(video.videoId);
+    if (cacheFile) cached = await readFile(cacheFile, "utf8").then(text => { const c = JSON.parse(String(text)); return Array.isArray(c?.captions?.segments) && c?.meta?.duration > 0 ? c : null; }).catch(() => null);
+    const captions = () => captionsMemo ??= cached ? Promise.resolve(cached.captions) : (async () => {
       let stderr = "";
       try {
         stderr = (await ytdlp(["--skip-download", "--write-subs", "--write-auto-subs", "--sub-langs", ".*-orig,en,en-.*", "--sub-format", "json3",
@@ -171,12 +201,14 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
       }
       if ((await stat(join(work, picked.file))).size > 8 * MB) return null;
       const segments = normalizeSegments(captionsFromJson3(JSON.parse(String(await read(join(work, picked.file), "utf8")))), meta.duration + 60);
-      return segments.map(s => s.text).join(" ").length >= 20 ? { segments, ...(picked.language ? { language: picked.language } : {}) } : null;
+      const found = segments.map(s => s.text).join(" ").length >= 20 ? { segments, ...(picked.language ? { language: picked.language } : {}) } : null;
+      if (found && cacheFile) await mkdir(dirname(cacheFile), { recursive: true }).then(() => writeFile(cacheFile, JSON.stringify({ meta, captions: found }))).catch(() => {});
+      return found;
     })();
     let meta!: { title: string; description: string; channel: string; duration: number; live: boolean };
     try {
       // 1. Bounded metadata: duration limit, title/description/channel for the relevance gate. No media is downloaded yet.
-      try {
+      if (cached) meta = cached.meta; else try {
         const out = await ytdlp(["--skip-download", "--dump-single-json", "--", video.url], 90_000, 4 * MB);
         const json = JSON.parse(out.stdout) as Record<string, unknown>;
         meta = { title: String(json.title ?? ""), description: String(json.description ?? ""), channel: String(json.channel ?? json.uploader ?? ""), duration: Number(json.duration ?? 0), live: json.is_live === true };

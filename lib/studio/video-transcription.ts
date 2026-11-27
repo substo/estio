@@ -1,4 +1,5 @@
 import "server-only";
+import { pickVideoRuns } from "./video-runs";
 import { Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { getStudioAccess } from "./access";
@@ -78,7 +79,12 @@ export interface VideoTranscriptionView {
 }
 export interface VideoFrameView { frame_index: number; time_seconds: number; scene_start: number; scene_end: number; ocr_text: string; audio_context: string; selection: string; status: string }
 export interface VideoStatus {
+  /** What the page headlines: the newest run while it works, otherwise the newest run that saved a result (a later failed re-run never hides it). */
   latest: VideoTranscriptionView | null; history: VideoTranscriptionView[]; frames: VideoFrameView[];
+  /** The run whose slides/frames are listed (the most recent ready/partial run that has frames). */
+  framesFrom: string | null;
+  /** A newer re-run that failed, was cancelled or was skipped, shown only as a small note beside the saved result. */
+  lastAttempt: VideoTranscriptionView | null;
   /** Why a queued job is waiting, so the owner sees a clear status instead of silence. */
   waiting: null | "mac_offline" | "mac_paused" | "processing_off" | "tools_missing";
   mac: { name: string; online: boolean; lastSeenAt: string | null } | null;
@@ -89,12 +95,12 @@ export async function getVideoStatus(locationId: string, recordId: string): Prom
   if (!access || !/^[0-9a-f-]{36}$/i.test(recordId)) return null;
   const history = await studioDb.rows<VideoTranscriptionView>(Prisma.sql`
     select id,status,origin,gated,relevance,method,language,duration_seconds,segment_count,transcript_chars,transcript_applied,visual_status,visual_error,frame_count,error_code,error_message,created_at,updated_at,completed_at,device_id
-    from studio.studio_video_transcriptions where location_id=${access.locationId} and record_id=${recordId}::uuid order by created_at desc limit 5`);
-  const latest = history[0] ?? null;
-  if (!latest) return { latest: null, history: [], frames: [], waiting: null, mac: null };
-  const frames = latest.frame_count > 0 ? await studioDb.rows<VideoFrameView>(Prisma.sql`
+    from studio.studio_video_transcriptions where location_id=${access.locationId} and record_id=${recordId}::uuid order by created_at desc limit 15`);
+  const { latest, lastAttempt, framesFrom } = pickVideoRuns(history);
+  if (!latest) return { latest: null, history: [], frames: [], framesFrom: null, lastAttempt: null, waiting: null, mac: null };
+  const frames = framesFrom ? await studioDb.rows<VideoFrameView>(Prisma.sql`
     select frame_index,time_seconds,scene_start,scene_end,ocr_text,audio_context,selection,status from studio.studio_video_frames
-    where location_id=${access.locationId} and transcription_id=${latest.id}::uuid and status='verified' order by time_seconds,frame_index limit 200`) : [];
+    where location_id=${access.locationId} and transcription_id=${framesFrom}::uuid and status='verified' order by time_seconds,frame_index limit 200`) : [];
   let waiting: VideoStatus["waiting"] = null; let mac: VideoStatus["mac"] = null;
   if (latest.device_id && (latest.status === "queued" || latest.status === "running")) {
     const d = await studioDb.one<{ name: string; seen_at: string | null; report: Record<string, unknown>; paused: boolean; processing_enabled: boolean }>(Prisma.sql`
@@ -106,7 +112,7 @@ export async function getVideoStatus(locationId: string, recordId: string): Prom
         : (d.report as { video?: { ready?: boolean } }).video?.ready === false || latest.error_code === "video_tools_missing" ? "tools_missing" : null;
     }
   }
-  return { latest, history, frames, waiting, mac };
+  return { latest, history, frames, framesFrom, lastAttempt, waiting, mac };
 }
 
 /** Device operations that need R2: the SQL function owns identity, lease and validation; this adds signed uploads and server-side byte checks. */

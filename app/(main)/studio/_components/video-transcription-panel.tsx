@@ -42,10 +42,11 @@ export function VideoTranscriptionPanel({ locationId, recordId, canTranscribe, s
       {canRun ? <Button type="button" size="sm" variant={hasTranscript ? "outline" : "default"} disabled={pending} onClick={() => void request()}>{pending ? "Requesting…" : latest?.status === "suggested" || !latest ? "Transcribe on my Mac" : "Transcribe again"}</Button> : null}
       <InfoTip label="About Mac transcription">Audio is transcribed locally on your Mac; YouTube captions are the only fallback. No speaker labels or comments.{status.mac ? ` ${status.mac.name} is ${status.mac.online ? "online" : "offline"}.` : ""}</InfoTip>
     </div>
+    {status.lastAttempt ? <p className="text-xs text-muted-foreground">A newer attempt did not replace this: {status.lastAttempt.status === "failed" ? (status.lastAttempt.error_message ?? "it failed") : status.lastAttempt.status}.</p> : null}
     {latest && latest.status === "ready" && latest.transcript_applied === false ? <p className="text-xs text-muted-foreground">A transcript you saved earlier was kept; the Mac transcript is stored but not applied.</p> : null}
     {status.frames.length ? <details><summary className="cursor-pointer text-xs font-medium">Slides and frames ({status.frames.length})</summary>
       <ul className="mt-2 space-y-3">{status.frames.map(f => <li key={f.frame_index} className="space-y-1">
-        <a href={`/studio/video-frames/${latest!.id}/${f.frame_index}`} target="_blank" rel="noopener noreferrer" className="text-primary underline">Frame at {clock(f.time_seconds)}</a>
+        <a href={`/studio/video-frames/${status.framesFrom}/${f.frame_index}`} target="_blank" rel="noopener noreferrer" className="text-primary underline">Frame at {clock(f.time_seconds)}</a>
         {f.ocr_text ? <p className="whitespace-pre-wrap break-words">{f.ocr_text}</p> : <p className="text-muted-foreground">No text read.</p>}</li>)}</ul></details> : null}
     {message ? <p role="status" className="text-xs">{message}</p> : null}
   </section>;
