@@ -31,7 +31,7 @@ export function createVideoDeviceApi(credentials: DeviceCredentials, options: De
       // The signed URL is minted by our server for exactly this object; only https, no redirects, bounded size and time.
       const target = new URL(url);
       if (target.protocol !== "https:" || bytes.byteLength > 1_572_864) throw new Error("video_upload_refused");
-      const response = await (options.fetcher ?? fetch)(target, { method: "PUT", redirect: "error", headers: { "content-type": "image/jpeg" }, body: bytes as unknown as BodyInit,
+      const response = await (options.fetcher ?? fetch)(target, { method: "PUT", redirect: "error", headers: { "content-type": "image/jpeg", "if-none-match": "*" }, body: bytes as unknown as BodyInit,
         signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]) });
       if (!response.ok) throw new Error("video_upload_failed");
     },
