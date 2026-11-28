@@ -21,7 +21,7 @@ export function LibraryRecordForm({ locationId, recordId, version, kind = "refer
     <label className="block font-medium" htmlFor="pasted-source-transcript">Transcript text</label>
     <textarea id="pasted-source-transcript" name="transcript" rows={6} maxLength={100_000} required
       value={values.transcript} onChange={event => setValues({ ...values, transcript: event.target.value })}
-      className={`scroll-mt-16 ${inputClass}`} />
+      className={`scroll-mt-24 ${inputClass}`} />
     {state.error ? <p role="alert" className="text-destructive">{state.error}</p> : null}
     <button disabled={pending || !values.transcript.trim()} type="submit" className="min-h-10 rounded-md bg-primary px-4 font-medium text-primary-foreground disabled:opacity-50">
       {pending ? "Saving…" : "Save transcript"}

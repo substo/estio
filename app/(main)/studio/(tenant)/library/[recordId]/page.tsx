@@ -102,13 +102,18 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
   const otherLinks = links.filter(link => link.kind !== "content");
   const notes = value('notes');
   const summaryNote = value('summary') || record.summary || '';
+  const watchedChannel = otherLinks.find(link => link.kind === "channel" && !link.archived);
   const creatorLine = view.creator ? (creator ? <a href={creator.channelUrl} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline">{view.creator}</a> : <span className="font-medium">{view.creator}</span>) : null;
 
   const header = <header className="space-y-2">
     <h1 className="text-balance text-xl font-semibold leading-tight tracking-tight md:text-2xl">{record.title}</h1>
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-muted-foreground">
       <span className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium"><LibraryPlatformIcon platform={view.platform} />{platformLabels[view.platform]}</span>
-      {creatorLine}
+      {creatorLine || (active && creator) ? <div className="flex min-w-0 items-center gap-0.5">
+        {creatorLine}
+        {isSource && creator && (active || watchedChannel) ? <LibrarySourceAction locationId={locationId}
+          url={creator.channelUrl} sourceId={recordId} sourceVersion={record.version} savedChannelId={watchedChannel?.id} /> : null}
+      </div> : null}
       {record.archived ? <span className="rounded-full bg-muted px-2.5 py-1 text-xs">Archived</span> : null}
       {view.url ? <a href={view.url} target="_blank" rel="noopener noreferrer" className="ml-auto inline-flex min-h-9 items-center gap-1.5 font-medium text-foreground hover:underline">Open original<ExternalLink aria-hidden="true" className="h-4 w-4" /><span className="sr-only">(new tab)</span></a> : null}
     </div>
@@ -150,7 +155,16 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
 
   const transcriptionCard = videoStatus ? <VideoTranscriptionPanel key={recordId} locationId={locationId} recordId={recordId}
     status={videoStatus} hasTranscript={hasTranscript} initialIssue={readVideoNotQueuedReason(query.transcriptionSetup)} /> : null;
-  const transcriptPanel = <div className="space-y-4">
+  const sourcePanel = <div className="space-y-4">
+    <JumpBar items={[{ id: "summary", label: "Summary" }, { id: "details", label: "Details" }, { id: "comments", label: "Comments" },
+      { id: "transcript", label: "Transcript" }, { id: "slides", label: "Slides" }, ...(highlights.length ? [{ id: "highlights", label: "Highlights" }] : [])]} />
+    <div className="grid gap-4 md:grid-cols-[minmax(0,320px)_minmax(0,1fr)] md:items-start">
+      <SourcePlayer title={record.title} thumbnail={view.thumbnail} videoId={youtube?.videoId ?? null} url={view.url} portrait={view.portrait} />
+      <div className="min-w-0">{header}</div>
+    </div>
+    {transcriptionCard}
+    <SummarySection locationId={locationId} recordId={recordId} view={summary} failure={summaryFailure} evidence={`${hasTranscript ? "t" : ""}${value('description').trim() ? "d" : ""}`} />
+    <HighlightsSection />
     {citationPanel}
     <SourceDetailsPanel key={`${locationId}:${recordId}:${view.url}`} locationId={locationId} recordId={recordId} initial={sourceDetails}
       canFetch={active && Boolean(youtube)} youtube={Boolean(youtube)} legacy={videoStatus?.meta ?? null} description={value('description')}
@@ -178,7 +192,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
   const notesPanel = <NotesPanel locationId={locationId} sourceId={recordId} version={record.version} notes={notes} archived={record.archived} />;
   const moreLinks = <details className="rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Linked records and files</summary><div className="mt-3 space-y-5">{footer}</div></details>;
   const tabs: SourceTab[] = [
-    { id: "transcript", label: "Source", pageScroll: true, panel: transcriptPanel },
+    { id: "transcript", label: "Source", panel: sourcePanel },
     ...(active ? [
       { id: "script", label: "Script", badge: contentLinks.length ? String(contentLinks.length) : undefined, panel: scriptPanel },
       { id: "knowledge", label: "Knowledge", badge: findings.length ? String(findings.length) : undefined, panel: knowledgePanel },
@@ -192,23 +206,9 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     {breadcrumb}
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
       <SourceWorkArea creation={creation && <DraftPanel />}
-        research={<div className="flex min-w-0 flex-col gap-4">
-        <div className="grid gap-4 md:grid-cols-[minmax(0,320px)_minmax(0,1fr)] md:items-start">
-          <SourcePlayer title={record.title} thumbnail={view.thumbnail} videoId={youtube?.videoId ?? null} url={view.url} portrait={view.portrait} />
-          <div className="min-w-0 space-y-3">
-            {header}
-            {creator && !links.some(link => link.kind === 'channel') && view.url ? <LibrarySourceAction locationId={locationId} url={creator.channelUrl} sourceId={recordId} sourceVersion={record.version} /> : null}
-          </div>
-        </div>
-        {transcriptionCard}
-        <HighlightsProvider locationId={locationId} recordId={recordId} initial={highlights}>
-          <JumpBar items={[{ id: "summary", label: "Summary" }, { id: "details", label: "Details", tab: "transcript" }, { id: "comments", label: "Comments", tab: "transcript" }, { id: "transcript", label: "Transcript", tab: "transcript" },
-            { id: "slides", label: "Slides", tab: "transcript" }, ...(highlights.length ? [{ id: "highlights", label: "Highlights" }] : [])]} />
-          <SummarySection locationId={locationId} recordId={recordId} view={summary} failure={summaryFailure} evidence={`${hasTranscript ? "t" : ""}${value('description').trim() ? "d" : ""}`} />
-          <HighlightsSection />
+        research={<HighlightsProvider locationId={locationId} recordId={recordId} initial={highlights}>
           <SourceTabs tabs={tabs} />
-        </HighlightsProvider>
-      </div>} />
+        </HighlightsProvider>} />
       <SourceAssistant canCreate={Boolean(creation)} locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} canRelated={active} archived={record.archived} knowledgeInputs={knowledgeInputs?.inputs ?? []} canTemplate={Boolean(youtube) && hasTranscript} agent={creation ? { source: { id: recordId, version: record.version, title: record.title, hasText: hasTranscript || Boolean(value('description').trim()) }, turns: creation.conversation.turns, focusProposal: focusedProposal, newDraftHref: `/studio/library/${recordId}?mode=create&new=${randomUUID().slice(0, 8)}`, sessionKey, scope: creation.scope, resume: creation.resume ? { id: creation.resume.id, title: creation.resume.title, turns: creation.resume.turns, updatedAt: creation.resume.updatedAt, href: `/studio/library/${recordId}?mode=create&draft=${creation.resume.id}` } : null } : undefined} />
     </div>
   </main></AgentDraftProvider></SourceWorkspaceProvider>;

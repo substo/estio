@@ -43,7 +43,7 @@ export function Section({ id, title, count, defaultOpen = true, action, children
   const [choice, setOpen] = useState<boolean | null>(null);
   const open = choice ?? defaultOpen;
   useEffect(() => { const on = (e: Event) => { if ((e as CustomEvent<string>).detail === id) setOpen(true); }; window.addEventListener(OPEN_SECTION_EVENT, on); return () => window.removeEventListener(OPEN_SECTION_EVENT, on); }, [id]);
-  return <section id={`sec-${id}`} aria-label={title} tabIndex={-1} className="scroll-mt-14 space-y-3 rounded-xl border bg-card p-3 md:p-4">
+  return <section id={`sec-${id}`} aria-label={title} tabIndex={-1} className="scroll-mt-24 space-y-3 rounded-xl border bg-card p-3 md:p-4">
     <div className="flex items-center gap-2">
       <button type="button" aria-expanded={open} aria-controls={`sec-${id}-body`} onClick={() => setOpen(!open)} className="flex min-h-9 flex-1 items-center gap-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
         <ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 transition-transform duration-150 motion-reduce:transition-none ${open ? "" : "-rotate-90"}`} />
@@ -65,7 +65,7 @@ export function jumpTo(id: string, tab?: string, focusId?: string) {
   }));
 }
 export function JumpBar({ items }: { items: Array<{ id: string; label: string; tab?: string }> }) {
-  return <nav aria-label="Jump to a section" className="sticky top-0 z-20 min-w-0 border-b bg-background">
+  return <nav aria-label="Jump to a section" className="sticky top-11 z-20 min-w-0 border-b bg-background">
     <div className="flex gap-0.5 overflow-x-auto py-0.5 md:gap-1">{items.map(item => <a key={item.id} href={`#sec-${item.id}`} onClick={event => {
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
