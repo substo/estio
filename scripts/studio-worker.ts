@@ -14,6 +14,7 @@ import { createDbStudioQueue } from "../lib/studio/worker/queue";
 import { createIdeaReviewHandler, productionIdeaReviewDeps } from "../lib/studio/worker/idea-review";
 import { createScriptBriefHandler, productionScriptBriefDeps } from "../lib/studio/worker/script-brief";
 import { createKnowledgeExtractionHandler, productionKnowledgeExtractionDeps } from "../lib/studio/worker/knowledge-extract";
+import { createImportKnowledgeHandler } from "../lib/studio/worker/import-knowledge";
 import { runStudioWorker } from "../lib/studio/worker/runner";
 
 // Hosted Studio worker: a pm2 process beside Next.js on Hetzner, so Studio jobs
@@ -50,6 +51,7 @@ async function main() {
   handlers["studio.brand_profile"] = createBrandProfileHandler(db);
   handlers["studio.idea_review"] = createIdeaReviewHandler(productionIdeaReviewDeps(db));
   handlers["studio.script_brief"] = createScriptBriefHandler(productionScriptBriefDeps(db));
+  handlers["studio.import_knowledge"] = createImportKnowledgeHandler(db);
   handlers["studio.knowledge_extract"] = createKnowledgeExtractionHandler(productionKnowledgeExtractionDeps(db));
   handlers["studio.youtube_discovery"] = createYoutubeDiscoveryHandler(productionYoutubeDiscoveryDeps(db));
   // Related-video search through the Location's connected device network (read-only; the Mac route is preferred and handled on the Mac).

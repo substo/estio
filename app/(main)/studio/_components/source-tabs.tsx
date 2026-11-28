@@ -1,7 +1,8 @@
 "use client";
+import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 
-export type SourceTab = { id: string; label: string; badge?: string; panel: React.ReactNode };
+export type SourceTab = { id: string; label: string; badge?: string; pending?: boolean; panel: React.ReactNode };
 export const OPEN_TAB_EVENT = "studio:open-tab";
 const RELATED_SEARCH_EVENT = "studio:related-search";
 
@@ -37,7 +38,7 @@ export function SourceTabs({ tabs, initial }: { tabs: SourceTab[]; initial?: str
     <div className="sticky top-0 z-30 h-11 bg-background"><div role="tablist" aria-label="Source workspace tabs" onKeyDown={onKey} className="flex h-full gap-1 overflow-x-auto border-b">
       {tabs.map(tab => <button key={tab.id} ref={node => { refs.current[tab.id] = node; }} role="tab" type="button" id={`${base}-t-${tab.id}`} aria-selected={active === tab.id} aria-controls={`${base}-p-${tab.id}`} tabIndex={active === tab.id ? 0 : -1} onClick={() => openPanel(tab.id)}
         className={`inline-flex min-h-11 shrink-0 items-center gap-1.5 border-b-2 px-3 text-sm font-medium transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary ${active === tab.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-        {tab.label}{tab.badge ? <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{tab.badge}</span> : null}
+        {tab.label}{tab.pending ? <><Loader2 aria-hidden="true" className="size-3 motion-safe:animate-spin" /><span className="sr-only"> — processing</span></> : null}{tab.badge ? <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{tab.badge}</span> : null}
       </button>)}
     </div></div>
     {tabs.map(tab => <div key={tab.id} role="tabpanel" id={`${base}-p-${tab.id}`} aria-labelledby={`${base}-t-${tab.id}`} hidden={active !== tab.id} tabIndex={0} className={`min-w-0 pb-4 focus-visible:outline-none ${tab.id === tabs[0].id ? "" : "pt-4"}`}>{tab.panel}</div>)}

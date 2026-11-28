@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Loader2 } from "lucide-react";
 import { buildKnowledgeOutline, type KnowledgeOutline } from "@/lib/studio/knowledge-outline";
 import { safeStudioSourceUrl } from "@/lib/studio/library-policy";
 import { RetryBatchForm } from "./extraction-forms";
@@ -28,25 +29,32 @@ export function KnowledgeOutlineDetail({ outline, query, embedded = false, frame
   const pageHref = (n: number) => `/studio/knowledge/extractions/${outline.id}?transcript=${n}#transcript`;
   const isSavedNotes = batches[0]?.snapshot.evidenceMode === "record_text" && batches[0].snapshot.evidenceInputId !== "transcript";
 
+  const coverage = <p>{covered} of {units.length} evidence passages processed · {batches.filter(batch => batch.result).length} of {batches.length} batches</p>;
   const Shell = embedded ? "div" : "main";
-  return <Shell className={embedded ? "space-y-6" : "mx-auto max-w-4xl space-y-6 p-4 sm:p-6 md:p-10"}>
+  return <Shell className={embedded ? "space-y-3" : "mx-auto max-w-4xl space-y-6 p-4 sm:p-6 md:p-10"}>
     {embedded ? null : <header className="space-y-2">
       <Link href={historyUrl} className="text-sm text-primary underline">Extraction history</Link>
       <h1 className="break-words text-2xl font-semibold sm:text-3xl">{source?.title ?? "Source knowledge"}</h1>
       {url ? <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm text-primary underline">Open original source</a> : null}
     </header>}
     <section aria-label="Processing coverage" className="space-y-2 text-sm">
-      {embedded ? <Link href={historyUrl} className="inline-flex min-h-9 items-center text-primary underline">Extraction history</Link> : null}
-      <p role="status"><strong>{complete ? "Reading complete" : waiting ? "Reading source" : "Extraction incomplete"}</strong>
-        {" · "}{covered} of {units.length} evidence passages processed · {batches.filter(batch => batch.result).length} of {batches.length} batches</p>
-      {units.length ? <p className="text-muted-foreground">{speech} speech · {ocr} on-screen text{other ? ` · ${other} saved text` : ""}
-        {framesFailed ? " · Frame processing failed" : null}</p> : null}
-      {duplicates ? <p className="text-muted-foreground">{duplicates} {duplicates === 1 ? "duplicate combined" : "duplicates combined"}. Distinct citations are shown with the takeaway.</p> : null}
+      {waiting || !complete || !embedded ? <div role="status" className="text-muted-foreground">
+        <p className="flex items-center gap-2 font-medium text-foreground">
+          {waiting ? <Loader2 aria-hidden="true" className="size-4 shrink-0 motion-safe:animate-spin" /> : null}
+          {waiting ? "Extracting knowledge…" : complete ? "Reading complete" : "Extraction incomplete"}
+        </p>
+        {coverage}
+      </div> : null}
       {waiting ? <RefreshKnowledgeOutline /> : null}
-      {batches.length ? <details>
-        <summary className="cursor-pointer text-muted-foreground">Processing details</summary>
+      {batches.length ? <details className="space-y-1 text-muted-foreground">
+        <summary className="cursor-pointer py-2">{embedded ? "Extraction details" : "Processing details"}</summary>
+        {embedded && complete ? coverage : null}
+        {units.length ? <p>{speech} speech · {ocr} on-screen text{other ? ` · ${other} saved text` : ""}
+          {framesFailed ? " · Frame processing failed" : null}</p> : null}
+        {duplicates ? <p>{duplicates} {duplicates === 1 ? "duplicate combined" : "duplicates combined"}. Distinct citations are shown with the takeaway.</p> : null}
         <p className="break-words">{outline.provider === "location_order" ? "Location AI order" : outline.provider === "subscription" ? "Paired Mac subscription" : "Location OpenAI API"}
           {" · "}{[...new Set(batches.map(batch => batch.model))].join(", ")}</p>
+        {embedded ? <Link href={historyUrl} className="inline-flex min-h-11 items-center text-primary underline">Extraction history</Link> : null}
       </details> : null}
       {failures.length ? <div className="space-y-2 rounded-md border p-3">
         <p role="alert">{failures.length} {failures.length === 1 ? "batch stopped" : "batches stopped"} before completion. Resolve failed work before approving takeaways.</p>
@@ -61,9 +69,9 @@ export function KnowledgeOutlineDetail({ outline, query, embedded = false, frame
     </section>
     {covered ? <OutlineTopics key={outline.id} outlineId={outline.id} sourceId={outline.sourceId} topics={topics}
       allTakeaways={allTakeaways} featured={featured} curated={batches.some(batch => batch.snapshot.curationVersion === 1)}
-      annotations={annotations} initialTriage={outline.triage ?? {}} canApprove={complete && !stale} /> : null}
+      annotations={annotations} initialTriage={outline.triage ?? {}} canApprove={complete && !stale} compact={embedded} /> : null}
     {units.length ? <details id="transcript" open={query.passage !== undefined || query.transcript !== undefined}
-      className="space-y-3 rounded-xl border p-4 sm:p-5">
+      className={embedded ? "space-y-2 rounded-lg border p-3" : "space-y-3 rounded-xl border p-4 sm:p-5"}>
       <summary className="cursor-pointer font-semibold">{isSavedNotes ? "Read saved evidence" : "Read transcript and source evidence"}</summary>
       <p className="text-sm text-muted-foreground">Passages {page * pageSize + 1}–{Math.min((page + 1) * pageSize, units.length)} of {units.length}</p>
       {units.slice(page * pageSize, (page + 1) * pageSize).map(unit => <TranscriptPassage key={unit.id} outlineId={outline.id} unit={unit}

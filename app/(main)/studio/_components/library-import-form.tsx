@@ -32,7 +32,7 @@ export function LibraryImportForm({ locationId, inputRef, deferRefresh }: {
     const submitter = (event.nativeEvent as SubmitEvent).submitter;
     const open = !(submitter instanceof HTMLButtonElement && submitter.value === "continue");
     setPending(open ? "open" : "continue"); setError(""); setSaved(null);
-    const body = { input: input.trim(), ...(ambiguous ? { platform } : {}), transcribe: true };
+    const body = { input: input.trim(), ...(ambiguous ? { platform } : {}), transcribe: true, extractKnowledge: true };
     const fingerprint = JSON.stringify(body);
     try {
       if (request.current?.fingerprint !== fingerprint) request.current = { fingerprint, key: crypto.randomUUID() };
@@ -42,7 +42,10 @@ export function LibraryImportForm({ locationId, inputRef, deferRefresh }: {
       if (typeof result.recordId !== "string" || !recordLinkId(result.recordId)) throw new Error("Studio didn’t return a source link. Try again.");
       const transcription = result.transcription as { status?: string; message?: string; reason?: string } | undefined;
       const reason = transcription?.status === "not_queued" ? readVideoNotQueuedReason(transcription.reason) : null;
-      const href = `/studio/library/${result.recordId}${reason ? `?transcriptionSetup=${reason}` : ""}`;
+      const setup = new URLSearchParams();
+      if (reason) setup.set("transcriptionSetup", reason);
+      if (result.knowledgeSetup === "unavailable") setup.set("knowledgeSetup", "unavailable");
+      const href = `/studio/library/${result.recordId}${setup.size ? `?${setup}` : ""}`;
       if (open) {
         startOpening(() => router.push(href));
       } else {

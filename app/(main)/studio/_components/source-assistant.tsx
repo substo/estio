@@ -10,15 +10,14 @@ import type { SourceAssistRun } from "@/lib/studio/source-assist";
 import { studioTextConsent } from "@/lib/studio/text-provider";
 import { StudioTextProviderChoice } from "./text-provider-choice";
 import { useStudioTenantHeaders } from "./studio-tenant-context";
-import { DRAFT_FROM_FINDINGS_EVENT, useSourceWorkspace } from "./source-workspace";
+import { DISCUSS_KNOWLEDGE_EVENT, DRAFT_FROM_FINDINGS_EVENT, useSourceWorkspace } from "./source-workspace";
 import { OPEN_TAB_EVENT } from "./source-tabs";
 import type { ProposalFocus } from "@/lib/studio/citation-navigation";
 import { AgentChat, type AgentResume, type AgentSource } from "./agent-chat";
 import type { AgentTurnView } from "@/lib/studio/agent";
 
 type Intent = "discuss" | "rewrite_note" | "propose_idea";
-type Mode = Intent | "knowledge" | "template";
-export type KnowledgeInput = { inputId: string; mode: string; label: string };
+type Mode = Intent | "template";
 type AiState = { reviewId: string; run: SourceAssistRun | null; error: string | null; waited: boolean; intent: Intent };
 type Entry = { id: number; role: "you" | "assistant" | "ai"; text: string; saved?: boolean; tone?: "error"; ai?: AiState; link?: { href: string; label: string } };
 type Recognition = { start(): void; stop(): void; continuous: boolean; interimResults: boolean; lang: string; onresult: ((event: any) => void) | null; onerror: ((event: any) => void) | null; onend: (() => void) | null };
@@ -27,12 +26,11 @@ const INTENTS: Array<{ value: Mode; label: string; hint: string }> = [
   { value: "discuss", label: "Discuss", hint: "Answer about this video" },
   { value: "rewrite_note", label: "Notes", hint: "Tidy my words into a note" },
   { value: "propose_idea", label: "Idea", hint: "Draft a linked idea" },
-  { value: "knowledge", label: "Knowledge", hint: "Extract cited takeaways for review" },
   { value: "template", label: "Script template", hint: "Extract reusable writing beats for review" },
 ];
 const clock = (seconds: number) => new Date(seconds * 1000).toISOString().slice(seconds >= 3600 ? 11 : 14, 19);
 
-export function SourceAssistant({ locationId, sourceId, sourceTitle, version, canRelated, archived, hasEvidence, knowledgeInputs, canTemplate, canCreate, agent }: { agent?: { source: AgentSource; turns: AgentTurnView[]; focusProposal?: ProposalFocus | null; newDraftHref: string; resume: AgentResume | null; scope: string; sessionKey: string }; knowledgeInputs: KnowledgeInput[]; canTemplate: boolean; canCreate?: boolean; locationId: string; sourceId: string; sourceTitle: string; version: number; canRelated: boolean; archived: boolean; hasEvidence: boolean }) {
+export function SourceAssistant({ locationId, sourceId, sourceTitle, version, canRelated, archived, hasEvidence, canTemplate, canCreate, agent }: { agent?: { source: AgentSource; turns: AgentTurnView[]; focusProposal?: ProposalFocus | null; newDraftHref: string; resume: AgentResume | null; scope: string; sessionKey: string }; canTemplate: boolean; canCreate?: boolean; locationId: string; sourceId: string; sourceTitle: string; version: number; canRelated: boolean; archived: boolean; hasEvidence: boolean }) {
   const router = useRouter();
   const tenant = useStudioTenantHeaders()["X-Studio-Tenant"];
   const [open, setOpen] = useState(false);
@@ -41,8 +39,6 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
   const { setNoteProposal, setIdeaProposal, findingSelection, setFindingSelection, provider, setProvider, creating, setCreating } = useSourceWorkspace();
-  const [inputChoice, setInputChoice] = useState(0);
-  const knowledgeInput = knowledgeInputs[inputChoice] ?? null;
   const showIn = (tab: string, line: string) => {
     setOpen(false);
     window.setTimeout(() => {
@@ -57,22 +53,35 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
   const fieldId = useId();
   const [mode, setMode] = useState<Mode>("discuss");
   useEffect(() => {
-    const openDraft = (event: Event) => {
+    function openComposer(mode: Intent, origin: unknown) {
       setCreating(false);
-      setMode("propose_idea");
+      setMode(mode);
       if (window.matchMedia("(min-width: 1024px)").matches) {
         requestAnimationFrame(() => document.getElementById(`${fieldId}-side`)?.focus());
       } else {
-        const origin = (event as CustomEvent<unknown>).detail;
         draftOrigin.current = origin instanceof HTMLElement ? origin : null;
         setOpen(true);
       }
+    }
+    const openDraft = (event: Event) => openComposer("propose_idea", (event as CustomEvent<unknown>).detail);
+    const discuss = (event: Event) => {
+      const { statement, quote, origin } = (event as CustomEvent<{ statement: string; quote: string; origin: HTMLElement }>).detail;
+      const question = `What does this takeaway mean, and how does the source support it?
+
+Takeaway: ${statement}${quote ? `
+Source quote: “${quote}”` : ""}`;
+      setText(previous => [previous.trim(), question].filter(Boolean).join("\n\n").slice(0, REACTION_LIMIT));
+      openComposer("discuss", origin);
     };
     window.addEventListener(DRAFT_FROM_FINDINGS_EVENT, openDraft);
-    return () => window.removeEventListener(DRAFT_FROM_FINDINGS_EVENT, openDraft);
+    window.addEventListener(DISCUSS_KNOWLEDGE_EVENT, discuss);
+    return () => {
+      window.removeEventListener(DRAFT_FROM_FINDINGS_EVENT, openDraft);
+      window.removeEventListener(DISCUSS_KNOWLEDGE_EVENT, discuss);
+    };
   }, [fieldId, setCreating]);
 
-  const taskMode = mode === "knowledge" || mode === "template";
+  const taskMode = mode === "template";
   const selectedIdea = mode === "propose_idea" && findingSelection;
   const intent: Intent = taskMode ? "discuss" : mode;
   const [asking, setAsking] = useState(false);
@@ -140,24 +149,18 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
   }
   async function runTask() {
     if (asking) return;
-    const knowledge = mode === "knowledge";
-    if (knowledge && !knowledgeInput) { push({ role: "assistant", text: "Knowledge needs a saved transcript or source text first.", tone: "error" }); return; }
     requestKey.current ??= crypto.randomUUID();
     setAsking(true);
     try {
-      const url = knowledge ? "/studio/knowledge/extractions/api" : "/studio/content/templates/from-video/api";
-      const body = knowledge
-        ? { action: "enqueueOutline", requestId: requestKey.current, sourceId, expectedVersion: version, inputId: knowledgeInput!.inputId, mode: knowledgeInput!.mode, ...studioTextConsent(provider, true) }
-        : { requestId: requestKey.current, sourceId, expectedVersion: version, ...studioTextConsent(provider, true) };
-      const response = await fetch(url, { method: "POST", headers: { "X-Studio-Tenant": tenant, "Content-Type": "application/json" }, signal: AbortSignal.timeout(30_000), body: JSON.stringify(body) });
+      const body = { requestId: requestKey.current, sourceId, expectedVersion: version, ...studioTextConsent(provider, true) };
+      const response = await fetch("/studio/content/templates/from-video/api", { method: "POST", headers: { "X-Studio-Tenant": tenant, "Content-Type": "application/json" }, signal: AbortSignal.timeout(30_000), body: JSON.stringify(body) });
       const data = await response.json();
       if (!response.ok) { if (response.status < 500) requestKey.current = null; push({ role: "assistant", text: data.error || "The task could not start.", tone: "error" }); return; }
       requestKey.current = null;
-      const id = knowledge ? data.outlineId : data.reviewId;
-      push({ role: "assistant", text: knowledge ? "Knowledge extraction queued. Review the cited takeaways when it finishes:" : "Script template extraction started. Review the beats when it finishes:", link: { href: knowledge ? `/studio/knowledge/extractions/${id}` : `/studio/content/templates/from-video/${id}`, label: knowledge ? "Open knowledge review" : "Open template review" } });
+      push({ role: "assistant", text: "Script template extraction started. Review the beats when it finishes:", link: { href: `/studio/content/templates/from-video/${data.reviewId}`, label: "Open template review" } });
       setOpen(false);
-      // Switch tabs first: updating the URL hash after a refresh starts would restore the old page state over it.
-      window.setTimeout(() => { window.dispatchEvent(new CustomEvent(OPEN_TAB_EVENT, { detail: knowledge ? "knowledge" : "script" })); window.setTimeout(() => router.refresh(), 100); }, 50);
+      // Update the hash before refreshing to keep the selected tab.
+      window.setTimeout(() => { window.dispatchEvent(new CustomEvent(OPEN_TAB_EVENT, { detail: "script" })); window.setTimeout(() => router.refresh(), 100); }, 50);
     } catch { push({ role: "assistant", text: "The outcome is unconfirmed. Press Run again to check this same request.", tone: "error" }); }
     finally { setAsking(false); }
   }
@@ -242,11 +245,10 @@ export function SourceAssistant({ locationId, sourceId, sourceTitle, version, ca
         <legend className="sr-only">Assistant mode</legend>
         <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Assistant mode">{INTENTS.filter(item => item.value !== "template" || canTemplate).map(item => <label key={item.value} title={item.hint} className={`inline-flex min-h-9 cursor-pointer items-center rounded-full border px-3 text-xs font-medium transition-colors duration-150 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-primary ${mode === item.value ? "border-primary bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}><input type="radio" className="sr-only" name={`mode-${variant}`} checked={mode === item.value} onChange={() => setMode(item.value)} />{item.label}</label>)}</div>
       </fieldset>
-      {mode === "knowledge" && knowledgeInputs.length > 1 ? <label className="flex items-center gap-2 text-xs">Evidence<select value={inputChoice} onChange={event => setInputChoice(Number(event.target.value))} className="min-h-9 min-w-0 flex-1 rounded-md border bg-background px-2 text-xs">{knowledgeInputs.map((item, index) => <option key={`${item.mode}:${item.inputId}`} value={index}>{item.label}</option>)}</select></label> : null}
-      {hasEvidence || selectedIdea ? <StudioTextProviderChoice selectedIdea={Boolean(selectedIdea)} compact sourceAssist={!taskMode} fullSource={mode === "knowledge"} videoTemplate={mode === "template"} provider={provider} onChange={setProvider} />
-        : <p className="text-xs text-muted-foreground">The assistant needs a saved transcript or description. Add one in the Transcript tab first.</p>}
+      {hasEvidence || selectedIdea ? <StudioTextProviderChoice selectedIdea={Boolean(selectedIdea)} compact sourceAssist={!taskMode} videoTemplate={mode === "template"} provider={provider} onChange={setProvider} />
+        : <p className="text-xs text-muted-foreground">The assistant needs a saved transcript or description. Add one in the Source tab.</p>}
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" onClick={() => void ask()} disabled={asking || archived || (!hasEvidence && !selectedIdea) || (taskMode ? (mode === "knowledge" && !knowledgeInput) : (!text.trim() && !selectedIdea))} className="min-h-10">{asking ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles aria-hidden="true" className="mr-2 h-4 w-4" />}{taskMode ? (mode === "knowledge" ? "Extract knowledge" : "Extract template") : selectedIdea ? "Generate idea draft" : "Ask"}</Button>
+        <Button type="button" onClick={() => void ask()} disabled={asking || archived || (!hasEvidence && !selectedIdea) || (!taskMode && !text.trim() && !selectedIdea)} className="min-h-10">{asking ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles aria-hidden="true" className="mr-2 h-4 w-4" />}{taskMode ? "Extract template" : selectedIdea ? "Generate idea draft" : "Ask"}</Button>
         {taskMode ? null : <Button type="button" variant="outline" onClick={() => void saveAsWritten()} disabled={saving || archived || !text.trim()} className="min-h-10"><NotebookPen aria-hidden="true" className="mr-2 h-4 w-4" />Save as written</Button>}
         {canDictate ? <Button type="button" variant="outline" size="icon" onClick={toggleDictation} aria-pressed={listening} aria-label={listening ? "Stop dictation" : "Dictate"} disabled={archived} className="h-10 w-10">{listening ? <MicOff aria-hidden="true" className="h-4 w-4" /> : <Mic aria-hidden="true" className="h-4 w-4" />}</Button> : null}
       </div>

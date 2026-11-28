@@ -7,7 +7,7 @@ import { Bookmark, Check, EyeOff, MessageSquare, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { evidenceTime, type EvidenceUnit, type OutlineAnnotation, type OutlineTakeaway, type OutlineTopic } from "@/lib/studio/knowledge-outline";
 import { useStudioCommand } from "../../../_components/use-studio-command";
-import { DRAFT_FROM_FINDINGS_EVENT, useOptionalSourceWorkspace } from "../../../_components/source-workspace";
+import { DISCUSS_KNOWLEDGE_EVENT, DRAFT_FROM_FINDINGS_EVENT, useOptionalSourceWorkspace } from "../../../_components/source-workspace";
 
 const endpoint = "/studio/knowledge/extractions/api";
 const citationLabel = (type: EvidenceUnit["evidenceType"]) =>
@@ -90,18 +90,14 @@ function Comment({ outlineId, nodeKey, value, editable, label, children }: {
 
 type ReviewControls = {
   outlineId: string; annotations: Record<string, OutlineAnnotation>; triage: TriageMap;
-  busy: boolean; change: (item: OutlineTakeaway, state: TriageState) => void;
+  busy: boolean; compact: boolean; discuss: boolean; change: (item: OutlineTakeaway, state: TriageState) => void;
 };
 
 function Takeaway({ item, controls, restore = false }: { item: OutlineTakeaway; controls: ReviewControls; restore?: boolean }) {
-  const { outlineId, annotations, triage, busy, change } = controls;
+  const { outlineId, annotations, triage, busy, compact, discuss, change } = controls;
   const kept = triage[item.key] === "kept";
-  return <article className="min-w-0 space-y-2 py-3">
-    <Comment outlineId={outlineId} nodeKey={item.key} value={annotations[item.key]} label={item.statement}>
-      <p className="break-words font-medium">{item.statement}</p>
-      {item.unverified ? <p className="mt-1 text-xs font-medium text-muted-foreground">Speaker claim · unverified</p> : null}
-    </Comment>
-    <div className="space-y-2 text-sm">{item.citations.map(citation => <blockquote key={`${citation.index}:${citation.quote}`} className="space-y-1 border-l-2 pl-3">
+  const hasEvidence = Boolean(item.citations.length || item.alternateStatements?.length);
+  const evidence = <div className="space-y-2 text-sm">{item.citations.map(citation => <blockquote key={`${citation.index}:${citation.quote}`} className="space-y-1 border-l-2 pl-3">
       <p className="whitespace-pre-wrap break-words">“{citation.quote}”</p>
       <Link className="text-primary underline" href={`/studio/knowledge/extractions/${outlineId}?passage=${citation.index}#unit-${citation.index}`}>
         {citationLabel(citation.type)} · {evidenceTime(citation.start, citation.end) ?? (citation.startChar === null ? "Source passage" : `Text offset ${citation.startChar}`)}
@@ -111,7 +107,16 @@ function Takeaway({ item, controls, restore = false }: { item: OutlineTakeaway; 
         <p>Related wording from the extraction</p>
         <ul className="list-disc pl-5">{item.alternateStatements.map(variant => <li key={variant}>{variant}</li>)}</ul>
       </div> : null}
-    </div>
+    </div>;
+  return <article className={compact ? "min-w-0 space-y-1 py-2" : "min-w-0 space-y-2 py-3"}>
+    <Comment outlineId={outlineId} nodeKey={item.key} value={annotations[item.key]} label={item.statement}>
+      <p className="break-words font-medium">{item.statement}</p>
+      {item.unverified ? <p className="mt-1 text-xs font-medium text-muted-foreground">Speaker claim · unverified</p> : null}
+    </Comment>
+    {compact && hasEvidence ? <details className="space-y-2">
+      <summary className="cursor-pointer py-2 text-sm text-muted-foreground">Source evidence</summary>
+      {evidence}
+    </details> : !compact ? evidence : null}
     {item.applied ? <p className="text-sm"><Link className="text-primary underline" href={`/studio/knowledge/${item.applied.insightId}`}>Open in Knowledge</Link>{" · "}{item.applied.status}</p> : null}
     <div className="flex flex-wrap gap-2">
       {restore ? <Button type="button" variant="outline" className="min-h-11" disabled={busy} onClick={() => change(item, "clear")}>
@@ -124,6 +129,11 @@ function Takeaway({ item, controls, restore = false }: { item: OutlineTakeaway; 
           <EyeOff aria-hidden="true" className="mr-2 h-4 w-4" />Skip
         </Button>
       </>}
+      {discuss ? <Button type="button" variant="ghost" size="sm" className="min-h-11" onClick={event => {
+        window.dispatchEvent(new CustomEvent(DISCUSS_KNOWLEDGE_EVENT, { detail: {
+          statement: item.statement, quote: item.citations[0]?.quote ?? "", origin: event.currentTarget,
+        } }));
+      }}>Discuss</Button> : null}
     </div>
   </article>;
 }
@@ -153,10 +163,10 @@ function Topic({ topic, controls, section, depth = 0 }: {
   </section>;
 }
 
-export function OutlineTopics({ outlineId, sourceId, topics, allTakeaways, featured, curated, annotations, initialTriage, canApprove }: {
+export function OutlineTopics({ outlineId, sourceId, topics, allTakeaways, featured, curated, annotations, initialTriage, canApprove, compact = false }: {
   outlineId: string; sourceId: string; topics: OutlineTopic[]; allTakeaways: OutlineTakeaway[];
   featured: Array<{ title: string; items: OutlineTakeaway[] }>; curated: boolean;
-  annotations: Record<string, OutlineAnnotation>; initialTriage: TriageMap; canApprove: boolean;
+  annotations: Record<string, OutlineAnnotation>; initialTriage: TriageMap; canApprove: boolean; compact?: boolean;
 }) {
   const router = useRouter();
   const workspace = useOptionalSourceWorkspace();
@@ -206,21 +216,25 @@ export function OutlineTopics({ outlineId, sourceId, topics, allTakeaways, featu
     } else if (result?.status === 409) router.refresh();
   }
 
-  const controls = { outlineId, annotations, triage, busy, change };
+  const controls = { outlineId, annotations, triage, busy, compact, discuss: Boolean(workspace), change };
   const readingTopics = topics.filter(topic => topicHasContent(topic, controls));
-  return <div className="space-y-4">
-    <Comment outlineId={outlineId} nodeKey="overview" value={overview} editable label="review overview">
+  const reviewNotes = <Comment outlineId={outlineId} nodeKey="overview" value={overview} editable label="review overview">
       <h2 className="font-semibold">{overview?.title || "Review notes"}</h2>
       {overview?.summary ? <p className="whitespace-pre-wrap break-words text-sm">{overview.summary}</p> : null}
-    </Comment>
+    </Comment>;
+  return <div className={compact ? "space-y-2" : "space-y-4"}>
+    {compact ? <details>
+      <summary className="cursor-pointer py-2 text-sm text-muted-foreground">{overview?.title || "Review notes"}</summary>
+      {reviewNotes}
+    </details> : reviewNotes}
     {allTakeaways.length ? <div className="flex flex-wrap gap-2" role="group" aria-label="Filter takeaways">
       {featured.length ? <Button type="button" variant={view === "suggested" ? "secondary" : "ghost"} aria-pressed={view === "suggested"} className="min-h-11" onClick={() => setFilter("suggested")}>Suggested</Button> : null}
       <Button type="button" variant={view === "all" ? "secondary" : "ghost"} aria-pressed={view === "all"} className="min-h-11" onClick={() => setFilter("all")}>All takeaways</Button>
       <Button type="button" variant={filter === "kept" ? "secondary" : "ghost"} aria-pressed={filter === "kept"} className="min-h-11" onClick={() => setFilter("kept")}>Kept ({kept.length})</Button>
       <Button type="button" variant={filter === "hidden" ? "secondary" : "ghost"} aria-pressed={filter === "hidden"} className="min-h-11" onClick={() => setFilter("hidden")}>Skipped ({hidden.length})</Button>
     </div> : null}
-    <div className="flex flex-wrap items-center gap-2 text-sm">
-      <p role="status">{message}</p>
+    <div className="flex flex-wrap items-center gap-2 text-sm empty:hidden" role="status">
+      {message ? <p>{message}</p> : null}
       {undo ? <Button ref={undoButton} type="button" variant="ghost" className="min-h-11" disabled={busy} onClick={() => void change(undo.item, undo.state)}>Undo skip</Button> : null}
       {privateCommand.retry && retryTriage ? <Button variant="outline" type="button" onClick={() => void change(retryTriage.item, retryTriage.state)}>Retry triage</Button> : null}
       {privateCommand.error || approval.error ? <p role="alert" className="text-destructive">{privateCommand.error || approval.error}</p> : null}
@@ -237,12 +251,12 @@ export function OutlineTopics({ outlineId, sourceId, topics, allTakeaways, featu
       </div>
       {references.length > 50 ? <p className="text-sm">Keep fewer citations to draft in one request.</p> : null}
     </section> : null}
-    {view === "suggested" ? <section aria-label="Suggested takeaways" className="space-y-5">
+    {view === "suggested" ? <section aria-label="Suggested takeaways" className={compact ? "space-y-3" : "space-y-5"}>
       {groups.length ? groups.map(group => <section key={group.title}>
         <h3 className="break-words pb-2 text-sm font-semibold">{group.title}</h3>
         <div className="divide-y border-t">{group.items.map(item => <Takeaway key={item.key} item={item} controls={controls} />)}</div>
       </section>) : <p className="text-sm text-muted-foreground">All suggested takeaways are skipped. Other findings are in All takeaways.</p>}
-    </section> : view === "all" ? <section aria-label="All takeaways" className="space-y-5">
+    </section> : view === "all" ? <section aria-label="All takeaways" className={compact ? "space-y-3" : "space-y-5"}>
       {!curated && allTakeaways.length ? <p className="text-sm text-muted-foreground">Earlier extraction. Takeaways are grouped by topic.</p> : null}
       {readingTopics.length > 1 ? <label className="flex flex-wrap items-center gap-2 text-sm">
         Jump to topic

@@ -4,6 +4,7 @@ import type { FindingSelection } from "@/lib/studio/knowledge-outline";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 export type IdeaProposal = { title: string; summary: string; ai?: boolean; draftReviewId?: string; limitations?: string[]; evidence?: Array<{ href: string; label: string; quote: string }> };
+export const DISCUSS_KNOWLEDGE_EVENT = "studio:discuss-knowledge";
 export const DRAFT_FROM_FINDINGS_EVENT = "studio:draft-from-findings";
 type Workspace = {
   /** Text the assistant proposes to add to My notes; shown as a change on the left until applied or dismissed. */

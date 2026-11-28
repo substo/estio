@@ -98,3 +98,20 @@ export async function listKnowledgeExtractions(locationId: string, sourceId?: st
         ${sourceId ? Prisma.sql`and snapshot#>>'{source,id}'=${sourceId}` : Prisma.empty}
     ) history order by created_at desc,id limit 30`);
 }
+
+
+export async function scheduleImportedKnowledge(locationId: string, recordId: string, transcriptionId?: string) {
+  const access = await requireOwnStudioCommandLocation(locationId);
+  await studioDb.call("studio_queue_import_knowledge", {
+    p_location: access.locationId, p_app: access.app, p_actor: access.userId, p_source: recordId, p_transcription: transcriptionId ?? null,
+  });
+}
+
+export async function getImportedKnowledgeState(locationId: string, recordId: string) {
+  const access = await getStudioAccess(locationId);
+  if (!access || !reviewUuid.test(recordId)) return null;
+  return studioDb.one<{ status: string; error: string | null }>(Prisma.sql`
+    select status, last_error_message as error from studio.studio_jobs
+    where location_id=${access.locationId} and kind='studio.import_knowledge'
+      and idempotency_key=${`import-knowledge:${recordId}`} and payload->>'app'=${access.app}`);
+}

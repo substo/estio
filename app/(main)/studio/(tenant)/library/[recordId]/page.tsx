@@ -13,7 +13,7 @@ import { libraryPresentation, platformLabels } from "@/lib/studio/library-presen
 import { validatedYoutubeCreator } from "@/lib/studio/library-import-metadata";
 import { studioRouteParams } from "@/lib/studio/route-context";
 import { listPendingStudioUploads } from "@/lib/studio/uploads";
-import { getKnowledgeExtractionInputs, getKnowledgeOutline, getLatestKnowledgeOutline } from "@/lib/studio/knowledge-extraction";
+import { getImportedKnowledgeState, getKnowledgeExtractionInputs, getKnowledgeOutline, getLatestKnowledgeOutline } from "@/lib/studio/knowledge-extraction";
 import { getStudioLibraryRecord } from "@/lib/studio/library";
 import { readVideoNotQueuedReason } from "@/lib/studio/video-state-text";
 import { getVideoStatus } from "@/lib/studio/video-transcription";
@@ -40,6 +40,7 @@ import { NotesPanel } from "../../../_components/notes-panel";
 import { IdeaPanel } from "../../../_components/idea-panel";
 import { SourceTemplatePanel } from "../../../_components/source-template-panel";
 import { InfoTip } from "../../../_components/info-tip";
+import { SourceKnowledgeActions } from "../../../_components/source-knowledge-actions";
 import { SourceAssistant } from "../../../_components/source-assistant";
 
 export const dynamic = "force-dynamic";
@@ -47,7 +48,7 @@ const card = "scroll-mt-16 space-y-3 rounded-xl border bg-card p-4 md:p-5";
 
 export default async function StudioLibraryRecordPage({ params, searchParams }: { params: Promise<{ recordId: string }>; searchParams: Promise<{ knowledgeReview?: string; draft?: string; mode?: string; stage?: string; new?: string;
   citationTurn?: string; citationProposal?: string; citationItem?: string; citationEvidence?: string;
-  proposalTurn?: string; proposalIndex?: string; transcriptionSetup?: string }> }) {
+  proposalTurn?: string; proposalIndex?: string; transcriptionSetup?: string; knowledgeSetup?: string }> }) {
   const { locationId, recordId } = await studioRouteParams(params);
   const result = await getStudioLibraryRecord(locationId, recordId);
   if (!result) notFound();
@@ -79,11 +80,12 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     return { ...data, conversation, resume, scope: await agentRouteScope(locationId) };
   };
   const summary = summaryView(record.payload, Boolean(value('transcript').trim()), Boolean(value('description').trim()));
-  const [pendingUploads, latestOutline, videoStatus, knowledgeInputs, creation, fromAgent, fromKnowledge, highlights, summaryFailure, sourceDetails] = await Promise.all([
+  const [pendingUploads, latestOutline, videoStatus, knowledgeInputs, knowledgeAuto, creation, fromAgent, fromKnowledge, highlights, summaryFailure, sourceDetails] = await Promise.all([
     listPendingStudioUploads(locationId, recordId),
     active ? getLatestKnowledgeOutline(locationId, recordId) : null,
     active && youtube ? getVideoStatus(locationId, recordId).catch(() => null) : null,
     active ? getKnowledgeExtractionInputs(locationId, recordId).catch(() => null) : null,
+    active ? getImportedKnowledgeState(locationId, recordId).catch(() => null) : null,
     creationData(),
     agentCitation,
     knowledgeCitation,
@@ -183,19 +185,25 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     {contentLinks.length ? <ul className="space-y-1 text-sm">{contentLinks.map(linked => <li key={linked.id}><Link className="text-primary hover:underline" href={creation && !linked.archived && linked.stagedSourceId === recordId ? `?mode=create&draft=${linked.id}` : `/studio/content/${linked.id}`}>{linked.title}</Link></li>)}</ul> : <p className="text-sm text-muted-foreground">No ideas or scripts from this source yet.</p>}
     {youtube ? <SourceTemplatePanel locationId={locationId} sourceId={recordId} /> : null}
   </div>;
+  const outlinePending = outline?.batches.some(batch => !batch.result && ["queued", "running"].includes(batch.status)) ?? false;
+  const knowledgePending = outlinePending || knowledgeAuto?.status === "queued" || knowledgeAuto?.status === "running";
   const knowledgePanel = <div className="space-y-3">
-    {panelHead("Knowledge", null, <InfoTip label="About knowledge">Cited takeaways you approve before they are kept. Use the assistant's Knowledge mode to extract them.</InfoTip>)}
+    <h2 className="font-semibold">Knowledge</h2>
+    <SourceKnowledgeActions evidence={knowledgeInputs} auto={outline ? null : knowledgeAuto} outlinePending={outlinePending}
+      allowExtract={!outline || outline.stale} setupFailed={query.knowledgeSetup === "unavailable"} />
     {outline ? <KnowledgeOutlineDetail outline={outline} query={{}} embedded framesFailed={videoStatus?.latest?.visual_status === "failed"} /> : null}
-    {findings.length ? <><h3 className="font-medium">Saved knowledge</h3><ul className="space-y-2 break-words text-sm">{findings.map(finding => <li key={finding.id}><Link href={`/studio/knowledge/${finding.id}`} className="text-primary hover:underline">{finding.statement}</Link> <span className="text-muted-foreground">({finding.status})</span></li>)}</ul></> : outline ? null : <p className="text-sm text-muted-foreground">No knowledge saved for this source.</p>}
-    {hasMoreFindings ? <Link href="/studio/knowledge?status=all" className="block text-sm text-primary hover:underline">Browse more</Link> : null}
+    {findings.length ? <details open={!outline} className="space-y-2"><summary className="cursor-pointer font-medium">Saved knowledge ({findings.length}{hasMoreFindings ? "+" : ""})</summary>
+      <ul className="space-y-2 break-words text-sm">{findings.map(finding => <li key={finding.id}><Link href={`/studio/knowledge/${finding.id}`} className="text-primary hover:underline">{finding.statement}</Link> <span className="text-muted-foreground">({finding.status})</span></li>)}</ul>
+      {hasMoreFindings ? <Link href="/studio/knowledge?status=all" className="text-sm text-primary hover:underline">Browse more</Link> : null}
+    </details> : null}
   </div>;
   const notesPanel = <NotesPanel locationId={locationId} sourceId={recordId} version={record.version} notes={notes} archived={record.archived} />;
   const moreLinks = <details className="rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Linked records and files</summary><div className="mt-3 space-y-5">{footer}</div></details>;
   const tabs: SourceTab[] = [
     { id: "transcript", label: "Source", panel: sourcePanel },
     ...(active ? [
+      { id: "knowledge", label: "Knowledge", pending: knowledgePending, badge: findings.length ? String(findings.length) : undefined, panel: knowledgePanel },
       { id: "script", label: "Script", badge: contentLinks.length ? String(contentLinks.length) : undefined, panel: scriptPanel },
-      { id: "knowledge", label: "Knowledge", badge: findings.length ? String(findings.length) : undefined, panel: knowledgePanel },
       { id: "related", label: "Related videos", panel: <RelatedYoutubeVideos key={`${locationId}:${recordId}`} anchorId={recordId} /> },
     ] : []),
     { id: "notes", label: "My notes", panel: notesPanel },
@@ -209,7 +217,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
         research={<HighlightsProvider locationId={locationId} recordId={recordId} initial={highlights}>
           <SourceTabs tabs={tabs} />
         </HighlightsProvider>} />
-      <SourceAssistant canCreate={Boolean(creation)} locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} canRelated={active} archived={record.archived} knowledgeInputs={knowledgeInputs?.inputs ?? []} canTemplate={Boolean(youtube) && hasTranscript} agent={creation ? { source: { id: recordId, version: record.version, title: record.title, hasText: hasTranscript || Boolean(value('description').trim()) }, turns: creation.conversation.turns, focusProposal: focusedProposal, newDraftHref: `/studio/library/${recordId}?mode=create&new=${randomUUID().slice(0, 8)}`, sessionKey, scope: creation.scope, resume: creation.resume ? { id: creation.resume.id, title: creation.resume.title, turns: creation.resume.turns, updatedAt: creation.resume.updatedAt, href: `/studio/library/${recordId}?mode=create&draft=${creation.resume.id}` } : null } : undefined} />
+      <SourceAssistant canCreate={Boolean(creation)} locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} canRelated={active} archived={record.archived} canTemplate={Boolean(youtube) && hasTranscript} agent={creation ? { source: { id: recordId, version: record.version, title: record.title, hasText: hasTranscript || Boolean(value('description').trim()) }, turns: creation.conversation.turns, focusProposal: focusedProposal, newDraftHref: `/studio/library/${recordId}?mode=create&new=${randomUUID().slice(0, 8)}`, sessionKey, scope: creation.scope, resume: creation.resume ? { id: creation.resume.id, title: creation.resume.title, turns: creation.resume.turns, updatedAt: creation.resume.updatedAt, href: `/studio/library/${recordId}?mode=create&draft=${creation.resume.id}` } : null } : undefined} />
     </div>
   </main></AgentDraftProvider></SourceWorkspaceProvider>;
 }
