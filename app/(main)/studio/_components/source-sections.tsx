@@ -40,11 +40,12 @@ const ref = (kind: HighlightKind, key: string) => highlightId(kind, key);
 
 /* ---------- Layout: collapsible sections and the jump bar. ---------- */
 export function Section({ id, title, count, defaultOpen = true, action, children }: { id: string; title: string; count?: string; defaultOpen?: boolean; action?: React.ReactNode; children: React.ReactNode }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [choice, setOpen] = useState<boolean | null>(null);
+  const open = choice ?? defaultOpen;
   useEffect(() => { const on = (e: Event) => { if ((e as CustomEvent<string>).detail === id) setOpen(true); }; window.addEventListener(OPEN_SECTION_EVENT, on); return () => window.removeEventListener(OPEN_SECTION_EVENT, on); }, [id]);
   return <section id={`sec-${id}`} aria-label={title} tabIndex={-1} className="scroll-mt-14 space-y-3 rounded-xl border bg-card p-3 md:p-4">
     <div className="flex items-center gap-2">
-      <button type="button" aria-expanded={open} aria-controls={`sec-${id}-body`} onClick={() => setOpen(v => !v)} className="flex min-h-9 flex-1 items-center gap-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+      <button type="button" aria-expanded={open} aria-controls={`sec-${id}-body`} onClick={() => setOpen(!open)} className="flex min-h-9 flex-1 items-center gap-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
         <ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 transition-transform duration-150 motion-reduce:transition-none ${open ? "" : "-rotate-90"}`} />
         <h2 className="font-semibold">{title}</h2>{count ? <span className="rounded-full bg-muted px-2 text-xs tabular-nums text-muted-foreground">{count}</span> : null}
         <span className="sr-only">{open ? "Hide" : "Show"}</span></button>
@@ -53,13 +54,14 @@ export function Section({ id, title, count, defaultOpen = true, action, children
     <div id={`sec-${id}-body`} hidden={!open} className="space-y-3">{children}</div>
   </section>;
 }
-export function jumpTo(id: string, tab?: string) {
+export function jumpTo(id: string, tab?: string, focusId?: string) {
   if (tab) window.dispatchEvent(new CustomEvent(OPEN_TAB_EVENT, { detail: tab }));
   window.dispatchEvent(new CustomEvent(OPEN_SECTION_EVENT, { detail: id }));
   requestAnimationFrame(() => requestAnimationFrame(() => {
     const section = document.getElementById(`sec-${id}`);
-    section?.focus({ preventScroll: true });
-    section?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+    const target = (focusId ? document.getElementById(focusId) : null) ?? section;
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
   }));
 }
 export function JumpBar({ items }: { items: Array<{ id: string; label: string; tab?: string }> }) {
@@ -90,10 +92,10 @@ export function SummarySection({ locationId, recordId, view, failure, evidence }
   useEffect(() => { if (view.state !== "generating") return; const t = setInterval(() => { if (document.visibilityState === "visible") router.refresh(); }, 5000); return () => clearInterval(t); }, [view.state, router]);
   const busy = pending || view.state === "generating";
   const reason = error || (view.state === "failed" ? failure || "The summary could not be made on your Mac." : "");
-  return <Section id="summary" title="Summary" action={view.text && !busy ? <Button type="button" size="sm" variant="ghost" onClick={() => void request(true)}>Update</Button> : null}>
+  return <Section id="summary" title="Summary" defaultOpen={Boolean(view.text || evidence || busy || reason)} action={view.text && !busy ? <Button type="button" size="sm" variant="ghost" onClick={() => void request(true)}>Update</Button> : null}>
     {view.text ? <><p className="break-words text-sm leading-relaxed">{splitSentences(view.text).map((sentence, i) => <span key={i}>{sentence}<StarButton kind="summary" id={textKey(sentence)} excerpt={sentence} label="this summary sentence" />{" "}</span>)}</p>
       {view.basis ? <p className="text-xs text-muted-foreground">{view.basis}</p> : null}</> : null}
-    {busy ? <p role="status" className="flex items-start gap-2 text-sm text-muted-foreground"><Loader2 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />{pending && view.state !== "generating" ? "Asking your Mac for a summary…" : generating[view.status] ?? "Writing the summary…"}</p> : null}
+    {busy ? <p role="status" className="flex items-start gap-2 text-sm text-muted-foreground"><Loader2 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 motion-safe:animate-spin" />{pending && view.state !== "generating" ? "Asking your Mac for a summary…" : generating[view.status] ?? "Writing the summary…"}</p> : null}
     {reason && !busy ? <div role="alert" className="flex flex-wrap items-start gap-2 rounded-md border border-destructive/40 p-3 text-sm"><TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
       <p className="min-w-0 flex-1 break-words">The summary could not be made: {reason.replace(/\.+$/, "")}.</p><Button type="button" size="sm" variant="outline" onClick={() => void request(true)}>Retry</Button></div> : null}
     {!view.text && !busy && !reason ? <p className="text-sm text-muted-foreground">{view.state === "none" && !view.request ? "A summary is written automatically once this source has a transcript or description." : "No summary yet."}</p> : null}
@@ -109,7 +111,7 @@ export function DetailsSection({ meta, description, channelUrl, channel, action,
     ["Published", meta?.uploadDate ? new Date(`${meta.uploadDate}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }) : null],
     ["Length", meta?.duration ? clock(meta.duration) : null], ["Views", number(meta?.viewCount ?? null)], ["Likes", number(meta?.likeCount ?? null)], ["Comments", number(meta?.commentCount ?? null)],
   ];
-  return <Section id="details" title="Details" action={action}>
+  return <Section id="details" title="Details" defaultOpen={Boolean(meta || description.trim())} action={action}>
     {status}
     <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">{facts.filter(([, v]) => v).map(([k, v]) => <div key={k} className="min-w-0"><dt className="text-xs text-muted-foreground">{k}</dt><dd className="break-words font-medium">{v}</dd></div>)}</dl>
     {meta?.title ? <p className="text-sm font-medium break-words">{meta.title}</p> : null}
@@ -148,7 +150,7 @@ export function CommentsSection({ meta, mac, details }: { meta: SourceMeta | nul
   const total = details?.meta?.commentCount ?? meta?.commentCount;
   const loaded = live || browserRows ? `${sourceDetailsCount(details?.fetchedComments ?? 0, details?.fetchedReplies ?? 0)} loaded` : null;
   const status = details?.error ?? details?.reason;
-  return <Section id="comments" title="Comments" count={total != null ? `${number(total)} on YouTube` : topLevel.length ? String(topLevel.length) : undefined}>
+  return <Section id="comments" title="Comments" defaultOpen={Boolean(topLevel.length)} count={total != null ? `${number(total)} on YouTube` : topLevel.length ? String(topLevel.length) : undefined}>
     {loaded ? <p className="text-sm tabular-nums text-muted-foreground">{loaded}{live ? " · fetch in progress" : ""}</p> : null}
     {status ? <p className="text-sm text-muted-foreground">{status}</p> : null}
     {!topLevel.length && !status && !live ? <p className="text-sm text-muted-foreground">{meta?.commentsError ?? (mac ? "Use Fetch details to load comments and replies from YouTube." : "Comments are available for YouTube sources.")}</p> : null}

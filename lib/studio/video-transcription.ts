@@ -10,19 +10,10 @@ import { createStudioR2Store, readStudioR2Config } from "./media-r2";
 import { deviceOnline } from "./devices-policy";
 import { canonicalYoutubeVideo } from "./video-transcription-policy";
 import { runVideoFrameOperation } from "./video-frames";
-import type { VideoWaiting } from "./video-state-text";
+import { videoNotQueuedMessages, type VideoNotQueuedReason, type VideoWaiting } from "./video-state-text";
 import { readSourceMeta, type SourceMeta } from "./youtube-source-meta";
 
 export type VideoOrigin = "paste" | "search" | "suggestion";
-export type VideoNotQueuedReason = "no_mac" | "processing_off" | "transcription_off" | "tools_missing" | "companion_outdated" | "no_authority";
-export const videoNotQueuedMessages: Record<VideoNotQueuedReason, string> = {
-  no_mac: "Pair a Mac in Setup to transcribe videos. Nothing was sent to a paid service.",
-  processing_off: "Turn Mac processing on in Setup to transcribe videos.",
-  transcription_off: "Turn on Video transcription in your Mac's Setup, then transcribe again.",
-  tools_missing: "Your Mac is missing transcription tools. Follow the Mac Setup guide, then transcribe again.",
-  companion_outdated: "Update the Studio companion on your Mac (it does not support video transcription yet).",
-  no_authority: "Only a Business admin with a paired Mac can run Mac transcription.",
-};
 const codeReason: Record<string, VideoNotQueuedReason> = { VT001: "no_mac", VT002: "transcription_off", VT003: "tools_missing", VT004: "companion_outdated", "42501": "no_authority" };
 export type VideoQueueResult =
   | { status: "queued" | "reused" | "skipped" | "skipped_existing"; transcriptionId?: string; jobId?: string }

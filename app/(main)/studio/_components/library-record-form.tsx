@@ -3,9 +3,9 @@
 import { useActionState, useState } from "react";
 import { saveLibraryAction } from "../(tenant)/library/actions";
 
-export function LibraryRecordForm({ locationId, recordId, version, kind = "reference", title = "", payload = {} }: {
+export function LibraryRecordForm({ locationId, recordId, version, kind = "reference", title = "", payload = {}, transcriptOnly = false }: {
   locationId: string; recordId: string; version: number;
-  kind?: "reference" | "channel"; title?: string; payload?: Record<string, unknown>;
+  kind?: "reference" | "channel"; title?: string; payload?: Record<string, unknown>; transcriptOnly?: boolean;
 }) {
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(
     ["title", "url", "summary", "notes", "transcript", "platform"].map((field) => [field, field === "title" ? title : typeof payload[field] === "string" ? payload[field] as string : ""]),
@@ -15,6 +15,18 @@ export function LibraryRecordForm({ locationId, recordId, version, kind = "refer
   const [archived, setArchived] = useState(payload.archived === true);
   const [state, action, pending] = useActionState(saveLibraryAction.bind(null, locationId, recordId, version), {});
   const inputClass = "mt-1 w-full rounded-md border bg-background p-3 text-sm";
+  if (transcriptOnly) return <form action={action} className="space-y-3">
+    <input type="hidden" name="kind" value={kind} />
+    <input type="hidden" name="title" value={title} />
+    <label className="block font-medium" htmlFor="pasted-source-transcript">Transcript text</label>
+    <textarea id="pasted-source-transcript" name="transcript" rows={6} maxLength={100_000} required
+      value={values.transcript} onChange={event => setValues({ ...values, transcript: event.target.value })}
+      className={`scroll-mt-16 ${inputClass}`} />
+    {state.error ? <p role="alert" className="text-destructive">{state.error}</p> : null}
+    <button disabled={pending || !values.transcript.trim()} type="submit" className="min-h-10 rounded-md bg-primary px-4 font-medium text-primary-foreground disabled:opacity-50">
+      {pending ? "Saving…" : "Save transcript"}
+    </button>
+  </form>;
   return (
     <form action={action} className="space-y-5 rounded-xl border bg-card p-6">
       <label className="block text-sm font-medium">Type

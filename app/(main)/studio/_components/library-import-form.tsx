@@ -1,26 +1,37 @@
 "use client";
 
-import { useId, useRef, useState, type Ref } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Plus } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { readVideoNotQueuedReason } from "@/lib/studio/video-state-text";
+import { recordLinkId } from "@/lib/studio/record-link-policy";
 import { LIBRARY_PLATFORMS, platformLabels } from "@/lib/studio/library-presentation";
 
-export function LibraryImportForm({ locationId, inputRef }: { locationId: string; inputRef?: Ref<HTMLInputElement> }) {
+export function LibraryImportForm({ locationId, inputRef, deferRefresh }: {
+  locationId: string;
+  inputRef: { current: HTMLInputElement | null };
+  deferRefresh: (refresh: () => void) => void;
+}) {
   const inputId = useId();
   const router = useRouter();
   const [input, setInput] = useState("");
   const [platform, setPlatform] = useState("");
-  const [pending, setPending] = useState(false);
+  const [pending, setPending] = useState<"open" | "continue" | null>(null);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [saved, setSaved] = useState<{ href: string; notice: string } | null>(null);
+  const [opening, startOpening] = useTransition();
+  useEffect(() => { if (saved) inputRef.current?.focus(); }, [inputRef, saved]);
   const request = useRef<{ fingerprint: string; key: string } | null>(null);
   const ambiguous = /^@?[\w.-]+$/.test(input.trim()) && !!input.trim();
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (pending) return;
-    setPending(true); setError(""); setSuccess("");
+    if (pending || opening) return;
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    const open = !(submitter instanceof HTMLButtonElement && submitter.value === "continue");
+    setPending(open ? "open" : "continue"); setError(""); setSaved(null);
     const body = { input: input.trim(), ...(ambiguous ? { platform } : {}), transcribe: true };
     const fingerprint = JSON.stringify(body);
     try {
@@ -28,27 +39,42 @@ export function LibraryImportForm({ locationId, inputRef }: { locationId: string
       const response = await fetch("/api/studio/library/import", { method: "POST", headers: { "Content-Type": "application/json", "X-Studio-Tenant": locationId }, body: JSON.stringify({ ...body, idempotencyKey: request.current.key }) });
       const result = await response.json();
       if (!response.ok || result.error) throw new Error(result.error || "Could not add this source. Please try again.");
-      const summaryNotice = typeof result.summaryError === "string" && result.summaryError.trim()
-        ? result.summaryError
-        : result.summaryStatus === "no_evidence" ? "Source description or transcript unavailable for a summary." : "";
-      const transcription = result.transcription as { status?: string; message?: string } | undefined;
-      const transcriptionNotice = !transcription ? "" : transcription.status === "not_queued" ? ` ${transcription.message ?? ""}`
-        : transcription.status === "queued" || transcription.status === "reused" ? " Transcription queued on your Mac; it waits there if the Mac is offline." : "";
-      // Retain the successful request key: re-entering the same source can retry
-      // summary enqueue without repeating the metadata mutation.
-      setInput(""); setPlatform(""); setSuccess(`Source saved.${summaryNotice ? ` ${summaryNotice}` : ""}${transcriptionNotice}`); router.refresh();
+      if (typeof result.recordId !== "string" || !recordLinkId(result.recordId)) throw new Error("Studio didn’t return a source link. Try again.");
+      const transcription = result.transcription as { status?: string; message?: string; reason?: string } | undefined;
+      const reason = transcription?.status === "not_queued" ? readVideoNotQueuedReason(transcription.reason) : null;
+      const href = `/studio/library/${result.recordId}${reason ? `?transcriptionSetup=${reason}` : ""}`;
+      if (open) {
+        startOpening(() => router.push(href));
+      } else {
+        setInput(""); setPlatform("");
+        setSaved({ href, notice: transcription?.status === "not_queued" ? transcription.message ?? ""
+          : transcription?.status === "queued" || transcription?.status === "reused" ? "Transcription queued on your Mac." : "" });
+        // The empty-library trigger can disappear after the first save. Keep the dialog mounted while adding more.
+        deferRefresh(() => router.refresh());
+      }
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not connect. Try again with the same source."); }
-    finally { setPending(false); }
+    finally { setPending(null); }
   }
-  return <form onSubmit={submit} className="min-w-0 space-y-3" aria-label="Add to library">
+  const busy = pending !== null || opening;
+  return <form onSubmit={submit} className="min-w-0 space-y-3" aria-label="Add to library" aria-busy={busy}>
     <label htmlFor={inputId} className="block text-sm font-medium">Source URL or @handle</label>
     <div className="flex min-w-0 flex-col gap-3">
-      <Input ref={inputRef} id={inputId} value={input} onChange={event => { setInput(event.target.value); setError(""); setSuccess(""); }} required maxLength={20000} disabled={pending} placeholder="Paste a video, post, channel URL or @handle" className="min-w-0 flex-1" />
-      {ambiguous ? <select aria-label="Handle platform" required value={platform} disabled={pending} onChange={event => setPlatform(event.target.value)} className="h-10 w-full min-w-0 rounded-md border bg-background px-3 text-sm"><option value="">Choose platform</option>{LIBRARY_PLATFORMS.filter(item => item !== "other").map(item => <option key={item} value={item}>{platformLabels[item]}</option>)}</select> : null}
-      <Button type="submit" disabled={pending || !input.trim()}>{pending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}{pending ? "Adding…" : "Add source"}</Button>
+      <Input ref={inputRef} id={inputId} value={input} onChange={event => { setInput(event.target.value); setError(""); }} required maxLength={20000} disabled={busy} placeholder="Paste a video, post, channel URL or @handle" className="min-w-0 flex-1" />
+      {ambiguous ? <select aria-label="Handle platform" required value={platform} disabled={busy} onChange={event => setPlatform(event.target.value)} className="h-10 w-full min-w-0 rounded-md border bg-background px-3 text-sm"><option value="">Choose platform</option>{LIBRARY_PLATFORMS.filter(item => item !== "other").map(item => <option key={item} value={item}>{platformLabels[item]}</option>)}</select> : null}
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Button type="submit" value="open" className="min-h-11" disabled={busy || !input.trim()}>
+          {pending === "open" || opening ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 motion-safe:animate-spin" /> : <ArrowRight aria-hidden="true" className="mr-2 h-4 w-4" />}
+          {opening ? "Opening source…" : pending === "open" ? "Saving source…" : "Add and open"}
+        </Button>
+        <Button type="submit" value="continue" variant="outline" className="min-h-11" disabled={busy || !input.trim()}>
+          {pending === "continue" ? <Loader2 aria-hidden="true" className="mr-2 h-4 w-4 motion-safe:animate-spin" /> : <Plus aria-hidden="true" className="mr-2 h-4 w-4" />}
+          {pending === "continue" ? "Saving source…" : "Save and add another"}
+        </Button>
+      </div>
     </div>
-    <p className="text-xs text-muted-foreground">Save videos and posts for inspiration, or add a channel to your watchlist.</p>
     {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-    {success ? <p role="status" className="text-sm text-muted-foreground">{success}</p> : null}
+    {saved ? <p role="status" className="text-sm text-muted-foreground">
+      Source saved. {saved.notice} <Link href={saved.href} className="font-medium text-primary underline underline-offset-2">Open source</Link>
+    </p> : null}
   </form>;
 }

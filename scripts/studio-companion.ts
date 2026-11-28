@@ -46,7 +46,7 @@ import { detectModel, hubDirectory, ModelManager, modelVenv } from "../lib/studi
 import { createPlaywrightYoutubeBrowser, createYoutubeSearchHandler, findChrome, openYoutubeLogin, youtubeBrowserProfile } from "../lib/studio/companion/youtube-search";
 import { CompanionMetrics, featureForStudioJob } from "../lib/studio/companion/metrics";
 
-const version = "studio-companion-18";
+const version = "studio-companion-19";
 const rediscoverMs = 10 * 60_000;
 const usage = "Usage: npm run start:studio-companion -- pair --origin <https origin> [--name 'My Mac'] | start [--once] | readiness | youtube-login\nRun in the background: bash scripts/studio-companion-launchagent.sh install";
 const messages: Record<string, string> = {

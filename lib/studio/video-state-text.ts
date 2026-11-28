@@ -60,3 +60,17 @@ export function describeVideoState(run: Run | null, waiting: VideoWaiting, busyW
     }
   }
 }
+
+export type VideoNotQueuedReason = "no_mac" | "processing_off" | "transcription_off" | "tools_missing" | "companion_outdated" | "no_authority" | "service_error";
+export const videoNotQueuedMessages: Record<VideoNotQueuedReason, string> = {
+  no_mac: "Pair a Mac in Setup to transcribe videos. Nothing was sent to a paid service.",
+  processing_off: "Turn Mac processing on in Setup to transcribe videos.",
+  transcription_off: "Turn on Video transcription in your Mac's Setup, then transcribe again.",
+  tools_missing: "Your Mac is missing transcription tools. Follow the Mac Setup guide, then transcribe again.",
+  companion_outdated: "Update the Studio companion on your Mac (it does not support video transcription yet).",
+  service_error: "Studio couldn’t request transcription. Try again from this source.",
+  no_authority: "Only a Business admin with a paired Mac can run Mac transcription.",
+};
+export function readVideoNotQueuedReason(value: unknown): VideoNotQueuedReason | null {
+  return typeof value === "string" && Object.hasOwn(videoNotQueuedMessages, value) ? value as VideoNotQueuedReason : null;
+}

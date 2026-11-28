@@ -35,7 +35,7 @@ export const POST = withStudioRoute(async (request, { params }) => {
     // Only an explicit paste of a YouTube video asks the paired Mac to transcribe it. Background enrichment and refresh never do.
     if (!transcribe || command.sourceId || !canonicalYoutubeVideo(command.input)) return respond(result);
     const transcription = await enqueueVideoTranscription(locationId, { recordId: result.recordId, origin: 'paste', requestKey: videoRequestKey('paste', result.recordId, command.idempotencyKey) })
-      .catch(() => ({ status: 'not_queued' as const, reason: 'no_authority' as const, message: 'Transcription could not be requested. Use Transcribe on your Mac from the source page.' }));
+      .catch(() => ({ status: 'not_queued' as const, reason: 'service_error' as const, message: 'Transcription could not be requested. Use Transcribe on your Mac from the source page.' }));
     return respond({ ...result, transcription });
   } catch (error) {
     if (error instanceof SyntaxError) return respond({error:'Invalid import request.'},400);

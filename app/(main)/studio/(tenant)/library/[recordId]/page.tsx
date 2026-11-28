@@ -15,6 +15,7 @@ import { studioRouteParams } from "@/lib/studio/route-context";
 import { listPendingStudioUploads } from "@/lib/studio/uploads";
 import { getKnowledgeExtractionInputs, getKnowledgeOutline, getLatestKnowledgeOutline } from "@/lib/studio/knowledge-extraction";
 import { getStudioLibraryRecord } from "@/lib/studio/library";
+import { readVideoNotQueuedReason } from "@/lib/studio/video-state-text";
 import { getVideoStatus } from "@/lib/studio/video-transcription";
 import { canonicalYoutubeVideo } from "@/lib/studio/video-transcription-policy";
 import { LibrarySourceAction } from "../../../_components/library-source-action";
@@ -46,7 +47,7 @@ const card = "scroll-mt-16 space-y-3 rounded-xl border bg-card p-4 md:p-5";
 
 export default async function StudioLibraryRecordPage({ params, searchParams }: { params: Promise<{ recordId: string }>; searchParams: Promise<{ knowledgeReview?: string; draft?: string; mode?: string; stage?: string; new?: string;
   citationTurn?: string; citationProposal?: string; citationItem?: string; citationEvidence?: string;
-  proposalTurn?: string; proposalIndex?: string }> }) {
+  proposalTurn?: string; proposalIndex?: string; transcriptionSetup?: string }> }) {
   const { locationId, recordId } = await studioRouteParams(params);
   const result = await getStudioLibraryRecord(locationId, recordId);
   if (!result) notFound();
@@ -147,17 +148,18 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     {returnToProposal ? <Link href={returnToProposal} className="inline-flex min-h-10 items-center font-medium text-primary underline">Return to proposal</Link> : null}
   </section> : null;
 
+  const transcriptionCard = videoStatus ? <VideoTranscriptionPanel key={recordId} locationId={locationId} recordId={recordId}
+    status={videoStatus} hasTranscript={hasTranscript} initialIssue={readVideoNotQueuedReason(query.transcriptionSetup)} /> : null;
   const transcriptPanel = <div className="space-y-4">
     {citationPanel}
     <SourceDetailsPanel key={`${locationId}:${recordId}:${view.url}`} locationId={locationId} recordId={recordId} initial={sourceDetails}
       canFetch={active && Boolean(youtube)} youtube={Boolean(youtube)} legacy={videoStatus?.meta ?? null} description={value('description')}
       channelUrl={creator?.channelUrl ?? null} channel={view.creator ?? null} />
-    <Section id="transcript" title="Transcript" count={hasTranscript ? "Saved" : "Not saved"}>
+    <Section id="transcript" title="Transcript" defaultOpen={hasTranscript || citationRequested} count={hasTranscript ? "Saved" : undefined}>
       <p className="text-xs text-muted-foreground">A transcript is what the video actually says. Check it against the original before relying on its claims.</p>
-      {videoStatus ? <VideoTranscriptionPanel locationId={locationId} recordId={recordId} canTranscribe status={videoStatus} hasTranscript={hasTranscript} transcript={value('transcript')} /> : null}
       {hasTranscript ? <><TranscriptLines text={value('transcript')} videoId={youtube?.videoId ?? null} />
           {value('previousTranscript').trim() ? <details className="rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Earlier saved transcript (replaced by the Mac transcript)</summary><p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">{value('previousTranscript')}</p></details> : null}</>
-        : <details className="rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Paste a transcript instead</summary><div className="mt-3"><LibraryRecordForm locationId={locationId} recordId={recordId} version={record.version} kind={record.kind} title={record.title} payload={record.payload} /></div></details>}
+        : <details id="paste-source-transcript" className="rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Paste a transcript instead</summary><div className="mt-3"><LibraryRecordForm locationId={locationId} recordId={recordId} version={record.version} kind={record.kind} title={record.title} payload={record.payload} transcriptOnly /></div></details>}
     </Section>
     {videoStatus?.frames.length && videoStatus.framesFrom ? <VideoSlidesSection status={videoStatus} transcript={value('transcript')} /> : <Section id="slides" title="Slides" defaultOpen={false}><p className="text-sm text-muted-foreground">No slides saved.</p></Section>}
   </div>;
@@ -198,10 +200,11 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
             {creator && !links.some(link => link.kind === 'channel') && view.url ? <LibrarySourceAction locationId={locationId} url={creator.channelUrl} sourceId={recordId} sourceVersion={record.version} /> : null}
           </div>
         </div>
+        {transcriptionCard}
         <HighlightsProvider locationId={locationId} recordId={recordId} initial={highlights}>
           <JumpBar items={[{ id: "summary", label: "Summary" }, { id: "details", label: "Details", tab: "transcript" }, { id: "comments", label: "Comments", tab: "transcript" }, { id: "transcript", label: "Transcript", tab: "transcript" },
             { id: "slides", label: "Slides", tab: "transcript" }, ...(highlights.length ? [{ id: "highlights", label: "Highlights" }] : [])]} />
-          <SummarySection locationId={locationId} recordId={recordId} view={summary} failure={summaryFailure} evidence={`${hasTranscript ? "t" : "d"}${value('description').trim() ? "d" : ""}`} />
+          <SummarySection locationId={locationId} recordId={recordId} view={summary} failure={summaryFailure} evidence={`${hasTranscript ? "t" : ""}${value('description').trim() ? "d" : ""}`} />
           <HighlightsSection />
           <SourceTabs tabs={tabs} />
         </HighlightsProvider>

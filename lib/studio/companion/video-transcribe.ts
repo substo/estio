@@ -9,7 +9,7 @@ import type { Usage } from "../../build/contract";
 import { localRoute, runLocalRoute, type ReportLocalRoute } from "./route";
 import { runNativeProcess, CompanionProcessError, type ProcessRunner } from "./process";
 import type { LocalProvider, LocalTextAdapter } from "./providers";
-import { commentExtractorArgs, parseYoutubeSourceMeta, type SourceMeta } from "../youtube-source-meta";
+import { commentExtractorArgs, parseYoutubeSourceMeta, youtubeSourceMetadataTemplate, type SourceMeta } from "../youtube-source-meta";
 import { videoProcessEnvironment, type VideoTools } from "./video-tools";
 import type { FrameDeclaration, VideoDeviceApi, VideoLease } from "./video-api";
 import {
@@ -83,7 +83,7 @@ export function youtubeFailureError(kind: YoutubeFailure, retryAfterSeconds = YO
     case "removed": return new StudioJobError("video_unavailable", "YouTube says this video was removed or is not available. Paste a transcript instead.", false);
     case "age_restricted": return new StudioJobError("video_age_restricted", "This video is age-restricted and needs a YouTube sign-in, which Studio never uses. Paste a transcript instead.", false);
     case "network": return new StudioJobError("video_network", "Could not reach YouTube from this Mac. It will be retried.", true, 600);
-    default: return new StudioJobError("video_unavailable", "YouTube did not return this video's details. It may be private, removed or temporarily unreachable. You can paste a transcript instead.", true, 600);
+    default: return new StudioJobError("video_metadata_failed", "Your Mac couldn’t read the video details from YouTube.", true, 600);
   }
 }
 /** Prefer the original-language captions (`xx-orig`), then English, then whatever came back. */
@@ -256,11 +256,21 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
       report("info", undefined, "Checking the video on YouTube");
       // 1. Bounded metadata: duration limit, title/description/channel for the relevance gate. No media is downloaded yet.
       if (cached) { meta = cached.meta; source = cached.source; } else try {
-        // One request set: the details and the top comments together. Comments are never asked for again on a later run of the same video.
-        const out = await ytdlp(["--skip-download", "--dump-single-json", "--write-comments", "--", video.url], 150_000, 4 * MB, [commentExtractorArgs]);
+        const args = ["--skip-download", "--print", youtubeSourceMetadataTemplate];
+        const readMetadata = (withComments: boolean) => ytdlp(
+          [...args, ...(withComments ? ["--write-comments"] : []), "--", video.url], 150_000, 4 * MB, withComments ? [commentExtractorArgs] : [],
+        );
+        // Optional comments can still make the output too big. Continue with the same bounded metadata once without them.
+        let commentsTooLarge = false;
+        const out = await readMetadata(true).catch(error => {
+          if (!(error instanceof CompanionProcessError) || error.code !== "cli_output_limit") throw error;
+          commentsTooLarge = true;
+          return readMetadata(false);
+        });
         const json = JSON.parse(out.stdout) as Record<string, unknown>;
         meta = { title: String(json.title ?? ""), description: String(json.description ?? ""), channel: String(json.channel ?? json.uploader ?? ""), duration: Number(json.duration ?? 0), live: json.is_live === true };
         source = parseYoutubeSourceMeta(json, out.stderr);
+        if (commentsTooLarge) source.commentsError = "Comments exceeded the safe size limit. Use Fetch details to load them separately.";
         if (classifyYtDlpFailure(out.stderr) === "rate_limited") {
           const error = block("rate_limited");
           await deps.api.meta?.(lease, source).catch(() => undefined);
@@ -268,6 +278,9 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
         }
       } catch (error) {
         if (error instanceof StudioJobError) throw error;
+        if (error instanceof CompanionProcessError && error.code === "cli_output_limit") {
+          fail("video_metadata_too_large", "The video details exceeded your Mac’s safe size limit. You can paste a transcript to continue.");
+        }
         const failure = error instanceof CompanionProcessError ? (error.code === "cli_timeout" ? "network" : classifyYtDlpFailure(error.stderr)) : "unknown";
         throw youtubeFailureError(failure);
       }

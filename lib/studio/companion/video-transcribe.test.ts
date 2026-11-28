@@ -12,6 +12,7 @@ import type { FrameDeclaration, VideoDeviceApi } from "./video-api";
 import { StudioJobError } from "../worker/handlers";
 import { defaultDeviceConfig, readDeviceCommand } from "../devices-policy";
 import { summarizeVideoTools, type TranscriptSegment } from "../video-transcription-policy";
+import { youtubeSourceMetadataTemplate, type SourceMeta } from "../youtube-source-meta";
 import { AI_WORKFLOW_CONTRACT_VERSION } from "../../ai/workflow-capabilities";
 
 const id = "ad000000-0000-4000-8000-000000000001";
@@ -29,7 +30,7 @@ const segments = [{ start: 0, end: 4, text: "Welcome to pricing." }, { start: 5,
 const jpeg = Buffer.from("\xff\xd8fakejpeg-bytes\xff\xd9", "binary");
 const meta = { title: "Pricing tiers", description: "All about tiers", channel: "Acme", duration: 120, is_live: false };
 
-interface Options { metaOverride?: Record<string, unknown>; parakeetFails?: boolean; captions?: boolean; videoFails?: boolean; extractFails?: boolean; uploadFails?: boolean; verifyMissing?: number; tools?: VideoTools; enabled?: boolean; controller?: AbortController; failAudio?: "timeout" | "other"; clientFailures?: Record<string, string>; failAll?: string; captionsWarning?: string; clock?: { t: number } }
+interface Options { oversizedComments?: boolean; metaOverride?: Record<string, unknown>; parakeetFails?: boolean; captions?: boolean; videoFails?: boolean; extractFails?: boolean; uploadFails?: boolean; verifyMissing?: number; tools?: VideoTools; enabled?: boolean; controller?: AbortController; failAudio?: "timeout" | "other"; clientFailures?: Record<string, string>; failAll?: string; captionsWarning?: string; clock?: { t: number } }
 function fixture(options: Options = {}) {
   const metas: unknown[] = []; const runs: ProcessRequest[] = []; const chunks: TranscriptSegment[][] = []; const reserved: FrameDeclaration[][] = []; const uploads: Uint8Array[] = []; let workdir = "";
   const api: VideoDeviceApi = {
@@ -51,7 +52,10 @@ function fixture(options: Options = {}) {
         const client = args.includes("--extractor-args") ? (/player_client=([^;]+)/.exec(args[args.indexOf("--extractor-args") + 1])?.[1] ?? "default") : "default";
         const failure = options.failAll ?? options.clientFailures?.[client];
         if (failure) throw new CompanionProcessError("cli_failed", failure);
-        if (args.includes("--dump-single-json")) return { stdout: JSON.stringify({ ...meta, ...options.metaOverride }), stderr: "" };
+        if (args.includes("--print")) {
+          if (options.oversizedComments && args.includes("--write-comments")) throw new CompanionProcessError("cli_output_limit");
+          return { stdout: JSON.stringify({ ...meta, ...options.metaOverride }), stderr: "" };
+        }
         if (args.includes("--write-subs")) {
           if (options.captionsWarning) return { stdout: "", stderr: options.captionsWarning };
           if (!options.captions) throw new CompanionProcessError("cli_failed");
@@ -293,7 +297,7 @@ test("the Mac transcript is primary: Parakeet runs and YouTube captions are neve
   const result = await createVideoTranscribeHandler(f.deps())(job(), context()) as { method: string };
   assert.equal(result.method, "local-parakeet-tdt-v3-4bit");
   assert.ok(!f.runs.some(r => r.args.includes("--write-subs")), "no captions requested");
-  const order = f.runs.map(r => r.args.includes("--dump-single-json") ? "meta" : r.args.includes("--merge-output-format") ? "video" : r.args[1]?.endsWith("transcribe-local.py") ? "parakeet" : "other");
+  const order = f.runs.map(r => r.args.includes("--print") ? "meta" : r.args.includes("--merge-output-format") ? "video" : r.args[1]?.endsWith("transcribe-local.py") ? "parakeet" : "other");
   assert.deepEqual(order.slice(0, 3), ["meta", "video", "parakeet"]);
   assert.equal(f.runs.filter(r => r.args.includes("--merge-output-format")).length, 1, "the video is downloaded once for transcript and slides");
   assert.ok(cookieFree(f.runs));
@@ -377,7 +381,7 @@ test("captions and metadata fetched once are reused, so a re-run asks YouTube fo
   f.chunks.length = 0;
   await handler(job(), context());
   const later = ytRuns(f).slice(first).map(r => r.args.join(" "));
-  assert.ok(!later.some(a => a.includes("--dump-single-json") || a.includes("--write-subs")), "metadata and captions are not requested again");
+  assert.ok(!later.some(a => a.includes("--print") || a.includes("--write-subs")), "metadata and captions are not requested again");
 });
 
 test("during a YouTube cool-down, stored captions still give a transcript and YouTube is not asked", async () => {
@@ -405,7 +409,7 @@ const withComments = { comments: [
 test("the one metadata request also fetches the top comments, and the Mac reports them with the details", async () => {
   const f = fixture({ captions: true, metaOverride: withComments });
   await createVideoTranscribeHandler(f.deps())(job(), context());
-  const metadata = f.runs.filter(r => r.args.includes("--dump-single-json"));
+  const metadata = f.runs.filter(r => r.args.includes("--print"));
   assert.equal(metadata.length, 1, "comments add no separate request");
   const args = metadata[0].args;
   assert.ok(args.includes("--write-comments"));
@@ -435,4 +439,22 @@ test("comments are fetched once: a re-run reuses them, and an older cache entry 
   const old = fixture({ captions: true, parakeetFails: true }); await writeFile(join(cacheDir, "bbbbbbbbbbb.json"), JSON.stringify({ meta: { title: "t", description: "", channel: "c", duration: 120, live: false }, captions: { segments: [{ start: 0, end: 5, text: "An old stored caption line that is long enough." }] } }));
   await createVideoTranscribeHandler({ ...old.deps(), cacheDir })(job({ videoId: "bbbbbbbbbbb", url: "https://www.youtube.com/watch?v=bbbbbbbbbbb" }), context());
   assert.equal(old.runs.filter(r => r.args.includes("--write-comments")).length, 1);
+});
+
+test("projects only required metadata and retries once without oversized comments", async () => {
+  const f = fixture({ oversizedComments: true });
+  await createVideoTranscribeHandler(f.deps())(job(), context());
+  const metadata = f.runs.filter(request => request.args.includes("--print"));
+  assert.equal(metadata.length, 2);
+  assert.ok(metadata[0].args.includes("--write-comments"));
+  assert.ok(!metadata[1].args.includes("--write-comments"));
+  for (const { args, maxOutputBytes } of metadata) {
+    assert.equal(args[args.indexOf("--print") + 1], youtubeSourceMetadataTemplate);
+    assert.match(youtubeSourceMetadataTemplate, /duration.*comments/);
+    assert.doesNotMatch(youtubeSourceMetadataTemplate, /automatic_captions|formats|subtitles/);
+    assert.ok(!args.includes("--dump-single-json"));
+    assert.equal(maxOutputBytes, 4 * 1024 * 1024);
+  }
+  assert.match((f.metas[0] as SourceMeta).commentsError ?? "", /Fetch details/);
+  assert.equal(f.chunks.length, 1);
 });

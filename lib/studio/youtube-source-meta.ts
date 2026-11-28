@@ -1,3 +1,7 @@
+// yt-dlp's full JSON includes playback formats and every translated caption URL. Print only what Studio reads.
+export const youtubeSourceMetadataTemplate =
+  "%(.{title,description,channel,channel_url,uploader,uploader_url,upload_date,duration,is_live,view_count,like_count,comment_count,tags,chapters,thumbnail,comments})j";
+
 /** What yt-dlp's single metadata run reports about a YouTube video, trimmed to what the Source page shows. Pure: used by the Mac companion, the device policy and the page. */
 export const SOURCE_COMMENT_LIMIT = 50;
 export interface SourceComment { author: string; text: string; likes: number | null; replies: number | null; at: number | null; pinned: boolean; byUploader: boolean }

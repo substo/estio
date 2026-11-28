@@ -4,7 +4,7 @@ import { z } from "zod";
 import { readSourceDetailsMeta, SOURCE_DETAILS_LIMIT, type SourceDetailsBatch, type SourceDetailsMetadata } from "../source-details-policy";
 import { canonicalYoutubeVideo } from "../video-transcription-policy";
 import { StudioJobError, type StudioJobHandler } from "../worker/handlers";
-import { parseYoutubeSourceMeta } from "../youtube-source-meta";
+import { parseYoutubeSourceMeta, youtubeSourceMetadataTemplate } from "../youtube-source-meta";
 import type { DeviceCredentials } from "./config";
 import { deviceCall } from "./http-queue";
 import { CompanionProcessError, runNativeProcess, type ProcessRunner } from "./process";
@@ -51,7 +51,7 @@ export function createSourceDetailsHandler(deps: {
     let limitWarning: StudioJobError | undefined;
     try {
       const { stdout, stderr } = await deps.pacing.pace(() => (deps.run ?? runNativeProcess)({
-        command: tools.paths.ytDlp!, args: [...baseYtDlp(tools), "--retries", "0", "--extractor-retries", "0", "--skip-download", "--dump-single-json", "--", video.url],
+        command: tools.paths.ytDlp!, args: [...baseYtDlp(tools), "--retries", "0", "--extractor-retries", "0", "--skip-download", "--print", youtubeSourceMetadataTemplate, "--", video.url],
         cwd: tmpdir(), signal, timeoutMs: 90_000, maxOutputBytes: 4_194_304,
       }), session);
       const failure = classifyYtDlpFailure(stderr);

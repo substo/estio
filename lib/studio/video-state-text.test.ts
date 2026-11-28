@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { describeVideoState, isWorking } from "./video-state-text";
+import { describeVideoState, isWorking, readVideoNotQueuedReason } from "./video-state-text";
 
 const run = (over: Record<string, unknown> = {}) => ({ status: "queued", method: null, error_code: null, error_message: null, segment_count: 0, visual_status: "pending", visual_error: null, relevance: null, ...over });
 test("a queued run says why it waits, including behind another Mac job", () => {
@@ -33,4 +33,11 @@ test("a running run shows an honest checklist, overall percent and staleness", (
 });
 test("a running run from an older companion says it is starting", () => {
   assert.match(describeVideoState(run({ status: "running" }), null).text, /Starting on your Mac/);
+});
+
+test("source navigation only accepts known transcription setup reasons", () => {
+  assert.equal(readVideoNotQueuedReason("tools_missing"), "tools_missing");
+  assert.equal(readVideoNotQueuedReason("service_error"), "service_error");
+  assert.equal(readVideoNotQueuedReason("__proto__"), null);
+  assert.equal(readVideoNotQueuedReason(["tools_missing"]), null);
 });

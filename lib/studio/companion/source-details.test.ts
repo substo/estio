@@ -28,6 +28,7 @@ test("fetches metadata without downloading or asking yt-dlp for comments, then s
     run: async request => {
       assert.ok(request.args.includes("--skip-download"));
       assert.ok(!request.args.includes("--write-comments"));
+      assert.ok(request.args.includes("--print") && !request.args.includes("--dump-single-json"));
       return { stdout: JSON.stringify({ title: "Test", description: "Description", comment_count: 2, upload_date: "20261127" }), stderr: "" };
     },
     save: async (_lease, batch) => { batches.push(batch); return true; },
