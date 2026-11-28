@@ -8,7 +8,7 @@ import { resolveStudioTextCommand } from "./text-route";
 import { studioDb } from "./studio-db";
 import { applyStagePatch, expose, hasCreationState, loadRecord, loadSource, requireCreationWriter, save, saveInitialCreationState, type StoredRecord } from "./creation";
 import { stageDraft, stageTextLimit, type CreationStage, type CreationState } from "./creation-policy";
-import { AGENT_MAX_ROUNDS, AGENT_PROMPT, isAgentSnapshot, readAgentResult, type AgentApplyCommand, type AgentFinal, type AgentSelection, type AgentResearch, type AgentItem, type AgentObservation, type AgentProposal, type AgentSnapshot, type AgentToolCall, type readAgentSendCommand } from "./agent-policy";
+import { AGENT_MAX_ROUNDS, AGENT_MESSAGE_LIMIT, AGENT_PROMPT, isAgentSnapshot, readAgentResult, type AgentApplyCommand, type AgentFinal, type AgentSelection, type AgentResearch, type AgentItem, type AgentObservation, type AgentProposal, type AgentSnapshot, type AgentToolCall, type readAgentSendCommand } from "./agent-policy";
 import { runAgentTool } from "./agent-tools";
 import { SPEAKING_WPM, formatClock, lengthFit, parseDurationRequest, scriptStats, aimWords, type LengthFit } from "./script-length";
 import { agentRoundRequestId } from "./agent-request";
@@ -16,6 +16,8 @@ import { sameScriptNarration } from "./video-assembly/script";
 import { safeStudioSourceUrl } from "./library-policy";
 import { citationClipRange, type SourceClipReference } from "./script-source-quotes";
 import { getKnowledgeSourceCitation, getSourceClipMetadata, getVerifiedQuoteTiming } from "./citation-source";
+import { highlightsForAgent } from "./source-page";
+import { stripHighlights, withHighlights } from "./source-highlights";
 import { getCitationTranscription } from "./video-transcription";
 import { canonicalYoutubeVideo } from "./video-transcription-policy";
 import { recordLinkId } from "./record-link-policy";
@@ -127,7 +129,7 @@ async function views(access: StudioAccess, turns: TurnRow[], pending: Map<string
     const items = turnEvidence(turn);
     const last = turn.rounds.at(-1);
     const run = (turn.status === "running" ? model.get(agentRoundRequestId(turn.id, turn.rounds.length + 1)) : undefined) ?? (last ? model.get(last.reviewId) : undefined);
-    return { id: turn.id, seq: turn.seq, message: turn.message, provider: turn.provider as AgentTurnView["provider"], status: turn.status, error: turn.error,
+    return { id: turn.id, seq: turn.seq, message: stripHighlights(turn.message), provider: turn.provider as AgentTurnView["provider"], status: turn.status, error: turn.error,
       activity: turn.rounds.filter(r => r.tool || r.observation?.summary).map(r => r.tool ? describeAgentStep(r.tool, r.observation) : r.observation!.summary!),
       target: turn.target_seconds, selection: turn.selection ?? null,
       waiting: turn.status === "running" ? pending.get(turn.id)?.waiting ?? "queued" : null,
@@ -222,9 +224,11 @@ export async function sendAgentMessage(locationId: string, command: ReturnType<t
   const request = parseDurationRequest(command.message);
   const target = request?.kind === "set" ? request.seconds : request?.kind === "clear" ? 0 : -1;
   let begun: { turnId: string; seq: number };
+  // What the owner highlighted on the source rides along as context for the model; it is not shown as something they typed.
+  const highlighted = withHighlights(command.message, await highlightsForAgent(access.locationId, command.sourceId ?? expose(row).state.source?.id ?? null), AGENT_MESSAGE_LIMIT);
   try {
     begun = await studioDb.call("studio_agent_begin_evidence_turn", { p_location: access.locationId, p_app: access.app, p_actor: access.userId,
-      p_record: row.id, p_turn: command.turnId, p_message: command.message, p_provider: command.provider, p_target: target, p_selection: command.selection, p_evidence: command.evidenceIds });
+      p_record: row.id, p_turn: command.turnId, p_message: highlighted, p_provider: command.provider, p_target: target, p_selection: command.selection, p_evidence: command.evidenceIds });
   } catch (error) {
     if (error instanceof StudioDbError && error.code === "P2018") throw new StudioCommandError("Some selected passages changed or are no longer available. Refresh the evidence choices and try again.", 409);
     if (error instanceof StudioDbError && error.code === "23505") throw new StudioCommandError("That message was already sent with different inputs. Refresh the conversation before retrying.", 409);

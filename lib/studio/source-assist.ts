@@ -6,13 +6,16 @@ import { StudioCommandError } from "./command-error";
 import { StudioDbError } from "./db";
 import { requireOwnStudioCommandLocation } from "./paid-workspace";
 import { studioDb } from "./studio-db";
+import { highlightsForAgent } from "./source-page";
+import { stripHighlights, withHighlights } from "./source-highlights";
+import { SOURCE_ASSIST_MESSAGE_LIMIT } from "./source-assist-policy";
 import type { readSourceAssistCommand, SourceAssistResult, SourceAssistSnapshot } from "./source-assist-policy";
 
 export async function enqueueSourceAssist(locationId: string, command: ReturnType<typeof readSourceAssistCommand>) {
   const access = await requireOwnStudioCommandLocation(locationId);
   try {
     return await studioDb.call<{ reviewId: string; jobId: string }>("studio_enqueue_source_assist", {
-      p_location: access.locationId, p_app: access.app, p_actor: access.userId, p_command: await resolveStudioTextCommand(access, "source_assist", command) });
+      p_location: access.locationId, p_app: access.app, p_actor: access.userId, p_command: await resolveStudioTextCommand(access, "source_assist", { ...command, message: withHighlights(command.message, await highlightsForAgent(access.locationId, command.sourceId), SOURCE_ASSIST_MESSAGE_LIMIT) }) });
   } catch (error) {
     if (error instanceof StudioDbError) {
       if (error.code === "P2013") throw new StudioCommandError("Save a transcript or description on this source first.");
@@ -46,7 +49,7 @@ export async function getSourceAssistRun(locationId: string, reviewId: string): 
   const done = row.result !== null;
   const status = done ? "done" : row.status === "failed" || row.status === "cancelled" || row.status === "dead" ? "failed" : row.status === "running" ? "running" : "queued";
   return { id: row.id, status, error: status === "failed" ? row.last_error_message ?? "The assistant could not complete. Start a new request." : null,
-    provider: row.execution_provider, model: row.model, intent: row.snapshot.inputId, message: row.snapshot.reaction ?? row.snapshot.focus, sourceId: row.snapshot.source.id,
+    provider: row.execution_provider, model: row.model, intent: row.snapshot.inputId, message: stripHighlights(row.snapshot.reaction ?? row.snapshot.focus), sourceId: row.snapshot.source.id,
     selectedOutline: row.snapshot.selectedOutline,
     citedPassage: row.snapshot.selectedOutline ? Object.fromEntries(row.snapshot.units.map(unit => [unit.id, unit.unitIndex])) : undefined,
     stale: done ? row.stale_at_completion === true || !row.current : false, result: row.result,

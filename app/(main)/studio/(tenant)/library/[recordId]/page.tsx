@@ -8,7 +8,7 @@ import { getCreationPage } from "@/lib/studio/creation";
 import { randomUUID } from "node:crypto";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Check, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { libraryPresentation, platformLabels } from "@/lib/studio/library-presentation";
 import { validatedYoutubeCreator } from "@/lib/studio/library-import-metadata";
 import { studioRouteParams } from "@/lib/studio/route-context";
@@ -22,12 +22,14 @@ import { StudioAttachments } from "../../../_components/studio-attachments";
 import { StudioUploadForm } from "../../../_components/studio-upload-form";
 import { StudioUploads } from "../../../_components/studio-uploads";
 import { TranscriptLines } from "../../../_components/transcript-lines";
-import { VideoTranscriptionPanel } from "../../../_components/video-transcription-panel";
+import { VideoSlidesSection, VideoTranscriptionPanel } from "../../../_components/video-transcription-panel";
 import { LibraryRecordForm } from "../../../_components/library-record-form";
 import { RelatedYoutubeVideos } from "../../../_components/related-youtube-videos";
 import { LibraryPlatformIcon } from "../../../_components/library-cards";
 import { SourcePlayer } from "../../../_components/source-player";
-import { ExpandableText } from "../../../_components/expandable-text";
+import { CommentsSection, DetailsSection, HighlightsProvider, HighlightsSection, JumpBar, Section, SummarySection } from "../../../_components/source-sections";
+import { getSourceHighlights, getSummaryFailure } from "@/lib/studio/source-page";
+import { summaryView } from "@/lib/studio/source-highlights";
 import { SourceTabs, type SourceTab } from "../../../_components/source-tabs";
 import { KnowledgeOutlineDetail } from "../../knowledge/extractions/outline-detail";
 import { SourceWorkArea, SourceWorkspaceProvider } from "../../../_components/source-workspace";
@@ -73,7 +75,8 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     const resume = !draftId && !query.new ? await latestSourceDraft(locationId, recordId) : null;
     return { ...data, conversation, resume, scope: await agentRouteScope(locationId) };
   };
-  const [pendingUploads, latestOutline, videoStatus, knowledgeInputs, creation, fromAgent, fromKnowledge] = await Promise.all([
+  const summary = summaryView(record.payload, Boolean(value('transcript').trim()), Boolean(value('description').trim()));
+  const [pendingUploads, latestOutline, videoStatus, knowledgeInputs, creation, fromAgent, fromKnowledge, highlights, summaryFailure] = await Promise.all([
     listPendingStudioUploads(locationId, recordId),
     active ? getLatestKnowledgeOutline(locationId, recordId) : null,
     active && youtube ? getVideoStatus(locationId, recordId).catch(() => null) : null,
@@ -81,6 +84,8 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     creationData(),
     agentCitation,
     knowledgeCitation,
+    active ? getSourceHighlights(locationId, recordId).catch(() => []) : [],
+    summary.state === "failed" ? getSummaryFailure(locationId, recordId).catch(() => null) : null,
   ]);
   const requestedReview = query.knowledgeReview;
   const requestedOutline = active && typeof requestedReview === "string" && requestedReview !== latestOutline?.id
@@ -123,9 +128,6 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     {footer}
   </main>;
 
-  const statusChip = (ok: boolean, text: string) => <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${ok ? "bg-emerald-50 text-emerald-700" : "bg-muted text-muted-foreground"}`}>{ok ? <Check aria-hidden="true" className="h-3.5 w-3.5" /> : null}{text}</span>;
-  const summaryText = value('aiSummary') || summaryNote;
-  const basis = value('summaryBasis') === 'transcript' ? 'Based on the saved transcript excerpt (first 20,000 characters) and description.' : value('summaryBasis') === 'description' ? 'Based on the description only; the video was not watched.' : 'Basis not recorded; verify against the source.';
   const panelHead = (title: string, status: React.ReactNode, tip?: React.ReactNode, action?: React.ReactNode) => <div className="flex flex-wrap items-center gap-2"><h2 className="font-semibold">{title}</h2>{status}{tip}<div className="ml-auto flex items-center gap-2">{action}</div></div>;
 
   const quotation = fromAgent?.quote ?? fromKnowledge?.quote;
@@ -144,15 +146,16 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
 
   const transcriptPanel = <div className="space-y-4">
     {citationPanel}
-    {panelHead("Transcript", statusChip(hasTranscript, hasTranscript ? "Saved" : "Not saved"), <InfoTip label="About the transcript">A transcript is what the video actually says. Check it against the original before relying on its claims.</InfoTip>)}
-    {videoStatus ? <VideoTranscriptionPanel locationId={locationId} recordId={recordId} canTranscribe status={videoStatus} hasTranscript={hasTranscript} transcript={value('transcript')} /> : null}
-    {hasTranscript ? <><TranscriptLines text={value('transcript')} videoId={youtube?.videoId ?? null} />
-        {value('previousTranscript').trim() ? <details className="rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Earlier saved transcript (replaced by the Mac transcript)</summary><p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">{value('previousTranscript')}</p></details> : null}</>
-      : <details className="rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Paste a transcript instead</summary><div className="mt-3"><LibraryRecordForm locationId={locationId} recordId={recordId} version={record.version} kind={record.kind} title={record.title} payload={record.payload} /></div></details>}
-    <div className="space-y-2 border-t pt-4">
-      {panelHead("AI summary", summaryText ? <InfoTip label="About the summary">{value('aiSummary') ? basis : 'Not generated by AI.'}</InfoTip> : null, null, view.url && active ? <LibrarySourceAction locationId={locationId} url={view.url} label={summaryText ? "Update summary" : "Summarize"} /> : null)}
-      <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">{summaryText || view.statusMessage || "No summary yet."}</p>
-    </div>
+    <DetailsSection meta={videoStatus?.meta ?? null} description={value('description')} url={view.url} channelUrl={creator?.channelUrl ?? null} channel={view.creator ?? null} mac={Boolean(youtube)} />
+    <CommentsSection meta={videoStatus?.meta ?? null} mac={Boolean(youtube)} />
+    <Section id="transcript" title="Transcript" count={hasTranscript ? "Saved" : "Not saved"}>
+      <p className="text-xs text-muted-foreground">A transcript is what the video actually says. Check it against the original before relying on its claims.</p>
+      {videoStatus ? <VideoTranscriptionPanel locationId={locationId} recordId={recordId} canTranscribe status={videoStatus} hasTranscript={hasTranscript} transcript={value('transcript')} /> : null}
+      {hasTranscript ? <><TranscriptLines text={value('transcript')} videoId={youtube?.videoId ?? null} />
+          {value('previousTranscript').trim() ? <details className="rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Earlier saved transcript (replaced by the Mac transcript)</summary><p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">{value('previousTranscript')}</p></details> : null}</>
+        : <details className="rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Paste a transcript instead</summary><div className="mt-3"><LibraryRecordForm locationId={locationId} recordId={recordId} version={record.version} kind={record.kind} title={record.title} payload={record.payload} /></div></details>}
+    </Section>
+    {videoStatus ? <VideoSlidesSection status={videoStatus} transcript={value('transcript')} /> : null}
   </div>;
   const scriptPanel = <div className="space-y-4">
     {panelHead("Script", null, <InfoTip label="About scripts">Ideas keep this source linked as research; nothing is copied or approved. Use the assistant's Idea or Script template modes to create them.</InfoTip>)}
@@ -169,7 +172,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
   const notesPanel = <NotesPanel locationId={locationId} sourceId={recordId} version={record.version} notes={notes} archived={record.archived} />;
   const moreLinks = <details className="rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Linked records and files</summary><div className="mt-3 space-y-5">{footer}</div></details>;
   const tabs: SourceTab[] = [
-    { id: "transcript", label: "Transcript", badge: hasTranscript ? undefined : undefined, panel: transcriptPanel },
+    { id: "transcript", label: "Source", panel: transcriptPanel },
     ...(active ? [
       { id: "script", label: "Script", badge: contentLinks.length ? String(contentLinks.length) : undefined, panel: scriptPanel },
       { id: "knowledge", label: "Knowledge", badge: findings.length ? String(findings.length) : undefined, panel: knowledgePanel },
@@ -189,10 +192,15 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
           <div className="min-w-0 space-y-3">
             {header}
             {creator && !links.some(link => link.kind === 'channel') && view.url ? <LibrarySourceAction locationId={locationId} url={creator.channelUrl} sourceId={recordId} sourceVersion={record.version} /> : null}
-            <ExpandableText text={value('description')} empty="none saved." />
           </div>
         </div>
-        <SourceTabs tabs={tabs} />
+        <HighlightsProvider locationId={locationId} recordId={recordId} initial={highlights}>
+          <JumpBar items={[{ id: "summary", label: "Summary" }, { id: "details", label: "Details", tab: "transcript" }, { id: "comments", label: "Comments", tab: "transcript" }, { id: "transcript", label: "Transcript", tab: "transcript" },
+            ...(videoStatus?.frames.length ? [{ id: "slides", label: "Slides", tab: "transcript" }] : []), ...(highlights.length ? [{ id: "highlights", label: "Highlights" }] : [])]} />
+          <SummarySection locationId={locationId} recordId={recordId} view={summary} failure={summaryFailure} evidence={`${hasTranscript ? "t" : "d"}${value('description').trim() ? "d" : ""}`} />
+          <HighlightsSection />
+          <SourceTabs tabs={tabs} />
+        </HighlightsProvider>
       </div>} />
       <SourceAssistant canCreate={Boolean(creation)} locationId={locationId} sourceId={recordId} sourceTitle={record.title} version={record.version} hasEvidence={hasTranscript || Boolean(value('description').trim())} canRelated={active} archived={record.archived} knowledgeInputs={knowledgeInputs?.inputs ?? []} canTemplate={Boolean(youtube) && hasTranscript} agent={creation ? { source: { id: recordId, version: record.version, title: record.title, hasText: hasTranscript || Boolean(value('description').trim()) }, turns: creation.conversation.turns, focusProposal: focusedProposal, newDraftHref: `/studio/library/${recordId}?mode=create&new=${randomUUID().slice(0, 8)}`, sessionKey, scope: creation.scope, resume: creation.resume ? { id: creation.resume.id, title: creation.resume.title, turns: creation.resume.turns, updatedAt: creation.resume.updatedAt, href: `/studio/library/${recordId}?mode=create&draft=${creation.resume.id}` } : null } : undefined} />
     </div>

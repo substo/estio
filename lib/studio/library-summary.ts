@@ -7,3 +7,9 @@ export async function enqueueLibrarySummary(locationId: string, recordId: string
   if (!access) throw new Error("Studio access denied.");
   return studioDb.call("studio_request_library_summary", { p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_record_id: recordId });
 }
+/** Retry after a failed or stale summary; plain requests treat unchanged evidence as already asked for. */
+export async function retryLibrarySummary(locationId: string, recordId: string) {
+  const access = await getStudioAccess(locationId);
+  if (!access) throw new Error("Studio access denied.");
+  return studioDb.call("studio_retry_library_summary", { p_location_id: access.locationId, p_actor_app: access.app, p_clerk_user_id: access.userId, p_record_id: recordId });
+}

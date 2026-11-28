@@ -2,6 +2,7 @@ import { z } from "zod";
 import { deviceCall, type DeviceCallOptions } from "./http-queue";
 import type { DeviceCredentials } from "./config";
 import type { TranscriptSegment } from "../video-transcription-policy";
+import type { SourceMeta } from "../youtube-source-meta";
 
 export interface VideoLease { jobId: string; workerId: string; leaseToken: string }
 export interface FrameDeclaration {
@@ -15,6 +16,8 @@ export interface VideoDeviceApi {
   upload(url: string, bytes: Uint8Array, signal: AbortSignal): Promise<void>;
   /** Live status for the Source page; optional so older fakes still work. */
   progress?(lease: VideoLease, progress: { phase: string; percent?: number; detail?: string }): Promise<void>;
+  /** What YouTube reported about the video, including the top comments; optional so older fakes still work. */
+  meta?(lease: VideoLease, meta: SourceMeta): Promise<void>;
   verify(lease: VideoLease, indexes: number[]): Promise<{ requested: number; verified: number; missing: number }>;
 }
 const reserved = z.array(z.object({ index: z.number().int(), status: z.enum(["pending", "verified"]), uploadUrl: z.string().url().max(4000).optional(), expiresInSeconds: z.number().optional() })).max(40);
@@ -25,6 +28,7 @@ export function createVideoDeviceApi(credentials: DeviceCredentials, options: De
   return {
     chunk: async (lease, chunkIndex, segments) => { await call("video_transcript_chunk", lease, { chunkIndex, segments }, z.boolean()); },
     progress: async (lease, progress) => { await call("video_progress", lease, progress, z.boolean()); },
+    meta: async (lease, meta) => { await call("video_meta", lease, { meta }, z.boolean()); },
     reserve: (lease, frames) => call("video_frames_reserve", lease, { frames }, reserved),
     verify: (lease, indexes) => call("video_frames_verify", lease, { indexes }, verified),
     async upload(url, bytes, signal) {

@@ -2,6 +2,7 @@
 import { useState } from "react";
 import type { VideoFrameView } from "@/lib/studio/video-transcription";
 import { usableSlideText } from "@/lib/studio/video-slide-terms";
+import { StarButton } from "./source-sections";
 
 const clock = (seconds: number) => { const s = Math.max(0, Math.floor(seconds)); const h = Math.floor(s / 3600); const m = Math.floor((s % 3600) / 60);
   return `${h ? `${h}:${String(m).padStart(2, "0")}` : m}:${String(s % 60).padStart(2, "0")}`; };
@@ -30,7 +31,7 @@ export function VideoSlideTimeline({ transcriptionId, frames, duration }: { tran
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={src(current)} alt={`Slide at ${clock(current.time_seconds)}`} className="aspect-video w-full object-cover" /></a>
       <div className="min-w-0 space-y-2 text-sm">
-        <p className="font-medium tabular-nums">{clock(current.time_seconds)} <span className="font-normal text-muted-foreground">· on screen from {clock(current.scene_start)} to {clock(current.scene_end)}</span></p>
+        <p className="font-medium tabular-nums">{clock(current.time_seconds)} <span className="font-normal text-muted-foreground">· on screen from {clock(current.scene_start)} to {clock(current.scene_end)}</span><StarButton kind="slide" id={`f${current.frame_index}`} at={Math.floor(current.time_seconds)} label={`the slide at ${clock(current.time_seconds)}`} excerpt={(usableSlideText(current.ocr_text) ? current.ocr_text : current.audio_context) || `Slide at ${clock(current.time_seconds)}`} /></p>
         <div><p className="text-xs font-medium text-muted-foreground">Said around then</p><p className="break-words">{current.audio_context || "Nothing was said."}</p></div>
         <div><p className="text-xs font-medium text-muted-foreground">Text on the slide</p>
           <p className="break-words">{usableSlideText(current.ocr_text) ? current.ocr_text : "No readable text (a picture, or the text was too small)."}</p></div>

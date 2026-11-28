@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { InfoTip } from "./info-tip";
 import type { VideoStatus } from "@/lib/studio/video-transcription";
 import { VideoSlideTimeline } from "./video-slide-timeline";
+import { Section } from "./source-sections";
 import { slideTerms } from "@/lib/studio/video-slide-terms";
 import { describeVideoState, isWorking, videoProgressView } from "@/lib/studio/video-state-text";
 
@@ -50,7 +51,7 @@ export function VideoTranscriptionPanel({ locationId, recordId, canTranscribe, s
     <div className="flex flex-wrap items-center gap-2">
       <span className="inline-flex items-center gap-1.5" role="status">{icon}<span className={tone === "bad" ? "text-destructive" : "text-muted-foreground"} aria-live="polite">{state}</span></span>
       {canRun ? <Button type="button" size="sm" variant={hasTranscript ? "outline" : "default"} disabled={pending} onClick={() => void request()}>{pending ? "Requesting…" : latest?.status === "suggested" || !latest ? "Transcribe on my Mac" : "Transcribe again"}</Button> : null}
-      <InfoTip label="About Mac transcription">Audio is transcribed locally on your Mac; YouTube captions are the only fallback. No speaker labels or comments.{status.mac ? ` ${status.mac.name} is ${status.mac.online ? "online" : "offline"}.` : ""}</InfoTip>
+      <InfoTip label="About Mac transcription">Audio is transcribed locally on your Mac; YouTube captions are the only fallback. No speaker labels.{status.mac ? ` ${status.mac.name} is ${status.mac.online ? "online" : "offline"}.` : ""}</InfoTip>
     </div>
     {progress ? <div className="space-y-2 rounded-md border p-3" aria-label="Transcription progress">
       <div className="flex items-center gap-2"><div className="h-2 flex-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress.percent}><div className="h-full bg-primary transition-all" style={{ width: `${progress.percent}%` }} /></div><span className="w-10 text-right text-xs tabular-nums">{progress.percent}%</span></div>
@@ -66,14 +67,19 @@ export function VideoTranscriptionPanel({ locationId, recordId, canTranscribe, s
       <p className="mt-1 text-xs text-muted-foreground">{latest.duration_seconds ? `${minutes(latest.duration_seconds)} of video · ` : ""}{latest.segment_count} timestamped lines · {transcript.split(/\s+/).filter(Boolean).length.toLocaleString()} words{status.frames.length ? ` · ${status.frames.length} slides` : ""}. {latest.method === "youtube-captions-fallback" ? "Made from YouTube's captions because the Mac transcript could not run." : "Made on your Mac, not taken from YouTube's automatic captions."}</p>
       {finished ? <p className="mt-2 text-xs">Next: read it through below (each time links to that moment in the video), then summarise it or quote from it in a script.</p> : null}
     </div> : null}
-    {status.frames.length && status.framesFrom ? <div className="space-y-3 pt-1">
-      <p className="text-xs font-medium">Slides along the video ({status.frames.length})</p>
-      <VideoSlideTimeline transcriptionId={status.framesFrom} frames={status.frames} duration={status.history.find(h => h.id === status.framesFrom)?.duration_seconds ?? null} />
-      {(() => { const t = slideTerms(status.frames, transcript); return <p className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
-        {t.slidesWithText} of {t.slides} slides had readable text. {t.terms ? `${t.inSpeech} of ${t.terms} names and terms on the slides were also spoken in the video.` : ""}{" "}
-        {t.missing.length ? `Not heard in the speech (possibly mis-heard, or only shown): ${t.missing.join(", ")}. ` : ""}
-        Slide text is kept as separate evidence; it does not change the transcript.</p>; })()}
-    </div> : null}
     {message && !working ? <p role="status" className="text-xs">{message}</p> : null}
   </section>;
+}
+
+/** The slides along the video, in a section of their own that can be hidden. */
+export function VideoSlidesSection({ status, transcript }: { status: VideoStatus; transcript: string }) {
+  if (!status.frames.length || !status.framesFrom) return null;
+  const t = slideTerms(status.frames, transcript);
+  return <Section id="slides" title="Slides" count={String(status.frames.length)}>
+    <VideoSlideTimeline transcriptionId={status.framesFrom} frames={status.frames} duration={status.history.find(h => h.id === status.framesFrom)?.duration_seconds ?? null} />
+    <p className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
+      {t.slidesWithText} of {t.slides} slides had readable text. {t.terms ? `${t.inSpeech} of ${t.terms} names and terms on the slides were also spoken in the video.` : ""}{" "}
+      {t.missing.length ? `Not heard in the speech (possibly mis-heard, or only shown): ${t.missing.join(", ")}. ` : ""}
+      Slide text is kept as separate evidence; it does not change the transcript.</p>
+  </Section>;
 }

@@ -31,10 +31,11 @@ const meta = { title: "Pricing tiers", description: "All about tiers", channel: 
 
 interface Options { metaOverride?: Record<string, unknown>; parakeetFails?: boolean; captions?: boolean; videoFails?: boolean; extractFails?: boolean; uploadFails?: boolean; verifyMissing?: number; tools?: VideoTools; enabled?: boolean; controller?: AbortController; failAudio?: "timeout" | "other"; clientFailures?: Record<string, string>; failAll?: string; captionsWarning?: string; clock?: { t: number } }
 function fixture(options: Options = {}) {
-  const runs: ProcessRequest[] = []; const chunks: TranscriptSegment[][] = []; const reserved: FrameDeclaration[][] = []; const uploads: Uint8Array[] = []; let workdir = "";
+  const metas: unknown[] = []; const runs: ProcessRequest[] = []; const chunks: TranscriptSegment[][] = []; const reserved: FrameDeclaration[][] = []; const uploads: Uint8Array[] = []; let workdir = "";
   const api: VideoDeviceApi = {
     chunk: async (_lease, index, segs) => { assert.equal(index, chunks.length); chunks.push(segs); },
     reserve: async (_lease, frames) => { reserved.push(frames); return frames.map(f => ({ index: f.index, status: "pending" as const, uploadUrl: `https://r2.example/${f.index}` })); },
+    meta: async (_lease, m) => { metas.push(m); },
     upload: async (_url, bytes) => { if (options.uploadFails) throw new Error("video_upload_failed"); uploads.push(bytes); },
     verify: async (_lease, indexes) => ({ requested: indexes.length, verified: indexes.length - (options.verifyMissing ?? 0), missing: options.verifyMissing ?? 0 }),
   };
@@ -47,7 +48,7 @@ function fixture(options: Options = {}) {
       runs.push(request); workdir = request.cwd;
       const [command, ...args] = [request.command, ...request.args];
       if (command === "/tools/yt-dlp") {
-        const client = args.includes("--extractor-args") ? args[args.indexOf("--extractor-args") + 1].replace("youtube:player_client=", "") : "default";
+        const client = args.includes("--extractor-args") ? (/player_client=([^;]+)/.exec(args[args.indexOf("--extractor-args") + 1])?.[1] ?? "default") : "default";
         const failure = options.failAll ?? options.clientFailures?.[client];
         if (failure) throw new CompanionProcessError("cli_failed", failure);
         if (args.includes("--dump-single-json")) return { stdout: JSON.stringify({ ...meta, ...options.metaOverride }), stderr: "" };
@@ -79,7 +80,7 @@ function fixture(options: Options = {}) {
       throw new Error(`unexpected command ${command}`);
     },
   });
-  return { deps, runs, chunks, reserved, uploads, generated, workdir: () => workdir };
+  return { deps, metas, runs, chunks, reserved, uploads, generated, workdir: () => workdir };
 }
 const context = (controller = new AbortController()) => ({ workerId: "mac:1", signal: controller.signal });
 
@@ -268,7 +269,7 @@ test("device boundary: new operations keep lease fields, bound sizes and reject 
 
 const cookieFree = (runs: ProcessRequest[]) => runs.every(r => !r.args.some(a => /cookie|--username|--password/i.test(a)));
 const ytRuns = (f: { runs: ProcessRequest[] }) => f.runs.filter(r => r.command === "/tools/yt-dlp");
-const clientOf = (r: ProcessRequest) => r.args.includes("--extractor-args") ? r.args[r.args.indexOf("--extractor-args") + 1].replace("youtube:player_client=", "") : "default";
+const clientOf = (r: ProcessRequest) => r.args.includes("--extractor-args") ? (/player_client=([^;]+)/.exec(r.args[r.args.indexOf("--extractor-args") + 1])?.[1] ?? "default") : "default";
 
 test("yt-dlp failures are classified for accurate messages", () => {
   assert.equal(classifyYtDlpFailure("ERROR: unable to download video data: HTTP Error 429: Too Many Requests"), "rate_limited");
@@ -393,4 +394,45 @@ test("during a YouTube cool-down, stored captions still give a transcript and Yo
   assert.equal(result.visual.status, "failed", "the slide download waits for the cool-down");
   assert.equal(f.runs.length, before, "no process was started during the cool-down");
   assert.ok(f.chunks.length > 0, "the transcript was saved");
+});
+
+const withComments = { comments: [
+  { id: "1", parent: "root", text: "Great breakdown of the tiers", like_count: 42, author: "@alice", timestamp: 1_700_000_000, is_pinned: true },
+  { id: "2", parent: "1", text: "A reply is not a top comment", like_count: 1, author: "@bob" },
+  { id: "3", parent: "root", text: "Thanks for the free tier tip", like_count: 3, author: "@carol", author_is_uploader: true },
+], comment_count: 120, view_count: 1000, like_count: 50, upload_date: "20260102", tags: ["pricing"], chapters: [{ start_time: 0, title: "Intro" }] };
+
+test("the one metadata request also fetches the top comments, and the Mac reports them with the details", async () => {
+  const f = fixture({ captions: true, metaOverride: withComments });
+  await createVideoTranscribeHandler(f.deps())(job(), context());
+  const metadata = f.runs.filter(r => r.args.includes("--dump-single-json"));
+  assert.equal(metadata.length, 1, "comments add no separate request");
+  const args = metadata[0].args;
+  assert.ok(args.includes("--write-comments"));
+  assert.equal(args.filter(a => a === "--extractor-args").length, 1, "one flag carries the comment limits");
+  assert.match(args[args.indexOf("--extractor-args") + 1], /comment_sort=top;max_comments=50,50,0,0/);
+  const sent = f.metas[0] as { comments: Array<{ author: string; likes: number; pinned: boolean; byUploader: boolean }>; commentsError: string | null; viewCount: number; uploadDate: string; chapters: unknown[] };
+  assert.deepEqual(sent.comments.map(c => c.author), ["@alice", "@carol"], "only top-level comments");
+  assert.equal(sent.comments[0].likes, 42); assert.ok(sent.comments[0].pinned); assert.ok(sent.comments[1].byUploader);
+  assert.equal(sent.commentsError, null); assert.equal(sent.viewCount, 1000); assert.equal(sent.uploadDate, "2026-01-02"); assert.equal(sent.chapters.length, 1);
+});
+
+test("missing comments are reported with a reason, and never fail the transcript", async () => {
+  const f = fixture({ captions: true });
+  const result = await createVideoTranscribeHandler(f.deps())(job(), context()) as { outcome: string };
+  assert.equal(result.outcome, "transcribed");
+  assert.match((f.metas[0] as { commentsError: string }).commentsError, /no comments/i);
+});
+
+test("comments are fetched once: a re-run reuses them, and an older cache entry is refreshed only outside a cool-down", async () => {
+  const cacheDir = await mkdtemp(join(tmpdir(), "yt-cache-"));
+  const f = fixture({ captions: true, parakeetFails: true, metaOverride: withComments });
+  const handler = createVideoTranscribeHandler({ ...f.deps(), cacheDir });
+  await handler(job(), context()); f.chunks.length = 0; await handler(job(), context());
+  assert.equal(f.runs.filter(r => r.args.includes("--write-comments")).length, 1, "YouTube was asked for comments once");
+  assert.equal(f.metas.length, 2); assert.deepEqual(f.metas[0], f.metas[1]);
+  // A cache written before comments existed is refreshed once...
+  const old = fixture({ captions: true, parakeetFails: true }); await writeFile(join(cacheDir, "bbbbbbbbbbb.json"), JSON.stringify({ meta: { title: "t", description: "", channel: "c", duration: 120, live: false }, captions: { segments: [{ start: 0, end: 5, text: "An old stored caption line that is long enough." }] } }));
+  await createVideoTranscribeHandler({ ...old.deps(), cacheDir })(job({ videoId: "bbbbbbbbbbb", url: "https://www.youtube.com/watch?v=bbbbbbbbbbb" }), context());
+  assert.equal(old.runs.filter(r => r.args.includes("--write-comments")).length, 1);
 });

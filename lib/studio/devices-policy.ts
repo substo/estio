@@ -1,3 +1,4 @@
+import { readSourceMeta } from "./youtube-source-meta";
 import { StudioCommandError } from "./command-error";
 import { isTimelineSnapshot } from "./workspace/timeline";
 import { relatedResultSchema } from "./related-search-policy";
@@ -8,7 +9,7 @@ import { readDesiredModels, readReportedModels } from "./local-models";
 import { COMPANION_METRIC_FEATURES, COMPANION_METRIC_STAGES, COMPANION_METRIC_UNITS } from "./device-metrics";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const modelPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
-export const deviceOperations = ["heartbeat", "claim", "extend", "complete", "fail", "command", "video_transcript_chunk", "video_frames_reserve", "video_frames_verify", "video_progress", "video_export_reserve", "video_export_verify"] as const;
+export const deviceOperations = ["heartbeat", "claim", "extend", "complete", "fail", "command", "video_transcript_chunk", "video_frames_reserve", "video_frames_verify", "video_progress", "video_meta", "video_export_reserve", "video_export_verify"] as const;
 export type DeviceOperation = typeof deviceOperations[number];
 export const devicePairingOperations = ["start", "poll"] as const;
 export type DevicePairingOperation = typeof devicePairingOperations[number];
@@ -363,6 +364,7 @@ export function readDeviceCommand(operation: DeviceOperation, value: unknown): R
     valid(typeof v.phase === "string" && /^[a-z_]{3,20}$/.test(v.phase) && (v.percent === undefined || v.percent === null || Number.isInteger(v.percent) && Number(v.percent) >= 0 && Number(v.percent) <= 100) && (v.detail === undefined || typeof v.detail === "string" && v.detail.length <= 160));
     return { ...out, phase: v.phase, ...(v.percent === undefined || v.percent === null ? {} : { percent: v.percent }), ...(v.detail === undefined ? {} : { detail: v.detail }) };
   }
+  if (operation === "video_meta") { const meta = readSourceMeta(v.meta); valid(meta !== null && new TextEncoder().encode(JSON.stringify(meta)).byteLength <= 120_000); return { ...out, meta }; }
   if (operation === "video_frames_reserve") return { ...out, ...readFramesReserve(v) };
   if (operation === "video_frames_verify") return { ...out, ...readFramesVerify(v) };
   if (operation === "video_export_reserve") return { ...out, ...readExportReserve(v) };

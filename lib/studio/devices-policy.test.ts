@@ -219,3 +219,11 @@ test("the Mac's transcription readiness survives the report whitelist as a bare 
   assert.deepEqual(kept.transcribeUpload, { ready: true });
   assert.deepEqual((safeDeviceCapabilities({ transcribeUpload: { ready: "yes" } }) as { transcribeUpload?: unknown }).transcribeUpload, { ready: false });
 });
+
+test("video_meta carries the lease and a validated source meta, and refuses malformed details", () => {
+  const lease = { workerId: "mac:1", jobId: "11111111-1111-4111-8111-111111111111", leaseToken: "22222222-2222-4222-8222-222222222222" };
+  const out = readDeviceCommand("video_meta", { ...lease, meta: { title: "T", comments: [{ author: "a", text: "hi", likes: 2 }], commentsError: null } }) as { meta: { comments: unknown[] } };
+  assert.equal(out.meta.comments.length, 1);
+  assert.throws(() => readDeviceCommand("video_meta", { ...lease, meta: "nope" }));
+  assert.throws(() => readDeviceCommand("video_meta", { workerId: "mac:1", meta: { title: "T" } }));
+});

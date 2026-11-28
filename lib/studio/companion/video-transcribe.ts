@@ -9,6 +9,7 @@ import type { Usage } from "../../build/contract";
 import { localRoute, runLocalRoute, type ReportLocalRoute } from "./route";
 import { runNativeProcess, CompanionProcessError, type ProcessRunner } from "./process";
 import type { LocalProvider, LocalTextAdapter } from "./providers";
+import { commentExtractorArgs, parseYoutubeSourceMeta, type SourceMeta } from "../youtube-source-meta";
 import { videoProcessEnvironment, type VideoTools } from "./video-tools";
 import type { FrameDeclaration, VideoDeviceApi, VideoLease } from "./video-api";
 import {
@@ -56,10 +57,10 @@ export const YOUTUBE_COOLDOWN_SECONDS = 30 * 60;
 /** Human-like pacing: one YouTube request at a time, 5-20 s apart, and at most this many transcription jobs a rolling hour may touch YouTube (the metadata, captions and client retries of one job count once). */
 export const YOUTUBE_MAX_REQUESTS_PER_HOUR = 3;
 const defaultJitterMs = () => 5_000 + Math.floor(Math.random() * 15_000);
-const baseYtDlp = (tools: VideoTools, client: string | null = null) => ["--ignore-config", "--no-playlist", "--no-cache-dir", "--quiet", "--no-progress", "--socket-timeout", "30", "--retries", "3",
+const baseYtDlp = (tools: VideoTools, client: string | null = null, youtubeArgs: string[] = []) => ["--ignore-config", "--no-playlist", "--no-cache-dir", "--quiet", "--no-progress", "--socket-timeout", "30", "--retries", "3",
   "--sleep-requests", "1", "--restrict-filenames", ...(tools.paths.ffmpeg ? ["--ffmpeg-location", dirname(tools.paths.ffmpeg)] : []),
   // Newer yt-dlp only enables deno by default; Homebrew node is passed by absolute path (a LaunchAgent PATH is minimal).
-  ...(tools.paths.node ? ["--js-runtimes", `node:${tools.paths.node}`] : []), ...(client ? ["--extractor-args", `youtube:player_client=${client}`] : [])];
+  ...(tools.paths.node ? ["--js-runtimes", `node:${tools.paths.node}`] : []), ...(client || youtubeArgs.length ? ["--extractor-args", `youtube:${[...(client ? [`player_client=${client}`] : []), ...youtubeArgs].join(";")}`] : [])];
 export type YoutubeFailure = "rate_limited" | "bot_check" | "private" | "removed" | "age_restricted" | "network" | "unknown";
 /** Classify yt-dlp's error output. Text only informs the user message and the retry policy; it never selects a command. */
 export function classifyYtDlpFailure(stderr: string): YoutubeFailure {
@@ -152,10 +153,12 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
     const signal = context.signal;
     const env = videoProcessEnvironment(tools);
     const cacheFile = cachePath(video.videoId);
-    let cached: { meta: { title: string; description: string; channel: string; duration: number; live: boolean }; captions: { segments: TranscriptSegment[]; language?: string } } | null = null;
+    let cached: { meta: { title: string; description: string; channel: string; duration: number; live: boolean }; captions: { segments: TranscriptSegment[]; language?: string }; source?: SourceMeta } | null = null;
     if (cacheFile) cached = await readFile(cacheFile, "utf8").then(text => { const c = JSON.parse(String(text)); return Array.isArray(c?.captions?.segments) && c?.meta?.duration > 0 ? c : null; }).catch(() => null);
     /** During a cool-down nothing asks YouTube; a video whose captions are already stored still gets its transcript (only the slide download waits). */
     const coolingDown = () => Math.ceil((blockedUntil - now()) / 1000);
+    /** An older cache entry has no comments; it is only reused while cooling down, otherwise the one metadata request is made again so the page gets them. */
+    if (cached && !cached.source && coolingDown() <= 0) cached = null;
     if (coolingDown() > 0 && !cached) throw youtubeFailureError("rate_limited", coolingDown());
     const work = await mkdtemp(join(deps.tmpRoot ?? tmpdir(), "studio-video-"));
     /** Live progress for the Source page. Best effort: a failed report never affects the job. */
@@ -183,13 +186,13 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
     };
     /** yt-dlp through the player-client ladder. A 429 stops everything and starts the cool-down; a bot check is tried on the other clients first. */
     const session = { counted: false };
-    const ytdlp = async (args: string[], timeoutMs: number, maxOutputBytes = 64 * 1024) => {
+    const ytdlp = async (args: string[], timeoutMs: number, maxOutputBytes = 64 * 1024, youtubeArgs: string[] = []) => {
       if (coolingDown() > 0) throw youtubeFailureError("rate_limited", coolingDown());
       const order = workingClient === undefined ? YOUTUBE_CLIENT_ORDER : [workingClient, ...YOUTUBE_CLIENT_ORDER.filter(client => client !== workingClient)];
       let last: unknown; let botChecked = false;
       for (const [index, client] of order.entries()) {
         try {
-          const out = await pace(() => exec(tools.paths.ytDlp!, [...baseYtDlp(tools, client), ...args], timeoutMs, maxOutputBytes), session);
+          const out = await pace(() => exec(tools.paths.ytDlp!, [...baseYtDlp(tools, client, youtubeArgs), ...args], timeoutMs, maxOutputBytes), session);
           workingClient = client;
           return out;
         } catch (error) {
@@ -221,7 +224,7 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
       if ((await stat(join(work, picked.file))).size > 8 * MB) return null;
       const segments = normalizeSegments(captionsFromJson3(JSON.parse(String(await read(join(work, picked.file), "utf8")))), meta.duration + 60);
       const found = segments.map(s => s.text).join(" ").length >= 20 ? { segments, ...(picked.language ? { language: picked.language } : {}) } : null;
-      if (found && cacheFile) await mkdir(dirname(cacheFile), { recursive: true }).then(() => writeFile(cacheFile, JSON.stringify({ meta, captions: found }))).catch(() => {});
+      if (found && cacheFile) await mkdir(dirname(cacheFile), { recursive: true }).then(() => writeFile(cacheFile, JSON.stringify({ meta, captions: found, ...(source ? { source } : {}) }))).catch(() => {});
       return found;
     })();
     /** One YouTube download of the video (480p with its audio) feeds both the transcript and the slides. */
@@ -235,18 +238,23 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
       return join(work, file);
     })();
     let meta!: { title: string; description: string; channel: string; duration: number; live: boolean };
+    let source: SourceMeta | undefined;
     try {
       report("info", undefined, "Checking the video on YouTube");
       // 1. Bounded metadata: duration limit, title/description/channel for the relevance gate. No media is downloaded yet.
-      if (cached) meta = cached.meta; else try {
-        const out = await ytdlp(["--skip-download", "--dump-single-json", "--", video.url], 90_000, 4 * MB);
+      if (cached) { meta = cached.meta; source = cached.source; } else try {
+        // One request set: the details and the top comments together. Comments are never asked for again on a later run of the same video.
+        const out = await ytdlp(["--skip-download", "--dump-single-json", "--write-comments", "--", video.url], 150_000, 4 * MB, [commentExtractorArgs]);
         const json = JSON.parse(out.stdout) as Record<string, unknown>;
         meta = { title: String(json.title ?? ""), description: String(json.description ?? ""), channel: String(json.channel ?? json.uploader ?? ""), duration: Number(json.duration ?? 0), live: json.is_live === true };
+        source = parseYoutubeSourceMeta(json, out.stderr);
       } catch (error) {
         if (error instanceof StudioJobError) throw error;
         const failure = error instanceof CompanionProcessError ? (error.code === "cli_timeout" ? "network" : classifyYtDlpFailure(error.stderr)) : "unknown";
         throw youtubeFailureError(failure);
       }
+      // Best effort: what YouTube told us about the video (and its comments) is shown on the Source page; a failure here never affects the transcript.
+      if (source) await deps.api.meta?.(lease, source).catch(() => undefined);
       if (meta.live) fail("video_unavailable", "Live streams cannot be transcribed until they end.");
       if (!Number.isFinite(meta.duration) || meta.duration <= 0) fail("video_unavailable", "This video's length is unknown, so it was not downloaded.");
       if (meta.duration > Math.min(payload.limits.maxSeconds, VIDEO_LIMITS.maxSeconds)) fail("video_too_long", "Videos over 2 hours are not transcribed.");

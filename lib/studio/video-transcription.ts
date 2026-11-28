@@ -11,6 +11,7 @@ import { deviceOnline } from "./devices-policy";
 import { canonicalYoutubeVideo } from "./video-transcription-policy";
 import { runVideoFrameOperation } from "./video-frames";
 import type { VideoWaiting } from "./video-state-text";
+import { readSourceMeta, type SourceMeta } from "./youtube-source-meta";
 
 export type VideoOrigin = "paste" | "search" | "suggestion";
 export type VideoNotQueuedReason = "no_mac" | "processing_off" | "transcription_off" | "tools_missing" | "companion_outdated" | "no_authority";
@@ -92,6 +93,8 @@ export interface VideoStatus {
   /** Plain name of the job the Mac is busy with while this one waits behind it. */
   busyWith: string | null;
   mac: { name: string; online: boolean; lastSeenAt: string | null } | null;
+  /** What YouTube reported on the newest run that kept it (details and top comments); null until a Mac run has fetched it. */
+  meta: SourceMeta | null;
 }
 const busyLabel: Record<string, string> = { "studio.character_sheet": "drawing a character sheet", "studio.video_assemble": "building a video", "studio.video_edit": "editing a video", "studio.video_transcribe": "another transcription", "studio.library_summary": "summarising a source" };
 /** Read model for the Library source page. Scoped by the caller's active Location. */
@@ -102,7 +105,7 @@ export async function getVideoStatus(locationId: string, recordId: string): Prom
     select id,status,origin,gated,relevance,method,language,duration_seconds,segment_count,transcript_chars,transcript_applied,visual_status,visual_error,frame_count,error_code,error_message,created_at,updated_at,completed_at,device_id,progress
     from studio.studio_video_transcriptions where location_id=${access.locationId} and record_id=${recordId}::uuid order by created_at desc limit 15`);
   const { latest, lastAttempt, framesFrom } = pickVideoRuns(history);
-  if (!latest) return { latest: null, history: [], frames: [], framesFrom: null, lastAttempt: null, waiting: null, busyWith: null, mac: null };
+  if (!latest) return { latest: null, history: [], frames: [], framesFrom: null, lastAttempt: null, waiting: null, busyWith: null, mac: null, meta: null };
   const frames = framesFrom ? await studioDb.rows<VideoFrameView>(Prisma.sql`
     select frame_index,time_seconds,scene_start,scene_end,ocr_text,audio_context,selection,status from studio.studio_video_frames
     where location_id=${access.locationId} and transcription_id=${framesFrom}::uuid and status='verified' order by time_seconds,frame_index limit 200`) : [];
@@ -121,7 +124,9 @@ export async function getVideoStatus(locationId: string, recordId: string): Prom
       }
     }
   }
-  return { latest, history, frames, framesFrom, lastAttempt, waiting, busyWith, mac };
+  const stored = await studioDb.one<{ source_meta: unknown }>(Prisma.sql`select source_meta from studio.studio_video_transcriptions
+    where location_id=${access.locationId} and record_id=${recordId}::uuid and source_meta is not null order by created_at desc limit 1`).catch(() => null);
+  return { latest, history, frames, framesFrom, lastAttempt, waiting, busyWith, mac, meta: readSourceMeta(stored?.source_meta) };
 }
 
 /** Device operations that need R2: the SQL function owns identity, lease and validation; this adds signed uploads and server-side byte checks. */
