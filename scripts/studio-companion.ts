@@ -30,7 +30,8 @@ import { createOnboardingResearchHandler } from "../lib/studio/companion/onboard
 import { DEVICE_BLOCK_REASONS } from "../lib/studio/devices-policy";
 import { discoverVideoTools, type VideoTools } from "../lib/studio/companion/video-tools";
 import { createFootageTranscriber } from "../lib/studio/companion/footage-transcript";
-import { createVideoTranscribeHandler } from "../lib/studio/companion/video-transcribe";
+import { createSourceDetailsHandler, sourceDetailsWriter } from "../lib/studio/companion/source-details";
+import { createVideoTranscribeHandler, createYoutubePacing } from "../lib/studio/companion/video-transcribe";
 import { createVideoDeviceApi } from "../lib/studio/companion/video-api";
 import { fileURLToPath } from "node:url";
 import { createExportApi, createVideoAssembleHandler } from "../lib/studio/companion/video-assemble";
@@ -45,7 +46,7 @@ import { detectModel, hubDirectory, ModelManager, modelVenv } from "../lib/studi
 import { createPlaywrightYoutubeBrowser, createYoutubeSearchHandler, findChrome, openYoutubeLogin, youtubeBrowserProfile } from "../lib/studio/companion/youtube-search";
 import { CompanionMetrics, featureForStudioJob } from "../lib/studio/companion/metrics";
 
-const version = "studio-companion-17";
+const version = "studio-companion-18";
 const rediscoverMs = 10 * 60_000;
 const usage = "Usage: npm run start:studio-companion -- pair --origin <https origin> [--name 'My Mac'] | start [--once] | readiness | youtube-login\nRun in the background: bash scripts/studio-companion-launchagent.sh install";
 const messages: Record<string, string> = {
@@ -125,12 +126,13 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
         .catch(() => log({ event: "model_reconcile_failed" }));
     };
     await models.refresh().catch(() => {});
-    const capabilities = () => ({ instanceId, modelStates: models.states(), platform: os.platform(), arch: os.arch(), version, metrics: metrics.summary(), knowledgeOutlineVersion: 2, knowledgeCurationVersion: 1, stagedCreationVersion: 1, studioAgentVersion: 4, videoTemplateVersion: 1, sourceAssistVersion: 1, textRouteVersion: TEXT_ROUTE_VERSION, deviceAiRouteVersion: 1, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble", "studio.character_sheet"], videoAssembly: { ready: assemblyReady(), missing: assembly.missing, sourceClips: 1 }, voicePreview: { ready: previewReady() }, characterSheet: { ready: sheetReady() }, transcribeUpload: { ready: Boolean(videoTools.paths.python && videoTools.paths.ffmpeg && videoTools.report.tools.model === "downloaded") }, youtubeSearch: { ready: youtubeReady(), signedIn: youtubeSignedIn, rank: researchReady() }, ...providers, ...discovery, video: videoTools.report,
+    const capabilities = () => ({ instanceId, modelStates: models.states(), platform: os.platform(), arch: os.arch(), version, metrics: metrics.summary(), knowledgeOutlineVersion: 2, knowledgeCurationVersion: 1, stagedCreationVersion: 1, studioAgentVersion: 4, videoTemplateVersion: 1, sourceAssistVersion: 1, textRouteVersion: TEXT_ROUTE_VERSION, deviceAiRouteVersion: 1, handlers: ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble", "studio.character_sheet", "studio.source_details"], sourceDetailsReady: sourceDetailsTools(), videoAssembly: { ready: assemblyReady(), missing: assembly.missing, sourceClips: 1 }, voicePreview: { ready: previewReady() }, characterSheet: { ready: sheetReady() }, transcribeUpload: { ready: Boolean(videoTools.paths.python && videoTools.paths.ffmpeg && videoTools.report.tools.model === "downloaded") }, youtubeSearch: { ready: youtubeReady(), signedIn: youtubeSignedIn, rank: researchReady() }, ...providers, ...discovery, video: videoTools.report,
       nativeSubscriptionVersion: 1, nativeRetryAt: nativeRetryAt(), capacity: capacity(), usage: tracker.snapshot(), processingBlocked: gate().reasons.filter(reason => reason in DEVICE_BLOCK_REASONS) });
     const researchReady = () => gate().processing && Object.values(capacity()).some(Boolean);
     /** Character sheets are drawn with the Codex CLI on this Mac's ChatGPT login: installed, signed in, and the gate allows processing. */
     const sheetReady = () => gate().processing && providers.codex.ready && providers.codex.authenticated;
 
+    const sourceDetailsTools = () => Boolean(chromePath && videoTools.paths.ytDlp);
     const youtubeReady = () => (chromePath !== null || researchReady()) && gate().processing;
     let assembly: AssemblyTools = { ready: false, missing: ["substo", "ffprobe", "Claude sign-in"] };
     const refreshAssembly = async () => { assembly = await discoverAssemblyTools(providers.claude.ready && providers.claude.authenticated, undefined, controller.signal); };
@@ -157,7 +159,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
         .finally(() => active.delete(cmd.provider));
       active.set(cmd.provider, task);
     };
-    const inner = createDeviceStudioQueue(credentials, { capabilities, textReady: () => settings.config.features.text && gate().processing, summaryReady: () => settings.config.features.text && gate().processing, researchReady: () => gate().processing, videoReady, youtubeReady, assembleReady: assemblyReady, previewReady, sheetReady, configAck: () => settings.pendingAck,
+    const inner = createDeviceStudioQueue(credentials, { capabilities, textReady: () => settings.config.features.text && gate().processing, summaryReady: () => settings.config.features.text && gate().processing, researchReady: () => gate().processing, videoReady, youtubeReady, assembleReady: assemblyReady, previewReady, sheetReady, sourceDetailsReady: () => sourceDetailsTools() && gate().processing, configAck: () => settings.pendingAck,
       onHeartbeat: (state, sentAck) => {
         if (settings.update(state, sentAck)) { log({ event: "config_applied", version: settings.appliedVersion, status: settings.pendingAck?.status }); pulse(); void reconcileModels(); }
         if (state && !once) for (const cmd of state.commands) runCommand(cmd);
@@ -187,7 +189,10 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const research = createOnboardingResearchHandler({ adapter: p => adapters[p], enabled: () => gate().processing, usage: usageNow, deviceId: config.deviceId, reportRoute });
     const withShutdown = (handler: StudioJobHandler): StudioJobHandler => (job, context) => handler(job, { ...context, signal: AbortSignal.any([context.signal, controller.signal]) });
     const textRun = createSubscriptionTextRunHandler({ adapter: p => adapters[p], usage: usageNow, enabled: () => gate().processing, config: () => settings.config, configVersion: () => settings.appliedVersion });
-    const video = createVideoTranscribeHandler({ cacheDir: join(os.homedir(), "Library", "Application Support", "Estio", "StudioCompanion", "youtube-cache"), tools: async () => { videoTools = await discoverVideoTools(); return videoTools; }, api: createVideoDeviceApi(credentials), enabled: () => gate().processing, config: () => settings.config,
+    const youtubePacing = createYoutubePacing();
+    const sourceDetails = createSourceDetailsHandler({ pacing: youtubePacing, enabled: () => gate().processing,
+      tools: discoverVideoTools, chrome: findChrome, save: sourceDetailsWriter(credentials) });
+    const video = createVideoTranscribeHandler({ youtubePacing, cacheDir: join(os.homedir(), "Library", "Application Support", "Estio", "StudioCompanion", "youtube-cache"), tools: async () => { videoTools = await discoverVideoTools(); return videoTools; }, api: createVideoDeviceApi(credentials), enabled: () => gate().processing, config: () => settings.config,
       adapter: p => adapters[p], usage: usageNow, deviceId: config.deviceId, reportRoute, scriptsDir: fileURLToPath(new URL("./studio-video", import.meta.url)) });
     const youtubeSearchInner = createYoutubeSearchHandler({ deviceId: config.deviceId, enabled: () => gate().processing, models: { adapter: p => adapters[p], usage: usageNow, config: () => settings.config }, browser: async () => {
       chromePath = await findChrome();
@@ -208,7 +213,7 @@ export async function main(argv = process.argv.slice(2), deps: { pairing?: Pairi
     const voicePreview = createVoicePreviewHandler({ enabled: () => gate().processing, ready: async speaker => speaker.startsWith("clone-") ? localCloneReady() : localTtsReady(), reference: (ref, signal) => ensureVoiceReference(ref, { signal, transcribe: transcribeReference }),
       synth: (speaker, text, signal, reference) => reference ? synthesizeLocalClone({ text, refAudio: reference.audio, refText: reference.text, signal }) : synthesizeLocal({ text, voice: speaker, signal }) });
     const characterSheet = createCharacterSheetHandler({ enabled: () => gate().processing, ready: sheetReady, draw: createCodexFrameDrawer(), transcribe: createFootageTranscriber({ tools: async () => { videoTools = await discoverVideoTools(); return videoTools; }, scriptsDir: fileURLToPath(new URL("./studio-video", import.meta.url)) }) });
-    const rawHandlers: Record<string, StudioJobHandler> = { "studio.character_sheet": withShutdown(characterSheet), "studio.voice_preview": withShutdown(voicePreview), "studio.video_assemble": withShutdown(videoAssemble), "studio.video_edit": withShutdown(videoEdit), "studio.open_editor": withShutdown(openEditor), "studio.video_transcribe": withShutdown(video), "studio.youtube_search": withShutdown(youtubeSearch), "studio.text_run": withShutdown(textRun), "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
+    const rawHandlers: Record<string, StudioJobHandler> = { "studio.source_details": withShutdown(sourceDetails), "studio.character_sheet": withShutdown(characterSheet), "studio.voice_preview": withShutdown(voicePreview), "studio.video_assemble": withShutdown(videoAssemble), "studio.video_edit": withShutdown(videoEdit), "studio.open_editor": withShutdown(openEditor), "studio.video_transcribe": withShutdown(video), "studio.youtube_search": withShutdown(youtubeSearch), "studio.text_run": withShutdown(textRun), "studio.library_summary": summary, "studio.onboarding_research": withShutdown(research), "studio.diagnostic": withShutdown(diagnostic) };
     const handlers = Object.fromEntries(Object.entries(rawHandlers).map(([kind, handler]) => [kind, metrics.wrap(featureForStudioJob, handler)]));
     const report = { instanceId, handlers: Object.keys(handlers) };
     if (once) {

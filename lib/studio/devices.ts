@@ -121,8 +121,8 @@ export async function executeStudioDeviceCommand(token: string, brand: "estio" |
     if (!identity || !await authorizeEstio(identity.locationId, identity.approvedBy)) throw new StudioCommandError("Access denied.", 403);
     estioAuthorizedBy = identity.approvedBy;
   }
-  // Outermost device entry point: character sheets, then voice previews, script-to-video assembly, then YouTube search in the Mac's browser, video transcription, then Mac text runs, onboarding research, Library summaries and the base device protocol.
-  const call = (observed?: unknown) => studioDb.call<unknown>("studio_character_sheet_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy, p_observed: observed });
+  // Outermost device entry point: source details, then character sheets, then voice previews, script-to-video assembly, then YouTube search in the Mac's browser, video transcription, then Mac text runs, onboarding research, Library summaries and the base device protocol.
+  const call = (observed?: unknown) => studioDb.call<unknown>("studio_source_details_device_command", { p_token_hash: tokenHash, p_app: brand, p_operation: operation, p_body: body, p_estio_authorized_by: estioAuthorizedBy, p_observed: observed });
   if (operation === "video_meta") return studioDb.call<unknown>("studio_video_save_meta", { p_token_hash: tokenHash, p_app: brand, p_body: body, p_estio_authorized_by: estioAuthorizedBy });
   if (operation === "video_progress") return studioDb.call<unknown>("studio_video_report_progress", { p_token_hash: tokenHash, p_app: brand, p_body: body, p_estio_authorized_by: estioAuthorizedBy });
   if (operation === "video_frames_reserve" || operation === "video_frames_verify") return executeVideoFrameOperation(operation, call);

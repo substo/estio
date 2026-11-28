@@ -27,7 +27,9 @@ import { LibraryRecordForm } from "../../../_components/library-record-form";
 import { RelatedYoutubeVideos } from "../../../_components/related-youtube-videos";
 import { LibraryPlatformIcon } from "../../../_components/library-cards";
 import { SourcePlayer } from "../../../_components/source-player";
-import { CommentsSection, DetailsSection, HighlightsProvider, HighlightsSection, JumpBar, Section, SummarySection } from "../../../_components/source-sections";
+import { SourceDetailsPanel } from "../../../_components/source-details-panel";
+import { readSourceDetails } from "@/lib/studio/source-details";
+import { HighlightsProvider, HighlightsSection, JumpBar, Section, SummarySection } from "../../../_components/source-sections";
 import { getSourceHighlights, getSummaryFailure } from "@/lib/studio/source-page";
 import { summaryView } from "@/lib/studio/source-highlights";
 import { SourceTabs, type SourceTab } from "../../../_components/source-tabs";
@@ -76,7 +78,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     return { ...data, conversation, resume, scope: await agentRouteScope(locationId) };
   };
   const summary = summaryView(record.payload, Boolean(value('transcript').trim()), Boolean(value('description').trim()));
-  const [pendingUploads, latestOutline, videoStatus, knowledgeInputs, creation, fromAgent, fromKnowledge, highlights, summaryFailure] = await Promise.all([
+  const [pendingUploads, latestOutline, videoStatus, knowledgeInputs, creation, fromAgent, fromKnowledge, highlights, summaryFailure, sourceDetails] = await Promise.all([
     listPendingStudioUploads(locationId, recordId),
     active ? getLatestKnowledgeOutline(locationId, recordId) : null,
     active && youtube ? getVideoStatus(locationId, recordId).catch(() => null) : null,
@@ -86,6 +88,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
     knowledgeCitation,
     active ? getSourceHighlights(locationId, recordId).catch(() => []) : [],
     summary.state === "failed" ? getSummaryFailure(locationId, recordId).catch(() => null) : null,
+    active && youtube && record.source_url ? readSourceDetails(access, recordId, record.source_url).catch(() => null) : null,
   ]);
   const requestedReview = query.knowledgeReview;
   const requestedOutline = active && typeof requestedReview === "string" && requestedReview !== latestOutline?.id
@@ -146,8 +149,9 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
 
   const transcriptPanel = <div className="space-y-4">
     {citationPanel}
-    <DetailsSection meta={videoStatus?.meta ?? null} description={value('description')} url={view.url} channelUrl={creator?.channelUrl ?? null} channel={view.creator ?? null} mac={Boolean(youtube)} />
-    <CommentsSection meta={videoStatus?.meta ?? null} mac={Boolean(youtube)} />
+    <SourceDetailsPanel key={`${locationId}:${recordId}:${view.url}`} locationId={locationId} recordId={recordId} initial={sourceDetails}
+      canFetch={active && Boolean(youtube)} youtube={Boolean(youtube)} legacy={videoStatus?.meta ?? null} description={value('description')}
+      channelUrl={creator?.channelUrl ?? null} channel={view.creator ?? null} />
     <Section id="transcript" title="Transcript" count={hasTranscript ? "Saved" : "Not saved"}>
       <p className="text-xs text-muted-foreground">A transcript is what the video actually says. Check it against the original before relying on its claims.</p>
       {videoStatus ? <VideoTranscriptionPanel locationId={locationId} recordId={recordId} canTranscribe status={videoStatus} hasTranscript={hasTranscript} transcript={value('transcript')} /> : null}
@@ -155,7 +159,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
           {value('previousTranscript').trim() ? <details className="rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Earlier saved transcript (replaced by the Mac transcript)</summary><p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">{value('previousTranscript')}</p></details> : null}</>
         : <details className="rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Paste a transcript instead</summary><div className="mt-3"><LibraryRecordForm locationId={locationId} recordId={recordId} version={record.version} kind={record.kind} title={record.title} payload={record.payload} /></div></details>}
     </Section>
-    {videoStatus ? <VideoSlidesSection status={videoStatus} transcript={value('transcript')} /> : null}
+    {videoStatus?.frames.length && videoStatus.framesFrom ? <VideoSlidesSection status={videoStatus} transcript={value('transcript')} /> : <Section id="slides" title="Slides" defaultOpen={false}><p className="text-sm text-muted-foreground">No slides saved.</p></Section>}
   </div>;
   const scriptPanel = <div className="space-y-4">
     {panelHead("Script", null, <InfoTip label="About scripts">Ideas keep this source linked as research; nothing is copied or approved. Use the assistant's Idea or Script template modes to create them.</InfoTip>)}
@@ -172,7 +176,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
   const notesPanel = <NotesPanel locationId={locationId} sourceId={recordId} version={record.version} notes={notes} archived={record.archived} />;
   const moreLinks = <details className="rounded-lg border p-3 text-sm"><summary className="cursor-pointer font-medium">Linked records and files</summary><div className="mt-3 space-y-5">{footer}</div></details>;
   const tabs: SourceTab[] = [
-    { id: "transcript", label: "Source", panel: transcriptPanel },
+    { id: "transcript", label: "Source", pageScroll: true, panel: transcriptPanel },
     ...(active ? [
       { id: "script", label: "Script", badge: contentLinks.length ? String(contentLinks.length) : undefined, panel: scriptPanel },
       { id: "knowledge", label: "Knowledge", badge: findings.length ? String(findings.length) : undefined, panel: knowledgePanel },
@@ -196,7 +200,7 @@ export default async function StudioLibraryRecordPage({ params, searchParams }: 
         </div>
         <HighlightsProvider locationId={locationId} recordId={recordId} initial={highlights}>
           <JumpBar items={[{ id: "summary", label: "Summary" }, { id: "details", label: "Details", tab: "transcript" }, { id: "comments", label: "Comments", tab: "transcript" }, { id: "transcript", label: "Transcript", tab: "transcript" },
-            ...(videoStatus?.frames.length ? [{ id: "slides", label: "Slides", tab: "transcript" }] : []), ...(highlights.length ? [{ id: "highlights", label: "Highlights" }] : [])]} />
+            { id: "slides", label: "Slides", tab: "transcript" }, ...(highlights.length ? [{ id: "highlights", label: "Highlights" }] : [])]} />
           <SummarySection locationId={locationId} recordId={recordId} view={summary} failure={summaryFailure} evidence={`${hasTranscript ? "t" : "d"}${value('description').trim() ? "d" : ""}`} />
           <HighlightsSection />
           <SourceTabs tabs={tabs} />

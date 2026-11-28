@@ -1,3 +1,4 @@
+import { readSourceDetailsMeta, readSourceDetailsOutcome, readSourceDetailsRows, SOURCE_DETAILS_BATCH } from "./source-details-policy";
 import { readSourceMeta } from "./youtube-source-meta";
 import { StudioCommandError } from "./command-error";
 import { isTimelineSnapshot } from "./workspace/timeline";
@@ -9,7 +10,7 @@ import { readDesiredModels, readReportedModels } from "./local-models";
 import { COMPANION_METRIC_FEATURES, COMPANION_METRIC_STAGES, COMPANION_METRIC_UNITS } from "./device-metrics";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const modelPattern = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
-export const deviceOperations = ["heartbeat", "claim", "extend", "complete", "fail", "command", "video_transcript_chunk", "video_frames_reserve", "video_frames_verify", "video_progress", "video_meta", "video_export_reserve", "video_export_verify"] as const;
+export const deviceOperations = ["heartbeat", "claim", "extend", "complete", "fail", "command", "video_transcript_chunk", "video_frames_reserve", "video_frames_verify", "video_progress", "video_meta", "source_details_batch", "video_export_reserve", "video_export_verify"] as const;
 export type DeviceOperation = typeof deviceOperations[number];
 export const devicePairingOperations = ["start", "poll"] as const;
 export type DevicePairingOperation = typeof devicePairingOperations[number];
@@ -17,12 +18,12 @@ export type DeviceProvider = "codex" | "claude";
 /** A device counts as running while its last heartbeat is this recent (same window as hosted workers). */
 export const DEVICE_ONLINE_SECONDS = 90;
 /** Work a paired computer may run. Mac checks are always allowed; the others are granted while processing is On. */
-export const DEVICE_WORK_KINDS = ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble", "studio.video_edit", "studio.open_editor", "studio.voice_preview", "studio.character_sheet"] as const;
+export const DEVICE_WORK_KINDS = ["studio.diagnostic", "studio.library_summary", "studio.onboarding_research", "studio.text_run", "studio.video_transcribe", "studio.youtube_search", "studio.video_assemble", "studio.video_edit", "studio.open_editor", "studio.voice_preview", "studio.character_sheet", "studio.source_details"] as const;
 export type DeviceWorkKind = typeof DEVICE_WORK_KINDS[number];
 export const ONBOARDING_RESEARCH_KIND: DeviceWorkKind = "studio.onboarding_research";
 export const deviceWorkLabels: Record<DeviceWorkKind, string> = {
   "studio.text_run": "Knowledge, idea reviews and script briefs", "studio.diagnostic": "Mac checks", "studio.library_summary": "Library summaries", "studio.onboarding_research": "Business research", "studio.video_transcribe": "Video transcription (YouTube audio, captions, slides)", "studio.youtube_search": "Related YouTube search in your Mac's browser", "studio.video_assemble": "Script to edited video",
-  "studio.video_edit": "Agent edits to a made video", "studio.open_editor": "Open the edit in Substo Video", "studio.voice_preview": "Voice previews", "studio.character_sheet": "Character sheets",
+  "studio.video_edit": "Agent edits to a made video", "studio.open_editor": "Open the edit in Substo Video", "studio.voice_preview": "Voice previews", "studio.character_sheet": "Character sheets", "studio.source_details": "YouTube details and comments",
 };
 /** Local reasons a running companion is holding processing back (reported in its heartbeat). */
 export const DEVICE_BLOCK_REASONS = {
@@ -170,6 +171,7 @@ export function safeDeviceCapabilities(value: unknown): Record<string, unknown> 
     const c = v.capacity as Record<string, unknown>;
     result.capacity = compact({ codex: typeof c.codex === "boolean" ? c.codex : undefined, claude: typeof c.claude === "boolean" ? c.claude : undefined });
   }
+  if (typeof v.sourceDetailsReady === "boolean") result.sourceDetailsReady = v.sourceDetailsReady;
   if (Array.isArray(v.processingBlocked)) result.processingBlocked = v.processingBlocked.filter((x, i, all) => typeof x === "string" && x in DEVICE_BLOCK_REASONS && all.indexOf(x) === i);
   if (v.video && typeof v.video === "object" && !Array.isArray(v.video)) {
     const video = v.video as Record<string, unknown>;
@@ -356,9 +358,23 @@ export function readDeviceCommand(operation: DeviceOperation, value: unknown): R
     valid(Number.isInteger(v.leaseSeconds) && Number(v.leaseSeconds) >= 10 && Number(v.leaseSeconds) <= 3600);
     out.leaseSeconds = v.leaseSeconds;
   }
-  if (operation === "claim") { valid(Number.isInteger(v.limit) && Number(v.limit) >= 1 && Number(v.limit) <= 50); return { ...out, limit: v.limit, textReady: v.textReady === true, summaryReady: v.summaryReady === true, researchReady: v.researchReady === true, videoReady: v.videoReady === true, youtubeReady: v.youtubeReady === true, assembleReady: v.assembleReady === true, previewReady: v.previewReady === true, sheetReady: v.sheetReady === true }; }
+  if (operation === "claim") { valid(Number.isInteger(v.limit) && Number(v.limit) >= 1 && Number(v.limit) <= 50); return { ...out, limit: v.limit, textReady: v.textReady === true, summaryReady: v.summaryReady === true, researchReady: v.researchReady === true, videoReady: v.videoReady === true, youtubeReady: v.youtubeReady === true, assembleReady: v.assembleReady === true, previewReady: v.previewReady === true, sheetReady: v.sheetReady === true, sourceDetailsReady: v.sourceDetailsReady === true }; }
   valid(typeof v.jobId === "string" && uuid.test(v.jobId) && typeof v.leaseToken === "string" && uuid.test(v.leaseToken));
   Object.assign(out, { jobId: v.jobId, leaseToken: v.leaseToken });
+  if (operation === "source_details_batch") {
+    if (v.meta !== undefined) {
+      const meta = readSourceDetailsMeta(v.meta); valid(meta !== null);
+      return { ...out, meta };
+    }
+    if (v.rows !== undefined) {
+      const rows = readSourceDetailsRows(v.rows, SOURCE_DETAILS_BATCH); valid(rows !== null && rows.length > 0);
+      return { ...out, rows };
+    }
+    const outcome = readSourceDetailsOutcome(v.outcome);
+    valid(outcome !== null && (v.reason === undefined || typeof v.reason === "string" && v.reason.length <= 300)
+      && Number.isSafeInteger(v.unresolved) && Number(v.unresolved) >= 0 && Number(v.unresolved) <= 250);
+    return { ...out, outcome, reason: v.reason ?? null, unresolved: v.unresolved };
+  }
   if (operation === "video_transcript_chunk") return { ...out, ...readTranscriptChunk(v) };
   if (operation === "video_progress") {
     valid(typeof v.phase === "string" && /^[a-z_]{3,20}$/.test(v.phase) && (v.percent === undefined || v.percent === null || Number.isInteger(v.percent) && Number(v.percent) >= 0 && Number(v.percent) <= 100) && (v.detail === undefined || typeof v.detail === "string" && v.detail.length <= 160));
@@ -369,6 +385,10 @@ export function readDeviceCommand(operation: DeviceOperation, value: unknown): R
   if (operation === "video_frames_verify") return { ...out, ...readFramesVerify(v) };
   if (operation === "video_export_reserve") return { ...out, ...readExportReserve(v) };
   if (operation === "video_export_verify") return out;
+  if (operation === "complete" && v.result && typeof v.result === "object" && "sourceDetailsDone" in v.result) {
+    valid(v.result.sourceDetailsDone === true);
+    return { ...out, result: { sourceDetailsDone: true } };
+  }
   if (operation === "complete") { out.result = v.result && typeof v.result === "object" && "preview" in v.result ? readPreviewResult(v.result) : v.result && typeof v.result === "object" && "sheet" in v.result ? readSheetResult(v.result) : v.result && typeof v.result === "object" && "assembly" in v.result ? readAssemblyResult(v.result) : v.result && typeof v.result === "object" && "editor" in v.result ? readEditorResult(v.result) : v.result && typeof v.result === "object" && "videos" in v.result ? readDeviceYoutubeSearchResult(v.result) : v.result && typeof v.result === "object" && "outcome" in v.result ? readVideoResult(v.result) : v.result && typeof v.result === "object" && "output" in v.result && typeof v.result.output === "object" ? readDeviceTextResult(v.result) : v.result && typeof v.result === "object" && "research" in v.result ? readDeviceResearchResult(v.result) : readDeviceDiagnosticResult(v.result); }
   if (operation === "complete" && v.routeActual !== undefined) {
     const actual = object(v.routeActual);

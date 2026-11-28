@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import { ChevronDown, Loader2, Star, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { highlightId, highlightLabel, splitParagraphs, splitSentences, textKey, type HighlightKind, type SourceHighlight, type SummaryView } from "@/lib/studio/source-highlights";
-import type { SourceMeta } from "@/lib/studio/youtube-source-meta";
+import { sourceDetailsCount, type SourceDetailsRow, type SourceDetailsState } from "@/lib/studio/source-details-policy";
+import type { SourceComment, SourceMeta } from "@/lib/studio/youtube-source-meta";
 import { OPEN_TAB_EVENT } from "./source-tabs";
 
 const OPEN_SECTION_EVENT = "studio:open-section";
@@ -41,7 +42,7 @@ const ref = (kind: HighlightKind, key: string) => highlightId(kind, key);
 export function Section({ id, title, count, defaultOpen = true, action, children }: { id: string; title: string; count?: string; defaultOpen?: boolean; action?: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
   useEffect(() => { const on = (e: Event) => { if ((e as CustomEvent<string>).detail === id) setOpen(true); }; window.addEventListener(OPEN_SECTION_EVENT, on); return () => window.removeEventListener(OPEN_SECTION_EVENT, on); }, [id]);
-  return <section id={`sec-${id}`} aria-label={title} className="scroll-mt-28 space-y-3 rounded-xl border bg-card p-3 md:p-4">
+  return <section id={`sec-${id}`} aria-label={title} tabIndex={-1} className="scroll-mt-14 space-y-3 rounded-xl border bg-card p-3 md:p-4">
     <div className="flex items-center gap-2">
       <button type="button" aria-expanded={open} aria-controls={`sec-${id}-body`} onClick={() => setOpen(v => !v)} className="flex min-h-9 flex-1 items-center gap-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
         <ChevronDown aria-hidden="true" className={`h-4 w-4 shrink-0 transition-transform duration-150 motion-reduce:transition-none ${open ? "" : "-rotate-90"}`} />
@@ -55,11 +56,20 @@ export function Section({ id, title, count, defaultOpen = true, action, children
 export function jumpTo(id: string, tab?: string) {
   if (tab) window.dispatchEvent(new CustomEvent(OPEN_TAB_EVENT, { detail: tab }));
   window.dispatchEvent(new CustomEvent(OPEN_SECTION_EVENT, { detail: id }));
-  requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(`sec-${id}`)?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" })));
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const section = document.getElementById(`sec-${id}`);
+    section?.focus({ preventScroll: true });
+    section?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+  }));
 }
 export function JumpBar({ items }: { items: Array<{ id: string; label: string; tab?: string }> }) {
-  return <nav aria-label="Jump to a section" className="sticky top-0 z-20 -mx-1 flex gap-1 overflow-x-auto border-b bg-background/95 px-1 py-1 backdrop-blur">
-    {items.map(item => <button key={item.id} type="button" onClick={() => jumpTo(item.id, item.tab)} className="inline-flex min-h-9 shrink-0 items-center rounded-full px-3 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">{item.label}</button>)}
+  return <nav aria-label="Jump to a section" className="sticky top-0 z-20 min-w-0 border-b bg-background">
+    <div className="flex gap-0.5 overflow-x-auto py-0.5 md:gap-1">{items.map(item => <a key={item.id} href={`#sec-${item.id}`} onClick={event => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      jumpTo(item.id, item.tab);
+      history.replaceState(null, "", `#sec-${item.id}`);
+    }} className="inline-flex min-h-11 shrink-0 items-center rounded-md px-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary md:px-3">{item.label}</a>)}</div>
   </nav>;
 }
 
@@ -91,7 +101,7 @@ export function SummarySection({ locationId, recordId, view, failure, evidence }
 }
 
 /* ---------- Details: everything YouTube reported. ---------- */
-export function DetailsSection({ meta, description, url, channelUrl, channel, mac }: { meta: SourceMeta | null; description: string; url: string | null; channelUrl: string | null; channel: string | null; mac: boolean }) {
+export function DetailsSection({ meta, description, channelUrl, channel, action, status }: { meta: Omit<SourceMeta, "comments" | "commentsError"> | null; description: string; channelUrl: string | null; channel: string | null; action?: React.ReactNode; status?: React.ReactNode }) {
   const [more, setMore] = useState(false);
   const paragraphs = splitParagraphs(description); const long = description.length > 700;
   const facts: Array<[string, React.ReactNode]> = [
@@ -99,9 +109,11 @@ export function DetailsSection({ meta, description, url, channelUrl, channel, ma
     ["Published", meta?.uploadDate ? new Date(`${meta.uploadDate}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }) : null],
     ["Length", meta?.duration ? clock(meta.duration) : null], ["Views", number(meta?.viewCount ?? null)], ["Likes", number(meta?.likeCount ?? null)], ["Comments", number(meta?.commentCount ?? null)],
   ];
-  return <Section id="details" title="Details" action={url ? <a href={url} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-primary hover:underline">Open on YouTube</a> : null}>
+  return <Section id="details" title="Details" action={action}>
+    {status}
     <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">{facts.filter(([, v]) => v).map(([k, v]) => <div key={k} className="min-w-0"><dt className="text-xs text-muted-foreground">{k}</dt><dd className="break-words font-medium">{v}</dd></div>)}</dl>
-    {!meta && mac ? <p className="text-xs text-muted-foreground">Views, likes, tags, chapters and comments appear after your Mac next reads this video from YouTube (when it transcribes it).</p> : null}
+    {meta?.title ? <p className="text-sm font-medium break-words">{meta.title}</p> : null}
+    {meta?.thumbnail && /^https:\/\/i\.ytimg\.com\//.test(meta.thumbnail) ? <a href={meta.thumbnail} target="_blank" rel="noopener noreferrer" className="text-xs font-medium text-primary hover:underline">Open YouTube thumbnail</a> : null}
     {meta?.tags.length ? <ul aria-label="Tags" className="flex flex-wrap gap-1.5">{meta.tags.map(t => <li key={t} className="rounded-full bg-muted px-2 py-0.5 text-xs">{t}</li>)}</ul> : null}
     {meta?.chapters.length ? <div><h3 className="text-xs font-medium text-muted-foreground">Chapters</h3><ol className="mt-1 space-y-0.5 text-sm">{meta.chapters.map(c => <li key={c.start} className="flex gap-3"><span className="w-12 shrink-0 tabular-nums text-muted-foreground">{clock(c.start)}</span><span className="break-words">{c.title}</span></li>)}</ol></div> : null}
     <div><h3 className="text-xs font-medium text-muted-foreground">Description</h3>
@@ -110,20 +122,49 @@ export function DetailsSection({ meta, description, url, channelUrl, channel, ma
   </Section>;
 }
 
-/* ---------- Comments: the top comments, fetched once with the details. ---------- */
-export function CommentsSection({ meta, mac }: { meta: SourceMeta | null; mac: boolean }) {
-  const [all, setAll] = useState(false); const comments = meta?.comments ?? []; const shown = all ? comments : comments.slice(0, 8);
-  return <Section id="comments" title="Comments" count={comments.length ? `${comments.length}${meta?.commentCount ? ` of ${number(meta.commentCount)}` : ""}` : undefined}>
-    {!meta ? <p className="text-sm text-muted-foreground">{mac ? "Not fetched yet. Your Mac reads the top comments once, together with the video's details, the next time it transcribes this video." : "Comments are only read for YouTube sources."}</p>
-      : !comments.length ? <p role="status" className="flex items-start gap-2 text-sm text-muted-foreground"><TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />{meta.commentsError ?? "No comments were returned."}</p> : <>
-        <p className="text-xs text-muted-foreground">Top comments as YouTube ranks them; fetched once, not updated.</p>
-        <ul className="space-y-3">{shown.map((c, i) => <li key={i} className="flex gap-2 text-sm"><div className="min-w-0 flex-1">
-          <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground"><span className="font-medium text-foreground">{c.author}</span>{c.byUploader ? <span className="rounded bg-muted px-1.5">Creator</span> : null}{c.pinned ? <span className="rounded bg-muted px-1.5">Pinned</span> : null}
-            {c.likes !== null ? <span>{number(c.likes)} {c.likes === 1 ? "like" : "likes"}</span> : null}{c.replies !== null ? <span>{number(c.replies)} {c.replies === 1 ? "reply" : "replies"}</span> : null}
-            {c.at ? <span>{new Date(c.at * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</span> : null}</p>
-          <p className="mt-0.5 whitespace-pre-wrap break-words leading-relaxed">{c.text}</p></div>
-          <StarButton kind="comment" id={textKey(`${c.author}${c.text}`)} excerpt={`${c.author}: ${c.text}`} label={`the comment by ${c.author}`} /></li>)}</ul>
-        {comments.length > 8 ? <Button type="button" size="sm" variant="outline" onClick={() => setAll(v => !v)}>{all ? "Show fewer" : `Show all ${comments.length}`}</Button> : null}</>}
+function Comment({ comment }: { comment: SourceComment & { published?: string | null } }) {
+  return <div className="flex items-start gap-2 text-sm"><div className="min-w-0 flex-1">
+    <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground"><span className="font-medium text-foreground">{comment.author}</span>
+      {comment.byUploader ? <span className="rounded bg-muted px-1.5">Creator</span> : null}
+      {comment.pinned ? <span className="rounded bg-muted px-1.5">Pinned</span> : null}
+      {comment.likes !== null ? <span>{number(comment.likes)} {comment.likes === 1 ? "like" : "likes"}</span> : null}
+      {comment.replies !== null ? <span>{number(comment.replies)} {comment.replies === 1 ? "reply" : "replies"}</span> : null}
+      {comment.published ?? (comment.at ? new Date(comment.at * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : null)}</p>
+    <p className="mt-0.5 whitespace-pre-wrap break-words leading-relaxed">{comment.text}</p></div>
+    <StarButton kind="comment" id={textKey(`${comment.author}${comment.text}`)} excerpt={`${comment.author}: ${comment.text}`} label={`the comment by ${comment.author}`} />
+  </div>;
+}
+
+export function CommentsSection({ meta, mac, details }: { meta: SourceMeta | null; mac: boolean; details: SourceDetailsState | null }) {
+  const [visible, setVisible] = useState(8);
+  const live = details?.status === "queued" || details?.status === "running";
+  const saved = details?.rows ?? [];
+  const browserRows = saved.length > 0 || details?.outcome === "reached_end";
+  const topLevel = browserRows ? saved.filter(row => !row.parentId) : (meta?.comments ?? []);
+  const replies = new Map<string, SourceDetailsRow[]>();
+  for (const row of saved) {
+    if (row.parentId) replies.set(row.parentId, [...(replies.get(row.parentId) ?? []), row]);
+  }
+  const total = details?.meta?.commentCount ?? meta?.commentCount;
+  const loaded = live || browserRows ? `${sourceDetailsCount(details?.fetchedComments ?? 0, details?.fetchedReplies ?? 0)} loaded` : null;
+  const status = details?.error ?? details?.reason;
+  return <Section id="comments" title="Comments" count={total != null ? `${number(total)} on YouTube` : topLevel.length ? String(topLevel.length) : undefined}>
+    {loaded ? <p className="text-sm tabular-nums text-muted-foreground">{loaded}{live ? " · fetch in progress" : ""}</p> : null}
+    {status ? <p className="text-sm text-muted-foreground">{status}</p> : null}
+    {!topLevel.length && !status && !live ? <p className="text-sm text-muted-foreground">{meta?.commentsError ?? (mac ? "Use Fetch details to load comments and replies from YouTube." : "Comments are available for YouTube sources.")}</p> : null}
+    {topLevel.length ? <ul className="divide-y">
+      {topLevel.slice(0, visible).map((comment, i) => {
+        const thread = "id" in comment ? replies.get(comment.id as string) : undefined;
+        return <li key={"id" in comment ? String(comment.id) : i} className="py-3 first:pt-0">
+          <Comment comment={comment} />
+          {thread?.length ? <details className="ml-3 mt-2 border-l pl-3">
+            <summary className="cursor-pointer text-sm font-medium text-primary">{thread.length} saved {thread.length === 1 ? "reply" : "replies"}</summary>
+            <ul className="mt-2 space-y-3">{thread.map(reply => <li key={reply.id}><Comment comment={reply} /></li>)}</ul>
+          </details> : null}
+        </li>;
+      })}
+    </ul> : null}
+    {topLevel.length > visible ? <Button type="button" size="sm" variant="outline" onClick={() => setVisible(n => n + 12)}>Show more comments</Button> : null}
   </Section>;
 }
 

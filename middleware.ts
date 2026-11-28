@@ -199,7 +199,7 @@ export default async function middleware(req: NextRequest, evt: any) {
     return new NextResponse("Not Found", { status: 404 });
   }
   // Only these native device endpoints (bearer token, pairing device code, or the public app brand) bypass Clerk.
-  if (/^\/api\/studio\/device\/(heartbeat|claim|extend|complete|fail|command|brand|pair\/start|pair\/poll)$/.test(req.nextUrl.pathname)) {
+  if (/^\/api\/studio\/device\/(heartbeat|claim|extend|complete|fail|command|source_details_batch|brand|pair\/start|pair\/poll)$/.test(req.nextUrl.pathname)) {
     return getRequestBrand(req) === "tenant" ? new NextResponse("Not Found", { status: 404 }) : NextResponse.next();
   }
   // Exact profile-only webhook uses its realm signature, independent of browser

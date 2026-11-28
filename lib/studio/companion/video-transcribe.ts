@@ -48,6 +48,7 @@ export interface VideoTranscribeDeps {
   jitterMs?: () => number;
   /** Where metadata and captions already fetched for a video are kept, so a re-run asks YouTube for nothing. Off when unset. */
   cacheDir?: string;
+  youtubePacing?: ReturnType<typeof createYoutubePacing>;
 }
 const MB = 1024 * 1024;
 /** YouTube player clients, tried in order after yt-dlp's own default (null). Public videos only: no cookies or sign-in are ever used. */
@@ -57,7 +58,7 @@ export const YOUTUBE_COOLDOWN_SECONDS = 30 * 60;
 /** Human-like pacing: one YouTube request at a time, 5-20 s apart, and at most this many transcription jobs a rolling hour may touch YouTube (the metadata, captions and client retries of one job count once). */
 export const YOUTUBE_MAX_REQUESTS_PER_HOUR = 3;
 const defaultJitterMs = () => 5_000 + Math.floor(Math.random() * 15_000);
-const baseYtDlp = (tools: VideoTools, client: string | null = null, youtubeArgs: string[] = []) => ["--ignore-config", "--no-playlist", "--no-cache-dir", "--quiet", "--no-progress", "--socket-timeout", "30", "--retries", "3",
+export const baseYtDlp = (tools: VideoTools, client: string | null = null, youtubeArgs: string[] = []) => ["--ignore-config", "--no-playlist", "--no-cache-dir", "--quiet", "--no-progress", "--socket-timeout", "30", "--retries", "3",
   "--sleep-requests", "1", "--restrict-filenames", ...(tools.paths.ffmpeg ? ["--ffmpeg-location", dirname(tools.paths.ffmpeg)] : []),
   // Newer yt-dlp only enables deno by default; Homebrew node is passed by absolute path (a LaunchAgent PATH is minimal).
   ...(tools.paths.node ? ["--js-runtimes", `node:${tools.paths.node}`] : []), ...(client || youtubeArgs.length ? ["--extractor-args", `youtube:${[...(client ? [`player_client=${client}`] : []), ...youtubeArgs].join(";")}`] : [])];
@@ -78,9 +79,9 @@ export function youtubeFailureError(kind: YoutubeFailure, retryAfterSeconds = YO
   switch (kind) {
     case "rate_limited": return new StudioJobError("video_rate_limited", `YouTube is rate-limiting this Mac. Studio will try again in about ${minutes} minutes; you can also paste a transcript instead.`, true, retryAfterSeconds);
     case "bot_check": return new StudioJobError("video_rate_limited", `YouTube is asking this Mac to prove it is not a bot, which is usually a temporary limit on its connection. Studio will try again in about ${minutes} minutes; you can also paste a transcript instead.`, true, retryAfterSeconds);
-    case "private": return new StudioJobError("video_private", "This video is private or members-only, so it cannot be transcribed. Paste a transcript instead.");
-    case "removed": return new StudioJobError("video_unavailable", "YouTube says this video was removed or is not available. Paste a transcript instead.");
-    case "age_restricted": return new StudioJobError("video_age_restricted", "This video is age-restricted and needs a YouTube sign-in, which Studio never uses. Paste a transcript instead.");
+    case "private": return new StudioJobError("video_private", "This video is private or members-only, so it cannot be transcribed. Paste a transcript instead.", false);
+    case "removed": return new StudioJobError("video_unavailable", "YouTube says this video was removed or is not available. Paste a transcript instead.", false);
+    case "age_restricted": return new StudioJobError("video_age_restricted", "This video is age-restricted and needs a YouTube sign-in, which Studio never uses. Paste a transcript instead.", false);
     case "network": return new StudioJobError("video_network", "Could not reach YouTube from this Mac. It will be retried.", true, 600);
     default: return new StudioJobError("video_unavailable", "YouTube did not return this video's details. It may be private, removed or temporarily unreachable. You can paste a transcript instead.", true, 600);
   }
@@ -110,13 +111,12 @@ export function captionsFromJson3(data: unknown): TranscriptSegment[] {
 }
 function fail(code: string, message: string, retryable = false, retryAfter?: number): never { throw new StudioJobError(code, message, retryable, retryAfter); }
 
-export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJobHandler {
-  const run = deps.run ?? runNativeProcess;
-  const read = deps.readFile ?? readFile;
+/** One budget and cooldown for transcription and source details on this companion. */
+export function createYoutubePacing(deps: Pick<VideoTranscribeDeps, "now" | "sleep" | "jitterMs"> = {}) {
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>(done => setTimeout(done, ms)));
   /** Shared by every job on this Mac: one rate-limit answer from YouTube pauses all YouTube requests, not just this job. */
-  let blockedUntil = 0; let workingClient: string | null | undefined;
+  let blockedUntil = 0;
   const jitter = deps.jitterMs ?? defaultJitterMs;
   /** Serialised across every job on this Mac; a request waits for the previous one plus a random pause. */
   let paceChain: Promise<unknown> = Promise.resolve(); let lastRequestAt = 0; const requestTimes: number[] = [];
@@ -129,6 +129,7 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
         throw new StudioJobError("video_paced", `Studio paces its YouTube requests to look like a person. It will try again in about ${Math.max(1, Math.ceil(wait / 60))} minutes; you can also paste a transcript instead.`, true, wait);
       }
       if (lastRequestAt) { const gap = jitter() - (now() - lastRequestAt); if (gap > 0) await sleep(gap); }
+      if (coolingDown() > 0) throw youtubeFailureError("rate_limited", coolingDown());
       if (!session.counted) { session.counted = true; requestTimes.push(now()); }
       lastRequestAt = now();
       return request();
@@ -136,8 +137,21 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
     paceChain = turn.catch(() => undefined).then(() => { lastRequestAt = now(); });
     return turn;
   };
+  const coolingDown = () => Math.ceil((blockedUntil - now()) / 1000);
+  const block = (kind: "rate_limited" | "bot_check") => {
+    blockedUntil = now() + YOUTUBE_COOLDOWN_SECONDS * 1000;
+    return youtubeFailureError(kind);
+  };
+  return { pace, coolingDown, block };
+}
+
+export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJobHandler {
+  const run = deps.run ?? runNativeProcess;
+  const read = deps.readFile ?? readFile;
+  const now = deps.now ?? Date.now;
+  const { pace, coolingDown, block } = deps.youtubePacing ?? createYoutubePacing(deps);
+  let workingClient: string | null | undefined;
   const cachePath = (videoId: string) => deps.cacheDir ? join(deps.cacheDir, `${videoId}.json`) : null;
-  const block = (kind: "rate_limited" | "bot_check") => { blockedUntil = now() + YOUTUBE_COOLDOWN_SECONDS * 1000; return youtubeFailureError(kind); };
   return async (job, context) => {
     const parsed = payloadSchema.safeParse(job.payload);
     const video = parsed.success ? canonicalYoutubeVideo(parsed.data.url) : null;
@@ -156,7 +170,6 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
     let cached: { meta: { title: string; description: string; channel: string; duration: number; live: boolean }; captions: { segments: TranscriptSegment[]; language?: string }; source?: SourceMeta } | null = null;
     if (cacheFile) cached = await readFile(cacheFile, "utf8").then(text => { const c = JSON.parse(String(text)); return Array.isArray(c?.captions?.segments) && c?.meta?.duration > 0 ? c : null; }).catch(() => null);
     /** During a cool-down nothing asks YouTube; a video whose captions are already stored still gets its transcript (only the slide download waits). */
-    const coolingDown = () => Math.ceil((blockedUntil - now()) / 1000);
     /** An older cache entry has no comments; it is only reused while cooling down, otherwise the one metadata request is made again so the page gets them. */
     if (cached && !cached.source && coolingDown() <= 0) cached = null;
     if (coolingDown() > 0 && !cached) throw youtubeFailureError("rate_limited", coolingDown());
@@ -248,6 +261,11 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
         const json = JSON.parse(out.stdout) as Record<string, unknown>;
         meta = { title: String(json.title ?? ""), description: String(json.description ?? ""), channel: String(json.channel ?? json.uploader ?? ""), duration: Number(json.duration ?? 0), live: json.is_live === true };
         source = parseYoutubeSourceMeta(json, out.stderr);
+        if (classifyYtDlpFailure(out.stderr) === "rate_limited") {
+          const error = block("rate_limited");
+          await deps.api.meta?.(lease, source).catch(() => undefined);
+          throw error;
+        }
       } catch (error) {
         if (error instanceof StudioJobError) throw error;
         const failure = error instanceof CompanionProcessError ? (error.code === "cli_timeout" ? "network" : classifyYtDlpFailure(error.stderr)) : "unknown";
