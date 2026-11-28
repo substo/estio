@@ -149,9 +149,13 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
     const lease: VideoLease = { jobId: job.id, workerId: context.workerId, leaseToken: job.lease_token };
     const signal = context.signal;
     const env = videoProcessEnvironment(tools);
+    const cacheFile = cachePath(video.videoId);
+    let cached: { meta: { title: string; description: string; channel: string; duration: number; live: boolean }; captions: { segments: TranscriptSegment[]; language?: string } } | null = null;
+    if (cacheFile) cached = await readFile(cacheFile, "utf8").then(text => { const c = JSON.parse(String(text)); return Array.isArray(c?.captions?.segments) && c?.meta?.duration > 0 ? c : null; }).catch(() => null);
+    /** During a cool-down nothing asks YouTube; a video whose captions are already stored still gets its transcript (only the slide download waits). */
+    const coolingDown = () => Math.ceil((blockedUntil - now()) / 1000);
+    if (coolingDown() > 0 && !cached) throw youtubeFailureError("rate_limited", coolingDown());
     const work = await mkdtemp(join(deps.tmpRoot ?? tmpdir(), "studio-video-"));
-    const blockedFor = Math.ceil((blockedUntil - now()) / 1000);
-    if (blockedFor > 0) throw youtubeFailureError("rate_limited", blockedFor);
     const exec = async (command: string, args: string[], timeoutMs: number, maxOutputBytes = 64 * 1024, withEnv = false) => {
       if (signal.aborted) fail("worker_lease_lost", "The Mac lost its job lease.", true);
       try { return await run({ command, args, cwd: work, signal, timeoutMs, maxOutputBytes, ...(withEnv ? { env: { ...process.env, ...env } } : {}) }); }
@@ -163,6 +167,7 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
     /** yt-dlp through the player-client ladder. A 429 stops everything and starts the cool-down; a bot check is tried on the other clients first. */
     const session = { counted: false };
     const ytdlp = async (args: string[], timeoutMs: number, maxOutputBytes = 64 * 1024) => {
+      if (coolingDown() > 0) throw youtubeFailureError("rate_limited", coolingDown());
       const order = workingClient === undefined ? YOUTUBE_CLIENT_ORDER : [workingClient, ...YOUTUBE_CLIENT_ORDER.filter(client => client !== workingClient)];
       let last: unknown; let botChecked = false;
       for (const [index, client] of order.entries()) {
@@ -184,9 +189,6 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
     };
     /** Captions first: cheap, no media download. Original language, uploaded subtitles or YouTube's automatic ones. */
     let captionsMemo: Promise<{ segments: TranscriptSegment[]; language?: string } | null> | undefined;
-    let cached: { meta: { title: string; description: string; channel: string; duration: number; live: boolean }; captions: { segments: TranscriptSegment[]; language?: string } } | null = null;
-    const cacheFile = cachePath(video.videoId);
-    if (cacheFile) cached = await readFile(cacheFile, "utf8").then(text => { const c = JSON.parse(String(text)); return Array.isArray(c?.captions?.segments) && c?.meta?.duration > 0 ? c : null; }).catch(() => null);
     const captions = () => captionsMemo ??= cached ? Promise.resolve(cached.captions) : (async () => {
       let stderr = "";
       try {

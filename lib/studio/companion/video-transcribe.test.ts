@@ -373,3 +373,19 @@ test("captions and metadata fetched once are reused, so a re-run asks YouTube fo
   const later = ytRuns(f).slice(first).map(r => r.args.join(" "));
   assert.ok(!later.some(a => a.includes("--dump-single-json") || a.includes("--write-subs")), "metadata and captions are not requested again");
 });
+
+test("during a YouTube cool-down, stored captions still give a transcript and YouTube is not asked", async () => {
+  const cacheDir = await mkdtemp(join(tmpdir(), "yt-cache-"));
+  const clock = { t: 1_000_000 };
+  const f = fixture({ failAll: "ERROR: unable to download video data: HTTP Error 429: Too Many Requests", clock });
+  const handler = createVideoTranscribeHandler({ ...f.deps(), cacheDir });
+  await assert.rejects(handler(job(), context()), (e: unknown) => e instanceof StudioJobError && e.code === "video_rate_limited");
+  await writeFile(join(cacheDir, "aaaaaaaaaaa.json"), JSON.stringify({ meta: { title: "t", description: "", channel: "c", duration: 120, live: false },
+    captions: { segments: [{ start: 0, end: 5, text: "A stored caption line that is long enough to keep." }], language: "en" } }));
+  const before = f.runs.length; f.chunks.length = 0;
+  const result = await handler(job(), context()) as { outcome: string; visual: { status: string } };
+  assert.equal(result.outcome, "transcribed");
+  assert.equal(result.visual.status, "failed", "the slide download waits for the cool-down");
+  assert.equal(f.runs.length, before, "no process was started during the cool-down");
+  assert.ok(f.chunks.length > 0, "the transcript was saved");
+});

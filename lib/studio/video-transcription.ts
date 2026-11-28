@@ -10,6 +10,7 @@ import { createStudioR2Store, readStudioR2Config } from "./media-r2";
 import { deviceOnline } from "./devices-policy";
 import { canonicalYoutubeVideo } from "./video-transcription-policy";
 import { runVideoFrameOperation } from "./video-frames";
+import type { VideoWaiting } from "./video-state-text";
 
 export type VideoOrigin = "paste" | "search" | "suggestion";
 export type VideoNotQueuedReason = "no_mac" | "processing_off" | "transcription_off" | "tools_missing" | "companion_outdated" | "no_authority";
@@ -86,9 +87,12 @@ export interface VideoStatus {
   /** A newer re-run that failed, was cancelled or was skipped, shown only as a small note beside the saved result. */
   lastAttempt: VideoTranscriptionView | null;
   /** Why a queued job is waiting, so the owner sees a clear status instead of silence. */
-  waiting: null | "mac_offline" | "mac_paused" | "processing_off" | "tools_missing";
+  waiting: VideoWaiting;
+  /** Plain name of the job the Mac is busy with while this one waits behind it. */
+  busyWith: string | null;
   mac: { name: string; online: boolean; lastSeenAt: string | null } | null;
 }
+const busyLabel: Record<string, string> = { "studio.character_sheet": "drawing a character sheet", "studio.video_assemble": "building a video", "studio.video_edit": "editing a video", "studio.video_transcribe": "another transcription", "studio.library_summary": "summarising a source" };
 /** Read model for the Library source page. Scoped by the caller's active Location. */
 export async function getVideoStatus(locationId: string, recordId: string): Promise<VideoStatus | null> {
   const access = await getStudioAccess(locationId);
@@ -97,11 +101,11 @@ export async function getVideoStatus(locationId: string, recordId: string): Prom
     select id,status,origin,gated,relevance,method,language,duration_seconds,segment_count,transcript_chars,transcript_applied,visual_status,visual_error,frame_count,error_code,error_message,created_at,updated_at,completed_at,device_id
     from studio.studio_video_transcriptions where location_id=${access.locationId} and record_id=${recordId}::uuid order by created_at desc limit 15`);
   const { latest, lastAttempt, framesFrom } = pickVideoRuns(history);
-  if (!latest) return { latest: null, history: [], frames: [], framesFrom: null, lastAttempt: null, waiting: null, mac: null };
+  if (!latest) return { latest: null, history: [], frames: [], framesFrom: null, lastAttempt: null, waiting: null, busyWith: null, mac: null };
   const frames = framesFrom ? await studioDb.rows<VideoFrameView>(Prisma.sql`
     select frame_index,time_seconds,scene_start,scene_end,ocr_text,audio_context,selection,status from studio.studio_video_frames
     where location_id=${access.locationId} and transcription_id=${framesFrom}::uuid and status='verified' order by time_seconds,frame_index limit 200`) : [];
-  let waiting: VideoStatus["waiting"] = null; let mac: VideoStatus["mac"] = null;
+  let waiting: VideoStatus["waiting"] = null; let mac: VideoStatus["mac"] = null; let busyWith: string | null = null;
   if (latest.device_id && (latest.status === "queued" || latest.status === "running")) {
     const d = await studioDb.one<{ name: string; seen_at: string | null; report: Record<string, unknown>; paused: boolean; processing_enabled: boolean }>(Prisma.sql`
       select name,seen_at,report,paused,processing_enabled from studio.studio_devices where location_id=${access.locationId} and id=${latest.device_id}::uuid and app=${access.app}`);
@@ -110,9 +114,13 @@ export async function getVideoStatus(locationId: string, recordId: string): Prom
       mac = { name: d.name, online, lastSeenAt: d.seen_at };
       if (latest.status === "queued") waiting = !online ? "mac_offline" : d.paused ? "mac_paused" : !d.processing_enabled ? "processing_off"
         : (d.report as { video?: { ready?: boolean } }).video?.ready === false || latest.error_code === "video_tools_missing" ? "tools_missing" : null;
+      if (latest.status === "queued" && !waiting) {
+        const busy = await studioDb.one<{ kind: string }>(Prisma.sql`select kind from studio.studio_jobs where device_id=${latest.device_id}::uuid and status='running' and lease_expires_at>clock_timestamp() order by updated_at desc limit 1`).catch(() => null);
+        if (busy) { waiting = "mac_busy"; busyWith = busyLabel[busy.kind] ?? null; }
+      }
     }
   }
-  return { latest, history, frames, framesFrom, lastAttempt, waiting, mac };
+  return { latest, history, frames, framesFrom, lastAttempt, waiting, busyWith, mac };
 }
 
 /** Device operations that need R2: the SQL function owns identity, lease and validation; this adds signed uploads and server-side byte checks. */
