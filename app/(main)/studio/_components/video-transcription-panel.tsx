@@ -1,14 +1,16 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Circle, Loader2, TriangleAlert } from "lucide-react";
+import { Check, Circle, Loader2, Sparkles, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "./info-tip";
 import type { VideoStatus } from "@/lib/studio/video-transcription";
+import { VideoSlideTimeline } from "./video-slide-timeline";
+import { slideTerms } from "@/lib/studio/video-slide-terms";
 import { describeVideoState, isWorking, videoProgressView } from "@/lib/studio/video-state-text";
 
-const clock = (seconds: number) => new Date(seconds * 1000).toISOString().slice(11, 19);
-export function VideoTranscriptionPanel({ locationId, recordId, canTranscribe, status, hasTranscript = false }: { locationId: string; recordId: string; canTranscribe: boolean; status: VideoStatus; hasTranscript?: boolean }) {
+const minutes = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`;
+export function VideoTranscriptionPanel({ locationId, recordId, canTranscribe, status, hasTranscript = false, transcript = "" }: { locationId: string; recordId: string; canTranscribe: boolean; status: VideoStatus; hasTranscript?: boolean; transcript?: string }) {
   const router = useRouter(); const key = useRef<string | null>(null);
   const [pending, setPending] = useState(false); const [message, setMessage] = useState("");
   const latest = status.latest;
@@ -18,7 +20,7 @@ export function VideoTranscriptionPanel({ locationId, recordId, canTranscribe, s
       const response = await fetch("/api/studio/video-transcription", { method: "POST", headers: { "Content-Type": "application/json", "X-Studio-Tenant": locationId }, body: JSON.stringify({ recordId, requestKey: key.current }) });
       const result = await response.json(); if (!response.ok) throw new Error(result.error || "Try again.");
       key.current = null;
-      setMessage(result.status === "not_queued" ? result.message : "Queued on your Mac."); router.refresh();
+      setMessage(result.status === "not_queued" ? result.message : ""); router.refresh();
     } catch (error) { setMessage(error instanceof Error ? error.message : "Could not connect. Retry."); } finally { setPending(false); }
   }
   const { tone, text: state } = describeVideoState(latest, status.waiting, status.busyWith);
@@ -29,6 +31,16 @@ export function VideoTranscriptionPanel({ locationId, recordId, canTranscribe, s
     const timer = setInterval(() => { if (document.visibilityState === "visible") router.refresh(); }, 4000);
     return () => clearInterval(timer);
   }, [working, router]);
+  // The moment a run finishes: bring the transcript into view and highlight it, so the result is the first thing seen.
+  const was = useRef(working); const [finished, setFinished] = useState(false);
+  useEffect(() => {
+    if (was.current && !working && latest && (latest.status === "ready" || latest.status === "partial")) {
+      setFinished(true);
+      const el = document.getElementById("saved-transcript");
+      if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.add("ring-2", "ring-primary", "shadow-lg"); setTimeout(() => el.classList.remove("ring-2", "ring-primary", "shadow-lg"), 4000); }
+    }
+    was.current = working;
+  }, [working, latest]);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { if (!working) return; const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, [working]);
   const progress = latest ? videoProgressView(latest, now) : null;
@@ -48,11 +60,20 @@ export function VideoTranscriptionPanel({ locationId, recordId, canTranscribe, s
       <p className="text-xs text-muted-foreground">{progress.stalledSeconds > 120 ? `No update from your Mac for ${Math.round(progress.stalledSeconds / 60)} minutes. It may be asleep or busy; this page keeps checking.` : `This step has run for ${progress.phaseSeconds < 90 ? `${progress.phaseSeconds} seconds` : `${Math.round(progress.phaseSeconds / 60)} minutes`}. Updated ${progress.stalledSeconds} seconds ago.`} A short video usually takes a few minutes in total.</p>
     </div> : null}
     {status.lastAttempt ? <p className="text-xs text-muted-foreground">A newer attempt ({status.lastAttempt.status}) did not replace this: {(status.lastAttempt.error_message ?? "no reason was recorded").replace(/\.+$/, "")}. Press Transcribe again to retry.</p> : null}
-    {latest && latest.status === "ready" && latest.transcript_applied === false ? <p className="text-xs text-muted-foreground">A transcript you saved earlier was kept; the Mac transcript is stored but not applied.</p> : null}
-    {status.frames.length ? <details><summary className="cursor-pointer text-xs font-medium">Slides and frames ({status.frames.length})</summary>
-      <ul className="mt-2 space-y-3">{status.frames.map(f => <li key={f.frame_index} className="space-y-1">
-        <a href={`/studio/video-frames/${status.framesFrom}/${f.frame_index}`} target="_blank" rel="noopener noreferrer" className="text-primary underline">Frame at {clock(f.time_seconds)}</a>
-        {f.ocr_text ? <p className="whitespace-pre-wrap break-words">{f.ocr_text}</p> : <p className="text-muted-foreground">No text read.</p>}</li>)}</ul></details> : null}
+    {latest && (latest.status === "ready" || latest.status === "partial") && latest.transcript_applied === false ? <p className="text-xs text-muted-foreground">This automatic run did not replace the transcript already saved on this source. Press Transcribe again to use the Mac transcript.</p> : null}
+    {latest && (latest.status === "ready" || latest.status === "partial") && latest.transcript_applied ? <div className={`rounded-lg border p-3 ${finished ? "border-emerald-500/60 bg-emerald-50/60 dark:bg-emerald-950/20" : ""}`}>
+      <p className="flex items-center gap-2 font-medium">{finished ? <Sparkles aria-hidden="true" className="h-4 w-4 text-emerald-600" /> : <Check aria-hidden="true" className="h-4 w-4 text-emerald-600" />}{finished ? "Your transcript is ready" : "Transcript from your Mac"}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{latest.duration_seconds ? `${minutes(latest.duration_seconds)} of video · ` : ""}{latest.segment_count} timestamped lines · {transcript.split(/\s+/).filter(Boolean).length.toLocaleString()} words{status.frames.length ? ` · ${status.frames.length} slides` : ""}. {latest.method === "youtube-captions-fallback" ? "Made from YouTube's captions because the Mac transcript could not run." : "Made on your Mac, not taken from YouTube's automatic captions."}</p>
+      {finished ? <p className="mt-2 text-xs">Next: read it through below (each time links to that moment in the video), then summarise it or quote from it in a script.</p> : null}
+    </div> : null}
+    {status.frames.length && status.framesFrom ? <div className="space-y-3 pt-1">
+      <p className="text-xs font-medium">Slides along the video ({status.frames.length})</p>
+      <VideoSlideTimeline transcriptionId={status.framesFrom} frames={status.frames} duration={status.history.find(h => h.id === status.framesFrom)?.duration_seconds ?? null} />
+      {(() => { const t = slideTerms(status.frames, transcript); return <p className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
+        {t.slidesWithText} of {t.slides} slides had readable text. {t.terms ? `${t.inSpeech} of ${t.terms} names and terms on the slides were also spoken in the video.` : ""}{" "}
+        {t.missing.length ? `Not heard in the speech (possibly mis-heard, or only shown): ${t.missing.join(", ")}. ` : ""}
+        Slide text is kept as separate evidence; it does not change the transcript.</p>; })()}
+    </div> : null}
     {message && !working ? <p role="status" className="text-xs">{message}</p> : null}
   </section>;
 }
