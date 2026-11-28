@@ -42,7 +42,20 @@ def main():
         raise SystemExit("usage: transcribe-local.py AUDIO OUTPUT_JSON | --prepare-model")
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     model = load_model(offline=True)
-    result = model.transcribe(sys.argv[1], chunk_duration=120.0, overlap_duration=15.0)
+    progress_file = os.environ.get("STUDIO_PROGRESS_FILE")
+
+    def report(current, total):
+        # Best effort: the companion reads this file to show a real percentage.
+        if not progress_file or not total:
+            return
+        try:
+            percent = max(0, min(99, int(100 * float(current) / float(total))))
+            with open(progress_file, "w", encoding="utf-8") as handle:
+                json.dump({"phase": "transcribe", "percent": percent, "detail": "Transcribing on your Mac"}, handle)
+        except Exception:
+            pass
+
+    result = model.transcribe(sys.argv[1], chunk_duration=120.0, overlap_duration=15.0, chunk_callback=report)
     output = {
         "text": result.text.strip(),
         "language": "",

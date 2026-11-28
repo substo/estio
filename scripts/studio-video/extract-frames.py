@@ -11,6 +11,8 @@ import os
 import re
 import subprocess
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 SCAN_WIDTH = 96
@@ -22,6 +24,20 @@ FFPROBE = os.environ.get("STUDIO_FFPROBE", "ffprobe")
 TESSERACT = os.environ.get("STUDIO_TESSERACT", "tesseract")
 MAX_CANDIDATES = 300
 MAX_FRAMES = 120
+
+
+PROGRESS_FILE = os.environ.get("STUDIO_PROGRESS_FILE")
+WORKERS = 4
+
+
+def progress(phase, percent, detail):
+    """Best effort: the companion reads this file to show a real percentage."""
+    if not PROGRESS_FILE:
+        return
+    try:
+        Path(PROGRESS_FILE).write_text(json.dumps({"phase": phase, "percent": int(percent), "detail": detail}), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def run(args, timeout=240):
@@ -67,6 +83,8 @@ def scan_states(video, length):
                 raise ValueError("Incomplete video scan frame")
             when = min(length - 0.05, index / SCAN_FPS)
             index += 1
+            if index % 40 == 0:
+                progress("slides_scan", min(99, 100 * when / length), "Looking for slide changes")
             if first is None:
                 first = previous = baseline = frame
                 frames.append({"time": when, "start": 0.0, "reason": "first-stable-state"})
@@ -187,8 +205,12 @@ def extract(video, output):
         # Keep an even spread across the video rather than only its start.
         step = len(moments) / MAX_CANDIDATES
         moments = [moments[int(i * step)] for i in range(MAX_CANDIDATES)]
-    selected = []
-    for index, moment in enumerate(moments):
+    total = len(moments)
+    done = [0]
+    lock = threading.Lock()
+
+    def read_one(pair):
+        index, moment = pair
         second = moment["time"]
         image = output / f"candidate-{index:05d}.jpg"
         try:
@@ -198,11 +220,20 @@ def extract(video, output):
             ocr = run([TESSERACT, str(image), "stdout", "-l", "eng", "--psm", "11"], timeout=30).stdout.decode("utf-8", "replace")
             ocr = re.sub(r"\s+", " ", ocr).strip()[:1200]
             following = next((other["start"] for other in moments if other["start"] > second), length)
-            selected.append({"time": second, "sceneStart": moment["start"], "sceneEnd": following,
-                             "ocr": ocr, "hash": fingerprint, "words": words(ocr),
-                             "detail": detail_score(image), "path": image, "reason": moment["reason"]})
+            item = {"time": second, "sceneStart": moment["start"], "sceneEnd": following,
+                    "ocr": ocr, "hash": fingerprint, "words": words(ocr),
+                    "detail": detail_score(image), "path": image, "reason": moment["reason"]}
         except (subprocess.SubprocessError, ValueError):
             image.unlink(missing_ok=True)
+            item = None
+        with lock:
+            done[0] += 1
+            progress("slides_read", 100 * done[0] / max(1, total), f"Reading slide text ({done[0]} of {total})")
+        return item
+
+    progress("slides_read", 0, f"Reading slide text (0 of {total})")
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        selected = [item for item in pool.map(read_one, enumerate(moments)) if item]
     kept = keep_states(selected)
     if len(kept) > MAX_FRAMES:
         for dropped in kept[MAX_FRAMES:]:

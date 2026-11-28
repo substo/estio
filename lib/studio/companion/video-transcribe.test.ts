@@ -57,10 +57,8 @@ function fixture(options: Options = {}) {
           await writeFile(join(request.cwd, "captions.en-orig.json3"), JSON.stringify({ events: [{ tStartMs: 1000, dDurationMs: 2000, segs: [{ utf8: "Caption words from YouTube" }] }] }));
           return { stdout: "", stderr: "" };
         }
-        if (args.includes("-x")) {
-          if (options.failAudio) throw new CompanionProcessError(options.failAudio === "timeout" ? "cli_timeout" : "cli_failed");
-          await writeFile(join(request.cwd, "source.mp3"), "audio"); return { stdout: "", stderr: "" };
-        }
+        // One download of the video (with its audio) feeds the transcript and the slides.
+        if (options.failAudio) throw new CompanionProcessError(options.failAudio === "timeout" ? "cli_timeout" : "cli_failed");
         if (options.videoFails) throw new CompanionProcessError("cli_failed");
         await writeFile(join(request.cwd, "video.mp4"), "video"); return { stdout: "", stderr: "" };
       }
@@ -126,7 +124,7 @@ test("Parakeet failure falls back to YouTube captions; no captions and no transc
 });
 
 test("a failed visual pass keeps the saved transcript and reports a partial result", async () => {
-  for (const options of [{ extractFails: true }, { videoFails: true }, { uploadFails: true }, { verifyMissing: 1 }, { tools: { ...allTools(), paths: { ...allTools().paths, tesseract: undefined }, report: summarizeVideoTools({ ytDlp: "1", ffmpeg: "1", ffprobe: "1", python: "3", parakeet: "1", model: "x" }) } }] as Options[]) {
+  for (const options of [{ extractFails: true }, { uploadFails: true }, { verifyMissing: 1 }, { tools: { ...allTools(), paths: { ...allTools().paths, tesseract: undefined }, report: summarizeVideoTools({ ytDlp: "1", ffmpeg: "1", ffprobe: "1", python: "3", parakeet: "1", model: "x" }) } }] as Options[]) {
     const f = fixture(options);
     const result = await createVideoTranscribeHandler(f.deps())(job(), context()) as { outcome: string; transcript: unknown; visual: { status: string; error?: string } };
     assert.equal(result.outcome, "transcribed"); assert.equal(result.visual.status, "failed"); assert.ok(result.visual.error && result.visual.error.length <= 300);
@@ -165,7 +163,7 @@ test("long, live and unreadable videos are refused before any media download", a
 test("lease loss aborts subprocesses and cleans the work folder", async () => {
   const controller = new AbortController(); const f = fixture({ controller });
   const deps = f.deps(); const original = deps.run!;
-  deps.run = async request => { if (request.args.includes("-x")) controller.abort(); return original(request); };
+  deps.run = async request => { if (request.args.includes("--merge-output-format")) controller.abort(); return original(request); };
   await assert.rejects(createVideoTranscribeHandler(deps)(job(), context(controller)), (e: unknown) => e instanceof StudioJobError && e.code === "worker_lease_lost" && e.retryable);
   await assert.rejects(readdir(f.workdir()), { code: "ENOENT" });
 });
@@ -289,25 +287,33 @@ test("caption files: original language first, then English, with a safe language
   assert.equal(pickCaptionFile(["video.mp4", "captions.en.vtt"]), undefined);
 });
 
-test("captions are used first: no audio is downloaded and Parakeet never runs when YouTube has captions", async () => {
+test("the Mac transcript is primary: Parakeet runs and YouTube captions are never requested when it works", async () => {
   const f = fixture({ captions: true });
-  const result = await createVideoTranscribeHandler(f.deps())(job(), context()) as { method: string; language: string };
-  assert.equal(result.method, "youtube-captions-fallback"); assert.equal(result.language, "en");
-  assert.ok(!f.runs.some(r => r.args.includes("-x")), "no audio download"); assert.ok(!f.runs.some(r => r.args[1]?.endsWith("transcribe-local.py")), "no Parakeet");
-  const order = f.runs.map(r => r.args.includes("--dump-single-json") ? "meta" : r.args.includes("--write-subs") ? "captions" : "other");
-  assert.deepEqual(order.slice(0, 2), ["meta", "captions"]);
+  const result = await createVideoTranscribeHandler(f.deps())(job(), context()) as { method: string };
+  assert.equal(result.method, "local-parakeet-tdt-v3-4bit");
+  assert.ok(!f.runs.some(r => r.args.includes("--write-subs")), "no captions requested");
+  const order = f.runs.map(r => r.args.includes("--dump-single-json") ? "meta" : r.args.includes("--merge-output-format") ? "video" : r.args[1]?.endsWith("transcribe-local.py") ? "parakeet" : "other");
+  assert.deepEqual(order.slice(0, 3), ["meta", "video", "parakeet"]);
+  assert.equal(f.runs.filter(r => r.args.includes("--merge-output-format")).length, 1, "the video is downloaded once for transcript and slides");
   assert.ok(cookieFree(f.runs));
 });
 
-test("without captions the audio route runs; the fixed node runtime is passed to yt-dlp", async () => {
+test("the fixed node runtime is passed to yt-dlp", async () => {
   const tools = allTools(); tools.paths.node = "/opt/homebrew/bin/node";
   const f = fixture({ tools }); await createVideoTranscribeHandler(f.deps())(job(), context());
-  assert.ok(f.runs.some(r => r.args.includes("-x")));
   for (const run of ytRuns(f)) assert.equal(run.args[run.args.indexOf("--js-runtimes") + 1], "node:/opt/homebrew/bin/node");
 });
 
+test("progress is reported through the phases and a failed report never fails the job", async () => {
+  const f = fixture(); const seen: string[] = [];
+  const deps = f.deps(); deps.api.progress = async (_lease, p) => { seen.push(p.phase); if (p.phase === "save") throw new Error("offline"); };
+  const result = await createVideoTranscribeHandler(deps)(job(), context()) as { outcome: string };
+  assert.equal(result.outcome, "transcribed");
+  assert.deepEqual([...new Set(seen)].slice(0, 5), ["info", "download", "transcribe", "save", "slides_scan"]);
+});
+
 test("player clients are tried in order, and the one that works is reused", async () => {
-  const f = fixture({ captions: true, clientFailures: { default: "ERROR: unexpected response", tv: "ERROR: nothing useful" } });
+  const f = fixture({ captions: true, parakeetFails: true, clientFailures: { default: "ERROR: unexpected response", tv: "ERROR: nothing useful" } });
   const result = await createVideoTranscribeHandler(f.deps())(job(), context()) as { method: string };
   assert.equal(result.method, "youtube-captions-fallback");
   const clients = ytRuns(f).map(clientOf);
@@ -342,9 +348,8 @@ test("a bot check is tried on every client, then reported as a temporary limit; 
 });
 
 test("a rate-limited subtitle request (a warning with exit 0) is not mistaken for 'no captions'", async () => {
-  const f = fixture({ captionsWarning: "WARNING: Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests" });
+  const f = fixture({ parakeetFails: true, captionsWarning: "WARNING: Unable to download video subtitles for 'en': HTTP Error 429: Too Many Requests" });
   await assert.rejects(createVideoTranscribeHandler(f.deps())(job(), context()), (e: unknown) => e instanceof StudioJobError && e.code === "video_rate_limited");
-  assert.ok(!f.runs.some(r => r.args.includes("-x")), "audio is not requested from a rate-limited IP");
 });
 
 test("YouTube requests are paced: jitter between them, and only a few jobs an hour may touch YouTube", async () => {
@@ -363,7 +368,7 @@ test("YouTube requests are paced: jitter between them, and only a few jobs an ho
 
 test("captions and metadata fetched once are reused, so a re-run asks YouTube for nothing", async () => {
   const cacheDir = await mkdtemp(join(tmpdir(), "yt-cache-"));
-  const f = fixture({ captions: true });
+  const f = fixture({ captions: true, parakeetFails: true });
   const handler = createVideoTranscribeHandler({ ...f.deps(), cacheDir });
   await handler(job(), context());
   const first = ytRuns(f).length;

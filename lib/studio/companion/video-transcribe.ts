@@ -23,6 +23,8 @@ const payloadSchema = z.object({
   limits: z.object({ maxSeconds: z.number().max(VIDEO_LIMITS.maxSeconds), maxMediaMb: z.number().max(500), maxFrames: z.number().max(VIDEO_LIMITS.maxFrames) }),
 }).passthrough();
 
+export const VIDEO_PHASES = ["info", "download", "transcribe", "captions", "save", "slides_scan", "slides_read", "slides_save"] as const;
+export type VideoPhase = typeof VIDEO_PHASES[number];
 export interface VideoTranscribeDeps {
   tools: () => Promise<VideoTools>;
   api: VideoDeviceApi;
@@ -156,9 +158,24 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
     const coolingDown = () => Math.ceil((blockedUntil - now()) / 1000);
     if (coolingDown() > 0 && !cached) throw youtubeFailureError("rate_limited", coolingDown());
     const work = await mkdtemp(join(deps.tmpRoot ?? tmpdir(), "studio-video-"));
-    const exec = async (command: string, args: string[], timeoutMs: number, maxOutputBytes = 64 * 1024, withEnv = false) => {
+    /** Live progress for the Source page. Best effort: a failed report never affects the job. */
+    let lastKey = ""; let lastAt = 0;
+    const report = (phase: VideoPhase, percent?: number, detail?: string) => {
+      const key = `${phase}:${percent ?? ""}:${detail ?? ""}`;
+      if (!deps.api.progress || key === lastKey || (percent !== undefined && key.startsWith(lastKey.split(":")[0] + ":") && now() - lastAt < 1500)) return;
+      lastKey = key; lastAt = now();
+      void deps.api.progress(lease, { phase, ...(percent === undefined ? {} : { percent: Math.max(0, Math.min(100, Math.round(percent))) }), ...(detail ? { detail: detail.slice(0, 160) } : {}) }).catch(() => undefined);
+    };
+    /** Runs a script that writes {phase,percent,detail} to a progress file, and forwards it while the script works. */
+    const withProgress = async <T,>(run: (progressFile: string) => Promise<T>): Promise<T> => {
+      const file = join(work, `progress-${Math.random().toString(36).slice(2)}.json`);
+      const timer = setInterval(() => { void read(file, "utf8").then(text => { const p = JSON.parse(String(text)) as { phase?: string; percent?: number; detail?: string };
+        if (p.phase && (VIDEO_PHASES as readonly string[]).includes(p.phase)) report(p.phase as VideoPhase, typeof p.percent === "number" ? p.percent : undefined, p.detail); }).catch(() => undefined); }, 2000);
+      try { return await run(file); } finally { clearInterval(timer); }
+    };
+    const exec = async (command: string, args: string[], timeoutMs: number, maxOutputBytes = 64 * 1024, withEnv = false, extraEnv: Record<string, string> = {}) => {
       if (signal.aborted) fail("worker_lease_lost", "The Mac lost its job lease.", true);
-      try { return await run({ command, args, cwd: work, signal, timeoutMs, maxOutputBytes, ...(withEnv ? { env: { ...process.env, ...env } } : {}) }); }
+      try { return await run({ command, args, cwd: work, signal, timeoutMs, maxOutputBytes, ...(withEnv ? { env: { ...process.env, ...env, ...extraEnv } } : {}) }); }
       catch (error) {
         if (signal.aborted) fail("worker_lease_lost", "The Mac lost its job lease.", true);
         throw error instanceof CompanionProcessError ? error : new Error("process_failed");
@@ -207,8 +224,19 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
       if (found && cacheFile) await mkdir(dirname(cacheFile), { recursive: true }).then(() => writeFile(cacheFile, JSON.stringify({ meta, captions: found }))).catch(() => {});
       return found;
     })();
+    /** One YouTube download of the video (480p with its audio) feeds both the transcript and the slides. */
+    let mediaMemo: Promise<string> | undefined;
+    const media = () => mediaMemo ??= (async () => {
+      report("download", undefined, "Downloading the video from YouTube");
+      await ytdlp(["--match-filter", `duration < ${VIDEO_LIMITS.maxSeconds}`, "--max-filesize", `${payload.limits.maxMediaMb}M`, "-f", "bv*[height<=480]+ba/b[height<=480]",
+        "--merge-output-format", "mp4", "-o", join(work, "video.%(ext)s"), "--", video.url], 40 * 60_000, 256 * 1024);
+      const file = (await readdir(work)).find(name => /^video\.(mp4|mkv|webm)$/.test(name));
+      if (!file) throw new Error("video_missing");
+      return join(work, file);
+    })();
     let meta!: { title: string; description: string; channel: string; duration: number; live: boolean };
     try {
+      report("info", undefined, "Checking the video on YouTube");
       // 1. Bounded metadata: duration limit, title/description/channel for the relevance gate. No media is downloaded yet.
       if (cached) meta = cached.meta; else try {
         const out = await ytdlp(["--skip-download", "--dump-single-json", "--", video.url], 90_000, 4 * MB);
@@ -252,45 +280,47 @@ export function createVideoTranscribeHandler(deps: VideoTranscribeDeps): StudioJ
         if (band !== "high") return { outcome: gateOutcome(band), relevance: stripBand(relevance), ...(routeActual ? { routeActual } : {}) };
       }
 
-      // 3. Captions first (cheap, no media download); only when YouTube has none is the audio downloaded and transcribed locally with Parakeet. No paid service is ever called.
-      let segments: TranscriptSegment[] = []; let method: "local-parakeet-tdt-v3-4bit" | "youtube-captions-fallback" = "youtube-captions-fallback"; let language: string | undefined;
-      const fromCaptions = await captions();
-      if (fromCaptions) { segments = fromCaptions.segments; language = fromCaptions.language; }
-      let audioFailure: unknown;
+      // 3. The transcript is made on this Mac (Parakeet, accurate timestamps). YouTube's own captions are only the fallback when that cannot run. No paid service is ever called.
+      let segments: TranscriptSegment[] = []; let method: "local-parakeet-tdt-v3-4bit" | "youtube-captions-fallback" = "local-parakeet-tdt-v3-4bit"; let language: string | undefined;
+      let audioFailure: unknown; let captionFailure: StudioJobError | undefined;
+      try {
+        const file = await media();
+        report("transcribe", 0, "Transcribing on your Mac");
+        const resultFile = join(work, "transcript.json");
+        await withProgress(progressFile => exec(tools.paths.python!, ["-I", resolve(deps.scriptsDir, "transcribe-local.py"), file, resultFile], 40 * 60_000, 64 * 1024, true, { STUDIO_PROGRESS_FILE: progressFile }));
+        const size = (await stat(resultFile)).size; if (size > 8 * MB) throw new Error("transcript_too_large");
+        const result = JSON.parse(String(await read(resultFile, "utf8"))) as { segments?: unknown; language?: unknown };
+        segments = normalizeSegments(result.segments, meta.duration + 60);
+        if (typeof result.language === "string" && /^[a-z]{2,12}$/.test(result.language)) language = result.language;
+        if (!segments.length) throw new Error("empty_transcript");
+      } catch (error) {
+        if (error instanceof StudioJobError && error.code === "worker_lease_lost") throw error;
+        audioFailure = error; segments = [];
+      }
       if (!segments.length) {
-        method = "local-parakeet-tdt-v3-4bit";
-        try {
-          await ytdlp(["--match-filter", `duration < ${VIDEO_LIMITS.maxSeconds}`, `--max-filesize`, `${payload.limits.maxMediaMb}M`, "-f", "bestaudio", "-x", "--audio-format", "mp3", "--audio-quality", "0",
-            "-o", join(work, "source.%(ext)s"), "--", video.url], 40 * 60_000, 256 * 1024);
-          const audio = (await readdir(work)).find(name => name.endsWith(".mp3"));
-          if (!audio) throw new Error("audio_missing");
-          const resultFile = join(work, "transcript.json");
-          await exec(tools.paths.python, ["-I", resolve(deps.scriptsDir, "transcribe-local.py"), join(work, audio), resultFile], 40 * 60_000, 64 * 1024, true);
-          const size = (await stat(resultFile)).size; if (size > 8 * MB) throw new Error("transcript_too_large");
-          const result = JSON.parse(String(await read(resultFile, "utf8"))) as { segments?: unknown; language?: unknown };
-          segments = normalizeSegments(result.segments, meta.duration + 60);
-          if (typeof result.language === "string" && /^[a-z]{2,12}$/.test(result.language)) language = result.language;
-          if (!segments.length) throw new Error("empty_transcript");
-        } catch (error) {
-          if (error instanceof StudioJobError) throw error;
-          audioFailure = error; segments = [];
-        }
-        if (!segments.length) {
-          const network = audioFailure instanceof CompanionProcessError && ["cli_timeout"].includes(audioFailure.code);
-          fail(network ? "video_network" : "video_no_transcript", network ? (relevance ? "Downloading the audio timed out after scoring relevance." : "Downloading the audio timed out. It will be retried.") : "YouTube has no captions for this video and its audio could not be transcribed on this Mac. You can paste a transcript instead.", network && !relevance, 600);
-        }
+        report("captions", undefined, "Using YouTube's captions instead");
+        method = "youtube-captions-fallback";
+        const fromCaptions = await captions().catch(error => { if (error instanceof StudioJobError) captionFailure = error; return null; });
+        if (fromCaptions) { segments = fromCaptions.segments; language = fromCaptions.language; }
+      }
+      if (!segments.length) {
+        if (captionFailure) throw captionFailure;
+        if (audioFailure instanceof StudioJobError) throw audioFailure;
+        const network = audioFailure instanceof CompanionProcessError && ["cli_timeout"].includes(audioFailure.code);
+        fail(network ? "video_network" : "video_no_transcript", network ? (relevance ? "Downloading the video timed out after scoring relevance." : "Downloading the video timed out. It will be retried.") : "The transcript could not be made on this Mac and YouTube has no captions for this video. You can paste a transcript instead.", network && !relevance, 600);
       }
 
       // 4. Save the timestamped transcript on the server first: it must survive any visual failure.
       const chunks = chunkSegments(segments);
       if (!chunks.length || chunks.length > VIDEO_LIMITS.maxChunks) fail("video_transcript_too_large", "The transcript is larger than a Library source can hold.");
       for (const [index, chunk] of chunks.entries()) {
+        report("save", (index / chunks.length) * 100, "Saving the transcript");
         if (signal.aborted) fail("worker_lease_lost", "The Mac lost its job lease.", true);
         await deps.api.chunk(lease, index, chunk).catch(() => fail("video_network", "Could not reach Studio to save the transcript.", !relevance, 120));
       }
 
       // 5. Slides: scene detection + Tesseract with ±15s transcript context. Any failure here leaves a usable transcript (partial).
-      const visual = await visualPass({ exec, ytdlp, tools, video: video.url, work, segments, lease, api: deps.api, signal, scriptsDir: deps.scriptsDir, payload, read })
+      const visual = await visualPass({ exec, media, report, withProgress, tools, video: video.url, work, segments, lease, api: deps.api, signal, scriptsDir: deps.scriptsDir, payload, read })
         .then(frames => ({ status: "ready" as const, frames }), (error: unknown) => {
           if (signal.aborted) fail("worker_lease_lost", "The Mac lost its job lease.", true);
           return { status: "failed" as const, error: visualMessage(error) };
@@ -308,19 +338,18 @@ function visualMessage(error: unknown) {
   return known[code] ?? "The slide and frame pass failed.";
 }
 async function visualPass(input: {
-  exec: (c: string, a: string[], t: number, m?: number, e?: boolean) => Promise<{ stdout: string; stderr: string }>; tools: VideoTools; video: string; work: string; segments: TranscriptSegment[]; lease: VideoLease; api: VideoDeviceApi;
-  ytdlp: (args: string[], timeoutMs: number, maxOutputBytes?: number) => Promise<unknown>;
+  exec: (c: string, a: string[], t: number, m?: number, e?: boolean, x?: Record<string, string>) => Promise<{ stdout: string; stderr: string }>; tools: VideoTools; video: string; work: string; segments: TranscriptSegment[]; lease: VideoLease; api: VideoDeviceApi;
+  media: () => Promise<string>; report: (phase: VideoPhase, percent?: number, detail?: string) => void;
+  withProgress: <T>(run: (progressFile: string) => Promise<T>) => Promise<T>;
   signal: AbortSignal; scriptsDir: string; payload: z.infer<typeof payloadSchema>; read: typeof readFile;
 }): Promise<number> {
   const { exec, tools, work, signal } = input;
   if (!tools.paths.ffmpeg || !tools.paths.ffprobe || !tools.paths.tesseract || !tools.paths.python) throw new Error("missing_visual_tools");
-  await input.ytdlp(["--match-filter", `duration < ${VIDEO_LIMITS.maxSeconds}`, "--max-filesize", `${input.payload.limits.maxMediaMb}M`, "-f", "bv*[height<=480]+ba/b[height<=480]",
-    "--merge-output-format", "mp4", "-o", join(work, "video.%(ext)s"), "--", input.video], 40 * 60_000, 256 * 1024);
-  const file = (await readdir(work)).find(name => /^video\.(mp4|mkv|webm)$/.test(name));
-  if (!file) throw new Error("video_missing");
+  const videoPath = await input.media();
+  input.report("slides_scan", 0, "Looking for slide changes");
   const framesDir = join(work, "frames"); await mkdir(framesDir, { recursive: true });
   const resultFile = join(work, "frames.json");
-  await exec(tools.paths.python, ["-I", resolve(input.scriptsDir, "extract-frames.py"), join(work, file), framesDir, resultFile], 20 * 60_000, 64 * 1024, true);
+  await input.withProgress(progressFile => exec(tools.paths.python!, ["-I", resolve(input.scriptsDir, "extract-frames.py"), videoPath, framesDir, resultFile], 20 * 60_000, 64 * 1024, true, { STUDIO_PROGRESS_FILE: progressFile }));
   if ((await stat(resultFile)).size > 4 * MB) throw new Error("frames_result_too_large");
   const raw = (JSON.parse(String(await input.read(resultFile, "utf8"))) as { frames?: unknown }).frames;
   const found = Array.isArray(raw) ? raw.slice(0, Math.min(input.payload.limits.maxFrames, VIDEO_LIMITS.maxFrames)) : [];
@@ -337,6 +366,7 @@ async function visualPass(input: {
       selection: /^[a-z][a-z0-9-]{0,39}$/.test(String(f.selection)) ? String(f.selection) : "settled-visual-change", sha256: createHash("sha256").update(bytes).digest("hex"), byteSize: size, path });
   }
   for (let i = 0; i < declared.length; i += VIDEO_LIMITS.framesPerCall) {
+    input.report("slides_save", (i / declared.length) * 100, `Saving slides (${Math.min(i + VIDEO_LIMITS.framesPerCall, declared.length)} of ${declared.length})`);
     if (signal.aborted) throw new Error("aborted");
     const batch = declared.slice(i, i + VIDEO_LIMITS.framesPerCall);
     const plan = await input.api.reserve(input.lease, batch.map(({ path: _path, ...rest }) => rest));

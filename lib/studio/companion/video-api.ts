@@ -13,6 +13,8 @@ export interface VideoDeviceApi {
   chunk(lease: VideoLease, chunkIndex: number, segments: TranscriptSegment[]): Promise<void>;
   reserve(lease: VideoLease, frames: FrameDeclaration[]): Promise<ReservedFrame[]>;
   upload(url: string, bytes: Uint8Array, signal: AbortSignal): Promise<void>;
+  /** Live status for the Source page; optional so older fakes still work. */
+  progress?(lease: VideoLease, progress: { phase: string; percent?: number; detail?: string }): Promise<void>;
   verify(lease: VideoLease, indexes: number[]): Promise<{ requested: number; verified: number; missing: number }>;
 }
 const reserved = z.array(z.object({ index: z.number().int(), status: z.enum(["pending", "verified"]), uploadUrl: z.string().url().max(4000).optional(), expiresInSeconds: z.number().optional() })).max(40);
@@ -22,6 +24,7 @@ export function createVideoDeviceApi(credentials: DeviceCredentials, options: De
     deviceCall(credentials.origin, credentials.token, operation, { workerId: lease.workerId, jobId: lease.jobId, leaseToken: lease.leaseToken, ...body }, schema, { ...options, timeoutMs: options.timeoutMs ?? 60_000 });
   return {
     chunk: async (lease, chunkIndex, segments) => { await call("video_transcript_chunk", lease, { chunkIndex, segments }, z.boolean()); },
+    progress: async (lease, progress) => { await call("video_progress", lease, progress, z.boolean()); },
     reserve: (lease, frames) => call("video_frames_reserve", lease, { frames }, reserved),
     verify: (lease, indexes) => call("video_frames_verify", lease, { indexes }, verified),
     async upload(url, bytes, signal) {

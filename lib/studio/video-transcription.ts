@@ -77,6 +77,7 @@ export interface VideoTranscriptionView {
   method: string | null; language: string | null; duration_seconds: number | null; segment_count: number; transcript_chars: number; transcript_applied: boolean;
   visual_status: "pending" | "ready" | "failed" | "skipped"; visual_error: string | null; frame_count: number; error_code: string | null; error_message: string | null;
   created_at: string; updated_at: string; completed_at: string | null; device_id: string | null;
+  progress: { phase: string; percent: number | null; detail: string; at: string; since: string } | null;
 }
 export interface VideoFrameView { frame_index: number; time_seconds: number; scene_start: number; scene_end: number; ocr_text: string; audio_context: string; selection: string; status: string }
 export interface VideoStatus {
@@ -98,7 +99,7 @@ export async function getVideoStatus(locationId: string, recordId: string): Prom
   const access = await getStudioAccess(locationId);
   if (!access || !/^[0-9a-f-]{36}$/i.test(recordId)) return null;
   const history = await studioDb.rows<VideoTranscriptionView>(Prisma.sql`
-    select id,status,origin,gated,relevance,method,language,duration_seconds,segment_count,transcript_chars,transcript_applied,visual_status,visual_error,frame_count,error_code,error_message,created_at,updated_at,completed_at,device_id
+    select id,status,origin,gated,relevance,method,language,duration_seconds,segment_count,transcript_chars,transcript_applied,visual_status,visual_error,frame_count,error_code,error_message,created_at,updated_at,completed_at,device_id,progress
     from studio.studio_video_transcriptions where location_id=${access.locationId} and record_id=${recordId}::uuid order by created_at desc limit 15`);
   const { latest, lastAttempt, framesFrom } = pickVideoRuns(history);
   if (!latest) return { latest: null, history: [], frames: [], framesFrom: null, lastAttempt: null, waiting: null, busyWith: null, mac: null };
