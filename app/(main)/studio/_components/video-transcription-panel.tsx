@@ -37,7 +37,7 @@ export function VideoTranscriptionPanel({ locationId, recordId, canTranscribe, s
       {canRun ? <Button type="button" size="sm" variant={hasTranscript ? "outline" : "default"} disabled={pending} onClick={() => void request()}>{pending ? "Requesting…" : latest?.status === "suggested" || !latest ? "Transcribe on my Mac" : "Transcribe again"}</Button> : null}
       <InfoTip label="About Mac transcription">Audio is transcribed locally on your Mac; YouTube captions are the only fallback. No speaker labels or comments.{status.mac ? ` ${status.mac.name} is ${status.mac.online ? "online" : "offline"}.` : ""}</InfoTip>
     </div>
-    {status.lastAttempt ? <p className="text-xs text-muted-foreground">A newer attempt did not replace this: {status.lastAttempt.status === "failed" ? (status.lastAttempt.error_message ?? "it failed") : status.lastAttempt.status}.</p> : null}
+    {status.lastAttempt ? <p className="text-xs text-muted-foreground">A newer attempt ({status.lastAttempt.status}) did not replace this: {(status.lastAttempt.error_message ?? "no reason was recorded").replace(/\.+$/, "")}. Press Transcribe again to retry.</p> : null}
     {latest && latest.status === "ready" && latest.transcript_applied === false ? <p className="text-xs text-muted-foreground">A transcript you saved earlier was kept; the Mac transcript is stored but not applied.</p> : null}
     {status.frames.length ? <details><summary className="cursor-pointer text-xs font-medium">Slides and frames ({status.frames.length})</summary>
       <ul className="mt-2 space-y-3">{status.frames.map(f => <li key={f.frame_index} className="space-y-1">

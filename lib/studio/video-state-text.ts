@@ -23,7 +23,7 @@ export function describeVideoState(run: Run | null, waiting: VideoWaiting, busyW
     case "running": return { tone: "busy", text: run.segment_count > 0
       ? "Step 3 of 4, transcript saved. Reading slides and frames on your Mac…" : "Step 2 of 4, getting captions or transcribing the audio on your Mac…" };
     case "ready": return { tone: "ok", text: `Done. Transcript and slides saved (${run.method === "youtube-captions-fallback" ? "YouTube captions" : "local Parakeet"}).` };
-    case "partial": return { tone: "warn", text: `Done, with a gap. Transcript saved; slides/frames incomplete: ${run.visual_error ?? "the visual pass failed"}.` };
+    case "partial": return { tone: "warn", text: `Done, with a gap. Transcript saved; slides/frames incomplete: ${(run.visual_error ?? "the visual pass failed").replace(/\.+$/, "")}.` };
     case "suggested": return { tone: "none", text: run.relevance ? `Suggested (relevance ${run.relevance.score}/100): ${run.relevance.reason}` : reason("Suggested only.") };
     case "skipped": return { tone: "none", text: run.relevance ? `Skipped, low relevance (${run.relevance.score}/100): ${run.relevance.reason}` : reason("Skipped.") };
     case "cancelled": return { tone: "bad", text: `Cancelled: ${reason("no reason was recorded.")} Press Transcribe again to restart it.` };
