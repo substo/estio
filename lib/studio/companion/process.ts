@@ -48,7 +48,7 @@ export function nativeLoginEnvironment(source: NodeJS.ProcessEnv = process.env):
   const env: NodeJS.ProcessEnv = { NODE_ENV: "production" };
   for (const key of ["HOME", "PATH", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "CODEX_HOME", "CLAUDE_CONFIG_DIR",
     // Local transcription only: private model cache, offline switches and the resolved tool paths. No credentials.
-    "HF_HOME", "HF_HUB_OFFLINE", "HF_HUB_DISABLE_XET", "STUDIO_FFMPEG", "STUDIO_FFPROBE", "STUDIO_TESSERACT"])
+    "HF_HOME", "HF_HUB_OFFLINE", "HF_HUB_DISABLE_XET", "STUDIO_FFMPEG", "STUDIO_FFPROBE", "STUDIO_TESSERACT", "STUDIO_PROGRESS_FILE"])
     if (source[key]) env[key] = source[key];
   env.NO_COLOR = "1";
   return env;

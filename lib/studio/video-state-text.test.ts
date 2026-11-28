@@ -31,6 +31,6 @@ test("a running run shows an honest checklist, overall percent and staleness", (
   const fallback = videoProgressView({ status: "running", progress: { phase: "captions", percent: null, detail: "Using YouTube's captions instead", at, since: at } }, now)!;
   assert.equal(fallback.fallback, true); assert.match(fallback.steps[2].label, /YouTube's captions/);
 });
-test("a running run from an older companion explains the missing progress", () => {
-  assert.match(describeVideoState(run({ status: "running" }), null).text, /does not report progress/);
+test("a running run from an older companion says it is starting", () => {
+  assert.match(describeVideoState(run({ status: "running" }), null).text, /Starting on your Mac/);
 });

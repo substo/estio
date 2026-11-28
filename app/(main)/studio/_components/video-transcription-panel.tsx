@@ -53,6 +53,6 @@ export function VideoTranscriptionPanel({ locationId, recordId, canTranscribe, s
       <ul className="mt-2 space-y-3">{status.frames.map(f => <li key={f.frame_index} className="space-y-1">
         <a href={`/studio/video-frames/${status.framesFrom}/${f.frame_index}`} target="_blank" rel="noopener noreferrer" className="text-primary underline">Frame at {clock(f.time_seconds)}</a>
         {f.ocr_text ? <p className="whitespace-pre-wrap break-words">{f.ocr_text}</p> : <p className="text-muted-foreground">No text read.</p>}</li>)}</ul></details> : null}
-    {message ? <p role="status" className="text-xs">{message}</p> : null}
+    {message && !working ? <p role="status" className="text-xs">{message}</p> : null}
   </section>;
 }

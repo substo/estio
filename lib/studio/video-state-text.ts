@@ -48,7 +48,7 @@ export function describeVideoState(run: Run | null, waiting: VideoWaiting, busyW
       if (waiting) return { tone: "busy", text: waiting === "mac_busy" && busyWith ? `${waitingText.mac_busy.replace("its current job", `its current job (${busyWith})`)}` : waitingText[waiting] };
       return { tone: "busy", text: run.error_message ? `Queued. It will retry by itself: ${run.error_message}` : "Queued. Your Mac picks this up in a few seconds." };
     }
-    case "running": return { tone: "busy", text: run.progress ? `Working on your Mac: ${run.progress.detail || "processing"}.` : "Working on your Mac. This version of the Mac companion does not report progress; update it for a live status." };
+    case "running": return { tone: "busy", text: run.progress ? `Working on your Mac: ${run.progress.detail || "processing"}.` : "Starting on your Mac…" };
     case "ready": return { tone: "ok", text: `Done. Transcript and slides saved (${run.method === "youtube-captions-fallback" ? "YouTube captions" : "local Parakeet"}).` };
     case "partial": return { tone: "warn", text: `Done, with a gap. Transcript saved; slides/frames incomplete: ${(run.visual_error ?? "the visual pass failed").replace(/\.+$/, "")}.` };
     case "suggested": return { tone: "none", text: run.relevance ? `Suggested (relevance ${run.relevance.score}/100): ${run.relevance.reason}` : reason("Suggested only.") };

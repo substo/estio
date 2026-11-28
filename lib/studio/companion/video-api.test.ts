@@ -9,3 +9,9 @@ test("a frame upload sends every header the signed URL covers (If-None-Match: * 
   const headers = seen?.headers as Record<string, string>;
   assert.equal(headers["if-none-match"], "*"); assert.equal(headers["content-type"], "image/jpeg");
 });
+
+import { nativeLoginEnvironment } from "./process";
+test("the progress file path reaches the transcription scripts (it was dropped by the environment allow-list)", () => {
+  assert.equal(nativeLoginEnvironment({ STUDIO_PROGRESS_FILE: "/tmp/p.json", OPENAI_API_KEY: "secret" }).STUDIO_PROGRESS_FILE, "/tmp/p.json");
+  assert.equal(nativeLoginEnvironment({ OPENAI_API_KEY: "secret" }).OPENAI_API_KEY, undefined);
+});
